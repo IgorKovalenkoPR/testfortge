@@ -27,7 +27,9 @@ Scope & trade-offs
 
 from __future__ import annotations
 
+import atexit
 import os
+import signal
 import threading
 import time
 import uuid
@@ -98,8 +100,42 @@ class JobQueue:
             max_workers=max_workers, thread_name_prefix="tf-job"
         )
         self._retention = retention_seconds
+        self._shutting_down = False
 
     # ── Public API ──────────────────────────────────────────────
+
+    def shutdown(self, wait: bool = False, timeout: float = 5.0) -> None:
+        """Stop accepting new work and wind down the executor.
+
+        Called from ``atexit`` + SIGTERM/SIGINT handlers so Python doesn't
+        hang on shutdown waiting for a Playwright run to finish. Pass
+        ``wait=True`` if you need in-flight jobs to complete (tests do).
+
+        Idempotent — multiple calls are safe and a no-op after the first.
+        """
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        # During interpreter teardown (atexit + pytest capture), stderr
+        # may already be closed. logging.Handler.emit catches the write
+        # failure but then dumps its own "Logging error" traceback via
+        # handleError unless raiseExceptions is off. Suppress both.
+        import logging as _logging
+        prev_raise = _logging.raiseExceptions
+        _logging.raiseExceptions = False
+        try:
+            log.info("JobQueue shutting down (wait=%s)", wait)
+        except (ValueError, OSError):
+            pass
+        finally:
+            _logging.raiseExceptions = prev_raise
+        try:
+            # cancel_futures keeps queued-but-not-started jobs from running
+            # once we've decided to exit. It's a Python 3.9+ kwarg.
+            self._executor.shutdown(wait=wait, cancel_futures=True)
+        except TypeError:  # pragma: no cover — pre-3.9 fallback
+            self._executor.shutdown(wait=wait)
+        _ = timeout  # reserved for future forced-join semantics
 
     def submit(self, kind: str, func: Callable[..., Any], *args,
                meta: Optional[dict] = None, **kwargs) -> str:
@@ -108,7 +144,12 @@ class JobQueue:
         ``kind`` is a category tag (e.g. ``"automation"``) used by the
         UI to route results back to the right page. ``meta`` is stored
         verbatim for the caller's convenience.
+
+        Raises :class:`RuntimeError` if the queue is shutting down — this
+        surfaces as HTTP 503 to the caller so clients know not to poll.
         """
+        if self._shutting_down:
+            raise RuntimeError("JobQueue is shutting down — refusing new work")
         job = Job(id=uuid.uuid4().hex, kind=kind, meta=meta or {})
         with self._lock:
             self._prune_locked()
@@ -198,13 +239,56 @@ _QUEUE_LOCK = threading.Lock()
 
 
 def get_queue() -> JobQueue:
-    """Return the process-wide :class:`JobQueue` (lazy-initialised)."""
+    """Return the process-wide :class:`JobQueue` (lazy-initialised).
+
+    On first creation we register ``atexit`` + SIGTERM/SIGINT handlers so
+    the executor is wound down cleanly on shutdown. Without this the
+    process hangs for ``PYTHONFINALIZATIONERROR`` seconds waiting for
+    long-running Playwright runs to finish.
+    """
     global _QUEUE
     if _QUEUE is None:
         with _QUEUE_LOCK:
             if _QUEUE is None:
                 _QUEUE = JobQueue()
+                _install_shutdown_hooks(_QUEUE)
     return _QUEUE
+
+
+def _install_shutdown_hooks(queue: JobQueue) -> None:
+    """Wire up atexit + signal handlers for graceful shutdown.
+
+    Signal handlers are only installed from the main thread (Python
+    raises ``ValueError`` otherwise) and only if the slot isn't already
+    taken — so we don't clobber Flask's reloader, Werkzeug's dev-server
+    handlers, or anything gunicorn already set up.
+    """
+    # atexit always runs — it's the safety net for clean interpreter exit.
+    atexit.register(queue.shutdown, wait=False)
+
+    # Signal handling is best-effort: signal.signal() only works in the
+    # main thread of the main interpreter, and some hosts (gunicorn,
+    # wsgi containers) install their own handlers we should respect.
+    if threading.current_thread() is not threading.main_thread():
+        return
+
+    def _handler(signum, _frame):
+        log.info("received signal %s — draining job queue", signum)
+        queue.shutdown(wait=False)
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            existing = signal.getsignal(sig)
+            # Only chain if nothing meaningful is already installed. SIG_DFL
+            # / SIG_IGN / None all indicate "available".
+            if existing in (signal.SIG_DFL, signal.SIG_IGN, None):
+                signal.signal(sig, _handler)
+        except (ValueError, OSError) as exc:
+            # ValueError: not main thread. OSError: some platforms reject.
+            log.debug("could not install %s handler: %s", sig_name, exc)
 
 
 __all__ = [

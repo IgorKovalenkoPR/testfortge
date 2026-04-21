@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from flask import Flask
 
-from . import dashboard, projects, generation, execution, automation, estimation, chat
+from . import (dashboard, projects, generation, execution,
+               automation, estimation, chat, ops)
 
 
 def register_all(app: Flask) -> None:
@@ -22,6 +23,7 @@ def register_all(app: Flask) -> None:
     automation.register(app)
     estimation.register(app)
     chat.register(app)
+    ops.register(app)
 
 
 __all__ = ["register_all"]

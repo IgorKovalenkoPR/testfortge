@@ -133,3 +133,27 @@ class TestSingleton:
         q1 = get_queue()
         q2 = get_queue()
         assert q1 is q2
+
+
+class TestShutdown:
+    def test_shutdown_is_idempotent(self):
+        q = JobQueue(max_workers=1)
+        q.shutdown(wait=False)
+        q.shutdown(wait=False)  # must not raise
+
+    def test_submit_after_shutdown_raises(self):
+        q = JobQueue(max_workers=1)
+        q.shutdown(wait=False)
+        with pytest.raises(RuntimeError, match="shutting down"):
+            q.submit("unit", lambda: 1)
+
+    def test_shutdown_waits_when_requested(self):
+        q = JobQueue(max_workers=1)
+        jid = q.submit("unit", lambda: "finished")
+        q.shutdown(wait=True)
+        # With wait=True, the in-flight job must complete before shutdown
+        # returns, so the result is observable immediately without polling.
+        job = q.get(jid)
+        assert job is not None
+        assert job.status == DONE
+        assert job.result == "finished"

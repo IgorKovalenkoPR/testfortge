@@ -83,6 +83,8 @@ class TestURLMapIntact:
             # Wave C.4 async additions
             "automation_run_async", "automation_status",
             "estimation_run_async", "estimation_status",
+            # Wave D observability
+            "healthz", "metrics",
         }
         missing = expected - endpoints
         assert not missing, f"missing endpoints: {missing}"
