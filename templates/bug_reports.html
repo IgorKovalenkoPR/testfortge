@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ t.get('bug_title', 'Bug Reports') }}{% endblock %}
+
+{% block content %}
+<h1>{{ t.get('bug_title', 'Bug Reports') }}</h1>
+<p class="subtitle">{{ t.get('bug_subtitle', 'Jira-style ISTQB-aligned defect reports') }}</p>
+
+{% if bugs %}
+{# ── Stats Summary ── #}
+<div class="bug-stats-row">
+    <div class="bug-stat-card">
+        <span class="stat-value">{{ stats.total }}</span>
+        <span class="stat-label">{{ t.get('te_total', 'Total') }}</span>
+    </div>
+    <div class="bug-stat-card stat-open">
+        <span class="stat-value">{{ stats.open }}</span>
+        <span class="stat-label">Open</span>
+    </div>
+    <div class="bug-stat-card stat-critical">
+        <span class="stat-value">{{ stats.critical }}</span>
+        <span class="stat-label">Critical</span>
+    </div>
+    <div class="bug-stat-card stat-major">
+        <span class="stat-value">{{ stats.major }}</span>
+        <span class="stat-label">Major</span>
+    </div>
+</div>
+
+{# ── Export ── #}
+<div class="bug-actions">
+    <a href="{{ url_for('export_bug_reports') }}" class="btn btn-secondary"><i data-lucide="file-text" class="icon-sm"></i> {{ t.get('bug_export', 'Export Bug Reports') }}</a>
+</div>
+
+{# ── Bug Cards ── #}
+{% for bug in bugs %}
+<div class="bug-card severity-{{ bug.severity | lower }}">
+    <div class="bug-header">
+        <span class="bug-id">{{ bug.id }}</span>
+        <span class="bug-title-text">{{ bug.title }}</span>
+        <div class="bug-badges">
+            <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug.severity }}</span>
+            <span class="badge priority-badge">{{ bug.priority }}</span>
+            <span class="badge status-badge-{{ bug.status | lower | replace(' ', '-') }}">{{ bug.status }}</span>
+        </div>
+    </div>
+    <div class="bug-body">
+        <table class="bug-details-table">
+            <tr><td class="label">{{ t.get('bug_environment', 'Environment') }}</td><td>{{ bug.environment }}</td></tr>
+            {% if bug.preconditions %}
+            <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug.preconditions }}</td></tr>
+            {% endif %}
+            {% if bug.steps_to_reproduce %}
+            <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td><td><pre class="steps">{{ bug.steps_to_reproduce }}</pre></td></tr>
+            {% endif %}
+            <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td><td class="actual-result">{{ bug.actual_result }}</td></tr>
+            {% if bug.expected_result %}
+            <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td><td>{{ bug.expected_result }}</td></tr>
+            {% endif %}
+            {% if bug.component %}
+            <tr><td class="label">{{ t.get('bug_component', 'Component') }}</td><td>{{ bug.component }}</td></tr>
+            {% endif %}
+            {% if bug.linked_item_id %}
+            <tr><td class="label">{{ t.get('bug_linked_item', 'Linked Item') }}</td><td>{{ bug.linked_item_id }} ({{ bug.linked_item_type }})</td></tr>
+            {% endif %}
+            {% if bug.reporter %}
+            <tr><td class="label">{{ t.get('bug_reporter', 'Reporter') }}</td><td>{{ bug.reporter }}</td></tr>
+            {% endif %}
+            {% if bug.created_at %}
+            <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at[:19] }}</td></tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="card">
+    <p>{{ t.get('bug_no_bugs', 'No bug reports created yet.') }}</p>
+    <p>{{ t.get('te_no_data', 'Run test execution to report bugs from failed test cases.') }}</p>
+    <a href="{{ url_for('test_execution_page') }}" class="btn btn-primary"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('nav_test_execution', 'Test Execution') }}</a>
+</div>
+{% endif %}
+
+<style>
+.bug-stats-row { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.bug-stat-card { background: white; border: 2px solid #e8eaf0; border-radius: 10px; padding: 16px 24px; text-align: center; min-width: 100px; }
+.bug-stat-card .stat-value { display: block; font-size: 2em; font-weight: 800; color: var(--primary); }
+.bug-stat-card .stat-label { font-size: 0.85em; color: #666; }
+.bug-stat-card.stat-open .stat-value { color: #2563eb; }
+.bug-stat-card.stat-critical .stat-value { color: #dc2626; }
+.bug-stat-card.stat-major .stat-value { color: #ea580c; }
+
+.bug-actions { margin-bottom: 20px; }
+
+.bug-card { border: 2px solid #e8eaf0; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+.bug-card.severity-critical { border-left: 5px solid #dc2626; }
+.bug-card.severity-major { border-left: 5px solid #ea580c; }
+.bug-card.severity-minor { border-left: 5px solid #f59e0b; }
+.bug-card.severity-trivial { border-left: 5px solid #6b7280; }
+
+.bug-header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: #f8f9fb; flex-wrap: wrap; }
+.bug-id { font-weight: 800; font-size: 1em; color: var(--primary); white-space: nowrap; }
+.bug-title-text { font-weight: 600; font-size: 1em; flex: 1; min-width: 200px; }
+.bug-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { padding: 3px 10px; border-radius: 12px; font-size: 0.78em; font-weight: 700; }
+.severity-badge-critical { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+.severity-badge-major { background: #fff7ed; color: #ea580c; border: 1px solid #fdba74; }
+.severity-badge-minor { background: #fffbeb; color: #d97706; border: 1px solid #fcd34d; }
+.severity-badge-trivial { background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; }
+.priority-badge { background: #eff6ff; color: #2563eb; border: 1px solid #93c5fd; }
+.status-badge-open { background: #ecfdf5; color: #059669; border: 1px solid #6ee7b7; }
+.status-badge-in-progress { background: #eff6ff; color: #2563eb; border: 1px solid #93c5fd; }
+.status-badge-resolved { background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }
+.status-badge-closed { background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; }
+.status-badge-reopened { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+
+.bug-body { padding: 14px 18px; }
+.bug-details-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.bug-details-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+.bug-details-table .label { font-weight: 600; color: #555; width: 160px; white-space: nowrap; }
+.actual-result { color: #dc2626; font-weight: 500; }
+pre.steps { white-space: pre-wrap; font-family: inherit; margin: 0; }
+
+@media (max-width: 768px) { .bug-stats-row { flex-direction: column; } }
+</style>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.cl_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.cl_title }}</h1>
+    <p class="subtitle">{{ t.cl_subtitle }}</p>
+</div>
+
+<!-- Input form -->
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% set input_title = t.input_title_default %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if resource_urls %}
+<div class="card" style="background:#f8fafe; margin-bottom:16px;">
+    <h3 class="card-title" style="font-size:0.95em;"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        {% for url in resource_urls %}
+        <a href="{{ url }}" target="_blank" rel="noopener" style="display:inline-block; padding:5px 14px; background:white; border:1px solid var(--primary); border-radius:20px; color:var(--primary); font-size:0.85em; text-decoration:none; word-break:break-all;">{{ url }}</a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if has_data and checklist %}
+<div class="filter-bar">
+    <label>{{ t.filter }}:</label>
+    <button class="filter-btn active" onclick="filterCL('all', this)">{{ t.all }}</button>
+    <button class="filter-btn" onclick="filterCL('Positive', this)">{{ t.positive }}</button>
+    <button class="filter-btn" onclick="filterCL('Negative', this)">{{ t.negative }}</button>
+    <button class="filter-btn" onclick="filterCL('Edge Case', this)">{{ t.edge_case }}</button>
+</div>
+
+<div class="card">
+    <table class="data-table checklist-table">
+        <thead>
+            <tr>
+                <th width="50">{{ t.status }}</th>
+                <th width="100">ID</th>
+                <th>{{ t.cl_objective }}</th>
+                <th width="120">{{ t.category }}</th>
+                <th width="100">{{ t.priority }}</th>
+                <th>{{ t.cl_comments }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set ns = namespace(current_section='') %}
+            {% for cl in checklist %}
+            {% if cl.section != ns.current_section %}
+            {% set ns.current_section = cl.section %}
+            <tr class="section-row">
+                <td colspan="6"><strong>{{ cl.section }}</strong></td>
+            </tr>
+            {% endif %}
+            <tr class="cl-row" data-category="{{ cl.category }}">
+                <td>
+                    <select class="status-select-sm">
+                        <option value="Unchecked">—</option>
+                        <option value="Passed">P</option>
+                        <option value="Failed">F</option>
+                        <option value="Passed but">P/B</option>
+                        <option value="Blocked">BLK</option>
+                    </select>
+                </td>
+                <td><strong>{{ cl.id }}</strong></td>
+                <td>{{ cl.objective }}</td>
+                <td><span class="badge badge-cat-{{ cl.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cl.category }}</span></td>
+                <td><span class="badge badge-{{ cl.priority|lower }}">{{ cl.priority }}</span></td>
+                <td><input type="text" class="inline-input" placeholder="—"></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card card-export">
+    <h2>{{ t.nav_export }}</h2>
+    <div class="export-buttons">
+        <a href="{{ url_for('export', fmt='csv-checklist') }}" class="btn btn-export"><i data-lucide="file-spreadsheet" class="icon-sm"></i> {{ t.export_csv }} (Checklist)</a>
+        <a href="{{ url_for('export', fmt='xlsx-checklist') }}" class="btn btn-export btn-success"><i data-lucide="sheet" class="icon-sm"></i> {{ t.export_xlsx_cl }}</a>
+        <a href="{{ url_for('export', fmt='markdown') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
+        <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>
+    </div>
+</div>
+{% elif not has_data %}
+<div class="card card-info">
+    <h3>{{ t.cl_how_to_title }}</h3>
+    <p>{{ t.cl_how_to_desc }}</p>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('test_cases_page') }}" class="btn btn-secondary">&larr; {{ t.nav_test_cases }}</a>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">{{ t.nav_dashboard }} &rarr;</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterCL(category, btn) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.cl-row').forEach(row => {
+        row.style.display = (category === 'all' || row.dataset.category === category) ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

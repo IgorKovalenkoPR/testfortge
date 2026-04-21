@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.est_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ t.est_title }}</h1>
+</div>
+
+<div id="est-progress" class="alert alert-info" style="display:none; margin-bottom:1rem">
+  <div style="display:flex; align-items:center; gap:.75rem">
+    <i data-lucide="loader-circle" class="icon-sm spin"></i>
+    <div style="flex:1">
+      <strong id="est-progress-label">{{ t.get('est_running', 'Crawling site and computing estimation…') }}</strong>
+      <div class="progress-bar" style="margin-top:.25rem; height:6px; background:#eee; border-radius:3px; overflow:hidden">
+        <div id="est-progress-fill" style="height:100%; width:0%; background:var(--tf-primary, #FF865C); transition:width .4s ease"></div>
+      </div>
+      <small id="est-progress-message" style="color:#666"></small>
+    </div>
+  </div>
+</div>
+
+<form id="estimation-form" method="POST" action="{{ url_for('estimation_run') }}" enctype="multipart/form-data"
+      data-async-url="{{ url_for('estimation_run_async') }}"
+      data-status-url-base="{{ url_for('estimation_status', job_id='__ID__') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card">
+    <h2>{{ t.est_config }}</h2>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>{{ t.est_project_name }}</label>
+        <input type="text" name="project_name" value="{{ last.project_name or '' }}"
+               placeholder="{{ t.est_project_name_ph }}">
+      </div>
+      <div class="form-group">
+        <label>{{ t.est_additional_platforms }}</label>
+        <input type="number" name="additional_platforms" min="0" max="50" step="1"
+               value="{{ last.additional_platforms or 9 }}">
+      </div>
+      <div class="form-group">
+        <label>{{ t.est_minutes_per_tc }}</label>
+        <input type="number" name="minutes_per_tc" min="1" max="60" step="1"
+               value="{{ last.minutes_per_tc or 5 }}">
+      </div>
+      <div class="form-group">
+        <label>{{ t.est_buffer }}</label>
+        <input type="number" name="buffer_percent" min="0" max="100" step="1"
+               value="{{ last.buffer_percent or 12 }}">
+      </div>
+      <div class="form-group">
+        <label>{{ t.est_primary_platform }}</label>
+        <input type="text" name="primary_platform" value="{{ last.primary_platform or 'Windows 10' }}">
+      </div>
+    </div>
+
+    <h3 style="margin-top:1.25rem">{{ t.get('est_coefficients', 'Coefficients (editable)') }}</h3>
+    <p class="muted" style="margin-top:-.25rem">
+      <small>{{ t.get('est_coefficients_hint',
+        'Defaults match the QA Team Lead reference template. Adjust to fit your project risk profile.') }}</small>
+    </p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>{{ t.get('est_compat_rate', 'Compatibility rate, %') }}</label>
+        <input type="number" name="compatibility_rate" min="0" max="10" step="0.05"
+               value="{{ last.compatibility_rate if last.compatibility_rate is defined else 0.3 }}">
+        <small>{{ t.get('est_compat_rate_hint', 'Per extra platform (default 0.3%).') }}</small>
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('est_bug_rate', 'Bug reporting rate, %') }}</label>
+        <input type="number" name="bug_report_rate" min="0" max="100" step="1"
+               value="{{ last.bug_report_rate if last.bug_report_rate is defined else 15 }}">
+        <small>{{ t.get('est_bug_rate_hint', 'Share of Functional+Regression (default 15%).') }}</small>
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('est_pm_overhead', 'PM overhead, %') }}</label>
+        <input type="number" name="pm_overhead" min="0" max="50" step="1"
+               value="{{ last.pm_overhead if last.pm_overhead is defined else 8 }}">
+        <small>{{ t.get('est_pm_overhead_hint', 'Project management share (default 8%).') }}</small>
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('est_max_stretch', 'MAX stretch (× MIN)') }}</label>
+        <input type="number" name="max_testing_stretch" min="1" max="3" step="0.05"
+               value="{{ last.max_testing_stretch if last.max_testing_stretch is defined else 1.5 }}">
+        <small>{{ t.get('est_max_stretch_hint', 'How much MAX exceeds MIN (default 1.5×).') }}</small>
+      </div>
+    </div>
+
+    <h3 style="margin-top:1.25rem">{{ t.est_source }}</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>
+          <input type="radio" name="source" value="url" checked> {{ t.est_source_url }}
+        </label>
+        <input type="url" name="url" placeholder="https://example.com" value="{{ last.url or '' }}">
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="radio" name="source" value="attachment"> {{ t.est_source_file }}
+        </label>
+        <input type="file" name="attachment" accept=".txt,.md,.csv,.xlsx,.docx,.pdf">
+      </div>
+      <div class="form-group">
+        <label>{{ t.est_source_text }}</label>
+        <textarea name="text_input" rows="4"
+                  placeholder="{{ t.est_source_text_ph }}">{{ last.text_input or '' }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary btn-lg">{{ t.est_run }} &rarr;</button>
+  </div>
+</form>
+
+{% set default_tasks = [
+    {'title':'Communication',
+     'description':'Communications with customer during the project, meetings and discussions.'},
+    {'title':'Testing documentation and requirements',
+     'description':'Go through the requirements document to ensure it is full, testable and consistent.'},
+    {'title':'Checklist Creation',
+     'description':'Create a high-level checklist / test suite covering all documented scenarios.'},
+    {'title':'Functional and UI Testing',
+     'description':'Manual execution of positive and negative test cases.'},
+    {'title':'Bugs Reporting',
+     'description':'All bugs, errors and suggestions found during execution are reported.'},
+    {'title':'Bug Rechecking',
+     'description':'Retest the application to verify that fixed issues no longer occur.'},
+    {'title':'Regression Testing',
+     'description':'Check that all features continue to work after the bug-fix phase.'},
+    {'title':'Compatibility Testing (per extra platform)',
+     'description':'Positive-path compatibility run on an additional platform combination.'}
+] %}
+{% set tasks = result.tasks if result else default_tasks %}
+{% set extra_platforms = result.additional_platforms if result else 0 %}
+
+{% if result %}
+<div class="card card-highlight">
+  <h2>{{ t.est_summary }}</h2>
+  <div class="stats-grid stats-grid-3">
+    <div class="stat-card"><div class="stat-number">{{ result.total_tc }}</div>
+      <div class="stat-label">{{ t.est_total_tc }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ result.features_hours }} h</div>
+      <div class="stat-label">{{ t.est_features_hours }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ result.one_plat_total_expected | round(1) }} h</div>
+      <div class="stat-label">{{ t.est_one_plat_total }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ result.full_total_expected | round(1) }} h</div>
+      <div class="stat-label">{{ t.est_full_total }}</div></div>
+  </div>
+  <p style="margin-top:.75rem"><em>{{ t.est_source_label }}:</em>
+    {{ result.source }}{% if result.source_ref %} — {{ result.source_ref }}{% endif %}</p>
+  <p><a class="btn btn-secondary" href="{{ url_for('estimation_export') }}">
+      <i data-lucide="save" class="icon-sm"></i> {{ t.est_export }}</a></p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>{{ t.est_tasks_title }}</h2>
+  <table class="est-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>{{ t.est_task }}</th>
+        <th>{{ t.est_min }}</th>
+        <th>{{ t.est_max }}</th>
+        <th>{{ t.est_expected }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ task.title }}</strong><br><small>{{ task.description }}</small></td>
+        <td>{{ (task.min_h if result else 0) | round(2) }}</td>
+        <td>{{ (task.max_h if result else 0) | round(2) }}</td>
+        <td>{{ (task.expected_h if result else 0) | round(2) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="est-row-subtotal">
+        <td colspan="2"><strong>{{ t.est_one_plat_subtotal }}</strong></td>
+        <td>{{ (result.one_plat_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_expected if result else 0) | round(1) }}</td>
+      </tr>
+      <tr>
+        <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
+        <td>{{ (result.one_plat_pm_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_pm_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_pm_expected if result else 0) | round(1) }}</td>
+      </tr>
+      <tr class="est-row-total">
+        <td colspan="2"><strong>{{ t.est_one_plat_total }}</strong></td>
+        <td>{{ (result.one_plat_total_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_total_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.one_plat_total_expected if result else 0) | round(1) }}</td>
+      </tr>
+      <tr class="est-row-subtotal">
+        <td colspan="2"><strong>{{ t.est_full_subtotal }} (+{{ extra_platforms }})</strong></td>
+        <td>{{ (result.full_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_expected if result else 0) | round(1) }}</td>
+      </tr>
+      <tr>
+        <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
+        <td>{{ (result.full_pm_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_pm_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_pm_expected if result else 0) | round(1) }}</td>
+      </tr>
+      <tr class="est-row-total">
+        <td colspan="2"><strong>{{ t.est_full_total }}</strong></td>
+        <td>{{ (result.full_total_min if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_total_max if result else 0) | round(1) }}</td>
+        <td>{{ (result.full_total_expected if result else 0) | round(1) }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>{{ t.est_features_title }}{% if result %} ({{ result.features | selectattr('is_section', 'equalto', false) | list | length }}){% endif %}</h2>
+  <table class="est-table">
+    <thead>
+      <tr>
+        <th>{{ t.est_feature }}</th>
+        <th>{{ t.est_tc }}</th>
+        <th>{{ t.est_comment }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if result %}
+        {% for f in result.features %}
+        <tr class="{% if f.is_section %}est-section-row{% endif %}">
+          <td>{{ f.name }}</td>
+          <td>{% if not f.is_section %}{{ f.test_cases }}{% endif %}</td>
+          <td>{{ f.comment }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        {% for i in range(5) %}
+        <tr>
+          <td>&nbsp;</td>
+          <td>0</td>
+          <td>&nbsp;</td>
+        </tr>
+        {% endfor %}
+      {% endif %}
+      <tr class="est-row-total">
+        <td><strong>{{ t.est_total }}</strong></td>
+        <td><strong>{{ result.total_tc if result else 0 }}</strong></td>
+        <td></td>
+      </tr>
+      <tr class="est-row-total">
+        <td><strong>{{ t.get('est_total_hours', 'Total (hours)') }}</strong></td>
+        <td><strong>{{ result.features_hours if result else 0 }}</strong></td>
+        <td>{% if result %}<small>= {{ result.buffer }} &times; {{ result.total_tc }} &times; {{ result.minutes_per_tc }} / 60 + 1</small>{% else %}<small>= buffer &times; total_tc &times; minutes_per_tc / 60 + 1</small>{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+// Async estimation for URL source only — file upload and pasted text both
+// complete in milliseconds and go through the original synchronous POST.
+// JS-less users get the synchronous /estimation/run handler in all cases.
+(function () {
+  const form = document.getElementById('estimation-form');
+  if (!form || !window.fetch) return;
+
+  const banner = document.getElementById('est-progress');
+  const fill = document.getElementById('est-progress-fill');
+  const msg = document.getElementById('est-progress-message');
+  const label = document.getElementById('est-progress-label');
+  const asyncUrl = form.dataset.asyncUrl;
+  const statusBase = form.dataset.statusUrlBase;
+
+  function setProgress(pct, message) {
+    fill.style.width = Math.round(pct * 100) + '%';
+    if (message) msg.textContent = message;
+  }
+
+  function poll(jobId) {
+    const url = statusBase.replace('__ID__', jobId);
+    fetch(url, {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(payload => {
+        if (payload.error) {
+          label.textContent = 'Error: ' + payload.error;
+          banner.classList.remove('alert-info');
+          banner.classList.add('alert-danger');
+          return;
+        }
+        setProgress(payload.progress || 0.15, payload.message || '');
+        if (payload.status === 'done') {
+          setProgress(1, 'Complete — reloading…');
+          setTimeout(() => window.location.reload(), 400);
+        } else if (payload.status === 'failed') {
+          label.textContent = 'Estimation failed';
+          msg.textContent = payload.error || '';
+          banner.classList.remove('alert-info');
+          banner.classList.add('alert-danger');
+        } else {
+          setTimeout(() => poll(jobId), 2000);
+        }
+      })
+      .catch(() => setTimeout(() => poll(jobId), 3000));
+  }
+
+  form.addEventListener('submit', function (evt) {
+    const chosenSource = (form.querySelector('input[name="source"]:checked') || {}).value;
+    // Only the URL path is worth going async — attachments + pasted text
+    // are cheap and use the default sync form submit.
+    if (chosenSource !== 'url') return;
+    evt.preventDefault();
+    banner.style.display = 'block';
+    setProgress(0.05, 'Submitting…');
+    const fd = new FormData(form);
+    fetch(asyncUrl, {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(data => {
+        if (data.job_id) {
+          poll(data.job_id);
+        } else {
+          form.submit();
+        }
+      })
+      .catch(() => form.submit());
+  });
+})();
+</script>
+{% endblock %}

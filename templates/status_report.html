@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.sr_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.sr_title }}</h1>
+    <p class="subtitle">{{ t.sr_subtitle }}</p>
+</div>
+
+{% if project_stats and project_stats.tc_count %}
+<div class="stats-grid stats-grid-4">
+    <div class="stat-card">
+        <div class="stat-number">{{ project_stats.tc_count }}</div>
+        <div class="stat-label">{{ t.nav_test_cases }}</div>
+    </div>
+    <div class="stat-card stat-positive">
+        <div class="stat-number">{{ project_stats.tc_passed }}</div>
+        <div class="stat-label">{{ t.passed }}</div>
+    </div>
+    <div class="stat-card stat-negative">
+        <div class="stat-number">{{ project_stats.tc_failed }}</div>
+        <div class="stat-label">{{ t.failed }}</div>
+    </div>
+    <div class="stat-card stat-edge">
+        <div class="stat-number">{{ project_stats.tc_blocked }}</div>
+        <div class="stat-label">{{ t.blocked }}</div>
+    </div>
+</div>
+{% endif %}
+
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card">
+        <h2>{{ t.sr_report_details }}</h2>
+        <div class="form-row form-row-2">
+            <div class="form-group">
+                <label for="report_date">{{ t.sr_date }}</label>
+                <input type="date" id="report_date" name="report_date" value="{{ request.form.get('report_date', '') }}">
+            </div>
+            <div class="form-group">
+                <label for="features_tested">{{ t.sr_features_tested }}</label>
+                <input type="text" id="features_tested" name="features_tested"
+                       placeholder="{{ t.sr_features_placeholder }}"
+                       value="{{ request.form.get('features_tested', '') }}">
+            </div>
+        </div>
+        <div class="form-row form-row-2">
+            <div class="form-group">
+                <label for="platforms_tested">{{ t.sr_platforms_tested }}</label>
+                <input type="text" id="platforms_tested" name="platforms_tested"
+                       placeholder="{{ t.sr_platforms_placeholder }}"
+                       value="{{ request.form.get('platforms_tested', '') }}">
+            </div>
+            <div class="form-group">
+                <label for="bugs_found">{{ t.sr_bugs_found }}</label>
+                <input type="text" id="bugs_found" name="bugs_found"
+                       placeholder="{{ t.sr_bugs_placeholder }}"
+                       value="{{ request.form.get('bugs_found', '') }}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="next_steps">{{ t.sr_next_steps }}</label>
+            <textarea id="next_steps" name="next_steps" rows="3"
+                      placeholder="{{ t.sr_next_steps_placeholder }}">{{ request.form.get('next_steps', '') }}</textarea>
+        </div>
+    </div>
+
+    {% set input_title = t.input_title_additional %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.sr_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if report %}
+<div class="card card-highlight">
+    <h2>{{ t.sr_title }} — {{ report.report_date }}</h2>
+
+    {% if report.stats_summary %}
+    <div class="hint-box" style="margin-bottom:1rem">
+        <strong>{{ t.sr_stats_summary }}:</strong> {{ report.stats_summary }}
+    </div>
+    {% endif %}
+
+    <table class="data-table sr-table">
+        <tr>
+            <th>{{ t.sr_date }}</th>
+            <td>{{ report.report_date }}</td>
+        </tr>
+        <tr>
+            <th>{{ t.sr_what_done }}</th>
+            <td>
+                <ul>
+                    {% for item in report.what_done %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <th>{{ t.sr_what_planned }}</th>
+            <td>
+                <ul>
+                    {% for item in report.what_planned %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <th>{{ t.sr_bugs }}</th>
+            <td>{{ report.bugs_summary }}</td>
+        </tr>
+        {% if report.custom_notes %}
+        <tr>
+            <th>{{ t.notes }}</th>
+            <td>{{ report.custom_notes }}</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('test_plan_page') }}" class="btn btn-secondary">&larr; {{ t.nav_test_plan }}</a>
+    <a href="{{ url_for('test_metrics_page') }}" class="btn btn-primary">{{ t.nav_test_metrics }} &rarr;</a>
+</div>
+{% endblock %}

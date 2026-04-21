@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}TestFortge{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="sidebar">
+        <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestFortge — a Testfort product">
+            <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
+                 alt="" class="brand-icon" width="34" height="34">
+            <span class="brand-text">TestFortge</span>
+        </a>
+        <div class="lang-toggle">
+            <a href="?lang=en" class="lang-btn {{ 'active' if lang=='en' }}">EN</a>
+            <a href="?lang=ua" class="lang-btn {{ 'active' if lang=='ua' }}">UA</a>
+        </div>
+        <ul class="nav-steps">
+            <li class="{% if request.endpoint == 'index' %}active{% endif %}">
+                <a href="{{ url_for('index') }}">
+                    <span class="step-icon"><i data-lucide="layout-dashboard" class="icon-sm"></i></span>
+                    {{ t.nav_dashboard }}
+                </a>
+            </li>
+            <li class="{% if request.endpoint == 'estimation_page' %}active{% endif %}">
+                <a href="{{ url_for('estimation_page') }}">
+                    <span class="step-icon"><i data-lucide="trending-up" class="icon-sm"></i></span>
+                    {{ t.nav_estimation if t.get('nav_estimation') else 'Estimation' }}
+                </a>
+            </li>
+            <li class="nav-divider"></li>
+            <li class="nav-section-label">{{ t.sidebar_generate }}</li>
+            <li class="{% if request.endpoint == 'test_cases_page' %}active{% endif %}">
+                <a href="{{ url_for('test_cases_page') }}">
+                    <span class="step-icon"><i data-lucide="check-circle-2" class="icon-sm"></i></span>
+                    {{ t.nav_test_cases }}
+                </a>
+            </li>
+            <li class="{% if request.endpoint == 'checklist_page' %}active{% endif %}">
+                <a href="{{ url_for('checklist_page') }}">
+                    <span class="step-icon"><i data-lucide="list-checks" class="icon-sm"></i></span>
+                    {{ t.nav_checklist }}
+                </a>
+            </li>
+            <li class="nav-divider"></li>
+            <li class="nav-section-label">{{ t.get('sidebar_execute', 'Execute:') }}</li>
+            <li class="{% if request.endpoint == 'test_execution_page' %}active{% endif %}">
+                <a href="{{ url_for('test_execution_page') }}">
+                    <span class="step-icon"><i data-lucide="play-circle" class="icon-sm"></i></span>
+                    {{ t.get('nav_test_execution', 'Test Execution') }}
+                </a>
+            </li>
+            <li class="{% if request.endpoint == 'automation_page' %}active{% endif %}">
+                <a href="{{ url_for('automation_page') }}">
+                    <span class="step-icon"><i data-lucide="bot" class="icon-sm"></i></span>
+                    {{ t.nav_automation if t.get('nav_automation') else 'Automation QA' }}
+                </a>
+            </li>
+            <li class="{% if request.endpoint == 'bug_reports_page' %}active{% endif %}">
+                <a href="{{ url_for('bug_reports_page') }}">
+                    <span class="step-icon"><i data-lucide="bug" class="icon-sm"></i></span>
+                    {{ t.get('nav_bug_reports', 'Bug Reports') }}
+                </a>
+            </li>
+        </ul>
+        {% if session.get('project_setup', {}).get('project_name') %}
+        <div class="sidebar-project">
+            <small>{{ t.sidebar_project }}</small>
+            <strong>{{ session['project_setup'].get('project_name', '') }}</strong>
+        </div>
+        {% endif %}
+    </nav>
+
+    <main class="main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    {# ── TestFortge Assistant (floating chatbot) ── #}
+    <div id="qa-chat"
+         data-lang="{{ lang }}"
+         data-greeting="{{ t.get('chat_greeting', 'Hi! I am the TestFortge assistant. Ask me anything about Estimation, Test Cases, Checklist, Test Execution, Automation QA or Bug Reports.') }}">
+        <button type="button" class="qa-chat-toggle" aria-expanded="false"
+                aria-label="{{ t.get('chat_open', 'Open QA assistant') }}"
+                title="{{ t.get('chat_open', 'Open QA assistant') }}">
+            <i data-lucide="message-circle" class="icon-lg"></i>
+        </button>
+        <div class="qa-chat-panel" role="dialog" aria-label="TestFortge Assistant">
+            <div class="qa-chat-head">
+                <div>
+                    <strong>{{ t.get('chat_title', 'QA Assistant') }}</strong>
+                    <small>{{ t.get('chat_subtitle', 'Ask about modules or a requirement') }}</small>
+                </div>
+                <div class="qa-chat-actions">
+                    <button type="button" data-chat-reset
+                            title="{{ t.get('chat_reset', 'Reset') }}"
+                            aria-label="{{ t.get('chat_reset', 'Reset') }}">
+                        <i data-lucide="rotate-ccw" class="icon-sm"></i>
+                    </button>
+                    <button type="button" data-chat-close
+                            title="{{ t.get('chat_close', 'Close') }}"
+                            aria-label="{{ t.get('chat_close', 'Close') }}">
+                        <i data-lucide="x" class="icon-sm"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="qa-chat-body"></div>
+            <form class="qa-chat-foot" autocomplete="off">
+                <input type="text" name="message"
+                       placeholder="{{ t.get('chat_placeholder', 'Type a question or paste a requirement…') }}"
+                       aria-label="{{ t.get('chat_placeholder', 'Type a question') }}">
+                <button type="submit">{{ t.get('chat_send', 'Send') }}</button>
+            </form>
+        </div>
+    </div>
+
+    {# Lucide icon library (ISC licensed) — hydrates <i data-lucide="…"> nodes #}
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
+        });
+    </script>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

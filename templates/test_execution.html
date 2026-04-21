@@ -1,0 +1,481 @@
+{% extends "base.html" %}
+{% block title %}{{ t.get('te_title', 'Test Execution') }}{% endblock %}
+
+{% block content %}
+<h1>{{ t.get('te_title', 'Test Execution') }}</h1>
+<p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
+
+{% if not has_tc_data and not has_cl_data %}
+<div class="card">
+    <p>{{ t.get('te_no_data', 'No test cases or checklists generated yet.') }}</p>
+    <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary">{{ t.nav_test_cases }}</a>
+    <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary">{{ t.nav_checklist }}</a>
+</div>
+{% else %}
+
+{# ── Resource URLs Panel ── #}
+{% if resource_urls %}
+<div class="card resource-urls-card">
+    <h3 class="card-title"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
+    <div class="url-chips">
+        {% for url in resource_urls %}
+        <a href="{{ url }}" target="_blank" rel="noopener" class="url-chip">{{ url }}</a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Existing Test Runs ── #}
+{% if test_runs %}
+{% for run in test_runs %}
+<div class="card run-card">
+    <div class="run-header" onclick="toggleRunDetails('run-{{ run.run_id }}')">
+        <div class="run-title">
+            <strong>Run {{ run.run_id }}</strong>
+            <span class="run-meta">{{ run.tester_name }} &middot; {{ run.environment }} &middot; {{ run.testing_types }}</span>
+        </div>
+        <div class="run-stats-inline">
+            <span class="run-stat stat-passed">{{ run.stats.passed }} P</span>
+            <span class="run-stat stat-failed">{{ run.stats.failed }} F</span>
+            <span class="run-stat stat-blocked">{{ run.stats.blocked }} B</span>
+            <span class="run-stat run-rate">{{ run.stats.pass_rate }}%</span>
+            {% if run.bug_count %}<span class="run-stat run-bugs"><i data-lucide="bug" class="icon-sm"></i> {{ run.bug_count }}</span>{% endif %}
+            <span class="run-toggle" id="toggle-run-{{ run.run_id }}"><i data-lucide="chevron-down" class="icon-sm"></i></span>
+        </div>
+    </div>
+    <div class="run-details" id="run-{{ run.run_id }}" style="display:none">
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th width="60">{{ t.get('status', 'Status') }}</th>
+                    <th width="90">ID</th>
+                    <th>{{ t.get('te_item_summary', 'Summary') }}</th>
+                    <th width="90">Bug ID</th>
+                    <th>{{ t.get('te_comment', 'Comment') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in run.results %}
+                <tr class="result-row result-{{ r.status | lower | replace(' ', '-') }}">
+                    <td>
+                        {% if r.status == 'Passed' %}
+                        <span class="status-badge status-passed">P</span>
+                        {% elif r.status == 'Failed' %}
+                        <span class="status-badge status-failed">F</span>
+                        {% elif r.status == 'Blocked' %}
+                        <span class="status-badge status-blocked">B</span>
+                        {% endif %}
+                    </td>
+                    <td><strong>{{ r.item_id }}</strong></td>
+                    <td class="item-summary-cell">
+                        {% if r.item_type == 'test_case' %}
+                            {% for tc in tc_items %}{% if tc.id == r.item_id %}{{ tc.summary }}{% endif %}{% endfor %}
+                        {% else %}
+                            {% for cl in cl_items %}{% if cl.id == r.item_id %}{{ cl.objective }}{% endif %}{% endfor %}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.bug_id %}
+                        <a href="{{ url_for('bug_reports_page') }}" class="bug-link">{{ r.bug_id }}</a>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td class="comment-cell">{{ r.comment or '—' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{# ── New Test Run Configuration ── #}
+<form method="POST" id="exec-config-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="card">
+    <h3 class="card-title">{{ t.get('te_new_run', 'New Test Run') }}</h3>
+
+    {# Source selection #}
+    <div class="form-group">
+        <label>{{ t.get('te_select_source', 'Select Test Source') }}</label>
+        <div class="form-row">
+            {% if has_tc_data %}
+            <label class="radio-card">
+                <input type="radio" name="source" value="test_cases" checked onchange="toggleItemList()">
+                <span><i data-lucide="check-circle-2" class="icon-sm"></i> {{ t.get('te_source_tc', 'Test Cases') }} ({{ tc_count }})</span>
+            </label>
+            {% endif %}
+            {% if has_cl_data %}
+            <label class="radio-card">
+                <input type="radio" name="source" value="checklist" {% if not has_tc_data %}checked{% endif %} onchange="toggleItemList()">
+                <span><i data-lucide="list-checks" class="icon-sm"></i> {{ t.get('te_source_cl', 'Checklist') }} ({{ cl_count }})</span>
+            </label>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{# ── Item Selection ── #}
+<div class="card">
+    <h3 class="card-title">{{ t.get('te_select_items', 'Select Items to Test') }}</h3>
+    <p class="hint">{{ t.get('te_select_items_hint', 'Select specific items or leave all checked to test everything') }}</p>
+    <div class="select-actions">
+        <a href="#" onclick="selectAll(); return false;" class="btn btn-sm">{{ t.get('all', 'All') }}</a>
+        <a href="#" onclick="selectNone(); return false;" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
+    </div>
+
+    {# Test Cases list #}
+    <div id="items-tc" class="item-select-list" {% if not has_tc_data %}style="display:none"{% endif %}>
+        {% if tc_items %}
+        {% set current_section = namespace(name='') %}
+        {% for tc in tc_items %}
+            {% if tc.section != current_section.name %}
+                {% set current_section.name = tc.section %}
+                <div class="item-section-label">{{ tc.section }}</div>
+            {% endif %}
+            <label class="item-select-row">
+                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc">
+                <span class="item-id">{{ tc.id }}</span>
+                <span class="item-summary">{{ tc.summary }}</span>
+                <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
+            </label>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+    {# Checklist items list #}
+    <div id="items-cl" class="item-select-list" style="display:none">
+        {% if cl_items %}
+        {% set current_section = namespace(name='') %}
+        {% for cl in cl_items %}
+            {% if cl.section != current_section.name %}
+                {% set current_section.name = cl.section %}
+                <div class="item-section-label">{{ cl.section }}</div>
+            {% endif %}
+            <label class="item-select-row">
+                <input type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl">
+                <span class="item-id">{{ cl.id }}</span>
+                <span class="item-summary">{{ cl.objective }}</span>
+                <span class="item-badge badge-{{ cl.category | lower | replace(' ', '-') }}">{{ cl.category }}</span>
+            </label>
+        {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+{# ── Environment ── #}
+<div class="card">
+    <h3 class="card-title">{{ t.get('te_environment', 'Test Environment') }}</h3>
+    <div class="form-grid">
+        <div class="form-group">
+            <label>{{ t.get('te_platform', 'Platform') }}</label>
+            <select name="platform" id="platform-select">
+                {% for p in platforms %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+            </select>
+            <input type="text" name="platform_custom" id="platform-custom" placeholder="Enter custom platform" style="display:none; margin-top:6px">
+        </div>
+        <div class="form-group">
+            <label>{{ t.get('te_browser', 'Browser') }}</label>
+            <select name="browser" id="browser-select">
+                {% for b in browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+            </select>
+            <input type="text" name="browser_custom" id="browser-custom" placeholder="Enter custom browser" style="display:none; margin-top:6px">
+        </div>
+        <div class="form-group">
+            <label>{{ t.get('te_device', 'Device / Mobile Web') }}</label>
+            <select name="device" id="device-select">
+                {% for d in devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+                <optgroup label="Mobile Web">
+                    {% for mw in mobile_web %}<option value="{{ mw }}">{{ mw }}</option>{% endfor %}
+                </optgroup>
+                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+            </select>
+            <input type="text" name="device_custom" id="device-custom" placeholder="Enter custom device" style="display:none; margin-top:6px">
+        </div>
+        <div class="form-group">
+            <label>{{ t.get('te_screen_size', 'Screen Size') }}</label>
+            <select name="screen_size" id="screen-select">
+                {% for name, size in screen_sizes.items() %}<option value="{{ size }}">{{ name }} ({{ size }})</option>{% endfor %}
+                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+            </select>
+            <input type="text" name="screen_custom" id="screen-custom" placeholder="e.g. 1440x900" style="display:none; margin-top:6px">
+        </div>
+    </div>
+</div>
+
+{# ── Testing Types ── #}
+<div class="card">
+    <h3 class="card-title">{{ t.get('te_testing_types', 'Testing Types') }}</h3>
+    <p class="hint">{{ t.get('te_select_types', 'Select one or more testing types') }}</p>
+    <div class="checkbox-grid">
+        {% for tt in testing_types %}
+        <label class="checkbox-card">
+            <input type="checkbox" name="testing_types" value="{{ tt }}" {% if tt == "Functional" %}checked{% endif %}>
+            <span>{{ tt }}</span>
+        </label>
+        {% endfor %}
+    </div>
+</div>
+
+{# ── Tester ── #}
+<div class="card">
+    <h3 class="card-title">{{ t.get('te_tester', 'Assigned Tester') }}</h3>
+    <select name="tester_id" class="tester-select">
+        {% for tester in testers %}
+        <option value="{{ tester.id }}">{{ tester.name }} ({{ tester.level }})</option>
+        {% endfor %}
+    </select>
+</div>
+
+{# ── Test Account / Credentials ── #}
+<div class="card">
+    <h3 class="card-title">{{ t.get('creds_title', 'Test Account') }}</h3>
+    <p class="subtitle">{{ t.get('creds_help_te',
+       'Optional. Provide credentials if the test cases or checklist require authenticated access, or generate a throw-away test account.') }}</p>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="none"
+                 {% if cred.mode in ('', 'none') %}checked{% endif %}>
+          {{ t.get('creds_mode_none', 'No authentication needed') }}
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="provided"
+                 {% if cred.mode == 'provided' %}checked{% endif %}>
+          {{ t.get('creds_mode_provided', 'Use existing account') }}
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="generated"
+                 {% if cred.mode == 'generated' %}checked{% endif %}>
+          {{ t.get('creds_mode_generated', 'Generate test account') }}
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>{{ t.get('creds_login_url', 'Login page URL') }}</label>
+        <input type="url" name="cred_login_url"
+               value="{{ cred.login_url or '' }}"
+               placeholder="https://example.com/login">
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('creds_username', 'Username / email') }}</label>
+        <input type="text" name="cred_username" autocomplete="off"
+               value="{{ cred.username or '' }}"
+               placeholder="qa.tester@example.com">
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('creds_password', 'Password') }}</label>
+        <input type="password" name="cred_password" autocomplete="new-password"
+               placeholder="{% if cred.password %}{{ t.get('creds_kept', '(kept from previous run)') }}{% endif %}">
+      </div>
+    </div>
+
+    <details style="margin-top:.5rem">
+      <summary>{{ t.get('creds_advanced', 'Advanced: registration URL / display name') }}</summary>
+      <div class="form-row" style="margin-top:.5rem">
+        <div class="form-group">
+          <label>{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
+          <input type="url" name="cred_register_url"
+                 value="{{ cred.register_url or '' }}"
+                 placeholder="https://example.com/signup">
+        </div>
+        <div class="form-group">
+          <label>{{ t.get('creds_display_name', 'Display name') }}</label>
+          <input type="text" name="cred_display_name"
+                 value="{{ cred.display_name or '' }}">
+        </div>
+      </div>
+    </details>
+
+    {% if cred.mode == 'generated' and cred.username %}
+    <div class="alert alert-info" style="margin-top:.5rem">
+      <strong>{{ t.get('creds_generated_label', 'Generated test account:') }}</strong>
+      <code>{{ cred.username }}</code> / <code>{{ cred.password }}</code>
+      {% if cred.notes %}<br><small>{{ cred.notes }}</small>{% endif %}
+    </div>
+    {% endif %}
+
+    <p style="margin-top:.5rem">
+      <button type="submit" formaction="{{ url_for('test_execution_generate_account') }}"
+              formmethod="POST" class="btn btn-secondary">
+        <i data-lucide="key-round" class="icon-sm"></i> {{ t.get('creds_generate_now', 'Generate test account now') }}
+      </button>
+    </p>
+</div>
+
+<button type="submit" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
+</form>
+
+{% endif %}
+
+<script>
+function toggleItemList() {
+    var source = document.querySelector('input[name="source"]:checked');
+    if (!source) return;
+    var tcList = document.getElementById('items-tc');
+    var clList = document.getElementById('items-cl');
+    if (source.value === 'test_cases') {
+        if (tcList) tcList.style.display = 'block';
+        if (clList) clList.style.display = 'none';
+        // Enable TC checkboxes, disable CL
+        document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = false; });
+        document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = true; });
+    } else {
+        if (tcList) tcList.style.display = 'none';
+        if (clList) clList.style.display = 'block';
+        document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = true; });
+        document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = false; });
+    }
+}
+
+function selectAll() {
+    var source = document.querySelector('input[name="source"]:checked');
+    var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
+    document.querySelectorAll(cls).forEach(function(cb) { cb.checked = true; });
+}
+
+function selectNone() {
+    var source = document.querySelector('input[name="source"]:checked');
+    var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
+    document.querySelectorAll(cls).forEach(function(cb) { cb.checked = false; });
+}
+
+// Show custom inputs for "Custom..." options
+['platform', 'browser', 'device', 'screen'].forEach(function(name) {
+    var sel = document.getElementById(name + '-select');
+    var inp = document.getElementById(name + '-custom');
+    if (sel && inp) {
+        sel.addEventListener('change', function() {
+            inp.style.display = sel.value === '__custom' ? 'block' : 'none';
+        });
+    }
+});
+
+// Toggle run details
+function toggleRunDetails(id) {
+    var el = document.getElementById(id);
+    var toggle = document.getElementById('toggle-' + id);
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        if (toggle) {
+            toggle.innerHTML = '<i data-lucide="chevron-up" class="icon-sm"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    } else {
+        el.style.display = 'none';
+        if (toggle) {
+            toggle.innerHTML = '<i data-lucide="chevron-down" class="icon-sm"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+}
+
+// Auto-expand the latest test run
+(function() {
+    var runs = document.querySelectorAll('.run-details');
+    if (runs.length > 0) {
+        var last = runs[runs.length - 1];
+        last.style.display = 'block';
+        var toggleId = 'toggle-' + last.id;
+        var toggle = document.getElementById(toggleId);
+        if (toggle) {
+            toggle.innerHTML = '<i data-lucide="chevron-up" class="icon-sm"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+})();
+
+// Init
+toggleItemList();
+</script>
+
+<style>
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.form-row .form-group { flex: 1; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9em; }
+.form-group select, .form-group input[type="text"], .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; }
+.tester-select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95em; }
+.checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.checkbox-card { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 0.9em; }
+.checkbox-card:hover { border-color: var(--primary); }
+.checkbox-card input:checked + span { font-weight: 600; color: var(--primary); }
+.radio-card { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; font-size: 1em; margin-right: 12px; }
+.radio-card:hover { border-color: var(--primary); }
+.radio-card input:checked + span { font-weight: 600; }
+.radio-card input { display: none; }
+.radio-card:has(input:checked) { border-color: var(--primary); background: var(--primary-light, #f0f0ff); }
+
+/* Resource URLs */
+.resource-urls-card { background: #f8fafe; }
+.url-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.url-chip { display: inline-block; padding: 6px 14px; background: white; border: 1px solid var(--primary); border-radius: 20px; color: var(--primary); font-size: 0.85em; text-decoration: none; word-break: break-all; }
+.url-chip:hover { background: var(--primary); color: white; }
+
+/* Item selection */
+.item-select-list { max-height: 400px; overflow-y: auto; border: 1px solid #e8eaf0; border-radius: 8px; padding: 8px; }
+.item-section-label { font-weight: 700; color: var(--primary); padding: 8px 6px 4px; font-size: 0.85em; border-bottom: 1px solid #e8eaf0; margin-bottom: 4px; }
+.item-select-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px; cursor: pointer; font-size: 0.88em; }
+.item-select-row:hover { background: #f4f5f7; }
+.item-id { font-weight: 700; color: var(--primary); min-width: 70px; font-size: 0.85em; }
+.item-summary { flex: 1; }
+.item-badge { font-size: 0.75em; padding: 2px 8px; border-radius: 10px; }
+.select-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.btn-sm { padding: 4px 12px; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #555; }
+.btn-sm:hover { background: #eee; }
+
+/* Test Run cards */
+.run-card { margin-bottom: 16px; padding: 0; overflow: hidden; }
+.run-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #f8f9fb; cursor: pointer; flex-wrap: wrap; gap: 8px; }
+.run-header:hover { background: #eef0f5; }
+.run-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.run-meta { font-size: 0.82em; color: #666; }
+.run-stats-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.run-stat { font-size: 0.85em; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+.run-stat.stat-passed { color: #16a34a; background: #f0fdf4; }
+.run-stat.stat-failed { color: #dc2626; background: #fef2f2; }
+.run-stat.stat-blocked { color: #d97706; background: #fffbeb; }
+.run-rate { color: var(--primary); background: #eff6ff; }
+.run-bugs { color: #dc2626; }
+.run-toggle { font-size: 0.8em; color: #999; margin-left: 4px; }
+.run-details { padding: 0 18px 14px; }
+
+/* Results table */
+.results-table { width: 100%; border-collapse: collapse; font-size: 0.85em; margin-top: 8px; }
+.results-table th { background: #f0f1f5; padding: 7px 10px; text-align: left; font-size: 0.85em; font-weight: 700; color: #555; }
+.results-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+.result-row.result-failed { background: #fef8f8; }
+.result-row.result-blocked { background: #fffcf0; }
+.item-summary-cell { font-size: 0.88em; }
+.comment-cell { font-size: 0.82em; color: #666; max-width: 250px; }
+
+/* Status badges */
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.82em; font-weight: 700; }
+.status-passed { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
+.status-failed { color: #dc2626; background: #fef2f2; border: 1px solid #fca5a5; }
+.status-blocked { color: #d97706; background: #fffbeb; border: 1px solid #fcd34d; }
+
+/* Bug link */
+.bug-link { color: #dc2626; font-weight: 700; font-size: 0.85em; text-decoration: none; }
+.bug-link:hover { text-decoration: underline; }
+
+.stat-passed { color: #16a34a; font-weight: 600; }
+.stat-failed { color: #dc2626; font-weight: 600; }
+.stat-blocked { color: #d97706; font-weight: 600; }
+
+.hint { color: #666; font-size: 0.85em; margin-bottom: 8px; }
+@media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
+</style>
+{% endblock %}

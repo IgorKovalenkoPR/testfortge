@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.test_plan_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.test_plan_title }}</h1>
+    <p class="subtitle">{{ t.test_plan_subtitle }}</p>
+</div>
+
+<!-- Input form -->
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% set input_title = t.input_title_scope %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.test_plan_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if has_data and plan %}
+<!-- Table of Contents -->
+<div class="card">
+    <h2>{{ t.tp_table_of_contents }}</h2>
+    <ol class="toc-list">
+        {% for section in plan.sections %}
+        <li><a href="#section-{{ section.number }}">{{ section.title }}</a></li>
+        {% endfor %}
+    </ol>
+</div>
+
+<!-- Sections -->
+{% for section in plan.sections %}
+<div class="card" id="section-{{ section.number }}">
+    <h2>{{ section.number }}. {{ section.title }}</h2>
+
+    {% if section.content %}
+    <div class="plan-content">{{ section.content|nl2br }}</div>
+    {% endif %}
+
+    {% if section.subsections %}
+    {% for sub in section.subsections %}
+    <div class="plan-subsection">
+        <h3>{{ sub.title }}</h3>
+        {% if sub.content is string %}
+        <div class="plan-text">{{ sub.content|nl2br }}</div>
+        {% elif sub.content is iterable %}
+        <ul>
+            {% for item in sub.content %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if section.tables %}
+    {% for table in section.tables %}
+    <div class="plan-table-wrapper">
+        {% if table.title %}<h3>{{ table.title }}</h3>{% endif %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    {% for header in table.headers %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table.rows %}
+                <tr>
+                    {% for cell in row %}
+                    <td>{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+{% endfor %}
+
+<div class="card card-export">
+    <h2>{{ t.nav_export }}</h2>
+    <div class="export-buttons">
+        <a href="{{ url_for('export', fmt='markdown') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
+        <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>
+    </div>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary">&larr; {{ t.nav_checklist }}</a>
+    <a href="{{ url_for('status_report_page') }}" class="btn btn-primary">{{ t.nav_status_report }} &rarr;</a>
+</div>
+{% endblock %}

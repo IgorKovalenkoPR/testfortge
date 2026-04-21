@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.auto_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ t.auto_title }}</h1>
+  <p class="subtitle">{{ t.auto_subtitle }}</p>
+</div>
+
+<div id="run-progress" class="alert alert-info" style="display:none; margin-bottom:1rem">
+  <div style="display:flex; align-items:center; gap:.75rem">
+    <i data-lucide="loader-circle" class="icon-sm spin"></i>
+    <div style="flex:1">
+      <strong id="run-progress-label">{{ t.get('auto_running', 'Automation run in progress…') }}</strong>
+      <div class="progress-bar" style="margin-top:.25rem; height:6px; background:#eee; border-radius:3px; overflow:hidden">
+        <div id="run-progress-fill" style="height:100%; width:0%; background:var(--tf-primary, #FF865C); transition:width .4s ease"></div>
+      </div>
+      <small id="run-progress-message" style="color:#666"></small>
+    </div>
+  </div>
+</div>
+
+<form id="automation-form" method="POST" action="{{ url_for('automation_run') }}"
+      data-async-url="{{ url_for('automation_run_async') }}"
+      data-status-url-base="{{ url_for('automation_status', job_id='__ID__') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card">
+    <h2>{{ t.auto_config }}</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>{{ t.auto_base_url }}</label>
+        <input type="url" name="base_url" required
+               value="{{ last_base_url or '' }}" placeholder="https://example.com">
+      </div>
+      <div class="form-group">
+        <label>{{ t.auto_scope }}</label>
+        <select name="scope">
+          <option value="all">{{ t.auto_scope_all }}</option>
+          <option value="section">{{ t.auto_scope_section }}</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>{{ t.auto_headless }}</label>
+        <select name="headless">
+          <option value="1">{{ t.auto_headless_yes }}</option>
+          <option value="0">{{ t.auto_headless_no }}</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>{{ t.auto_record_video }}</label>
+        <select name="record_video">
+          <option value="1">{{ t.yes if t.get('yes') else 'Yes' }}</option>
+          <option value="0">{{ t.no if t.get('no') else 'No' }}</option>
+        </select>
+      </div>
+    </div>
+    <p><strong>{{ t.auto_tc_count }}:</strong> {{ tc_count }}</p>
+  </div>
+
+  <div class="card">
+    <h2>{{ t.get('creds_title', 'Test Account') }}</h2>
+    <p class="subtitle">{{ t.get('creds_help',
+       'Optional. Provide a login/password if test cases need to run behind authentication, or let TestFortge generate a throw-away test account.') }}</p>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="none"
+                 {% if cred.mode in ('', 'none') %}checked{% endif %}>
+          {{ t.get('creds_mode_none', 'No authentication needed') }}
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="provided"
+                 {% if cred.mode == 'provided' %}checked{% endif %}>
+          {{ t.get('creds_mode_provided', 'Use existing account') }}
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="radio" name="cred_mode" value="generated"
+                 {% if cred.mode == 'generated' %}checked{% endif %}>
+          {{ t.get('creds_mode_generated', 'Generate test account') }}
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>{{ t.get('creds_login_url', 'Login page URL') }}</label>
+        <input type="url" name="cred_login_url"
+               value="{{ cred.login_url or '' }}"
+               placeholder="https://example.com/login">
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('creds_username', 'Username / email') }}</label>
+        <input type="text" name="cred_username" autocomplete="off"
+               value="{{ cred.username or '' }}"
+               placeholder="qa.tester@example.com">
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('creds_password', 'Password') }}</label>
+        <input type="password" name="cred_password" autocomplete="new-password"
+               placeholder="{% if cred.password %}{{ t.get('creds_kept', '(kept from previous run)') }}{% endif %}">
+      </div>
+    </div>
+
+    <details style="margin-top:.75rem">
+      <summary>{{ t.get('creds_advanced', 'Advanced: registration & custom selectors') }}</summary>
+      <div class="form-row" style="margin-top:.5rem">
+        <div class="form-group">
+          <label>{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
+          <input type="url" name="cred_register_url"
+                 value="{{ cred.register_url or '' }}"
+                 placeholder="https://example.com/signup">
+        </div>
+        <div class="form-group">
+          <label>{{ t.get('creds_display_name', 'Display name') }}</label>
+          <input type="text" name="cred_display_name"
+                 value="{{ cred.display_name or '' }}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>{{ t.get('creds_user_selector', 'Username field selector') }}</label>
+          <input type="text" name="cred_username_selector"
+                 value="{{ cred.username_selector or '' }}"
+                 placeholder="input[name='email']">
+        </div>
+        <div class="form-group">
+          <label>{{ t.get('creds_pass_selector', 'Password field selector') }}</label>
+          <input type="text" name="cred_password_selector"
+                 value="{{ cred.password_selector or '' }}"
+                 placeholder="input[name='password']">
+        </div>
+        <div class="form-group">
+          <label>{{ t.get('creds_submit_selector', 'Submit button selector') }}</label>
+          <input type="text" name="cred_submit_selector"
+                 value="{{ cred.submit_selector or '' }}"
+                 placeholder="role=button[name=/sign in/i]">
+        </div>
+      </div>
+    </details>
+
+    {% if cred.mode == 'generated' and cred.username %}
+    <div class="alert alert-info" style="margin-top:.75rem">
+      <strong>{{ t.get('creds_generated_label', 'Generated test account:') }}</strong>
+      <code>{{ cred.username }}</code> / <code>{{ cred.password }}</code>
+      {% if cred.notes %}<br><small>{{ cred.notes }}</small>{% endif %}
+    </div>
+    {% endif %}
+
+    <p style="margin-top:.5rem">
+      <button type="submit" form="gen-acc-form" class="btn btn-secondary">
+        <i data-lucide="key-round" class="icon-sm"></i> {{ t.get('creds_generate_now', 'Generate test account now') }}
+      </button>
+    </p>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary btn-lg" {% if tc_count == 0 %}disabled{% endif %}>
+      {{ t.auto_run_btn }} &rarr;
+    </button>
+  </div>
+</form>
+
+<form id="gen-acc-form" method="POST" action="{{ url_for('automation_generate_account') }}" style="display:none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="base_url" value="{{ last_base_url or '' }}">
+  <input type="hidden" name="cred_login_url" value="{{ cred.login_url or '' }}">
+  <input type="hidden" name="cred_register_url" value="{{ cred.register_url or '' }}">
+</form>
+
+{% if report %}
+<div class="card card-highlight">
+  <h2>{{ t.auto_summary }}</h2>
+  <div class="stats-grid stats-grid-3">
+    <div class="stat-card"><div class="stat-number">{{ report.total }}</div><div class="stat-label">{{ t.auto_total }}</div></div>
+    <div class="stat-card"><div class="stat-number status-passed">{{ report.passed }}</div><div class="stat-label">{{ t.passed }}</div></div>
+    <div class="stat-card"><div class="stat-number status-failed">{{ report.failed }}</div><div class="stat-label">{{ t.failed }}</div></div>
+    <div class="stat-card"><div class="stat-number status-blocked">{{ report.blocked }}</div><div class="stat-label">{{ t.blocked }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ report.pass_rate }}%</div><div class="stat-label">{{ t.auto_pass_rate }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ (report.duration_ms // 1000) }}s</div><div class="stat-label">{{ t.auto_duration }}</div></div>
+  </div>
+  {% if metrics %}
+  <div class="stats-grid stats-grid-3" style="margin-top:1rem">
+    <div class="stat-card"><div class="stat-number">{{ metrics.automation_coverage }}%</div><div class="stat-label">{{ t.auto_coverage }}</div></div>
+    <div class="stat-card"><div class="stat-number">{{ metrics.total_automated }}/{{ metrics.total_manual }}</div><div class="stat-label">{{ t.auto_automated_vs_manual }}</div></div>
+  </div>
+  {% endif %}
+</div>
+
+{% for script in report.scripts %}
+<div class="card step-card">
+  <h3>
+    <span class="status-badge status-{{ script.status }}">{{ script.status|upper }}</span>
+    {{ script.tc_id }} — {{ script.summary }}
+    <small>({{ (script.duration_ms // 1000) }}s)</small>
+  </h3>
+  {% if script.comment %}<p class="alert alert-warning">{{ script.comment }}</p>{% endif %}
+
+  <details>
+    <summary>{{ t.auto_show_steps }} ({{ script.steps|length }})</summary>
+    <div class="screenshot-gallery">
+      {% for step in script.steps %}
+      <div class="step-row status-{{ step.status }}">
+        <div class="step-head">
+          <strong>#{{ step.index }}. {{ step.action }}</strong>
+          <span class="status-badge status-{{ step.status }}">{{ step.status }}</span>
+          <small>{{ step.duration_ms }} ms</small>
+        </div>
+        <div class="step-raw">{{ step.raw }}</div>
+        {% if step.comment %}<div class="step-comment">{{ step.comment }}</div>{% endif %}
+        <div class="step-shots">
+          {% if step.screenshot_before %}
+          <figure>
+            <img src="{{ url_for('automation_asset', path=step.screenshot_before) }}" alt="before">
+            <figcaption>{{ t.auto_before }}</figcaption>
+          </figure>
+          {% endif %}
+          {% if step.screenshot_after %}
+          <figure>
+            <img src="{{ url_for('automation_asset', path=step.screenshot_after) }}" alt="after">
+            <figcaption>{{ t.auto_after }}</figcaption>
+          </figure>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+
+  {% if script.video_path %}
+  <p><a href="{{ url_for('automation_asset', path=script.video_path) }}" target="_blank">▶ {{ t.auto_video }}</a></p>
+  {% endif %}
+</div>
+{% endfor %}
+{% elif tc_count == 0 %}
+<div class="card card-info">
+  <p>{{ t.auto_no_tc }}</p>
+</div>
+{% endif %}
+
+<script>
+// Async automation submit — intercepts the form, POSTs to /automation/run-async,
+// polls /automation/status/<id> every 2s, reloads the page on completion.
+// If JS is disabled or fetch fails, the native form POST to /automation/run
+// is used as a fallback.
+(function () {
+  const form = document.getElementById('automation-form');
+  if (!form || !window.fetch) return;
+
+  const banner = document.getElementById('run-progress');
+  const fill = document.getElementById('run-progress-fill');
+  const msg = document.getElementById('run-progress-message');
+  const label = document.getElementById('run-progress-label');
+  const asyncUrl = form.dataset.asyncUrl;
+  const statusBase = form.dataset.statusUrlBase;
+
+  function setProgress(pct, message) {
+    fill.style.width = Math.round(pct * 100) + '%';
+    if (message) msg.textContent = message;
+  }
+
+  function poll(jobId) {
+    const url = statusBase.replace('__ID__', jobId);
+    fetch(url, {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(payload => {
+        if (payload.error) {
+          label.textContent = 'Error: ' + payload.error;
+          banner.classList.remove('alert-info');
+          banner.classList.add('alert-danger');
+          return;
+        }
+        setProgress(payload.progress || 0.1, payload.message || '');
+        if (payload.status === 'done') {
+          setProgress(1, 'Complete — reloading…');
+          setTimeout(() => window.location.reload(), 400);
+        } else if (payload.status === 'failed') {
+          label.textContent = 'Automation failed';
+          msg.textContent = payload.error || '';
+          banner.classList.remove('alert-info');
+          banner.classList.add('alert-danger');
+        } else {
+          setTimeout(() => poll(jobId), 2000);
+        }
+      })
+      .catch(err => {
+        // Network hiccup — keep polling; Playwright runs are long.
+        setTimeout(() => poll(jobId), 3000);
+      });
+  }
+
+  form.addEventListener('submit', function (evt) {
+    evt.preventDefault();
+    banner.style.display = 'block';
+    setProgress(0.05, 'Submitting…');
+    const fd = new FormData(form);
+    fetch(asyncUrl, {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(data => {
+        if (data.job_id) {
+          poll(data.job_id);
+        } else {
+          // Fallback: submit the form natively
+          form.removeEventListener('submit', arguments.callee);
+          form.submit();
+        }
+      })
+      .catch(() => form.submit());
+  });
+})();
+</script>
+{% endblock %}

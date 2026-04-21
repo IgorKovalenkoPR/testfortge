@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.guide_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><span class="step-icon"><i data-lucide="book-open" class="icon-lg icon-coral"></i></span> {{ t.guide_title }}</h1>
+    <p class="subtitle">{{ t.guide_subtitle }}</p>
+</div>
+
+<div class="card card-info">
+    <p>{{ t.guide_intro }}</p>
+</div>
+
+<!-- Step 1 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">1</span>
+        <div>
+            <h2>{{ t.guide_step1_title }}</h2>
+            <p class="guide-path"><a href="{{ url_for('setup') }}">{{ t.go }} &rarr;</a></p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <p><strong>{{ t.guide_what }}</strong> {{ t.guide_step1_what }}</p>
+        <ol>
+            <li>{{ t.guide_step1_1 }}</li>
+            <li>{{ t.guide_step1_2 }}</li>
+            <li>{{ t.guide_step1_3 }}</li>
+            <li>{{ t.guide_step1_4 }}</li>
+            <li>{{ t.guide_step1_5 }}</li>
+            <li>{{ t.guide_step1_6 }}</li>
+            <li>{{ t.guide_step1_7 }}</li>
+        </ol>
+    </div>
+</div>
+
+<!-- Step 2 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">2</span>
+        <div>
+            <h2>{{ t.guide_step2_title }}</h2>
+            <p class="guide-path"><a href="{{ url_for('requirements') }}">{{ t.go }} &rarr;</a></p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <p><strong>{{ t.guide_what }}</strong> {{ t.guide_step2_what }}</p>
+        <ul>
+            <li>{{ t.guide_step2_1 }}</li>
+            <li>{{ t.guide_step2_2 }}</li>
+            <li>{{ t.guide_step2_3 }}</li>
+        </ul>
+        <p><strong>{{ t.guide_result }}</strong> {{ t.guide_step2_result }}</p>
+    </div>
+</div>
+
+<!-- Step 3 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">3</span>
+        <div>
+            <h2>{{ t.guide_step3_title }}</h2>
+            <p class="guide-path">
+                <a href="{{ url_for('test_cases_page') }}">{{ t.nav_test_cases }} &rarr;</a> |
+                <a href="{{ url_for('checklist_page') }}">{{ t.nav_checklist }} &rarr;</a>
+            </p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <p><strong>{{ t.guide_what }}</strong> {{ t.guide_step3_what }}</p>
+        <ul>
+            <li>{{ t.guide_step3_1 }}</li>
+            <li>{{ t.guide_step3_2 }}</li>
+            <li>{{ t.guide_step3_3 }}</li>
+            <li>{{ t.guide_step3_4 }}</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Step 4 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">4</span>
+        <div>
+            <h2>{{ t.guide_step4_title }}</h2>
+            <p class="guide-path"><a href="{{ url_for('test_plan_page') }}">{{ t.go }} &rarr;</a></p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <p><strong>{{ t.guide_what }}</strong> {{ t.guide_step4_what }}</p>
+        <p>{{ t.guide_step4_desc }}</p>
+    </div>
+</div>
+
+<!-- Step 5 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">5</span>
+        <div>
+            <h2>{{ t.guide_step5_title }}</h2>
+            <p class="guide-path">
+                <a href="{{ url_for('status_report_page') }}">{{ t.nav_status_report }} &rarr;</a> |
+                <a href="{{ url_for('test_metrics_page') }}">{{ t.nav_test_metrics }} &rarr;</a>
+            </p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <p><strong>{{ t.guide_status_report }}</strong> {{ t.guide_step5_sr }}</p>
+        <p><strong>{{ t.guide_test_metrics }}</strong> {{ t.guide_step5_tm }}</p>
+    </div>
+</div>
+
+<!-- Step 6 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">6</span>
+        <div>
+            <h2>{{ t.guide_step6_title }}</h2>
+            <p class="guide-path">
+                <a href="{{ url_for('techniques') }}">{{ t.nav_techniques }} &rarr;</a> |
+                <a href="{{ url_for('recommendations') }}">{{ t.nav_recommendations }} &rarr;</a> |
+                <a href="{{ url_for('tools') }}">{{ t.nav_tools }} &rarr;</a>
+            </p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <ul>
+            <li>{{ t.guide_step6_1 }}</li>
+            <li>{{ t.guide_step6_2 }}</li>
+            <li>{{ t.guide_step6_3 }}</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Step 7 -->
+<div class="card guide-card">
+    <div class="guide-step">
+        <span class="guide-step-num">7</span>
+        <div>
+            <h2>{{ t.guide_step7_title }}</h2>
+        </div>
+    </div>
+    <div class="guide-body">
+        <ul>
+            <li>{{ t.guide_step7_1 }}</li>
+            <li>{{ t.guide_step7_2 }}</li>
+            <li>{{ t.guide_step7_3 }}</li>
+            <li>{{ t.guide_step7_4 }}</li>
+        </ul>
+        <p>{{ t.guide_step7_storage }}</p>
+    </div>
+</div>
+
+<div class="card card-info">
+    <h2>{{ t.guide_faq }}</h2>
+    <details>
+        <summary><strong>{{ t.guide_faq1_q }}</strong></summary>
+        <p>{{ t.guide_faq1_a }}</p>
+    </details>
+    <details>
+        <summary><strong>{{ t.guide_faq2_q }}</strong></summary>
+        <p>{{ t.guide_faq2_a }}</p>
+    </details>
+    <details>
+        <summary><strong>{{ t.guide_faq3_q }}</strong></summary>
+        <p>{{ t.guide_faq3_a }}</p>
+    </details>
+    <details>
+        <summary><strong>{{ t.guide_faq4_q }}</strong></summary>
+        <p>{{ t.guide_faq4_a }}</p>
+    </details>
+</div>
+{% endblock %}

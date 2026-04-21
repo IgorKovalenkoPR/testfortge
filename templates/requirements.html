@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.req_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.req_title }}</h1>
+    <p class="subtitle">{{ t.req_subtitle }}</p>
+</div>
+
+<form method="POST" action="{{ url_for('requirements') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card">
+        <h2>{{ t.text_input }}</h2>
+        <div class="form-group">
+            <textarea id="requirements_text" name="requirements_text" rows="14"
+                      placeholder="{{ t.req_placeholder }}">{{ request.form.get('requirements_text', '') }}</textarea>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.file_upload }}</h2>
+        <div class="form-group">
+            <div class="file-upload-area" id="dropZone">
+                <div class="upload-icon icon-coral"><i data-lucide="cloud-upload" class="icon-lg"></i></div>
+                <p>{{ t.file_upload_hint }}</p>
+                <p class="meta-text">{{ t.supported_formats }}</p>
+                <input type="file" id="req_files" name="req_files" multiple
+                       accept=".txt,.md,.doc,.docx,.xlsx,.csv,.pdf,.png,.jpg,.jpeg"
+                       class="file-input-hidden">
+            </div>
+            <div id="fileList" class="file-list"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.custom_prompt }}</h2>
+        <div class="form-group">
+            <textarea name="custom_prompt" rows="3"
+                      placeholder="{{ t.custom_prompt_hint }}">{{ request.form.get('custom_prompt', '') }}</textarea>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <a href="{{ url_for('setup') }}" class="btn btn-secondary">&larr; {{ t.back }}</a>
+        <button type="submit" class="btn btn-primary btn-lg">
+            {{ t.generate_btn }}: {{ t.nav_user_stories }} &rarr;
+        </button>
+    </div>
+</form>
+
+<div class="card card-info">
+    <h3>{{ t.req_example_title }}</h3>
+    <pre class="example-block">{{ t.req_example_text }}</pre>
+    <button type="button" class="btn btn-sm" onclick="document.getElementById('requirements_text').value=this.parentElement.querySelector('pre').textContent">
+        {{ t.insert_example }}
+    </button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('req_files');
+const fileList = document.getElementById('fileList');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    fileInput.files = e.dataTransfer.files;
+    showFiles(fileInput.files);
+});
+fileInput.addEventListener('change', () => showFiles(fileInput.files));
+
+function showFiles(files) {
+    fileList.innerHTML = '';
+    for (const f of files) {
+        const div = document.createElement('div');
+        div.className = 'file-item';
+        div.textContent = `${f.name} (${(f.size/1024).toFixed(1)} KB)`;
+        fileList.appendChild(div);
+    }
+}
+</script>
+{% endblock %}

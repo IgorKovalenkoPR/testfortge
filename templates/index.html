@@ -1,0 +1,376 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.dashboard_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.dashboard_title }}</h1>
+    <p class="subtitle">{{ t.dashboard_subtitle }}</p>
+</div>
+
+<div class="dashboard-actions">
+    <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary btn-lg">
+        <span class="btn-icon"><i data-lucide="check-circle-2" class="icon-sm"></i></span> {{ t.nav_test_cases }}
+    </a>
+    <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary btn-lg">
+        <span class="btn-icon"><i data-lucide="list-checks" class="icon-sm"></i></span> {{ t.nav_checklist }}
+    </a>
+</div>
+
+{% if session.get('test_cases_data') or session.get('checklist_data') %}
+<div class="card card-highlight">
+    <h2>{{ t.current_project }}{% if session.get('project_setup', {}).get('project_name') %}: {{ session['project_setup'].get('project_name', '') }}{% endif %}</h2>
+    <div class="quick-stats">
+        <div class="qs-item">
+            <span class="qs-label">{{ t.dash_requirements }}</span>
+            <span class="qs-value">{{ session.get('raw_requirements', [])|length }}</span>
+        </div>
+        <div class="qs-item">
+            <span class="qs-label">{{ t.nav_test_cases }}</span>
+            <span class="qs-value">{{ session.get('test_cases_data', [])|length }}</span>
+        </div>
+        <div class="qs-item">
+            <span class="qs-label">{{ t.nav_checklist }}</span>
+            <span class="qs-value">{{ session.get('checklist_data', [])|length }}</span>
+        </div>
+    </div>
+    <div class="card-actions">
+        <a href="{{ url_for('test_cases_page') }}" class="btn btn-sm">{{ t.nav_test_cases }}</a>
+        <a href="{{ url_for('checklist_page') }}" class="btn btn-sm">{{ t.nav_checklist }}</a>
+        <form method="POST" action="{{ url_for('save_project') }}" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="project_name" value="{{ session.get('project_setup', {}).get('project_name', '') }}">
+            <button type="submit" class="btn btn-sm btn-success"><i data-lucide="save" class="icon-sm"></i> {{ t.save_project }}</button>
+        </form>
+        <form method="POST" action="{{ url_for('new_session') }}" style="display:inline"
+              onsubmit="return confirm('{{ t.new_session_confirm }}')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-danger"><i data-lucide="x" class="icon-sm"></i> {{ t.new_session }}</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{# ═══ TEST METRICS SECTION ═══ #}
+{% if metrics.has_data %}
+<div class="card">
+    <h2><i data-lucide="bar-chart-3" class="icon icon-coral"></i> Test Metrics</h2>
+    <p class="subtitle">Select a metric to display</p>
+
+    <div class="metrics-selector">
+        <button class="metric-btn active" onclick="showMetric('tc_count', this)">Test Cases</button>
+        <button class="metric-btn" onclick="showMetric('cl_count', this)">Checklist</button>
+        <button class="metric-btn" onclick="showMetric('exec_status', this)">Execution Status</button>
+        <button class="metric-btn" onclick="showMetric('bug_severity', this)">Bug Severity</button>
+        <button class="metric-btn" onclick="showMetric('bug_priority', this)">Bug Priority</button>
+        <button class="metric-btn" onclick="showMetric('environments', this)">Environments</button>
+    </div>
+
+    {# ── 1. Test Cases Count ── #}
+    <div id="metric_tc_count" class="metric-panel active">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.tc_total }}</div>
+            <div class="metric-big-label">Test Cases Written</div>
+        </div>
+        {% if metrics.tc_total > 0 %}
+        <div class="chart-row">
+            <div class="chart-block">
+                <h4>By Category</h4>
+                <div class="bar-chart">
+                    {% for cat, cnt in metrics.tc_by_category.items() %}
+                    <div class="bar-row">
+                        <span class="bar-label">{{ cat }}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill bar-fill-{{ cat|lower|replace(' ', '-')|replace('/', '-') }}"
+                                 style="width: {{ (cnt / metrics.tc_total * 100)|round }}%"></div>
+                        </div>
+                        <span class="bar-value">{{ cnt }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="chart-block">
+                <h4>By Priority</h4>
+                <div class="bar-chart">
+                    {% for pri, cnt in metrics.tc_by_priority.items() %}
+                    <div class="bar-row">
+                        <span class="bar-label">{{ pri }}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill bar-fill-pri-{{ pri|lower }}"
+                                 style="width: {{ (cnt / metrics.tc_total * 100)|round }}%"></div>
+                        </div>
+                        <span class="bar-value">{{ cnt }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <p class="metric-empty">No test cases generated yet. <a href="{{ url_for('test_cases_page') }}">Generate Test Cases</a></p>
+        {% endif %}
+    </div>
+
+    {# ── 2. Checklist Count ── #}
+    <div id="metric_cl_count" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.cl_total }}</div>
+            <div class="metric-big-label">Checklist Items</div>
+        </div>
+        {% if metrics.cl_total > 0 %}
+        <div class="chart-row">
+            <div class="chart-block">
+                <h4>By Category</h4>
+                <div class="bar-chart">
+                    {% for cat, cnt in metrics.cl_by_category.items() %}
+                    <div class="bar-row">
+                        <span class="bar-label">{{ cat }}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill bar-fill-{{ cat|lower|replace(' ', '-')|replace('/', '-') }}"
+                                 style="width: {{ (cnt / metrics.cl_total * 100)|round }}%"></div>
+                        </div>
+                        <span class="bar-value">{{ cnt }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="chart-block">
+                <h4>By Priority</h4>
+                <div class="bar-chart">
+                    {% for pri, cnt in metrics.cl_by_priority.items() %}
+                    <div class="bar-row">
+                        <span class="bar-label">{{ pri }}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill bar-fill-pri-{{ pri|lower }}"
+                                 style="width: {{ (cnt / metrics.cl_total * 100)|round }}%"></div>
+                        </div>
+                        <span class="bar-value">{{ cnt }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <p class="metric-empty">No checklist items generated yet. <a href="{{ url_for('checklist_page') }}">Generate Checklist</a></p>
+        {% endif %}
+    </div>
+
+    {# ── 3. Execution Status ── #}
+    <div id="metric_exec_status" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.exec_total }}</div>
+            <div class="metric-big-label">Total Executed ({{ metrics.runs_count }} runs)</div>
+        </div>
+        {% if metrics.exec_total > 0 %}
+        <div class="donut-row">
+            <div class="donut-chart-wrap">
+                <svg viewBox="0 0 120 120" class="donut-chart">
+                    {% set p_pct = (metrics.exec_passed / metrics.exec_total * 100) %}
+                    {% set f_pct = (metrics.exec_failed / metrics.exec_total * 100) %}
+                    {% set b_pct = (metrics.exec_blocked / metrics.exec_total * 100) %}
+                    {% set p_dash = (p_pct * 3.14159 * 50 / 100) %}
+                    {% set f_dash = (f_pct * 3.14159 * 50 / 100) %}
+                    {% set b_dash = (b_pct * 3.14159 * 50 / 100) %}
+                    {% set circ = (3.14159 * 50) %}
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="#e2e8f0" stroke-width="12"/>
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="#22c55e" stroke-width="12"
+                            stroke-dasharray="{{ p_dash }} {{ circ }}"
+                            stroke-dashoffset="0"
+                            transform="rotate(-90 60 60)"/>
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="#ef4444" stroke-width="12"
+                            stroke-dasharray="{{ f_dash }} {{ circ }}"
+                            stroke-dashoffset="{{ -p_dash }}"
+                            transform="rotate(-90 60 60)"/>
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="#f59e0b" stroke-width="12"
+                            stroke-dasharray="{{ b_dash }} {{ circ }}"
+                            stroke-dashoffset="{{ -(p_dash + f_dash) }}"
+                            transform="rotate(-90 60 60)"/>
+                    <text x="60" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">{{ metrics.exec_pass_rate }}%</text>
+                    <text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">Pass Rate</text>
+                </svg>
+            </div>
+            <div class="donut-legend">
+                <div class="legend-item">
+                    <span class="legend-dot" style="background:#22c55e"></span>
+                    <span class="legend-label">Passed</span>
+                    <span class="legend-value">{{ metrics.exec_passed }}</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background:#ef4444"></span>
+                    <span class="legend-label">Failed</span>
+                    <span class="legend-value">{{ metrics.exec_failed }}</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background:#f59e0b"></span>
+                    <span class="legend-label">Blocked</span>
+                    <span class="legend-value">{{ metrics.exec_blocked }}</span>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <p class="metric-empty">No test executions yet. <a href="{{ url_for('test_execution_page') }}">Run Test Execution</a></p>
+        {% endif %}
+    </div>
+
+    {# ── 4. Bug Severity ── #}
+    <div id="metric_bug_severity" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.bug_total }}</div>
+            <div class="metric-big-label">Bugs Found</div>
+        </div>
+        {% if metrics.bug_total > 0 %}
+        <div class="bar-chart bar-chart-wide">
+            {% set sev_order = ['Critical', 'Major', 'Normal', 'Minor', 'Low'] %}
+            {% set sev_colors = {'Critical': '#dc2626', 'Major': '#ef4444', 'Normal': '#f59e0b', 'Minor': '#3b82f6', 'Low': '#94a3b8'} %}
+            {% for sev in sev_order %}
+            {% set cnt = metrics.bug_by_severity.get(sev, 0) %}
+            {% if cnt > 0 %}
+            <div class="bar-row">
+                <span class="bar-label">{{ sev }}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%; background: {{ sev_colors.get(sev, '#94a3b8') }}"></div>
+                </div>
+                <span class="bar-value">{{ cnt }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <div class="bug-status-pills">
+            {% for st, cnt in metrics.bug_by_status.items() %}
+            <span class="status-pill pill-{{ st|lower }}">{{ st }}: {{ cnt }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="metric-empty">No bugs reported yet.</p>
+        {% endif %}
+    </div>
+
+    {# ── 5. Bug Priority ── #}
+    <div id="metric_bug_priority" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.bug_total }}</div>
+            <div class="metric-big-label">Bugs by Priority</div>
+        </div>
+        {% if metrics.bug_total > 0 %}
+        <div class="bar-chart bar-chart-wide">
+            {% set pri_order = ['High', 'Medium', 'Low'] %}
+            {% set pri_colors = {'High': '#dc2626', 'Medium': '#f59e0b', 'Low': '#22c55e'} %}
+            {% for pri in pri_order %}
+            {% set cnt = metrics.bug_by_priority.get(pri, 0) %}
+            {% if cnt > 0 %}
+            <div class="bar-row">
+                <span class="bar-label">{{ pri }}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%; background: {{ pri_colors.get(pri, '#94a3b8') }}"></div>
+                </div>
+                <span class="bar-value">{{ cnt }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="metric-empty">No bugs reported yet.</p>
+        {% endif %}
+    </div>
+
+    {# ── 6. Environments ── #}
+    <div id="metric_environments" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">{{ metrics.environments|length }}</div>
+            <div class="metric-big-label">Environments Covered</div>
+        </div>
+        {% if metrics.environments %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Platform</th>
+                    <th>Browser</th>
+                    <th>Device</th>
+                    <th>Screen</th>
+                    <th>Runs</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for env in metrics.environments %}
+                <tr>
+                    <td><strong>{{ env.platform }}</strong></td>
+                    <td>{{ env.browser }}</td>
+                    <td>{{ env.device }}</td>
+                    <td>{{ env.screen }}</td>
+                    <td>{{ env.runs }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="metric-empty">No test environments covered yet. <a href="{{ url_for('test_execution_page') }}">Run Test Execution</a></p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if projects %}
+<div class="card">
+    <h2>{{ t.saved_projects }}</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>{{ t.project_name }}</th>
+                <th>{{ t.nav_test_cases }}</th>
+                <th>{{ t.nav_checklist }}</th>
+                <th>{{ t.sr_date }}</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in projects %}
+            <tr>
+                <td><strong>{{ p.project_name }}</strong></td>
+                <td>{{ p.get('test_cases_count', 0) }}</td>
+                <td>{{ p.get('checklist_count', 0) }}</td>
+                <td class="meta-text">{{ p.saved_at[:16] }}</td>
+                <td>
+                    <a href="{{ url_for('load_project', folder=p.folder) }}" class="btn btn-xs">{{ t.load }}</a>
+                    <form method="POST" action="{{ url_for('delete_project', folder=p.folder) }}" style="display:inline"
+                          onsubmit="return confirm('{{ t.delete_confirm }}')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-xs btn-danger" aria-label="Delete"><i data-lucide="trash-2" class="icon-sm"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="features-overview">
+    <h2>{{ t.features_title }}</h2>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon icon-coral"><i data-lucide="check-circle-2" class="icon-lg"></i></div>
+            <h3>{{ t.dash_feat_tc_title }}</h3>
+            <p>{{ t.dash_feat_tc_desc }}</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon icon-coral"><i data-lucide="file-text" class="icon-lg"></i></div>
+            <h3>{{ t.mvp_feat_input_title }}</h3>
+            <p>{{ t.mvp_feat_input_desc }}</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon icon-coral"><i data-lucide="bar-chart-3" class="icon-lg"></i></div>
+            <h3>{{ t.mvp_feat_export_title }}</h3>
+            <p>{{ t.mvp_feat_export_desc }}</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showMetric(metricId, btn) {
+    document.querySelectorAll('.metric-panel').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.metric-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('metric_' + metricId).classList.add('active');
+    btn.classList.add('active');
+}
+</script>
+{% endblock %}

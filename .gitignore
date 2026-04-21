@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+*.pyo
+flask_session/
+uploads/
+storage/
+.env
+*.egg-info/
+dist/
+build/
+
+# Test / tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Large bundled artifact (keep as release asset instead)
+ui_audit_tool.zip
+
+# Claude Code — user-local state (keep launch.json shareable)
+.claude/settings.local.json

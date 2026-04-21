@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.rec_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.rec_title }}</h1>
+    <p class="subtitle">{{ t.rec_subtitle }}</p>
+</div>
+
+<!-- Input form -->
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% set input_title = t.input_title_default %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.rec_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if has_data %}
+<div class="tabs">
+    <button class="tab active" onclick="showTab('types')">{{ t.rec_testing_types }}</button>
+    <button class="tab" onclick="showTab('focus')">{{ t.rec_focus_areas }}</button>
+    <button class="tab" onclick="showTab('standards')">{{ t.rec_standards }}</button>
+</div>
+
+<!-- Testing Types Tab -->
+<div id="types" class="tab-content active">
+    {% for tt in testing_types %}
+    <div class="card">
+        <div class="card-header-row">
+            <h3>{{ tt.name }}</h3>
+            <span class="badge badge-{{ 'high' if tt.priority == 'Required' else 'medium' }}">{{ tt.priority }}</span>
+        </div>
+        <p>{{ tt.description }}</p>
+        <p class="reasoning-text"><strong>{{ t.reasoning }}:</strong> {{ tt.reasoning }}</p>
+        {% if tt.subtypes %}
+        <div class="subtypes-row">
+            <strong>{{ t.subtypes }}:</strong>
+            {% for st in tt.subtypes %}
+            <span class="tag">{{ st }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Focus Areas Tab -->
+<div id="focus" class="tab-content">
+    <div class="card">
+        <h2>{{ t.rec_critical_modules }}</h2>
+        <table class="data-table">
+            <thead>
+                <tr><th>{{ t.module }}</th><th>{{ t.why_critical }}</th></tr>
+            </thead>
+            <tbody>
+                {% for m in focus.critical_modules %}
+                <tr>
+                    <td><strong>{{ m.module }}</strong></td>
+                    <td>{{ m.why }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.rec_edge_cases }}</h2>
+        <ul class="edge-case-list">
+            {% for ec in focus.edge_cases %}
+            <li><span class="edge-icon"><i data-lucide="triangle-alert" class="icon-sm"></i></span> {{ ec }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.rec_platform_checks }}</h2>
+        <ul class="platform-checks">
+            {% for check in focus.platform_must_test %}
+            <li><span class="check-icon"><i data-lucide="check-circle-2" class="icon-sm icon-coral"></i></span> {{ check }}</li>
+            {% endfor %}
+        </ul>
+
+        {% if focus.platform_tools %}
+        <div class="subtypes-row" style="margin-top:1rem">
+            <strong>{{ t.recommended_tools }}:</strong>
+            {% for tool in focus.platform_tools %}
+            <span class="tag tag-tool">{{ tool }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Standards Tab -->
+<div id="standards" class="tab-content">
+    {% for std in standards %}
+    <div class="card">
+        <div class="card-header-row">
+            <h3>{{ std.name }}</h3>
+            <span class="badge badge-outline">{{ std.full_name }}</span>
+        </div>
+        <p>{{ std.relevance }}</p>
+    </div>
+    {% endfor %}
+
+    {% if focus.standards %}
+    <div class="card">
+        <h2>{{ t.rec_domain_standards }}</h2>
+        <ul>
+            {% for s in focus.standards %}
+            <li><strong>{{ s }}</strong></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<div class="card card-info">
+    <h3>{{ t.rec_how_to_title }}</h3>
+    <p>{{ t.rec_how_to_desc }}</p>
+    <ul style="padding-left:1.5rem; margin-top:.5rem">
+        <li>{{ t.rec_how_to_1 }}</li>
+        <li>{{ t.rec_how_to_2 }}</li>
+        <li>{{ t.rec_how_to_3 }}</li>
+    </ul>
+    <p style="margin-top:.5rem"><em>{{ t.existing_data_hint }}</em></p>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('techniques') }}" class="btn btn-secondary">&larr; {{ t.nav_techniques }}</a>
+    <a href="{{ url_for('tools') }}" class="btn btn-primary">{{ t.nav_tools }} &rarr;</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    event.target.classList.add('active');
+}
+</script>
+{% endblock %}

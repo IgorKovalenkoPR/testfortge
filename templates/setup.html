@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.setup_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><span class="step-badge">{{ t.step }} 1</span> {{ t.setup_title }}</h1>
+    <p class="subtitle">{{ t.setup_subtitle }}</p>
+</div>
+
+<form method="POST" action="{{ url_for('setup') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card">
+        <h2>{{ t.project_name }}</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="project_name">{{ t.project_name }} *</label>
+                <input type="text" id="project_name" name="project_name" required
+                       value="{{ setup.get('project_name', '') }}"
+                       placeholder="{{ t.project_name_placeholder }}">
+            </div>
+        </div>
+
+        <div class="form-row form-row-2">
+            <div class="form-group">
+                <label for="domain">{{ t.domain }}</label>
+                <select id="domain" name="domain">
+                    <option value="e-commerce" {{ 'selected' if setup.get('domain')=='e-commerce' }}>{{ t.domain_ecommerce }}</option>
+                    <option value="fintech" {{ 'selected' if setup.get('domain')=='fintech' }}>{{ t.domain_fintech }}</option>
+                    <option value="healthcare" {{ 'selected' if setup.get('domain')=='healthcare' }}>{{ t.domain_healthcare }}</option>
+                    <option value="saas" {{ 'selected' if setup.get('domain')=='saas' }}>{{ t.domain_saas }}</option>
+                    <option value="education" {{ 'selected' if setup.get('domain')=='education' }}>{{ t.domain_edtech }}</option>
+                    <option value="social_media" {{ 'selected' if setup.get('domain')=='social_media' }}>{{ t.domain_social }}</option>
+                    <option value="iot" {{ 'selected' if setup.get('domain')=='iot' }}>{{ t.domain_iot }}</option>
+                    <option value="other" {{ 'selected' if setup.get('domain','other')=='other' }}>{{ t.domain_other }}</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="platform">{{ t.platform }}</label>
+                <select id="platform" name="platform">
+                    <option value="web" {{ 'selected' if setup.get('platform','web')=='web' }}>{{ t.platform_web }}</option>
+                    <option value="mobile_native" {{ 'selected' if setup.get('platform')=='mobile_native' }}>{{ t.platform_mobile }}</option>
+                    <option value="mobile_hybrid" {{ 'selected' if setup.get('platform')=='mobile_hybrid' }}>{{ t.platform_hybrid }}</option>
+                    <option value="desktop" {{ 'selected' if setup.get('platform')=='desktop' }}>{{ t.platform_desktop }}</option>
+                    <option value="api_backend" {{ 'selected' if setup.get('platform')=='api_backend' }}>{{ t.platform_api }}</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="tech_stack">{{ t.tech_stack }}</label>
+            <input type="text" id="tech_stack" name="tech_stack"
+                   value="{{ setup.get('tech_stack', [])|join(', ') }}"
+                   placeholder="{{ t.tech_stack_placeholder }}">
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.product_features }}</h2>
+        <div class="form-row form-row-3">
+            <div class="form-group">
+                <label for="team_size">{{ t.team_size }}</label>
+                <select id="team_size" name="team_size">
+                    <option value="solo" {{ 'selected' if setup.get('team_size')=='solo' }}>{{ t.team_solo }}</option>
+                    <option value="small" {{ 'selected' if setup.get('team_size','small')=='small' }}>{{ t.team_small }}</option>
+                    <option value="medium" {{ 'selected' if setup.get('team_size')=='medium' }}>{{ t.team_medium }}</option>
+                    <option value="large" {{ 'selected' if setup.get('team_size')=='large' }}>{{ t.team_large }}</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="budget">{{ t.budget }}</label>
+                <select id="budget" name="budget">
+                    <option value="low" {{ 'selected' if setup.get('budget')=='low' }}>{{ t.budget_low }}</option>
+                    <option value="medium" {{ 'selected' if setup.get('budget','medium')=='medium' }}>{{ t.budget_medium }}</option>
+                    <option value="high" {{ 'selected' if setup.get('budget')=='high' }}>{{ t.budget_high }}</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="release_frequency">{{ t.release_frequency }}</label>
+                <select id="release_frequency" name="release_frequency">
+                    <option value="daily" {{ 'selected' if setup.get('release_frequency')=='daily' }}>{{ t.release_daily }}</option>
+                    <option value="weekly" {{ 'selected' if setup.get('release_frequency')=='weekly' }}>{{ t.release_weekly }}</option>
+                    <option value="biweekly" {{ 'selected' if setup.get('release_frequency','biweekly')=='biweekly' }}>{{ t.release_biweekly }}</option>
+                    <option value="monthly" {{ 'selected' if setup.get('release_frequency')=='monthly' }}>{{ t.release_monthly }}</option>
+                    <option value="quarterly" {{ 'selected' if setup.get('release_frequency')=='quarterly' }}>{{ t.release_quarterly }}</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>{{ t.product_features }}</label>
+            <div class="checkbox-grid">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="has_api" {{ 'checked' if setup.get('has_api', True) }}>
+                    <span>{{ t.has_api }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="has_auth" {{ 'checked' if setup.get('has_auth', True) }}>
+                    <span>{{ t.has_auth }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="has_payments" {{ 'checked' if setup.get('has_payments', False) }}>
+                    <span>{{ t.has_payments }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="has_file_upload" {{ 'checked' if setup.get('has_file_upload', False) }}>
+                    <span>{{ t.has_file_upload }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="has_realtime" {{ 'checked' if setup.get('has_realtime', False) }}>
+                    <span>{{ t.has_realtime }}</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>{{ t.target_markets }}</label>
+            <div class="checkbox-grid">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="target_markets" value="EU"
+                           {{ 'checked' if 'EU' in setup.get('target_markets', []) }}>
+                    <span>{{ t.market_eu }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="target_markets" value="US"
+                           {{ 'checked' if 'US' in setup.get('target_markets', []) }}>
+                    <span>{{ t.market_us }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="target_markets" value="UA"
+                           {{ 'checked' if 'UA' in setup.get('target_markets', []) }}>
+                    <span>{{ t.market_ua }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="target_markets" value="Global"
+                           {{ 'checked' if 'Global' in setup.get('target_markets', []) }}>
+                    <span>{{ t.market_global }}</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.modules_title }}</h2>
+        <p class="hint">{{ t.modules_subtitle }}</p>
+        <div class="module-grid">
+            {% set modules = [
+                ("user_stories", t.mod_user_stories, t.mod_user_stories_desc),
+                ("test_cases", t.mod_test_cases, t.mod_test_cases_desc),
+                ("checklists", t.mod_checklists, t.mod_checklists_desc),
+                ("test_plan", t.mod_test_plan, t.mod_test_plan_desc),
+                ("status_report", t.mod_status_report, t.mod_status_report_desc),
+                ("test_metrics", t.mod_test_metrics, t.mod_test_metrics_desc),
+                ("techniques", t.mod_techniques, t.mod_techniques_desc),
+                ("testing_types", t.mod_testing_types, t.mod_testing_types_desc),
+                ("tools", t.mod_tools, t.mod_tools_desc),
+                ("nocode", t.mod_nocode, t.mod_nocode_desc),
+                ("focus_areas", t.mod_focus_areas, t.mod_focus_areas_desc),
+            ] %}
+            {% set enabled = setup.get('enabled_modules', ['user_stories','test_cases','checklists','test_plan','status_report','test_metrics','techniques','testing_types','tools','nocode','focus_areas']) %}
+            {% for key, name, desc in modules %}
+            <label class="module-card">
+                <input type="checkbox" name="enabled_modules" value="{{ key }}"
+                       {{ 'checked' if key in enabled }}>
+                <div class="module-content">
+                    <strong>{{ name }}</strong>
+                    <span class="module-desc">{{ desc }}</span>
+                </div>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">
+            {{ t.next }} &rarr;
+        </button>
+    </div>
+</form>
+{% endblock %}

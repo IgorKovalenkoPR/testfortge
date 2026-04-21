@@ -1,0 +1,43 @@
+{# Reusable input block for generation pages #}
+{# Usage: {% include '_input_block.html' %} inside a <form enctype="multipart/form-data"> #}
+
+<div class="card">
+    <h2>{{ input_title | default(t.input_title_default) }}</h2>
+
+    <div class="form-group">
+        <label>{{ t.text_input }}</label>
+        <textarea name="input_text" rows="8"
+                  placeholder="{{ t.input_placeholder }}">{{ request.form.get('input_text', '') }}</textarea>
+    </div>
+
+    <div class="form-group">
+        <label>{{ t.file_upload }}</label>
+        <div class="file-upload-area" onclick="this.querySelector('input[type=file]').click()">
+            <div class="upload-icon icon-coral"><i data-lucide="cloud-upload" class="icon-lg"></i></div>
+            <p>{{ t.file_upload_hint }}</p>
+            <p class="meta-text">{{ t.supported_formats }}</p>
+            <input type="file" name="input_files" multiple
+                   accept=".txt,.md,.docx,.xlsx,.csv,.pdf,.png,.jpg,.jpeg,.mp4,.webm,.avi,.mov,.mkv,.flv,.wmv,.gif,.m4v,.3gp,.ts,.mts,.vob,.ogv"
+                   class="file-input-hidden"
+                   onchange="showUploadedFiles(this)">
+        </div>
+        <div class="file-list" id="uploadedFiles"></div>
+    </div>
+
+    <div class="form-group">
+        <label>{{ t.custom_prompt }}</label>
+        <textarea name="custom_prompt" rows="3"
+                  placeholder="{{ t.custom_prompt_hint }}">{{ request.form.get('custom_prompt', '') }}</textarea>
+    </div>
+</div>
+
+<script>
+function showUploadedFiles(input) {
+    var listEl = document.getElementById('uploadedFiles');
+    listEl.innerHTML = '';
+    Array.from(input.files).forEach(function(f) {
+        var size = f.size < 1024*1024 ? (f.size/1024).toFixed(1)+' KB' : (f.size/(1024*1024)).toFixed(1)+' MB';
+        listEl.innerHTML += '<div class="file-item"><span class="file-name">'+f.name+'</span><span class="file-size">'+size+'</span></div>';
+    });
+}
+</script>

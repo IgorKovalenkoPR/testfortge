@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.tm_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.tm_title }}</h1>
+    <p class="subtitle">{{ t.tm_subtitle }}</p>
+</div>
+
+<!-- Input form -->
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card">
+        <h2>{{ t.tm_input_data }}</h2>
+
+        <div class="form-group">
+            <label for="devices">{{ t.tm_devices_label }}</label>
+            <input type="text" id="devices" name="devices"
+                   value="{{ devices|join(', ') }}"
+                   placeholder="{{ t.tm_devices_placeholder }}">
+        </div>
+
+        <h3>{{ t.tm_tc_execution }}</h3>
+        <div class="form-row form-row-5">
+            <div class="form-group">
+                <label for="total_tc">{{ t.tm_total_tc }}</label>
+                <input type="number" id="total_tc" name="total_tc" min="0"
+                       value="{{ metrics_input.get('total_tc', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="tc_passed">{{ t.passed }}</label>
+                <input type="number" id="tc_passed" name="tc_passed" min="0"
+                       value="{{ metrics_input.get('tc_passed', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="tc_failed">{{ t.failed }}</label>
+                <input type="number" id="tc_failed" name="tc_failed" min="0"
+                       value="{{ metrics_input.get('tc_failed', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="tc_blocked">{{ t.blocked }}</label>
+                <input type="number" id="tc_blocked" name="tc_blocked" min="0"
+                       value="{{ metrics_input.get('tc_blocked', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="tc_passed_but">{{ t.passed_but }}</label>
+                <input type="number" id="tc_passed_but" name="tc_passed_but" min="0"
+                       value="{{ metrics_input.get('tc_passed_but', '') or '' }}"
+                       placeholder="0">
+            </div>
+        </div>
+
+        <h3>{{ t.tm_bugs_data }}</h3>
+        <div class="form-row form-row-5">
+            <div class="form-group">
+                <label for="total_bugs">{{ t.tm_total_bugs }}</label>
+                <input type="number" id="total_bugs" name="total_bugs" min="0"
+                       value="{{ metrics_input.get('total_bugs', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="bugs_critical">{{ t.tm_bugs_critical }}</label>
+                <input type="number" id="bugs_critical" name="bugs_critical" min="0"
+                       value="{{ metrics_input.get('bugs_critical', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="bugs_major">{{ t.tm_bugs_major }}</label>
+                <input type="number" id="bugs_major" name="bugs_major" min="0"
+                       value="{{ metrics_input.get('bugs_major', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="bugs_minor">{{ t.tm_bugs_minor }}</label>
+                <input type="number" id="bugs_minor" name="bugs_minor" min="0"
+                       value="{{ metrics_input.get('bugs_minor', '') or '' }}"
+                       placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="bugs_low">{{ t.tm_bugs_low }}</label>
+                <input type="number" id="bugs_low" name="bugs_low" min="0"
+                       value="{{ metrics_input.get('bugs_low', '') or '' }}"
+                       placeholder="0">
+            </div>
+        </div>
+    </div>
+
+    {% set input_title = t.input_title_additional %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tm_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if has_data and metrics %}
+<!-- KPIs -->
+<div class="card card-highlight">
+    <h2>{{ t.tm_kpi_title }}</h2>
+    <div class="kpi-grid">
+        {% for kpi in metrics.kpis %}
+        <div class="kpi-card kpi-{{ kpi.status }}">
+            <div class="kpi-value">{{ kpi.value }}</div>
+            <div class="kpi-name">{{ kpi.name }}</div>
+            <div class="kpi-formula">{{ kpi.formula }}</div>
+            <div class="kpi-status-indicator">
+                {% if kpi.status == 'good' %}<i data-lucide="check-circle-2" class="icon-sm"></i>{% elif kpi.status == 'warning' %}<i data-lucide="triangle-alert" class="icon-sm"></i>{% else %}<i data-lucide="x-circle" class="icon-sm"></i>{% endif %}
+                {{ kpi.status|upper }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid stats-grid-3">
+    <div class="stat-card">
+        <div class="stat-number">{{ metrics.total_checks }}</div>
+        <div class="stat-label">{{ t.tm_overall }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ metrics.total_test_cases }}</div>
+        <div class="stat-label">{{ t.nav_test_cases }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ metrics.total_issues }}</div>
+        <div class="stat-label">{{ t.tm_issues }}</div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('coverage')">{{ t.tm_coverage }}</button>
+    <button class="tab" onclick="showTab('execution')">{{ t.tm_execution }}</button>
+    <button class="tab" onclick="showTab('issues')">{{ t.tm_issues }}</button>
+</div>
+
+<!-- Coverage Tab -->
+<div id="coverage" class="tab-content active">
+    <div class="card">
+        <h2>{{ t.tm_coverage }}</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>{{ t.tm_device }}</th>
+                    <th>{{ t.tm_overall }}</th>
+                    <th>{{ t.tm_remaining }}</th>
+                    <th>{{ t.tm_percentage }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in metrics.coverage %}
+                <tr>
+                    <td><strong>{{ row.device }}</strong></td>
+                    <td>{{ row.overall_checks }}</td>
+                    <td>{{ row.remaining }}</td>
+                    <td>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" style="width: {{ "%.0f"|format(row.percentage * 100) }}%"></div>
+                            <span class="progress-text">{{ "%.0f"|format(row.percentage * 100) }}%</span>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Execution Tab -->
+<div id="execution" class="tab-content">
+    <div class="card">
+        <h2>{{ t.tm_execution }}</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>{{ t.tm_device }}</th>
+                    <th>{{ t.tm_pass }}</th>
+                    <th>{{ t.tm_fail }}</th>
+                    <th>{{ t.tm_pass_but }}</th>
+                    <th>{{ t.blocked }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in metrics.execution %}
+                <tr>
+                    <td><strong>{{ row.device }}</strong></td>
+                    <td class="status-passed">{{ row.passed }}</td>
+                    <td class="status-failed">{{ row.failed }}</td>
+                    <td class="status-passed-but">{{ row.passed_but }}</td>
+                    <td class="status-blocked">{{ row.blocked }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Issues Tab -->
+<div id="issues" class="tab-content">
+    <div class="card">
+        <h2>{{ t.tm_by_platform }}</h2>
+        <table class="data-table">
+            <thead><tr><th>{{ t.platform }}</th><th>{{ t.count }}</th></tr></thead>
+            <tbody>
+                {% for item in metrics.issues.by_platform %}
+                <tr><td>{{ item.type }}</td><td>{{ item.count }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.tm_by_type }}</h2>
+        <table class="data-table">
+            <thead><tr><th>{{ t.tm_by_type }}</th><th>{{ t.count }}</th></tr></thead>
+            <tbody>
+                {% for item in metrics.issues.by_type %}
+                <tr><td>{{ item.type }}</td><td>{{ item.count }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.tm_by_status }}</h2>
+        <table class="data-table">
+            <thead><tr><th>{{ t.status }}</th><th>{{ t.count }}</th></tr></thead>
+            <tbody>
+                {% for item in metrics.issues.by_status %}
+                <tr><td>{{ item.status }}</td><td>{{ item.count }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.tm_by_severity }}</h2>
+        <table class="data-table">
+            <thead><tr><th>{{ t.tm_by_severity }}</th><th>{{ t.count }}</th></tr></thead>
+            <tbody>
+                {% for item in metrics.issues.by_severity %}
+                <tr><td>{{ item.severity }}</td><td>{{ item.count }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% elif not has_data %}
+<div class="card card-info">
+    <h3>{{ t.tm_how_to_title }}</h3>
+    <p>{{ t.tm_how_to_desc }}</p>
+    <ul style="padding-left:1.5rem; margin-top:.5rem">
+        <li>{{ t.tm_how_to_1 }}</li>
+        <li>{{ t.tm_how_to_2 }}</li>
+        <li>{{ t.tm_how_to_3 }}</li>
+    </ul>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('status_report_page') }}" class="btn btn-secondary">&larr; {{ t.nav_status_report }}</a>
+    <a href="{{ url_for('techniques') }}" class="btn btn-primary">{{ t.nav_techniques }} &rarr;</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    event.target.classList.add('active');
+}
+</script>
+{% endblock %}

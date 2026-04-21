@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.tc_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.tc_title }}</h1>
+    <p class="subtitle">{{ t.tc_subtitle }}</p>
+</div>
+
+<!-- Input form: files + text + prompt -->
+<form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% set input_title = t.input_title_default %}
+    {% include '_input_block.html' %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
+    </div>
+</form>
+
+{% if resource_urls %}
+<div class="card" style="background:#f8fafe; margin-bottom:16px;">
+    <h3 class="card-title" style="font-size:0.95em;"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        {% for url in resource_urls %}
+        <a href="{{ url }}" target="_blank" rel="noopener" style="display:inline-block; padding:5px 14px; background:white; border:1px solid var(--primary); border-radius:20px; color:var(--primary); font-size:0.85em; text-decoration:none; word-break:break-all;">{{ url }}</a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if has_data and test_cases %}
+<div class="stats-grid stats-grid-4">
+    <div class="stat-card">
+        <div class="stat-number">{{ test_cases|length }}</div>
+        <div class="stat-label">{{ t.nav_test_cases }}</div>
+    </div>
+    <div class="stat-card stat-positive">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Positive')|list|length }}</div>
+        <div class="stat-label">{{ t.positive }}</div>
+    </div>
+    <div class="stat-card stat-negative">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Negative')|list|length }}</div>
+        <div class="stat-label">{{ t.negative }}</div>
+    </div>
+    <div class="stat-card stat-edge">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Edge Case')|list|length + test_cases|selectattr('category', 'equalto', 'Security')|list|length }}</div>
+        <div class="stat-label">{{ t.edge_case }} / {{ t.security }}</div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('testcases')">{{ t.nav_test_cases }}</button>
+    <button class="tab" onclick="showTab('traceability')">{{ t.traceability_matrix }}</button>
+</div>
+
+<!-- Test Cases Tab -->
+<div id="testcases" class="tab-content active">
+    <div class="filter-bar">
+        <label>{{ t.filter }}:</label>
+        <button class="filter-btn active" onclick="filterTC('all', this)">{{ t.all }}</button>
+        <button class="filter-btn" onclick="filterTC('Positive', this)">{{ t.positive }}</button>
+        <button class="filter-btn" onclick="filterTC('Negative', this)">{{ t.negative }}</button>
+        <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
+        <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
+    </div>
+
+    {% set ns = namespace(current_section='') %}
+    {% for tc in test_cases %}
+    {% if tc.section != ns.current_section %}
+    {% set ns.current_section = tc.section %}
+    <h2 class="section-header">{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
+    {% endif %}
+
+    <div class="card tc-card" data-category="{{ tc.category }}">
+        <div class="card-header-row">
+            <h3>{{ tc.id }}: {{ tc.summary }}</h3>
+            <div class="badge-group">
+                <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc.category }}</span>
+                <span class="badge badge-{{ tc.priority|lower }}">{{ tc.priority }}</span>
+                <span class="badge badge-outline">{{ tc.user_story_id }}</span>
+            </div>
+        </div>
+
+        <table class="tc-detail-table">
+            <tr><th>{{ t.tc_preconditions }}</th><td>{{ tc.preconditions }}</td></tr>
+            <tr><th>{{ t.tc_steps }}</th><td>{{ tc.test_steps|nl2br }}</td></tr>
+            <tr><th>{{ t.tc_test_data }}</th><td>{{ tc.test_data|nl2br }}</td></tr>
+            <tr><th>{{ t.tc_expected }}</th><td>{{ tc.expected_result|nl2br }}</td></tr>
+            <tr><th>{{ t.tc_issues }}</th><td>{{ tc.issues or '—' }}</td></tr>
+            <tr><th>{{ t.tc_comment }}</th><td>{{ tc.comment or '—' }}</td></tr>
+        </table>
+
+        <div class="tc-status-row">
+            <label>{{ t.status }}:</label>
+            <select class="status-select" onchange="this.className='status-select status-'+this.value.toLowerCase().replace(' ','-')">
+                <option value="Unchecked">{{ t.unchecked }}</option>
+                <option value="Passed">{{ t.passed }}</option>
+                <option value="Failed">{{ t.failed }}</option>
+                <option value="Passed but">{{ t.passed_but }}</option>
+                <option value="Blocked">{{ t.blocked }}</option>
+            </select>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Traceability Tab -->
+<div id="traceability" class="tab-content">
+    <div class="card">
+        <h2>{{ t.traceability_matrix }}</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>{{ t.requirement }}</th>
+                    <th>{{ t.user_story }}</th>
+                    <th>{{ t.priority }}</th>
+                    <th>{{ t.nav_test_cases }}</th>
+                    <th>{{ t.category }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in traceability %}
+                <tr>
+                    <td><strong>{{ row.requirement_id }}</strong></td>
+                    <td>{{ row.user_story_id }}: {{ row.user_story }}</td>
+                    <td><span class="badge badge-{{ row.priority|lower }}">{{ row.priority }}</span></td>
+                    <td>{% for tc_id in row.test_case_ids %}<span class="tag">{{ tc_id }}</span>{% endfor %}</td>
+                    <td>{% for cat in row.categories %}<span class="badge badge-cat-{{ cat|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cat }}</span>{% endfor %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Export -->
+<div class="card card-export">
+    <h2>{{ t.nav_export }}</h2>
+    <div class="export-buttons">
+        <a href="{{ url_for('export', fmt='markdown') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
+        <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>
+        <a href="{{ url_for('export', fmt='csv-testcases') }}" class="btn btn-export"><i data-lucide="file-spreadsheet" class="icon-sm"></i> {{ t.export_csv }} (TC)</a>
+        <a href="{{ url_for('export', fmt='xlsx-testcases') }}" class="btn btn-export btn-success"><i data-lucide="sheet" class="icon-sm"></i> {{ t.export_xlsx_tc }}</a>
+    </div>
+</div>
+{% elif not has_data %}
+<div class="card card-info">
+    <h3>{{ t.tc_how_to_title }}</h3>
+    <p>{{ t.tc_how_to_desc }}</p>
+    <ul style="padding-left:1.5rem; margin-top:.5rem">
+        <li>{{ t.tc_how_to_1 }}</li>
+        <li>{{ t.tc_how_to_2 }}</li>
+        <li>{{ t.tc_how_to_3 }}</li>
+        <li>{{ t.tc_how_to_4 }}</li>
+    </ul>
+</div>
+{% endif %}
+
+<div class="form-actions">
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">&larr; {{ t.nav_dashboard }}</a>
+    <a href="{{ url_for('checklist_page') }}" class="btn btn-primary">{{ t.nav_checklist }} &rarr;</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    event.target.classList.add('active');
+}
+function filterTC(category, btn) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tc-card').forEach(card => {
+        card.style.display = (category === 'all' || card.dataset.category === category) ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

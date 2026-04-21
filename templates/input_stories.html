@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}TestFortge — {{ t.is_title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ t.is_title }}</h1>
+    <p class="subtitle">{{ t.is_subtitle }}</p>
+</div>
+
+<form method="POST" action="{{ url_for('input_stories') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card">
+        <h2>{{ t.us_stories_label }}</h2>
+        <div class="form-group">
+            <textarea name="stories_text" rows="14"
+                      placeholder="{{ t.is_placeholder }}">{{ request.form.get('stories_text', '') }}</textarea>
+        </div>
+        <p class="hint">{{ t.is_hint }}</p>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.custom_prompt }}</h2>
+        <div class="form-group">
+            <textarea name="custom_prompt" rows="3"
+                      placeholder="{{ t.custom_prompt_hint }}">{{ request.form.get('custom_prompt', '') }}</textarea>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ t.is_generate_target }}</h2>
+        <div class="form-group">
+            <div class="checkbox-grid">
+                <label class="checkbox-label">
+                    <input type="radio" name="target" value="test_cases_page" checked>
+                    <span>{{ t.nav_test_cases }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="radio" name="target" value="checklist_page">
+                    <span>{{ t.nav_checklist }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="radio" name="target" value="test_plan_page">
+                    <span>{{ t.nav_test_plan }}</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="radio" name="target" value="test_metrics_page">
+                    <span>{{ t.nav_test_metrics }}</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">&larr; {{ t.back }}</a>
+        <button type="submit" class="btn btn-primary btn-lg">
+            {{ t.generate_btn }} &rarr;
+        </button>
+    </div>
+</form>
+{% endblock %}
