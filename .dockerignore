@@ -1,0 +1,57 @@
+# Keep the build context small and free of host-only cruft.
+# Matches .gitignore intent, plus a few extras that matter for image size.
+
+# ── VCS ───────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Python bytecode / caches ──────────────────────────────────────
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+
+# ── Virtualenvs ───────────────────────────────────────────────────
+.venv
+venv
+env
+
+# ── Editor / IDE ──────────────────────────────────────────────────
+.idea
+.vscode
+.claude
+*.swp
+*.swo
+
+# ── OS metadata ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Runtime data (comes from volumes, not the build context) ──────
+flask_session
+storage
+uploads
+
+# ── Local env (secrets must never land in the image) ──────────────
+.env
+.env.local
+*.env.local
+
+# ── Tests / dev-only helpers (skip to shrink final image) ─────────
+tests
+run_tests.py
+ui_audit_tool
+ui_audit_tool.zip
+
+# ── Docs-only files that the container doesn't need ───────────────
+*.md
+!requirements.txt

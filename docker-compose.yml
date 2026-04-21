@@ -1,0 +1,53 @@
+# TestFortge — local / staging compose topology.
+#
+# Usage:
+#   cp .env.example .env              # edit SECRET_KEY at minimum
+#   docker compose up -d --build
+#   curl http://localhost:5000/healthz
+#
+# The service is a single Flask+gunicorn container. Stateful directories
+# (sessions, generated artefacts, uploads) live on named volumes so the
+# container can be rebuilt without losing user data.
+services:
+  testfortge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: testfortge:latest
+    container_name: testfortge
+    restart: unless-stopped
+    ports:
+      - "${TESTFORTGE_PORT:-5000}:5000"
+    environment:
+      # Required — set in .env (NEVER commit a real value).
+      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY must be set in .env}"
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+      # Security flags — flip BEHIND_HTTPS=1 when terminating TLS upstream.
+      BEHIND_HTTPS: "${BEHIND_HTTPS:-0}"
+      FLASK_DEBUG: "0"
+      # Job queue tuning
+      JOB_QUEUE_WORKERS: "${JOB_QUEUE_WORKERS:-2}"
+      JOB_RETENTION_SECONDS: "${JOB_RETENTION_SECONDS:-3600}"
+    volumes:
+      - testfortge-storage:/app/storage
+      - testfortge-sessions:/app/flask_session
+      - testfortge-uploads:/app/uploads
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys;r=urllib.request.urlopen('http://127.0.0.1:5000/healthz',timeout=3);sys.exit(0 if r.status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Playwright's chromium sandbox needs a bit of shared memory headroom.
+    shm_size: "1gb"
+
+volumes:
+  testfortge-storage:
+  testfortge-sessions:
+  testfortge-uploads:
