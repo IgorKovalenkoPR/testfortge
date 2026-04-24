@@ -31,7 +31,8 @@ from engine.site_crawler import crawl_site
 from engine.file_parser import parse_file, allowed_file
 from engine.job_queue import get_queue, DONE, FAILED
 
-from .automation import STORAGE_ROOT
+from .automation import STORAGE_ROOT, MAX_CONCURRENT_JOBS_PER_SESSION
+from ._shared import get_session_id
 
 log = get_logger(__name__)
 
@@ -217,6 +218,25 @@ def register(app: Flask) -> None:
             return jsonify({"error": "no_url",
                             "message": "Provide a URL to crawl."}), 400
 
+        # Per-session concurrency cap (shared threshold with automation).
+        sid = get_session_id(session)
+        active = get_queue().count_active_by_meta(
+            "estimation", "session_id", sid)
+        if active >= MAX_CONCURRENT_JOBS_PER_SESSION:
+            resp = jsonify({
+                "error": "rate_limited",
+                "message": (f"You already have {active} active estimation "
+                            f"jobs. Wait for them to finish before starting "
+                            f"another."),
+                "active": active,
+                "limit": MAX_CONCURRENT_JOBS_PER_SESSION,
+            })
+            resp.status_code = 429
+            # Site crawls are typically faster than automation runs, so
+            # a 15s hint is more than enough in practice.
+            resp.headers["Retry-After"] = "15"
+            return resp
+
         # Same clamping as /estimation/run — keep numeric inputs sane.
         def _clamp_int(name: str, default: int, lo: int, hi: int) -> int:
             try:
@@ -289,7 +309,11 @@ def register(app: Flask) -> None:
 
         job_id = get_queue().submit(
             "estimation", _worker,
-            meta={"url": url, "project_name": project_name},
+            meta={
+                "url": url,
+                "project_name": project_name,
+                "session_id": sid,  # used by count_active_by_meta()
+            },
         )
         session["estimation_job_id"] = job_id
         return jsonify({"job_id": job_id, "status": "pending"})

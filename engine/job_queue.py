@@ -195,6 +195,24 @@ class JobQueue:
                 reverse=True,
             )
 
+    def count_active_by_meta(self, kind: str, meta_key: str,
+                             meta_value: Any) -> int:
+        """Count PENDING + RUNNING jobs of ``kind`` whose meta field matches.
+
+        Used by the async routes to cap concurrent jobs *per session* —
+        a single user can't flood the worker pool and starve other
+        tenants. Finished jobs (DONE / FAILED) don't count so the limit
+        is a concurrency cap, not a lifetime quota.
+        """
+        with self._lock:
+            self._prune_locked()
+            return sum(
+                1 for j in self._jobs.values()
+                if j.kind == kind
+                and j.status in (PENDING, RUNNING)
+                and j.meta.get(meta_key) == meta_value
+            )
+
     # ── Private helpers ─────────────────────────────────────────
 
     def _mark_running(self, job_id: str) -> None:

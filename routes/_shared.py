@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+import uuid
 from datetime import datetime
 
 from flask import current_app, request, session
@@ -170,6 +171,35 @@ def extract_resource_urls() -> list[str]:
                 seen.add(url)
                 urls.append(url)
     return urls
+
+
+# ── Session identity (for per-session rate limiting) ─────────────
+
+def get_session_id(session_obj=None) -> str:
+    """Return a stable identifier for the caller's session.
+
+    Used by the async routes to cap concurrent jobs per session. Order
+    of preference:
+
+    1. ``session.sid`` — Flask-Session populates this on filesystem /
+       Redis / Memcached backends. It's the real session file key, so
+       different browsers/cookies naturally get different ids.
+    2. ``session["_tf_sid"]`` — a UUID we mint and store in the session
+       itself. Covers the signed-cookie backend (no ``sid`` attribute)
+       and any custom backend that doesn't set ``sid``.
+
+    The id is opaque — we only compare it for equality, never parse or
+    expose it.
+    """
+    sess = session_obj if session_obj is not None else session
+    sid = getattr(sess, "sid", None)
+    if sid:
+        return sid
+    sid = sess.get("_tf_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        sess["_tf_sid"] = sid
+    return sid
 
 
 # ── Project directory naming ─────────────────────────────────────

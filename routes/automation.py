@@ -33,7 +33,7 @@ from engine.test_credentials import (
 )
 from engine.job_queue import get_queue, DONE, FAILED
 
-from ._shared import SAFE_ASSET_RE
+from ._shared import SAFE_ASSET_RE, get_session_id
 
 log = get_logger(__name__)
 
@@ -43,6 +43,12 @@ STORAGE_ROOT = os.path.join(
     "storage",
 )
 os.makedirs(STORAGE_ROOT, exist_ok=True)
+
+# Per-session concurrency cap for /automation/run-async + /estimation/run-async.
+# Prevents a single user from monopolising the (small) worker pool.
+MAX_CONCURRENT_JOBS_PER_SESSION = int(
+    os.environ.get("MAX_CONCURRENT_JOBS_PER_SESSION", "3")
+)
 
 
 def register(app: Flask) -> None:
@@ -133,6 +139,25 @@ def register(app: Flask) -> None:
             return jsonify({"error": "no_test_cases",
                             "message": "Generate Test Cases first."}), 400
 
+        # Per-session concurrency cap — a single user can't flood the pool.
+        sid = get_session_id(session)
+        active = get_queue().count_active_by_meta(
+            "automation", "session_id", sid)
+        if active >= MAX_CONCURRENT_JOBS_PER_SESSION:
+            resp = jsonify({
+                "error": "rate_limited",
+                "message": (f"You already have {active} active automation "
+                            f"jobs. Wait for them to finish before starting "
+                            f"another."),
+                "active": active,
+                "limit": MAX_CONCURRENT_JOBS_PER_SESSION,
+            })
+            resp.status_code = 429
+            # Suggest a conservative retry window — automation runs are
+            # typically 30s–2min, so 30s is a reasonable first probe.
+            resp.headers["Retry-After"] = "30"
+            return resp
+
         base_url = request.form.get("base_url", "").strip()
         headless = request.form.get("headless", "1") == "1"
         record_video = request.form.get("record_video", "1") == "1"
@@ -159,7 +184,11 @@ def register(app: Flask) -> None:
 
         job_id = get_queue().submit(
             "automation", _worker,
-            meta={"base_url": base_url, "script_count": len(scripts)},
+            meta={
+                "base_url": base_url,
+                "script_count": len(scripts),
+                "session_id": sid,  # used by count_active_by_meta()
+            },
         )
         # Track the active job in the session so the /automation page can
         # resume polling after a reload.
