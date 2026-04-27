@@ -89,6 +89,9 @@ class EstimationResult:
     features: list[Feature] = field(default_factory=list)
     total_tc: int = 0
     features_hours: int = 0                # Features!B40
+    # Heuristic complexity bucket — drives Communication / Testing-doc hours.
+    # One of: "simple" | "medium" | "complex".
+    complexity_tier: str = "simple"
 
     tasks: list[TaskRow] = field(default_factory=list)
 
@@ -129,6 +132,58 @@ PM_OVERHEAD = 0.08          # Project Management share
 BUG_REPORT_RATE = 0.15      # (Functional + Regression) * 0.15
 COMPATIBILITY_RATE = 0.003  # 0.3% of Checklist creation hours per extra platform
 MAX_TESTING_STRETCH = 1.5   # MAX = 1.5 * MIN for checklist/functional
+
+
+# Communication + Testing-documentation hours scale by project complexity.
+# Bands chosen by the QA Team Lead persona on real engagements:
+#   simple  — landing page / brochure site, 1 platform, single role
+#   medium  — typical SMB SaaS / e-commerce, 2-3 roles, a couple of platforms
+#   complex — multi-tenant / fintech / multi-platform with admin + B2C + API
+# These cover both Communication (row 11) and Testing documentation &
+# requirements (row 12) per the reference template.
+_COMM_DOC_HOURS: dict[str, tuple[float, float]] = {
+    "simple":  (6.0,  8.0),
+    "medium":  (9.0, 11.0),
+    "complex": (12.0, 16.0),
+}
+
+
+def _complexity_tier(total_tc: int, features_count: int,
+                     additional_platforms: int) -> str:
+    """Heuristic complexity bucket — 'simple', 'medium' or 'complex'.
+
+    Combines three signals because no single one is reliable on its own:
+      * test-case count       — primary proxy for surface area
+      * feature count         — domain breadth / number of flows
+      * additional platforms  — multi-platform coverage adds coordination
+
+    Each signal contributes points; the sum maps to a bucket. Thresholds
+    were calibrated against the reference Manual QA template so that:
+      ≤ 50 TC, ≤ 5 features, ≤ 1 platform → simple
+      ~ 100 TC, ~ 10 features              → medium
+      ≥ 200 TC OR many platforms           → complex
+    """
+    score = 0.0
+
+    # Test-case surface area (dominant signal)
+    if   total_tc <= 50:  score += 0.0
+    elif total_tc <= 120: score += 1.0
+    elif total_tc <= 250: score += 2.0
+    else:                 score += 3.0
+
+    # Feature breadth
+    if   features_count <= 4:  score += 0.0
+    elif features_count <= 12: score += 0.5
+    else:                      score += 1.0
+
+    # Multi-platform coordination overhead
+    if   additional_platforms <= 1: score += 0.0
+    elif additional_platforms <= 5: score += 0.25
+    else:                           score += 0.5
+
+    if score <= 1.0:  return "simple"
+    if score <= 2.5:  return "medium"
+    return "complex"
 
 
 def compute_features_hours(total_tc: int, minutes_per_tc: int = 5,
@@ -203,10 +258,15 @@ def compute_estimation(
     # "Estimation Breakdown" reads as zero by default and only gets populated
     # once the user supplies features for a concrete project.
     has_tc = res.total_tc > 0
-    # Row 11 Communication
-    comm_min, comm_max = (12.0, 16.0) if has_tc else (0.0, 0.0)
-    # Row 12 Testing documentation & requirements
-    doc_min, doc_max = (12.0, 16.0) if has_tc else (0.0, 0.0)
+    # Communication and documentation hours scale with project complexity —
+    # see ``_complexity_tier`` below for the heuristic. A simple landing
+    # page should not get the same 12/16 hours as a multi-platform fintech.
+    tier = _complexity_tier(res.total_tc,
+                            sum(1 for f in features if not f.is_section),
+                            int(additional_platforms))
+    comm_min, comm_max = _COMM_DOC_HOURS[tier] if has_tc else (0.0, 0.0)
+    doc_min,  doc_max  = _COMM_DOC_HOURS[tier] if has_tc else (0.0, 0.0)
+    res.complexity_tier = tier
     # Row 13 Checklist Creation
     chk_min = float(res.features_hours)
     chk_max = _stretch * chk_min
@@ -686,7 +746,7 @@ def export_estimation_xlsx(result: EstimationResult, output_path: str) -> str:
     ws["C4"] = "Version:"
     ws["D4"] = "v1.0"
     ws["C5"] = "Author:"
-    ws["D5"] = "TestFortge — QA Team Lead"
+    ws["D5"] = "TestForTge — QA Team Lead"
     ws["C6"] = "Date:"
     ws["D6"] = result.created_at
 

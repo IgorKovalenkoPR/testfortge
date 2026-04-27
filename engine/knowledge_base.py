@@ -417,7 +417,7 @@ FLOW_PLAYBOOKS = {
                 "phase": "Review & Place Order",
                 "checks": [
                     "Review screen shows items, prices, shipping, tax, discount and grand total",
-                    "Editing any section returns to the correct step with preserved data",
+                    "Clicking Edit on a review section returns the user to that exact step with every field still populated (no data loss)",
                     "Terms & conditions / age check / marketing opt-in are required where declared",
                     "'Place order' button is clickable only when all prior steps are valid",
                 ],
@@ -439,7 +439,7 @@ FLOW_PLAYBOOKS = {
                     "Price or stock changes while the buyer is in checkout — user is warned",
                     "Session expires mid-checkout — cart is restored on re-login",
                     "Currency / language change mid-flow preserves cart and totals",
-                    "Very large cart (50+ line items) renders and totals correctly",
+                    "Very large cart (50+ line items) renders within the page-load budget and the grand total equals the sum of line-item subtotals + shipping + tax",
                     "Refresh / browser-back / double-submit does not duplicate the order",
                 ],
             },
@@ -479,7 +479,7 @@ DOMAIN_FOCUS = {
     "e-commerce": {
         "name": "E-Commerce",
         "critical_modules": [
-            {"module": "Product Catalog / Search", "why": "Core revenue driver. Search must be accurate, filters must be correct."},
+            {"module": "Product Catalog / Search", "why": "Core revenue driver. Search results must match the query, filters must narrow the result set to only rows that satisfy every active filter."},
             {"module": "Cart / Checkout", "why": "Direct impact on conversion. Any bug = lost revenue."},
             {"module": "Payment / Payment Gateway", "why": "The most critical module. Errors = financial losses + loss of trust."},
             {"module": "Order Management", "why": "Statuses, cancellations, returns — a complex state machine."},
@@ -543,7 +543,7 @@ DOMAIN_FOCUS = {
             {"module": "Subscriptions / Billing", "why": "Recurring payments, pricing plans, upgrade/downgrade."},
             {"module": "Multi-tenancy / Data Isolation", "why": "One client's data must not be visible to another."},
             {"module": "API / Integrations", "why": "SaaS thrives on integrations. Webhooks, OAuth, rate limits."},
-            {"module": "Dashboard / Analytics", "why": "The main user interface. Data correctness."},
+            {"module": "Dashboard / Analytics", "why": "The main user interface. Aggregated metrics must match the underlying event stream; timezone, currency and sample-size assumptions must be validated."},
         ],
         "key_testing_types": ["functional", "security", "api_testing", "performance", "compatibility"],
         "edge_cases": [
@@ -635,7 +635,7 @@ PLATFORM_SPECIFICS = {
     "web": {
         "name": "Web Application",
         "must_test": [
-            "Cross-browser (Chrome, Firefox, Safari, Edge)",
+            "Browser matrix as an execution-environment axis (document which browsers are in scope for each run; the same functional suite is replayed per browser, not duplicated into per-browser test cases)",
             "Responsive design (mobile, tablet, desktop viewports)",
             "Keyboard navigation and screen reader",
             "Cookies, localStorage, sessionStorage",

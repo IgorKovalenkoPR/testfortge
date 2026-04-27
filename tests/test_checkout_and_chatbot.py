@@ -94,7 +94,8 @@ class TestChatbot:
         from engine.chatbot import respond
         r = respond("привіт", "ua")
         assert r.intent == "greeting"
-        assert "TestFortge" in r.text
+        # Brand mark — accept both the legacy spelling and the sword-T variant
+        assert ("TestForTge" in r.text) or ("TestFortge" in r.text)
 
     def test_checkout_flow_help(self):
         from engine.chatbot import respond

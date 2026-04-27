@@ -194,6 +194,118 @@ function applyStatusColor(select) {
         return h;
     }
 
+    /* Render the in-chat bug-report form when intent === 'bug_form'.
+       Required fields per the spec: Summary, Environment, Steps to
+       Reproduce, Actual Result, Expected Result. Optional: Attachment,
+       Note. POSTs as multipart/form-data to /chat/bug-form. */
+    const BUG_FORM_LABELS = lang === 'ua' ? {
+        legend:      'Створити баг-репорт',
+        summary:     'Summary (короткий заголовок)',
+        environment: 'Environment (OS / браузер / пристрій)',
+        steps:       'Steps to Reproduce (по одному кроку на рядок)',
+        actual:      'Actual Result (що сталося)',
+        expected:    'Expected Result (що мало статися)',
+        attachment:  'Attachment (опційно)',
+        note:        'Note (опційно)',
+        submit:      'Створити баг',
+        cancel:      'Скасувати',
+        success:     'Баг-репорт створено',
+        missing:     'Заповніть, будь ласка, обовʼязкові поля',
+    } : {
+        legend:      'Create a bug report',
+        summary:     'Summary (short title)',
+        environment: 'Environment (OS / browser / device)',
+        steps:       'Steps to Reproduce (one step per line)',
+        actual:      'Actual Result (what happened)',
+        expected:    'Expected Result (what should have happened)',
+        attachment:  'Attachment (optional)',
+        note:        'Note (optional)',
+        submit:      'Create bug',
+        cancel:      'Cancel',
+        success:     'Bug report created',
+        missing:     'Please fill in the required fields',
+    };
+
+    function renderBugForm() {
+        const L = BUG_FORM_LABELS;
+        const wrap = document.createElement('form');
+        wrap.className = 'qa-chat-bugform';
+        wrap.enctype = 'multipart/form-data';
+        wrap.innerHTML = `
+            <legend>${escapeHtml(L.legend)}</legend>
+            <label>${escapeHtml(L.summary)}
+                <input type="text" name="summary" required maxlength="200">
+            </label>
+            <label>${escapeHtml(L.environment)}
+                <input type="text" name="environment" required
+                       placeholder="Windows 11 / Chrome 138 / Desktop">
+            </label>
+            <label>${escapeHtml(L.steps)}
+                <textarea name="steps_to_reproduce" required></textarea>
+            </label>
+            <label>${escapeHtml(L.actual)}
+                <textarea name="actual_result" required></textarea>
+            </label>
+            <label>${escapeHtml(L.expected)}
+                <textarea name="expected_result" required></textarea>
+            </label>
+            <label>${escapeHtml(L.attachment)}
+                <input type="file" name="attachment">
+            </label>
+            <label>${escapeHtml(L.note)}
+                <textarea name="note"></textarea>
+            </label>
+            <div class="qa-bug-error" hidden></div>
+            <div class="qa-bug-actions">
+                <button type="button" data-bug-cancel>${escapeHtml(L.cancel)}</button>
+                <button type="submit">${escapeHtml(L.submit)}</button>
+            </div>
+        `;
+        body.appendChild(wrap);
+        // Scroll the form's "Create a bug report" header to the top of the
+        // chat body so the first input is immediately visible (instead of
+        // forcing the user to scroll up past prior messages).
+        requestAnimationFrame(() => {
+            const top = wrap.offsetTop - body.offsetTop;
+            body.scrollTop = Math.max(0, top - 4);
+            // Move focus into the form for keyboard users.
+            const firstInput = wrap.querySelector('input[name="summary"]');
+            if (firstInput) firstInput.focus({ preventScroll: true });
+        });
+
+        const errBox = wrap.querySelector('.qa-bug-error');
+        wrap.querySelector('[data-bug-cancel]').addEventListener('click', () => {
+            wrap.remove();
+        });
+        wrap.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errBox.hidden = true;
+            const fd = new FormData(wrap);
+            const submitBtn = wrap.querySelector('button[type=submit]');
+            submitBtn.disabled = true;
+            try {
+                const resp = await fetch('/chat/bug-form', {
+                    method: 'POST',
+                    headers: csrfHeaders(),  // no Content-Type → browser sets multipart boundary
+                    body: fd,
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.ok) {
+                    errBox.textContent = data.message || L.missing;
+                    errBox.hidden = false;
+                    submitBtn.disabled = false;
+                    return;
+                }
+                wrap.remove();
+                renderMessage('bot', `${L.success}: ${data.id}`);
+            } catch (err) {
+                errBox.textContent = 'Network error. Please try again.';
+                errBox.hidden = false;
+                submitBtn.disabled = false;
+            }
+        });
+    }
+
     async function sendMessage(text) {
         const msg = (text || '').trim();
         if (!msg) return;
@@ -211,6 +323,10 @@ function applyStatusColor(select) {
                 ? data.follow_up
                 : (data.suggestions || []);
             renderMessage('bot', data.text || '...', chips);
+            // Open the structured bug form when the bot signals it.
+            if (data.intent === 'bug_form') {
+                renderBugForm();
+            }
         } catch (err) {
             renderMessage('bot', 'Network error. Please try again.');
         } finally {
@@ -246,4 +362,46 @@ function applyStatusColor(select) {
             panel.classList.contains('open') ? closePanel() : openPanel();
         }
     });
+})();
+
+/* ── Back-to-Top button ───────────────────────────────────────────
+   Shows after the user scrolls 400px down; smooth-scrolls to the top
+   when clicked. Uses requestAnimationFrame so the scroll listener
+   stays cheap on long pages (Test Cases / Bug Reports lists).         */
+(function () {
+    const btn = document.getElementById('back-to-top');
+    if (!btn) return;
+
+    const SHOW_AFTER_PX = 250;
+    let ticking = false;
+
+    function update() {
+        const y = window.scrollY || document.documentElement.scrollTop;
+        if (y > SHOW_AFTER_PX) {
+            btn.hidden = false;
+            btn.classList.add('is-visible');
+        } else {
+            btn.classList.remove('is-visible');
+            // Wait for the fade-out before re-hiding so screen readers
+            // don't get a flicker of focusable button on every scroll.
+            setTimeout(() => {
+                if (!btn.classList.contains('is-visible')) btn.hidden = true;
+            }, 220);
+        }
+        ticking = false;
+    }
+
+    window.addEventListener('scroll', () => {
+        if (!ticking) {
+            window.requestAnimationFrame(update);
+            ticking = true;
+        }
+    }, { passive: true });
+
+    btn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // Initial state on page load (e.g. after browser-back to a scrolled page).
+    update();
 })();

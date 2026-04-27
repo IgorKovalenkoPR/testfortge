@@ -5,7 +5,7 @@ A small rule-based assistant that lives in the bottom-right corner of
 every page. It plays two roles:
 
 1. **Help-desk for end users** — answers "what is X?", "how do I X?",
-   "where is X?" style questions about every TestFortge module
+   "where is X?" style questions about every TestForTge module
    (Estimation, Test Cases, Checklist, Test Execution, Automation QA,
    Bug Reports, credentials, site crawling, etc.).
 
@@ -21,9 +21,31 @@ counterpart; the caller passes ``lang`` explicitly.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable
+
+from engine.log import get_logger
+
+_logger = get_logger(__name__)
+
+# ────────────────────────────────────────────────────────────────────
+# Optional AI backend (Anthropic Claude). The chatbot is designed to
+# work fully offline via the rule-based dispatcher below; if an
+# ANTHROPIC_API_KEY is configured we layer Claude on top so generic
+# questions get a real LLM answer instead of a canned fallback. Any
+# import / network / quota failure falls back to the rule-based reply.
+# ────────────────────────────────────────────────────────────────────
+try:
+    from anthropic import Anthropic  # type: ignore
+    _ANTHROPIC_OK = True
+except Exception as _exc:  # pragma: no cover — import-time defensive
+    _ANTHROPIC_OK = False
+    _logger.debug("anthropic SDK not importable: %s", _exc)
+
+_ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+_ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "600"))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -62,7 +84,7 @@ def _any(hay: str, needles: list[str]) -> bool:
 _HELP_EN = {
     "estimation": (
         "**Estimation** is the QA Team Lead workspace. Paste requirements, "
-        "upload a file, or give a URL — TestFortge crawls the site, extracts "
+        "upload a file, or give a URL — TestForTge crawls the site, extracts "
         "features and produces PERT-based hours using reference rates "
         "(5 min per TC, 0.3% compat rate, 15% bug-report overhead, etc.). "
         "Export the full breakdown as XLSX."
@@ -100,7 +122,7 @@ _HELP_EN = {
     "checkout_flow": (
         "A **Checkout Flow** is the end-to-end buyer journey: Discovery → "
         "Cart → Auth/Guest → Shipping → Payment → Review → Place Order → "
-        "Confirmation, plus edge and security checks. TestFortge has a "
+        "Confirmation, plus edge and security checks. TestForTge has a "
         "built-in playbook with ~45 mandatory checks. Just type "
         "'Create Checkout flow test cases for https://YOUR-SITE/' in the "
         "Test Cases screen and all of them are generated automatically."
@@ -108,21 +130,60 @@ _HELP_EN = {
     "credentials": (
         "The **Test Account** card on Test Execution and Automation QA "
         "has three modes: *No auth* (public pages), *Use existing account* "
-        "(you type login/password), and *Generate test account* (TestFortge "
+        "(you type login/password), and *Generate test account* (TestForTge "
         "creates a throw-away pair; if you also supply a Registration "
         "URL, the automation runner can register the account for you)."
     ),
     "languages": (
-        "TestFortge is bilingual. Click **EN** / **UA** at the top of the "
+        "TestForTge is bilingual. Click **EN** / **UA** at the top of the "
         "sidebar to switch — every label, hint and generated section title "
         "follows the selected language."
+    ),
+    "overview": (
+        "**TestForTge** is a Flask-based QA framework that turns raw "
+        "requirements (text, files or a URL) into ready-to-use QA artefacts: "
+        "PERT-based effort estimation, Senior-QA test cases, low-level "
+        "checklists, executed test runs, Playwright automation and a bug "
+        "tracker — all bilingual (EN/UA). I'm Tedgie, the in-app assistant; "
+        "ask me about any module."
+    ),
+    "site_crawling": (
+        "**Site crawling** powers Estimation, Test Cases and Checklist when "
+        "you paste a URL. The crawler follows internal links (same domain), "
+        "extracts headings/forms/CTAs, and feeds them to the generator. "
+        "If a site is behind login, fill the Test Account card so the "
+        "crawler authenticates first; otherwise paste the direct URLs."
+    ),
+    "uploads": (
+        "**Supported uploads**: .docx, .pdf, .xlsx, .csv, .md, .txt and "
+        "image files. Default cap is 64 MB (configurable via "
+        "MAX_CONTENT_LENGTH). Files are parsed into requirements before "
+        "generation, so unstructured drafts work too."
+    ),
+    "exports": (
+        "**Exports**: Estimation → XLSX with full PERT breakdown, Test "
+        "Cases → XLSX/Markdown, Checklist → XLSX/Markdown, Bug Reports → "
+        "Markdown. Use the export buttons on each module screen — exports "
+        "include section titles, IDs and the language you generated in."
+    ),
+    "data_persistence": (
+        "TestForTge stores everything in a per-user **Flask session** "
+        "(filesystem-backed by default). Generated artefacts, project "
+        "setup, and bug reports survive a refresh but are isolated per "
+        "browser. Use **Reset** at the top of each module to wipe its slice."
+    ),
+    "shortcuts": (
+        "**UI shortcuts**: language switch (EN/UA top-left), Reset on each "
+        "module, Back-to-Top floats in once you scroll past ~400 px, and "
+        "the Tedgie chat bubble bottom-right is always one click away — "
+        "you can also type a bug description there to open a structured form."
     ),
 }
 
 _HELP_UA = {
     "estimation": (
         "**Естімація** — робоче місце QA Team Lead. Вставте вимоги, "
-        "завантажте файл або вкажіть URL — TestFortge прокраулить сайт, "
+        "завантажте файл або вкажіть URL — TestForTge прокраулить сайт, "
         "визначить функціонал та порахує години методом PERT за "
         "довідковими коефіцієнтами (5 хв на TC, 0,3% на платформу, "
         "15% на багрепорти тощо). Експорт у XLSX."
@@ -161,7 +222,7 @@ _HELP_UA = {
         "**Checkout flow** — наскрізний шлях покупця: Discovery → "
         "Кошик → Авторизація/Гість → Доставка → Оплата → Перегляд → "
         "Оформлення → Підтвердження, плюс граничні та безпекові перевірки. "
-        "TestFortge має вбудований плейбук на ~45 обов'язкових перевірок. "
+        "TestForTge має вбудований плейбук на ~45 обов'язкових перевірок. "
         "Введіть 'Create Checkout flow test cases for https://ВАШ-САЙТ/' "
         "на екрані Test Cases — усі вони згенеруються автоматично."
     ),
@@ -169,13 +230,53 @@ _HELP_UA = {
         "Картка **Test Account** у Test Execution та Automation QA має "
         "три режими: *Без авторизації*, *Використати існуючий акаунт* "
         "(ви вводите логін/пароль) і *Згенерувати тестовий акаунт* "
-        "(TestFortge створює одноразову пару; якщо вказати Registration URL, "
+        "(TestForTge створює одноразову пару; якщо вказати Registration URL, "
         "раннер автоматизації сам зареєструє акаунт)."
     ),
     "languages": (
-        "TestFortge підтримує дві мови. Натисніть **EN** / **UA** вгорі "
+        "TestForTge підтримує дві мови. Натисніть **EN** / **UA** вгорі "
         "бічної панелі — усі підписи, підказки та розділи згенерованих "
         "артефактів підлаштуються під обрану мову."
+    ),
+    "overview": (
+        "**TestForTge** — Flask-фреймворк, який перетворює сирі вимоги "
+        "(текст, файли або URL) на готові QA-артефакти: оцінку трудовитрат "
+        "методом PERT, тест-кейси рівня Senior QA, низькорівневі чек-лісти, "
+        "виконання тестів, автоматизацію на Playwright та трекер багів — "
+        "усе двома мовами (EN/UA). Я — Tedgie, вбудований асистент; "
+        "запитуйте про будь-який модуль."
+    ),
+    "site_crawling": (
+        "**Краулер сайту** обслуговує Естімацію, Test Cases і Checklist, "
+        "коли ви вставляєте URL. Він обходить внутрішні посилання (той "
+        "самий домен), збирає заголовки/форми/CTA і передає генератору. "
+        "Якщо сайт за логіном — заповніть картку Test Account (щоб краулер "
+        "увійшов), або вставте конкретні URL вручну."
+    ),
+    "uploads": (
+        "**Підтримувані формати**: .docx, .pdf, .xlsx, .csv, .md, .txt і "
+        "зображення. Стандартний ліміт — 64 МБ (налаштовується через "
+        "MAX_CONTENT_LENGTH). Файли парсяться у вимоги перед генерацією — "
+        "тож неструктурований чернетковий текст теж згодиться."
+    ),
+    "exports": (
+        "**Експорт**: Естімація → XLSX з повним PERT-розкладом, Test "
+        "Cases → XLSX/Markdown, Чек-ліст → XLSX/Markdown, Баг-репорти → "
+        "Markdown. Кнопки експорту на екрані кожного модуля; експорт "
+        "включає назви секцій, ID та мову, якою генерували."
+    ),
+    "data_persistence": (
+        "TestForTge зберігає все у **Flask-сесії** користувача (за "
+        "замовчуванням — на диску). Згенеровані артефакти, налаштування "
+        "проєкту й баги переживають оновлення сторінки, але ізольовані "
+        "по браузеру. Кнопка **Reset** на кожному модулі очищує його зріз."
+    ),
+    "shortcuts": (
+        "**Підказки інтерфейсу**: перемикач мови (EN/UA вгорі ліворуч), "
+        "Reset на кожному модулі, кнопка Back-to-Top зʼявляється після "
+        "~400 px скролу, чат-кнопка Tedgie у правому-нижньому куті завжди "
+        "під рукою — туди ж можна одразу написати опис бага, і відкриється "
+        "структурована форма."
     ),
 }
 
@@ -183,24 +284,109 @@ _HELP_UA = {
 # the matcher checks each synonym group against the user's normalized
 # lowercase message.
 _MODULE_SYNONYMS = {
-    "checkout_flow":  ["checkout flow", "checkout process", "purchase flow",
-                       "buy flow", "order flow", "place order",
-                       "оформлення замовлення", "процес покупки", "чекаут", "чек-аут"],
-    "estimation":     ["estimation", "estimate", "hours", "pert", "естімаці",
-                       "оцін", "годин", "пер"],
-    "test_cases":     ["test case", "tc ", "tcs", "test-case",
-                       "тест-кейс", "тесткейс", "кейс"],
-    "checklist":      ["checklist", "чек-ліст", "чеклист"],
-    "test_execution": ["test execution", "execution", "run test", "виконання тест",
-                       "виконати тест"],
-    "automation":     ["automation", "playwright", "headless", "browser automation",
-                       "автомат", "хедлес"],
-    "bug_reports":    ["bug report", "bug", "defect", "issue log",
-                       "баг", "дефект", "помилк"],
-    "credentials":    ["credential", "login", "password", "sign in",
-                       "акаунт", "логін", "пароль"],
-    "languages":      ["language", "translate", "ua", "english",
-                       "мова", "переклад", "українськ", "англійськ"],
+    # Checkout-flow stays first so "checkout in test cases" routes to the
+    # playbook rather than the generic test_cases card.
+    "checkout_flow":  [
+        "checkout flow", "checkout process", "purchase flow", "buy flow",
+        "order flow", "place order", "checkout", "buyer journey",
+        "shopping cart", "cart to confirmation",
+        "оформлення замовлення", "процес покупки", "чекаут", "чек-аут",
+        "наскрізна покупка", "повний цикл покупки",
+    ],
+    "site_crawling":  [
+        "site crawl", "crawl", "crawler", "spider", "scrape pages",
+        "follow links", "discover pages", "scan website",
+        "краул", "обхід сайту", "сканування сайту", "обійти сайт",
+        "знайти сторінки", "розвідка сайту",
+    ],
+    "uploads":        [
+        "upload", "file upload", "attach file", "import file",
+        "supported format", "supported file", "max file size",
+        "drag and drop", ".docx", ".pdf", ".xlsx", ".csv",
+        "завантаж", "формати файлів", "розмір файлу", "вкласти файл",
+        "імпорт файлу", "підтриму",
+    ],
+    "exports":        [
+        "export to xlsx", "export to markdown", "export to csv",
+        "download xlsx", "download markdown", "download csv",
+        "export bug", "export test case", "export estim", "export checklist",
+        "markdown export", "xlsx export",
+        "експорт", "вивантаж у xlsx", "зберегти xlsx", "експортувати",
+        "завантажити результат",
+    ],
+    "estimation":     [
+        "estimation", "estimate hours", "estimating", "man-hours",
+        "manhours", "effort estimation", "pert", "budget hours",
+        "time budget", "estimation hours",
+        "естімаці", "оцінк", "оцінювання", "трудовитрат",
+        "розрахунок годин", "pert",
+    ],
+    "test_cases":     [
+        "test case", "test cases", "tc ", "tcs", "test-case",
+        "positive case", "negative case", "edge case", "user story tests",
+        "тест-кейс", "тесткейс", "кейс", "позитивні тести",
+        "негативні тести", "крайові випадки",
+    ],
+    "checklist":      [
+        "checklist", "check list", "smoke checklist", "regression list",
+        "low-level check", "smoke pass",
+        "чек-ліст", "чеклист", "смоук чек", "регресійний список",
+    ],
+    "test_execution": [
+        "test execution", "execution", "run test", "run tests",
+        "execute test", "run a test", "execute selected",
+        "виконання тест", "виконати тест", "запустити тест",
+        "прогон тестів", "виконати прогон",
+    ],
+    "automation":     [
+        "automation", "auto qa", "auto-qa", "playwright", "headless",
+        "headed", "show browser", "browser automation", "selenium",
+        "automation runner",
+        "автомат", "хедлес", "хедед", "плейрайт", "автотест",
+        "показати браузер", "запустити автоматизацію",
+    ],
+    "bug_reports":    [
+        "bug report", "bug list", "bug tracker", "defect tracker",
+        "issue log", "issue list", "bug export", "log defect",
+        "баг", "дефект", "помилк", "багрепорт", "баг-трекер",
+        "трекер дефектів", "журнал помилок",
+    ],
+    "credentials":    [
+        "credential", "credentials", "test account", "login", "password",
+        "sign in", "sign-in", "registration url", "auto register",
+        "auto-register", "throw-away account", "throwaway account",
+        "тестовий акаунт", "акаунт", "логін", "пароль", "вхід",
+        "реєстрація", "url реєстрації", "одноразовий акаунт",
+        "автоматична реєстрація",
+    ],
+    "data_persistence": [
+        "persist data", "saved data", "where is my data",
+        "data is gone", "lost my work", "filesystem session",
+        "flask session storage", "session storage",
+        "де мої дані", "загубив дані", "втратив роботу",
+        "збереження даних", "де зберігаються",
+    ],
+    "shortcuts":      [
+        "shortcut", "shortcuts", "back to top", "back-to-top",
+        "scroll to top", "reset button", "ui tip",
+        "комбінації клавіш", "нагору", "до верху", "повернутись нагору",
+        "кнопка скидання",
+    ],
+    "languages":      [
+        "language", "translate", " ua ", "english", "ukrainian",
+        "switch language", "change language",
+        "мова", "переклад", "українськ", "англійськ", "змінити мову",
+        "перемкнути мову",
+    ],
+    # The "overview" key intentionally has only generic phrases — it acts
+    # as the catch-all "what is this" answer.
+    "overview":       [
+        "what is testfortge", "what is testforTge", "what is this",
+        "what does this do", "tell me about testfortge",
+        "introduce yourself", "who are you", "what can you do",
+        "що таке testfortge", "що це", "розкажи про testfortge",
+        "хто ти", "представся", "що ти вмієш", "про застосунок",
+    ],
 }
 
 
@@ -238,7 +424,7 @@ _REQ_MARKERS_UA = ["як ", "користувач має", "користувач
 def _greeting(lang: str) -> ChatReply:
     if lang == "ua":
         return ChatReply(
-            text=("Вітаю! Я QA-асистент TestFortge. Можу пояснити будь-який "
+            text=("Вітаю! Я QA-асистент TestForTge. Можу пояснити будь-який "
                   "модуль (Естімація, Test Cases, Checklist, Test Execution, "
                   "Automation QA, Bug Reports), підказати як працює Checkout "
                   "flow або допомогти сформулювати вимогу так, щоб згенеровані "
@@ -252,11 +438,12 @@ def _greeting(lang: str) -> ChatReply:
             ],
         )
     return ChatReply(
-        text=("Hi! I'm the TestFortge assistant. I can explain any module "
+        text=("Hi! I'm the TestForTge assistant. I can explain any module "
               "(Estimation, Test Cases, Checklist, Test Execution, "
               "Automation QA, Bug Reports), walk you through the Checkout "
               "flow playbook, or help you phrase a requirement so the "
-              "generated QA Engineers understand it correctly."),
+              "generator produces concrete, verb-led test cases and "
+              "checklist items from it."),
         intent="greeting",
         suggestions=[
             "What is the Checkout flow?",
@@ -296,11 +483,17 @@ def _related_suggestions(key: str, lang: str) -> list[str]:
             "checklist":      ["Різниця між чек-лістом і тест-кейсами", "Як запустити виконання?"],
             "test_execution": ["Як додати тестовий акаунт?", "Які типи тестування обрати?"],
             "automation":     ["Як увімкнути headed-режим?", "Як налаштувати авто-реєстрацію?"],
-            "bug_reports":    ["Експорт багів у Markdown", "Як пов'язати баг з тест-кейсом?"],
-            "checkout_flow": ["Які фази перевіряються?", "Який шаблон тест-карти для Checkout?"],
+            "bug_reports":    ["Експорт багів у Markdown", "Як повʼязати баг з тест-кейсом?"],
+            "checkout_flow":  ["Які фази перевіряються?", "Який шаблон тест-карти для Checkout?"],
             "credentials":    ["Згенерувати тестовий акаунт", "Як пройти 2FA у Playwright?"],
+            "site_crawling":  ["Сайт за логіном — що робити?", "Як обмежити глибину обходу?"],
+            "uploads":        ["Які формати підтримуються?", "Який ліміт розміру файлу?"],
+            "exports":        ["Експорт тест-кейсів у XLSX", "Експорт багів у Markdown"],
+            "data_persistence": ["Як скинути дані модуля?", "Чи можна перенести сесію?"],
+            "shortcuts":      ["Що таке Back-to-Top?", "Як перемкнути мову?"],
+            "overview":       ["Який модуль показати першим?", "З чого почати?"],
         }
-        return base.get(key, ["Що таке TestFortge?"])
+        return base.get(key, ["Що таке TestForTge?"])
     base = {
         "estimation":     ["Export estimation to XLSX", "What sources are supported?"],
         "test_cases":     ["What is the Checkout flow?", "How do I upload a spec?"],
@@ -308,10 +501,16 @@ def _related_suggestions(key: str, lang: str) -> list[str]:
         "test_execution": ["How do I add a test account?", "Which testing types to pick?"],
         "automation":     ["Turn on headed mode", "Auto-register new accounts"],
         "bug_reports":    ["Export bugs to Markdown", "Link a bug to a test case"],
-        "checkout_flow": ["Which phases are covered?", "Show me the card data I can use"],
+        "checkout_flow":  ["Which phases are covered?", "Show me the card data I can use"],
         "credentials":    ["Generate a throw-away account", "How to pass 2FA in Playwright?"],
+        "site_crawling":  ["Site behind login — now what?", "How do I limit crawl depth?"],
+        "uploads":        ["Which formats are accepted?", "What's the file-size limit?"],
+        "exports":        ["Export test cases to XLSX", "Export bugs to Markdown"],
+        "data_persistence": ["How do I reset a module?", "Can I move my session?"],
+        "shortcuts":      ["What is Back-to-Top?", "How do I switch language?"],
+        "overview":       ["Which module first?", "Where do I start?"],
     }
-    return base.get(key, ["What is TestFortge?"])
+    return base.get(key, ["What is TestForTge?"])
 
 
 def _default_help(lang: str) -> ChatReply:
@@ -336,6 +535,82 @@ def _default_help(lang: str) -> ChatReply:
 
 def _troubleshoot(lang: str, user_msg: str) -> ChatReply:
     low = _norm(user_msg)
+
+    # ── 1) Auth / login / 401 / 403 / CSRF / session expiry ───────────
+    auth_markers = ["401", "403", "csrf", "unauthor", "forbidden",
+                    "session expired", "logged out", "log in failed",
+                    "login failed", "wrong password", "invalid credentials",
+                    "сесія", "вхід не", "невірн", "не пускає", "не залогін"]
+    if _any(low, auth_markers):
+        if lang == "ua":
+            return ChatReply(
+                text=("Авторизаційні збої — типові причини: 1) сесія Flask "
+                      "протухла → оновіть сторінку, увійдіть знову; 2) CSRF "
+                      "токен застарів → жорстко перезавантажте (Ctrl+F5); "
+                      "3) для Automation/Test Execution — перевірте картку "
+                      "Test Account (логін, пароль, Registration URL); "
+                      "4) сайт-ціль повертає 401/403 → можливо потрібен "
+                      "ще один заголовок або 2FA — додайте кастомні "
+                      "селектори чи перейдіть у headed-режим, щоб побачити."),
+                intent="troubleshoot_auth",
+            )
+        return ChatReply(
+            text=("Auth failures usually fall into: 1) stale Flask session "
+                  "→ refresh and sign in again; 2) stale CSRF token → hard "
+                  "reload (Ctrl+F5); 3) for Automation / Test Execution → "
+                  "verify the Test Account card (login, password, "
+                  "Registration URL); 4) target site returning 401/403 → "
+                  "may need an extra header or 2FA — add custom selectors "
+                  "or switch to headed mode to see what the page asks for."),
+            intent="troubleshoot_auth",
+        )
+
+    # ── 2) Captcha / bot-detection ─────────────────────────────────────
+    captcha_markers = ["captcha", "recaptcha", "hcaptcha", "robot check",
+                       "i'm not a robot", "капч"]
+    if _any(low, captcha_markers):
+        if lang == "ua":
+            return ChatReply(
+                text=("Капчу TestForTge не обходить навмисно. Варіанти: "
+                      "перемкніть Automation у headed-режим і пройдіть капчу "
+                      "вручну (далі сесія дійде до кінця); або в тестовому "
+                      "оточенні відключіть капчу для тестового акаунта; або "
+                      "генеруйте тест-кейси без авторизаційного входу."),
+                intent="troubleshoot_captcha",
+            )
+        return ChatReply(
+            text=("TestForTge intentionally does not solve CAPTCHAs. "
+                  "Options: switch Automation to headed mode and solve it "
+                  "manually (the session continues afterwards); or disable "
+                  "CAPTCHA for the test account in your staging env; or "
+                  "generate test cases without an auth-gated flow."),
+            intent="troubleshoot_captcha",
+        )
+
+    # ── 3) File upload / size / format errors ──────────────────────────
+    upload_markers = ["413", "too large", "request entity too large",
+                      "invalid file", "wrong format", "unsupported file",
+                      "не підтриму", "формат файлу", "завеликий файл"]
+    if _any(low, upload_markers):
+        if lang == "ua":
+            return ChatReply(
+                text=("Помилка завантаження: 1) ліміт за замовчуванням 64 МБ "
+                      "(MAX_CONTENT_LENGTH у .env); 2) підтримуються лише "
+                      ".docx/.pdf/.xlsx/.csv/.md/.txt і зображення; "
+                      "3) HTTP 413 → файл перевищує ліміт. Або стисніть, "
+                      "або підвищте MAX_CONTENT_LENGTH і перезапустіть Flask."),
+                intent="troubleshoot_upload",
+            )
+        return ChatReply(
+            text=("Upload error: 1) default cap is 64 MB "
+                  "(MAX_CONTENT_LENGTH in .env); 2) only "
+                  ".docx/.pdf/.xlsx/.csv/.md/.txt and images are accepted; "
+                  "3) HTTP 413 means the file exceeds the cap — compress it "
+                  "or raise MAX_CONTENT_LENGTH and restart Flask."),
+            intent="troubleshoot_upload",
+        )
+
+    # ── 4) Automation QA failures ──────────────────────────────────────
     if "automation" in low or "playwright" in low or "автомат" in low:
         if lang == "ua":
             return ChatReply(
@@ -343,77 +618,271 @@ def _troubleshoot(lang: str, user_msg: str) -> ChatReply:
                       "потребує входу — додайте Test Account; 2) headless "
                       "режим пропускає капчу — перемкніть на 'No (показати "
                       "браузер)'; 3) селектор не знайдено — увімкніть "
-                      "'Advanced: custom selectors' і вкажіть точні поля."),
+                      "'Advanced: custom selectors' і вкажіть точні поля; "
+                      "4) URL не вказано — Base URL не може бути порожнім; "
+                      "5) Playwright не встановлений → `playwright install`."),
                 intent="troubleshoot_automation",
             )
         return ChatReply(
             text=("Common Automation QA failures: 1) page requires login — "
                   "fill the Test Account card; 2) headless hits a captcha — "
                   "switch to 'No (show browser)'; 3) selector not found — "
-                  "open 'Advanced: custom selectors' and pass exact fields."),
+                  "open 'Advanced: custom selectors' and pass exact fields; "
+                  "4) URL missing — Base URL must not be empty; "
+                  "5) Playwright browsers not installed → `playwright install`."),
             intent="troubleshoot_automation",
         )
-    if "crawl" in low or "прокраул" in low or "site" in low:
+
+    # ── 5) Crawler can't reach pages ───────────────────────────────────
+    if "crawl" in low or "прокраул" in low or " site " in f" {low} " or "сайт" in low:
         if lang == "ua":
             return ChatReply(
                 text=("Якщо краулер не дістається потрібних сторінок: "
                       "додайте Test Account (сайт під логіном), або вставте "
                       "прямі URL у текстове поле вимог, або завантажте "
-                      "sitemap/spec-файл."),
+                      "sitemap/spec-файл. Перевірте також, що сайт не "
+                      "блокує User-Agent з нашого запиту."),
                 intent="troubleshoot_crawl",
             )
         return ChatReply(
             text=("If the crawler can't reach internal pages: add a Test "
                   "Account (site behind login), paste direct URLs into the "
-                  "requirements textarea, or upload a sitemap/spec file."),
+                  "requirements textarea, or upload a sitemap/spec file. "
+                  "Also check the target site isn't blocking our User-Agent."),
             intent="troubleshoot_crawl",
         )
+
+    # ── 6) Generation produced nothing / empty result ──────────────────
+    empty_markers = ["empty result", "no test cases", "nothing generated",
+                     "0 cases", "zero cases",
+                     "порожній результ", "немає тест", "нічого не згенер",
+                     "0 кейсів", "жодного кейсу"]
+    if _any(low, empty_markers):
+        if lang == "ua":
+            return ChatReply(
+                text=("Якщо генератор повернув порожній результат: 1) вимога "
+                      "занадто абстрактна — додайте конкретні дії, дані, "
+                      "очікуваний результат; 2) URL заблокував краулер — "
+                      "вставте прямі сторінки; 3) файл не розпарсився — "
+                      "конвертуйте у .docx або .md і спробуйте ще раз."),
+                intent="troubleshoot_empty",
+            )
+        return ChatReply(
+            text=("If the generator returned nothing: 1) the requirement "
+                  "is too abstract — add concrete actions, data, expected "
+                  "results; 2) crawler was blocked → paste direct page "
+                  "URLs; 3) file failed to parse → convert to .docx or .md "
+                  "and try again."),
+            intent="troubleshoot_empty",
+        )
+
+    # ── 7) Generic fallback ────────────────────────────────────────────
     if lang == "ua":
         return ChatReply(
             text=("Опишіть, що саме не працює: який модуль, який крок, "
-                  "яке повідомлення з'явилось? Я підкажу наступний крок."),
+                  "яке повідомлення зʼявилось? Я підкажу наступний крок."),
             intent="troubleshoot_generic",
-            follow_up=["Який модуль?", "Який саме крок?", "Текст помилки?"],
+            follow_up=["Який модуль?", "Який саме крок?", "Текст помилки?",
+                       "Який браузер / ОС?"],
         )
     return ChatReply(
         text=("Tell me what's broken: which module, which step, and the "
               "error text you saw. I'll suggest the next move."),
         intent="troubleshoot_generic",
-        follow_up=["Which module?", "Which step?", "Error text?"],
+        follow_up=["Which module?", "Which step?", "Error text?",
+                   "Which browser / OS?"],
     )
+
+
+# Domain hints we can detect in a vague requirement so the clarifying
+# questions are domain-aware (instead of always generic).
+_DOMAIN_PATTERNS = {
+    "auth":    ["login", "log in", "sign in", "sign up", "register",
+                "registration", "password", "2fa", "otp", "oauth",
+                "вхід", "реєстрац", "пароль", "2фа", "одноразовий код"],
+    "payment": ["payment", "checkout", "card", "stripe", "paypal", "invoice",
+                "refund", "subscription", "billing",
+                "оплат", "платіж", "карта", "підписк", "рахунок"],
+    "search":  ["search", "filter", "facet", "autocomplete", "suggest",
+                "пошук", "фільтр", "автодопов"],
+    "upload":  ["upload", "attach", "file", "drag and drop",
+                "завантаж", "вкласти файл", "перетягн"],
+    "form":    ["form", "submit", "validation", "field", "input",
+                "форма", "валідац", "поле", "відправ"],
+    "api":     ["api", "endpoint", "rest", "graphql", "webhook",
+                "endpoint", "rest", "вебхук"],
+    "report":  ["report", "export", "pdf", "xlsx", "dashboard",
+                "звіт", "експорт", "дашборд"],
+}
+
+
+def _detect_domain(low: str) -> str | None:
+    for key, markers in _DOMAIN_PATTERNS.items():
+        if any(m in low for m in markers):
+            return key
+    return None
+
+
+_DOMAIN_FOLLOWUPS_EN = {
+    "auth": [
+        "Who can authenticate (role / user type)?",
+        "Which auth method (email+password, SSO, OAuth, OTP, 2FA)?",
+        "Password policy (min length, complexity)?",
+        "Lockout / rate-limit on failed attempts?",
+        "Session lifetime and 'remember me' behavior?",
+        "Recovery / forgot-password flow?",
+    ],
+    "payment": [
+        "Supported payment methods (card, wallet, bank transfer)?",
+        "Currencies and tax handling?",
+        "3-D Secure / SCA required?",
+        "Refunds, partial refunds, chargebacks?",
+        "Subscriptions or one-off only?",
+        "Failure modes (insufficient funds, declined card, timeout)?",
+    ],
+    "search": [
+        "What entities are searchable (products, articles, users)?",
+        "Match rules (exact, prefix, fuzzy, synonyms)?",
+        "Filters/facets and sort orders?",
+        "Empty-state and no-result behavior?",
+        "Pagination / infinite scroll?",
+        "Performance budget (max latency for first results)?",
+    ],
+    "upload": [
+        "Allowed file types and MIME enforcement?",
+        "Max file size and total quota?",
+        "Virus / malware scan policy?",
+        "How are uploaded files persisted (storage, retention)?",
+        "Concurrent / batched uploads supported?",
+        "Cancel / resume behavior?",
+    ],
+    "form": [
+        "Required vs optional fields?",
+        "Validation rules per field (length, format, range)?",
+        "Error display (inline, summary, both)?",
+        "Submit behavior on slow network / repeat clicks?",
+        "What happens on successful submit?",
+        "Is the form draft-saved between sessions?",
+    ],
+    "api": [
+        "Auth model (API key, OAuth, JWT)?",
+        "Rate-limit and quota?",
+        "Error contract (HTTP codes + error envelope)?",
+        "Idempotency keys for writes?",
+        "Versioning policy?",
+        "Response time SLO?",
+    ],
+    "report": [
+        "Which metrics / dimensions are reported?",
+        "Export formats (XLSX, CSV, PDF)?",
+        "Time range filters and timezones?",
+        "Permissions — who can view / export?",
+        "Refresh cadence (live, daily, on-demand)?",
+        "How is empty data presented?",
+    ],
+}
+
+_DOMAIN_FOLLOWUPS_UA = {
+    "auth": [
+        "Хто може автентифікуватися (роль / тип користувача)?",
+        "Який метод входу (email+пароль, SSO, OAuth, OTP, 2FA)?",
+        "Політика пароля (довжина, складність)?",
+        "Блокування / rate-limit при невдалих спробах?",
+        "Тривалість сесії, поведінка 'запамʼятати мене'?",
+        "Сценарій відновлення / забутий пароль?",
+    ],
+    "payment": [
+        "Які способи оплати (карта, гаманець, банк-переказ)?",
+        "Валюти й податки?",
+        "Чи потрібен 3-D Secure / SCA?",
+        "Повернення, часткові повернення, чарджбеки?",
+        "Підписки чи разові оплати?",
+        "Сценарії помилок (недостатньо коштів, відхилено, таймаут)?",
+    ],
+    "search": [
+        "Що шукаємо (товари, статті, користувачі)?",
+        "Правила збігу (точний, префікс, нечіткий, синоніми)?",
+        "Фільтри / фасети, сортування?",
+        "Поведінка при порожньому результаті?",
+        "Пагінація чи нескінченний скрол?",
+        "Бюджет затримки (час до перших результатів)?",
+    ],
+    "upload": [
+        "Які типи файлів дозволені (з MIME-перевіркою)?",
+        "Максимальний розмір файлу й загальна квота?",
+        "Чи скануємо на віруси / шкідливе?",
+        "Як зберігаються файли (сховище, термін зберігання)?",
+        "Підтримка паралельних / пакетних завантажень?",
+        "Скасування / відновлення завантаження?",
+    ],
+    "form": [
+        "Обовʼязкові й опційні поля?",
+        "Правила валідації для кожного поля (довжина, формат, діапазон)?",
+        "Як відображаються помилки (інлайн, зведення, обидва)?",
+        "Поведінка при повільній мережі / повторних кліках?",
+        "Що відбувається після успішного відправлення?",
+        "Чи зберігається чернетка між сесіями?",
+    ],
+    "api": [
+        "Модель авторизації (API-key, OAuth, JWT)?",
+        "Rate-limit і квоти?",
+        "Контракт помилок (HTTP-коди + конверт помилок)?",
+        "Idempotency-ключі для записів?",
+        "Політика версіонування?",
+        "SLO часу відповіді?",
+    ],
+    "report": [
+        "Які метрики й виміри у звіті?",
+        "Формати експорту (XLSX, CSV, PDF)?",
+        "Фільтри по часу й часові пояси?",
+        "Хто має доступ до перегляду / експорту?",
+        "Періодичність оновлення (live, добова, on-demand)?",
+        "Як показуємо порожні дані?",
+    ],
+}
 
 
 def _clarify_requirement(lang: str, text: str) -> ChatReply:
-    """Ask targeted questions to turn a vague requirement into testable input."""
+    """Ask targeted questions to turn a vague requirement into testable input.
+
+    If we can spot a domain (auth/payment/search/upload/form/api/report) we
+    swap the generic checklist for a domain-aware one so the answers feed
+    directly into Test Cases / Checklist generators.
+    """
+    domain = _detect_domain(_norm(text))
+    generic_en = [
+        "Who is the user (role)?",
+        "What is the goal of this action?",
+        "What inputs / formats are used?",
+        "What limits apply (ranges, format, count)?",
+        "What does success look like? And failure?",
+        "Is authentication required?",
+        "Are there dependent integrations (email, payment, API)?",
+    ]
+    generic_ua = [
+        "Хто користувач (роль)?",
+        "Яка мета цієї дії?",
+        "Які вхідні дані / формати?",
+        "Які очікувані обмеження (межі, формат, кількість)?",
+        "Як виглядає успіх? А помилка?",
+        "Чи потрібна авторизація?",
+        "Чи є залежні інтеграції (пошта, платіж, API)?",
+    ]
     if lang == "ua":
-        return ChatReply(
-            text=("Щоб згенерувати якісні тест-кейси, мені треба ще кілька "
-                  "деталей. Дайте відповідь на ці запитання:"),
-            intent="clarify_requirement",
-            follow_up=[
-                "Хто користувач (роль)?",
-                "Яка мета цієї дії?",
-                "Які вхідні дані / формати?",
-                "Які очікувані обмеження (межі, формат, кількість)?",
-                "Як виглядає успіх? А помилка?",
-                "Чи потрібна авторизація?",
-                "Чи є залежні інтеграції (пошта, платіж, API)?",
-            ],
-        )
-    return ChatReply(
-        text=("To generate strong test cases I need a few more details. "
-              "Please answer these:"),
-        intent="clarify_requirement",
-        follow_up=[
-            "Who is the user (role)?",
-            "What is the goal of this action?",
-            "What inputs / formats are used?",
-            "What limits apply (ranges, format, count)?",
-            "What does success look like? And failure?",
-            "Is authentication required?",
-            "Are there dependent integrations (email, payment, API)?",
-        ],
-    )
+        followups = _DOMAIN_FOLLOWUPS_UA.get(domain, generic_ua) if domain else generic_ua
+        intro = ("Виглядає як вимога з домену '%s' — уточнімо деталі:" % domain
+                 if domain else
+                 "Щоб згенерувати якісні тест-кейси, мені треба ще кілька "
+                 "деталей. Дайте відповідь на ці запитання:")
+        return ChatReply(text=intro, intent="clarify_requirement",
+                         follow_up=followups)
+    followups = _DOMAIN_FOLLOWUPS_EN.get(domain, generic_en) if domain else generic_en
+    intro = (f"Looks like a '{domain}' domain — let's nail down the details:"
+             if domain else
+             "To generate strong test cases I need a few more details. "
+             "Please answer these:")
+    return ChatReply(text=intro, intent="clarify_requirement",
+                     follow_up=followups)
 
 
 def _checkout_flow_details(lang: str) -> ChatReply:
@@ -428,14 +897,14 @@ def _checkout_flow_details(lang: str) -> ChatReply:
                   "Security & Compliance"]
 
     if lang == "ua":
-        text = ("Плейбук Checkout flow у TestFortge покриває такі фази:\n- " +
+        text = ("Плейбук Checkout flow у TestForTge покриває такі фази:\n- " +
                 "\n- ".join(phases) +
                 "\n\nУсього ~45 обов'язкових перевірок. Щоб згенерувати, "
                 "введіть у Test Cases: 'Create Checkout flow test cases for "
                 "https://ВАШ-САЙТ/'.")
         sugg = ["Які тестові дані використати?", "Як додати тестовий акаунт?"]
     else:
-        text = ("The TestFortge Checkout flow playbook covers:\n- " +
+        text = ("The TestForTge Checkout flow playbook covers:\n- " +
                 "\n- ".join(phases) +
                 "\n\n~45 mandatory checks in total. To generate, type in "
                 "Test Cases: 'Create Checkout flow test cases for "
@@ -448,28 +917,145 @@ def _checkout_flow_details(lang: str) -> ChatReply:
 # Main dispatch
 # ═══════════════════════════════════════════════════════════════════
 
+# ─── Bug-report intent ────────────────────────────────────────────────
+_BUG_REPORT_TRIGGERS_EN = [
+    "report a bug", "report bug", "found a bug", "i found a bug",
+    "submit a bug", "file a bug", "log a bug", "create a bug",
+    "raise a bug", "open a bug", "new bug", "bug report",
+    "this is a bug", "there's a bug", "there is a bug",
+]
+_BUG_REPORT_TRIGGERS_UA = [
+    "створити баг", "створи баг", "знайшов баг", "знайшла баг",
+    "надіслати баг", "оформити баг", "відправити баг", "новий баг",
+    "це баг", "хочу повідомити", "повідомити про баг",
+    "хочу створити баг", "є баг",
+]
+
+
+def _wants_bug_form(low: str) -> bool:
+    return _any(low, _BUG_REPORT_TRIGGERS_EN) or _any(low, _BUG_REPORT_TRIGGERS_UA)
+
+
+def _bug_form_reply(lang: str) -> ChatReply:
+    """Return a reply that tells the UI to render the bug-form."""
+    if lang == "ua":
+        text = (
+            "Звісно! Опиши, будь ласка, баг — я відкрию форму. "
+            "Заповни поля Summary, Steps to Reproduce, Actual / Expected "
+            "Result і Environment, додай Attachment або Note за потреби, "
+            "і я створю баг-репорт."
+        )
+    else:
+        text = (
+            "Sure! Let's file a bug. Fill in the form below — Summary, "
+            "Steps to reproduce, Actual / Expected result and Environment "
+            "are required; Attachment and Note are optional. I'll create a "
+            "proper bug report once you submit."
+        )
+    return ChatReply(text=text, intent="bug_form")
+
+
+# ─── AI backend (Anthropic Claude) ────────────────────────────────────
+def _ai_system_prompt(lang: str) -> str:
+    base = (
+        "You are Tedgie, the TestForTge QA Assistant. TestForTge "
+        "is a Flask-based QA framework with these modules: Estimation, "
+        "Test Cases, Checklist, Test Execution, Automation QA (Playwright), "
+        "Bug Reports, and a Chat assistant (you). "
+        "Your job is to help QA engineers (1) understand how the framework "
+        "works, (2) clarify requirements before generation, (3) walk through "
+        "module workflows, and (4) collect bug reports. "
+        "Keep answers concise (2-5 sentences unless asked for detail), "
+        "professional, no emojis. Refer to yourself as Tedgie. "
+        "When the user describes a bug or wants to report one, end your reply "
+        "with the literal token <BUG_FORM/> on its own line — the UI uses "
+        "that to open a structured bug-form."
+    )
+    if lang == "ua":
+        base += " Reply in Ukrainian."
+    else:
+        base += " Reply in English."
+    return base
+
+
+def _ai_respond(message: str, lang: str) -> ChatReply | None:
+    """Try an Anthropic-backed reply. Returns None on any failure so the
+    rule-based dispatcher can take over without the user noticing."""
+    if not _ANTHROPIC_OK:
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        client = Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=_ANTHROPIC_MODEL,
+            max_tokens=_ANTHROPIC_MAX_TOKENS,
+            system=_ai_system_prompt(lang),
+            messages=[{"role": "user", "content": message}],
+        )
+        # Concatenate all text blocks in the response.
+        chunks: list[str] = []
+        for block in getattr(resp, "content", []) or []:
+            text = getattr(block, "text", None)
+            if text:
+                chunks.append(text)
+        text = "\n".join(chunks).strip()
+        if not text:
+            return None
+        intent = "ai_generic"
+        if "<BUG_FORM/>" in text:
+            text = text.replace("<BUG_FORM/>", "").strip()
+            intent = "bug_form"
+        return ChatReply(text=text, intent=intent)
+    except Exception as exc:
+        _logger.warning("AI chatbot call failed, falling back to rules: %s", exc)
+        return None
+
+
 def respond(message: str, lang: str = "en") -> ChatReply:
     """Produce a :class:`ChatReply` for ``message``.
 
-    The dispatcher is a cascade of cheap checks — greeting → gratitude →
-    troubleshooting → flow help → per-module help → requirement
-    clarification → default. The logic is intentionally conservative so
-    replies stay predictable and tests can assert them.
+    Dispatch order:
+      1. Empty / greeting / gratitude — cheap fast path.
+      2. Explicit bug-report trigger words — open the bug form.
+      3. Anthropic Claude (when ANTHROPIC_API_KEY is set).
+      4. Rule-based dispatcher (troubleshoot / module help / clarify).
     """
     raw = (message or "").strip()
     low = _norm(raw)
     if not low:
         return _default_help(lang)
 
-    # Greeting / gratitude (fast path)
+    # Greeting / gratitude (fast path) — cheap and deterministic, no AI
+    # round-trip needed.
     if _any(low, _GREETINGS) and len(low) < 40:
         return _greeting(lang)
     if _any(low, _GRATITUDE):
         return _gratitude(lang)
 
-    # Troubleshooting intent — anything that sounds like a failure
+    # Explicit bug-form trigger always wins so the user can shortcut to
+    # filing a report regardless of the rest of the message.
+    if _wants_bug_form(low):
+        return _bug_form_reply(lang)
+
+    # AI-backed reply (Anthropic Claude). Falls through to rule-based on
+    # any failure.
+    ai = _ai_respond(raw, lang)
+    if ai is not None:
+        return ai
+
+    # Troubleshooting intent — anything that sounds like a failure.
+    # Runs before module help so "Automation is broken" routes to the
+    # troubleshooter rather than the static help card.
     if _any(low, _BROKEN_EN) or _any(low, _BROKEN_UA):
         return _troubleshoot(lang, raw)
+
+    # Requirement shaping wins over module help so a clear "as a user…"
+    # phrase keeps clarifying questions even when it mentions a module
+    # name (e.g. "As a user I want to export reports").
+    if _any(low, _REQ_MARKERS_EN) or _any(low, _REQ_MARKERS_UA):
+        return _clarify_requirement(lang, raw)
 
     # Checkout-flow specific — always surface the playbook
     if _any(low, _MODULE_SYNONYMS["checkout_flow"]):
@@ -485,10 +1071,6 @@ def respond(message: str, lang: str = "en") -> ChatReply:
             continue  # already handled above
         if _any(low, syns):
             return _module_help(key, lang)
-
-    # Requirement shaping: user pasted something that looks like a story
-    if _any(low, _REQ_MARKERS_EN) or _any(low, _REQ_MARKERS_UA):
-        return _clarify_requirement(lang, raw)
 
     # "What can you do" / generic help
     if _any(low, _ASK_HELP_EN) or _any(low, _ASK_HELP_UA):

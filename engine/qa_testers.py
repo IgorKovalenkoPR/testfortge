@@ -281,12 +281,68 @@ def _generate_comment(status: str, summary: str, tester_name: str) -> str:
     return ""
 
 
+_NEGATION_TOKENS = (" no ", " not ", " never ", " without ", " cannot ", " can't ", " doesn't ", " don't ", " isn't ", " aren't ")
+
+
+def _has_existing_negation(text: str) -> bool:
+    """True when the sentence already contains a negation word.
+
+    Prevents the negator from producing double-negation summaries like
+    "has not no console errors" when the TC asserts a negative property
+    (e.g. "has no console errors", "cannot access", "without errors").
+    Surrounded with spaces so we don't match e.g. "innot" inside a word.
+    """
+    padded = " " + text.lower().strip() + " "
+    return any(tok in padded for tok in _NEGATION_TOKENS)
+
+
+def _negative_clause_bug_summary(s: str) -> str:
+    """Build a bug summary for a TC whose objective already negates.
+
+    Strategy: invert "no/not/cannot" to its positive form when we can,
+    otherwise prefix "Issue: " so we never emit "is not no" or
+    "does not cannot" garbage. Also prefer "and the page has no errors"
+    → "and the page has errors".
+    """
+    inversions = [
+        (r'\bhas no\b', 'has'),
+        (r'\bhave no\b', 'have'),
+        (r'\bwith no\b', 'with'),
+        (r'\bwithout\b', 'with'),
+        (r'\bcannot\b', 'can'),
+        (r"\bcan't\b", 'can'),
+        (r"\bdoesn't\b", 'does'),
+        (r"\bdon't\b", 'do'),
+        (r"\bisn't\b", 'is'),
+        (r"\baren't\b", 'are'),
+        (r'\bnever\b', ''),
+        (r'\bnot\b', ''),
+    ]
+    out = s
+    changed = False
+    for pat, repl in inversions:
+        new_s, count = re.subn(pat, repl, out, count=1, flags=re.I)
+        if count:
+            out = new_s
+            changed = True
+            break
+    out = re.sub(r'\s{2,}', ' ', out).strip()
+    if not changed or not out:
+        return f"Issue: {s.strip()}"
+    return out
+
+
 def _make_bug_summary(tc_summary: str) -> str:
     """Convert test case summary to bug summary (passive voice, negated).
 
     Example:
       TC:  'Verify that login is completed successfully with valid credentials'
       Bug: 'Login is not completed successfully with valid credentials'
+
+    Special case: if the TC already contains a negation word ("no",
+    "never", "cannot", "without", ...) we invert the existing negation
+    instead of stacking another "not" on top of it — otherwise we'd emit
+    nonsense like "has not no console errors" (BUG-001).
     """
     s = tc_summary.strip()
     # Strip "Verify that " prefix
@@ -295,6 +351,12 @@ def _make_bug_summary(tc_summary: str) -> str:
         s = s[len(prefix):]
     elif s.lower().startswith(prefix.lower()):
         s = s[len(prefix):]
+
+    if _has_existing_negation(s):
+        s = _negative_clause_bug_summary(s)
+        if s:
+            s = s[0].upper() + s[1:]
+        return s
 
     # Negate: insert "not" after first "is/are/can/should/does/has"
     patterns = [
@@ -339,7 +401,7 @@ def _make_bug_expected(tc_summary: str, tc_expected: str) -> str:
         # Ensure it uses "should" phrasing
         if not any(w in exp.lower() for w in ("should", "shall")):
             exp = exp.rstrip(".")
-            exp = f"The feature should work correctly: {exp}"
+            exp = f"The feature should behave as specified: {exp}"
         return exp
     # Fallback from summary
     s = tc_summary.strip()
@@ -358,10 +420,158 @@ def _severity_from_priority(priority: str) -> str:
     return {"High": "Major", "Medium": "Minor", "Low": "Trivial"}.get(priority, "Minor")
 
 
+# ── Steps / preconditions synthesis for ISTQB-compliant bug reports ──
+#
+# ISTQB Foundation Level mandates non-empty Preconditions and
+# Steps to Reproduce on every defect. The previous implementation
+# left both fields empty for any bug auto-created from a checklist
+# item (because checklist items themselves don't carry steps), making
+# those bugs un-actionable. The helpers below synthesise both fields
+# from whatever signal we have: the test case's own steps, the
+# checklist objective, the section/component, the run environment,
+# and the resource URL under test.
+
+def _split_env(environment: str) -> dict:
+    """Pull platform/browser/device/screen out of the joined env string.
+
+    ``environment`` is built upstream as ``"<platform> / <browser> / <device> / <screen>"``.
+    Falls back to whatever pieces are present so we never crash on a
+    short/legacy string.
+    """
+    parts = [p.strip() for p in (environment or "").split("/")]
+    while len(parts) < 4:
+        parts.append("")
+    return {"platform": parts[0], "browser": parts[1],
+            "device": parts[2], "screen": parts[3]}
+
+
+def _make_preconditions(item_type: str, section: str, environment: str,
+                        site_url: str, item_preconditions: str = "") -> str:
+    """Produce a non-empty ISTQB-style Preconditions block.
+
+    Honours the item's own preconditions when present (test cases ship
+    them, checklist items don't), then layers in environment + URL so
+    a developer can replicate without consulting any other artefact.
+    """
+    env = _split_env(environment)
+    pre_lines: list[str] = []
+    if item_preconditions and item_preconditions.strip():
+        pre_lines.append(item_preconditions.strip().rstrip("."))
+    if env["platform"] and env["browser"]:
+        pre_lines.append(
+            f"Test environment ready: {env['platform']} with {env['browser']} "
+            f"on {env['device'] or 'Desktop'} ({env['screen'] or 'default resolution'})"
+        )
+    elif environment:
+        pre_lines.append(f"Test environment ready: {environment}")
+    if site_url:
+        pre_lines.append(f"Application under test is reachable at {site_url}")
+    if section:
+        section_clean = section.strip()
+        pre_lines.append(f"User has access to the {section_clean} area of the application")
+    if not pre_lines:
+        pre_lines.append("Application is deployed to the test environment and reachable")
+    return "; ".join(pre_lines) + "."
+
+
+_VERB_HINTS = (
+    ("login", "submit valid credentials on the login form"),
+    ("log in", "submit valid credentials on the login form"),
+    ("sign in", "submit valid credentials on the sign-in form"),
+    ("sign up", "fill in the registration form"),
+    ("register", "fill in the registration form"),
+    ("search", "enter a query into the search field and submit"),
+    ("checkout", "add an item to the cart and proceed to checkout"),
+    ("payment", "proceed to the payment step and submit payment details"),
+    ("upload", "select a file using the file picker"),
+    ("download", "trigger the download action"),
+    ("filter", "apply a filter from the filter panel"),
+    ("sort", "select a sort option"),
+    ("password", "submit the password change form"),
+    ("email", "submit the email field"),
+)
+
+
+def _objective_to_action(objective: str) -> str:
+    """Translate a checklist objective into a step verb-phrase.
+
+    Looks up keyword hints first; otherwise echoes the objective as-is
+    with the leading "Verify that " stripped so the step reads like an
+    action a tester actually performs.
+    """
+    text = objective.strip().rstrip(".")
+    lower = text.lower()
+    for kw, action in _VERB_HINTS:
+        if kw in lower:
+            return action
+    # Strip "Verify that ..." → use the rest as a noun-phrase action.
+    for prefix in ("verify that ", "check that ", "ensure that ", "confirm that "):
+        if lower.startswith(prefix):
+            return f"perform the action: {text[len(prefix):]}"
+    return f"perform the action: {text}"
+
+
+def _make_steps_for_checklist(objective: str, section: str,
+                              environment: str, site_url: str) -> str:
+    """Build a numbered Steps-to-Reproduce list for a checklist-derived bug.
+
+    The previous version returned ``""`` here, which violated ISTQB's
+    mandatory-fields rule and made the bug un-actionable. Now we
+    always emit a 4-step recipe: open the URL, navigate to the area,
+    perform the action implied by the objective, observe the result.
+    """
+    env = _split_env(environment)
+    target = site_url or "the application under test"
+    browser = env["browser"] or "the browser"
+    section_clean = (section or "").strip() or "the relevant"
+    action = _objective_to_action(objective)
+
+    steps = [
+        f"Open {target} in {browser}.",
+        f"Navigate to the {section_clean} section/page.",
+        f"Attempt to {action}.",
+        "Observe the application's response.",
+    ]
+    return "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
+
+
+def _make_steps_for_testcase(test_steps: str, summary: str, section: str,
+                             environment: str, site_url: str) -> str:
+    """Normalise (or synthesise) a numbered step list for a TC bug.
+
+    Test cases generated by the Senior QA module already ship with
+    ``"1. Step\\n2. Step"`` text, but legacy/imported TCs sometimes
+    have a single-line blob or stray bullet markers. We delegate the
+    coercion to :func:`bug_report.normalize_steps_to_numbered_list`,
+    falling back to the checklist synthesiser when the field is empty.
+    """
+    from .bug_report import normalize_steps_to_numbered_list
+    normalised = normalize_steps_to_numbered_list(test_steps)
+    if normalised:
+        return normalised
+    return _make_steps_for_checklist(summary, section, environment, site_url)
+
+
+def _make_found_in_build(environment: str, run_iso_ts: str) -> str:
+    """Compose a build identifier from environment + run timestamp.
+
+    Format: ``"<platform>-<browser>@<YYYYMMDDTHHMM>"`` — short enough
+    for a Jira "Found in Build" cell, deterministic, and free of any
+    spaces so it's safe to use as a label or filter value.
+    """
+    env = _split_env(environment)
+    plat = (env["platform"] or "env").replace(" ", "")
+    brw = (env["browser"] or "browser").replace(" ", "")
+    ts = (run_iso_ts or "").replace("-", "").replace(":", "")[:13] or "now"
+    return f"{plat}-{brw}@{ts}"
+
+
 def execute_items(items: list, item_type: str, tester_id: str,
                   environment: str, testing_types: list[str],
                   selected_ids: list[str] | None = None,
-                  site_url: str = "") -> dict:
+                  site_url: str = "",
+                  manual_statuses: dict[str, str] | None = None,
+                  manual_bug_refs: dict[str, str] | None = None) -> dict:
     """Auto-execute test cases or checklist items.
 
     When *site_url* is provided the tester runs **real automated checks**
@@ -390,6 +600,14 @@ def execute_items(items: list, item_type: str, tester_id: str,
     site_url : str
         URL of the website under test.  When provided the engine
         will crawl the site and perform real HTTP/HTML checks.
+    manual_statuses : dict[str, str] | None
+        Per-item overrides of the form ``{item_id: "Passed"|"Failed"|"Blocked"}``.
+        Any item whose ID is a key here skips both the real-site runner and
+        the deterministic simulator and takes the mapped status as-is.
+    manual_bug_refs : dict[str, str] | None
+        Per-item map ``{item_id: existing_bug_id}``.  When present, the
+        result is stamped with the existing bug ID and NO new bug report
+        is generated for that item — even on Failed/Blocked.
 
     Returns
     -------
@@ -418,6 +636,10 @@ def execute_items(items: list, item_type: str, tester_id: str,
     bugs = []
     passed = failed = blocked = 0
     bug_counter = 0
+    # Bookkeeping so callers can flash an honest summary of how each
+    # status was decided — manual override, live HTTP check, or the
+    # deterministic fallback simulator.
+    sources = {"manual": 0, "real_check": 0, "simulated": 0}
 
     for item in items:
         item_id = item.get("id", "")
@@ -443,21 +665,36 @@ def execute_items(items: list, item_type: str, tester_id: str,
         category = item.get("category", "Positive")
         priority = item.get("priority", "Medium")
 
-        # ── Decide status: real check or simulation ───────────
+        # ── Decide status: manual override → real check → simulation ──
         status = ""
         comment = ""
+        source = ""  # "manual" | "real_check" | "simulated"
 
-        if runner and summary:
+        # Manual override wins: the tester set Pass/Fail/Blocked in the UI
+        # before hitting Run. Skips both the real runner and the simulator
+        # so the human verdict is always preserved.
+        if manual_statuses and item_id in manual_statuses:
+            mstatus = manual_statuses[item_id].strip()
+            if mstatus in ("Passed", "Failed", "Blocked"):
+                status = mstatus
+                comment = f"Status set manually by {tester_name}."
+                source = "manual"
+
+        if not status and runner and summary:
             check_key = runner.match_item(summary)
             if check_key and check_key in real_checks:
                 cr = real_checks[check_key]
                 status = cr.status                    # "Passed" or "Failed"
                 comment = cr.actual_result             # real description
+                source = "real_check"
 
         if not status:
             # Fallback: deterministic simulation
             status = _compute_status(summary, category, priority, tester_id, environment)
             comment = _generate_comment(status, summary, tester_name)
+            source = "simulated"
+
+        sources[source] = sources.get(source, 0) + 1
 
         # Track counts
         if status == "Passed":
@@ -478,15 +715,52 @@ def execute_items(items: list, item_type: str, tester_id: str,
             "comment": comment,
             "bug_id": "",
             "timestamp": now,
+            "source": source,
         }
 
-        # For Failed/Blocked: tester creates a bug report
+        # If the tester linked this result to an existing bug, reuse it
+        # rather than creating a new bug report.
+        if manual_bug_refs and item_id in manual_bug_refs:
+            ref = manual_bug_refs[item_id].strip()
+            if ref:
+                result_entry["bug_id"] = ref
+                results.append(result_entry)
+                continue
+
+        # For Failed/Blocked: tester creates a bug report.
+        # Every auto-generated defect must satisfy ISTQB's
+        # mandatory-fields contract — preconditions and steps to
+        # reproduce in particular were previously empty for any bug
+        # spawned from a failed checklist item, so we synthesise them
+        # here from the run context (objective + section + env + URL).
         if status in ("Failed", "Blocked"):
             bug_counter += 1
             bug_summary = _make_bug_summary(summary)
             bug_expected = _make_bug_expected(summary, expected)
             # Use real actual_result when available
             bug_actual = comment if comment else _make_bug_actual(bug_summary)
+
+            # Steps + preconditions: synthesise so they are NEVER empty.
+            if item_type == "test_case":
+                bug_steps = _make_steps_for_testcase(
+                    steps, summary, section, environment, site_url,
+                )
+            else:
+                bug_steps = _make_steps_for_checklist(
+                    summary, section, environment, site_url,
+                )
+            bug_preconditions = _make_preconditions(
+                item_type, section, environment, site_url, preconditions,
+            )
+
+            # Tag the bug with reproducibility + build metadata so the
+            # downstream Jira-style export and the in-app cards have
+            # every ISTQB-mandatory field filled.
+            labels = [item_type]
+            if category:
+                labels.append(f"category:{category.lower().replace(' ', '-')}")
+            if testing_types:
+                labels.extend(f"type:{t.lower().replace(' ', '-')}" for t in testing_types)
 
             bug = {
                 "id": "",  # assigned later with generate_bug_id
@@ -495,10 +769,14 @@ def execute_items(items: list, item_type: str, tester_id: str,
                 "priority": priority,
                 "status": "Open",
                 "environment": environment,
-                "preconditions": preconditions,
-                "steps_to_reproduce": steps,
+                "preconditions": bug_preconditions,
+                "steps_to_reproduce": bug_steps,
                 "actual_result": bug_actual,
                 "expected_result": bug_expected,
+                # ISTQB-mandatory metadata
+                "frequency": "Always",
+                "affects_version": "",        # filled by routes/execution.py
+                "found_in_build": _make_found_in_build(environment, now),
                 "attachments": [],
                 "linked_item_id": item_id,
                 "linked_item_type": item_type,
@@ -506,7 +784,7 @@ def execute_items(items: list, item_type: str, tester_id: str,
                 "assignee": "",
                 "created_at": now,
                 "component": section,
-                "labels": [],
+                "labels": labels,
                 "comment": comment if status == "Blocked" else "",
             }
             bugs.append(bug)
@@ -521,6 +799,8 @@ def execute_items(items: list, item_type: str, tester_id: str,
         "failed": failed,
         "blocked": blocked,
         "pass_rate": round(passed / total * 100, 1) if total else 0,
+        "sources": sources,
+        "site_url": site_url,
     }
 
     return {"results": results, "bugs": bugs, "stats": stats}

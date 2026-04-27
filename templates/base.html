@@ -4,16 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{% block title %}TestFortge{% endblock %}</title>
+    <title>{% block title %}TestForTge{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <nav class="sidebar">
-        <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestFortge — a Testfort product">
+        <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — Testfort + Forge">
             <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
-                 alt="" class="brand-icon" width="34" height="34">
-            <span class="brand-text">TestFortge</span>
+                 alt="" class="brand-icon" width="44" height="44">
+            {# Split wordmark: TestFor + sword-T + ge so both "Testfort" and
+               "Forge" are visually discoverable in the brand name.        #}
+            <span class="brand-text">
+                <span class="brand-primary">TestFor</span><span class="brand-sword">T</span><span class="brand-primary">ge</span>
+            </span>
         </a>
         <div class="lang-toggle">
             <a href="?lang=en" class="lang-btn {{ 'active' if lang=='en' }}">EN</a>
@@ -87,20 +91,34 @@
         {% block content %}{% endblock %}
     </main>
 
-    {# ── TestFortge Assistant (floating chatbot) ── #}
+    {# ── Back-to-Top button (appears after scrolling 400px) ── #}
+    <button type="button" id="back-to-top"
+            class="back-to-top"
+            aria-label="{{ t.get('back_to_top', 'Back to top') }}"
+            title="{{ t.get('back_to_top', 'Back to top') }}"
+            hidden>
+        <i data-lucide="arrow-up" class="icon-lg"></i>
+    </button>
+
+    {# ── Tedgie — TestForTge QA Assistant (floating chatbot) ── #}
     <div id="qa-chat"
          data-lang="{{ lang }}"
-         data-greeting="{{ t.get('chat_greeting', 'Hi! I am the TestFortge assistant. Ask me anything about Estimation, Test Cases, Checklist, Test Execution, Automation QA or Bug Reports.') }}">
-        <button type="button" class="qa-chat-toggle" aria-expanded="false"
-                aria-label="{{ t.get('chat_open', 'Open QA assistant') }}"
-                title="{{ t.get('chat_open', 'Open QA assistant') }}">
-            <i data-lucide="message-circle" class="icon-lg"></i>
+         data-greeting="{{ t.get('chat_greeting', 'Hi! I am Tedgie, the TestForTge QA Assistant. Ask me anything about Estimation, Test Cases, Checklist, Test Execution, Automation QA or Bug Reports.') }}">
+        <button type="button" class="qa-chat-toggle qa-chat-mascot" aria-expanded="false"
+                aria-label="{{ t.get('chat_open', 'Open Tedgie — QA assistant') }}"
+                title="{{ t.get('chat_open', 'Open Tedgie — QA assistant') }}">
+            <img src="{{ url_for('static', filename='img/tedgie.svg') }}"
+                 alt="" class="qa-chat-mascot-img" width="44" height="44">
         </button>
-        <div class="qa-chat-panel" role="dialog" aria-label="TestFortge Assistant">
+        <div class="qa-chat-panel" role="dialog" aria-label="Tedgie — Testfort QA Assistant">
             <div class="qa-chat-head">
-                <div>
-                    <strong>{{ t.get('chat_title', 'QA Assistant') }}</strong>
-                    <small>{{ t.get('chat_subtitle', 'Ask about modules or a requirement') }}</small>
+                <div class="qa-chat-headline">
+                    <img src="{{ url_for('static', filename='img/tedgie.svg') }}"
+                         alt="" class="qa-chat-mascot-sm" width="28" height="28">
+                    <div>
+                        <strong>{{ t.get('chat_title', 'Tedgie') }}</strong>
+                        <small>{{ t.get('chat_subtitle', 'TestForTge QA Assistant') }}</small>
+                    </div>
                 </div>
                 <div class="qa-chat-actions">
                     <button type="button" data-chat-reset

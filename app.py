@@ -13,6 +13,20 @@ hardening and CSRF wiring — lives in :mod:`config`. Uploads are bounded
 by MAX_CONTENT_LENGTH; payloads exceeding it return HTTP 413.
 """
 
+import os
+import mimetypes
+
+# Force-register the canonical MIME types for static assets BEFORE Flask
+# spins up. On Windows the `mimetypes` module reads from the registry and
+# we have seen `.js` mapped to `text/plain` on some boxes, which makes
+# Chrome block our app.js with a strict-MIME error and break the chat /
+# Back-to-Top widgets. Registering them at import time fixes that
+# regardless of the host's registry state.
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
+
 import markupsafe
 from flask import Flask, Response, g, request, session
 from flask_session import Session
@@ -21,6 +35,7 @@ from flask_wtf.csrf import CSRFError, generate_csrf
 from flask_compress import Compress
 
 import config as _config
+from engine import basic_auth
 from engine.i18n import get_lang
 from engine.log import get_logger
 from routes import register_all
@@ -38,6 +53,14 @@ Compress(app)
 # ``@csrf.exempt`` decorator; the default posture is "protect".
 csrf = CSRFProtect(app)
 SESSION_DIR = app.config["SESSION_FILE_DIR"]
+
+# HTTP Basic Auth gate. No-op unless TESTFORTGE_BASIC_USER and
+# TESTFORTGE_BASIC_PASSWORD are both set in the environment, in which
+# case the gate is registered as the very first ``before_request`` hook
+# so unauthenticated visitors never reach the session / i18n machinery.
+basic_auth.install(app)
+if basic_auth.is_enabled():
+    log.info("HTTP Basic Auth gate is active.")
 
 
 # ── Error handlers ───────────────────────────────────────────────
@@ -87,16 +110,20 @@ def nl2br_filter(s):
 
 @app.after_request
 def _apply_security_headers(resp):
-    # CSP allows self + inline styles (the current templates still rely on
-    # a couple of inline ``style=`` attributes and the Lucide icon
-    # initialiser). Tighten further once all inline styles are removed.
+    # CSP allows self + inline styles AND inline scripts. The templates rely
+    # on inline <script> blocks (drag-drop, tabs, run-detail toggles, the
+    # Lucide icon initialiser) and a number of inline ``onclick=`` handlers.
+    # Without 'unsafe-inline' on script-src those silently fail under modern
+    # browsers — leaving Drag & Drop / Upload / metric tabs / Test Execution
+    # toggles non-functional. Tighten with nonces once every inline script
+    # and onclick has been migrated to an external file.
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "script-src 'self' https://unpkg.com; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
         "connect-src 'self'; "
         "frame-ancestors 'none'",
     )
@@ -137,4 +164,12 @@ if __name__ == "__main__":
     # Debug mode is gated on the FLASK_DEBUG env var (loaded by config.py).
     # Never hard-code ``debug=True`` — the Werkzeug debugger exposes RCE
     # via the debugger PIN if it reaches a production host.
-    app.run(debug=_config.DEBUG, port=5000)
+    #
+    # Bind host: when TESTFORTGE_HOST is set we honour it (e.g. ``0.0.0.0``
+    # to expose on the LAN). Default stays loopback-only so a fresh clone
+    # never leaks to the network without an explicit opt-in. The Basic
+    # Auth gate (``engine.basic_auth``) is the second line of defence
+    # whenever the host is not 127.0.0.1.
+    host = os.environ.get("TESTFORTGE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.environ.get("TESTFORTGE_PORT", "5000"))
+    app.run(host=host, port=port, debug=_config.DEBUG)

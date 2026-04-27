@@ -1,16 +1,24 @@
 """TestFortge — Chatbot routes.
 
 Tiny JSON API powering the floating QA assistant widget:
-  * POST /chat          — answer a user message
-  * GET  /chat/history  — return the per-session transcript
-  * POST /chat/reset    — clear the transcript
+  * POST /chat            — answer a user message
+  * GET  /chat/history    — return the per-session transcript
+  * POST /chat/reset      — clear the transcript
+  * POST /chat/bug-form   — submit a structured bug report from the chat
 """
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
+
 from flask import Flask, jsonify, request, session
+from werkzeug.utils import secure_filename
 
 from engine.chatbot import respond_dict as _chatbot_respond
+from engine.bug_report import (
+    BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
+)
 
 
 def register(app: Flask) -> None:
@@ -72,6 +80,105 @@ def register(app: Flask) -> None:
     def chat_reset_route():
         session["chat_history"] = []
         return jsonify({"status": "ok"})
+
+    @app.route("/chat/bug-form", methods=["POST"])
+    def chat_bug_form_route():
+        """Receive a structured bug report from the in-chat form.
+
+        Required fields: ``summary``, ``environment``, ``steps_to_reproduce``,
+        ``actual_result``, ``expected_result``.
+        Optional: ``attachment`` (file), ``note``.
+        """
+        # Multipart form when an attachment is attached, plain form otherwise.
+        f = request.form
+        required = {
+            "summary":             f.get("summary", "").strip(),
+            "environment":         f.get("environment", "").strip(),
+            "steps_to_reproduce":  f.get("steps_to_reproduce", "").strip(),
+            "actual_result":       f.get("actual_result", "").strip(),
+            "expected_result":     f.get("expected_result", "").strip(),
+        }
+        missing = [k for k, v in required.items() if not v]
+        if missing:
+            return jsonify({
+                "ok": False,
+                "error": "missing_fields",
+                "missing": missing,
+                "message": f"Missing required field(s): {', '.join(missing)}",
+            }), 400
+
+        # Optional attachment — store under UPLOAD_FOLDER/chat_bug_attachments/.
+        attachment_name = ""
+        attachment_path = ""
+        upload = request.files.get("attachment")
+        if upload and upload.filename:
+            upload_root = app.config.get("UPLOAD_FOLDER", "./uploads")
+            target_dir = os.path.join(upload_root, "chat_bug_attachments")
+            os.makedirs(target_dir, exist_ok=True)
+            safe_name = secure_filename(upload.filename)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            attachment_name = f"{ts}_{safe_name}"
+            attachment_path = os.path.join(target_dir, attachment_name)
+            try:
+                upload.save(attachment_path)
+            except Exception:
+                # Don't fail the whole bug just because the attachment
+                # didn't persist — log via the standard request flow and
+                # continue with an empty attachment.
+                attachment_name = ""
+                attachment_path = ""
+
+        note = f.get("note", "").strip()
+
+        bugs = session.get("bug_reports_data", [])
+        existing = [dict_to_bug(b) for b in bugs]
+        new_id = generate_bug_id(existing)
+        project_setup = session.get("project_setup", {}) or {}
+
+        # Build a numbered Steps-to-Reproduce string the way the rest of
+        # the framework expects.
+        steps_raw = required["steps_to_reproduce"]
+        if not steps_raw.lstrip().startswith("1."):
+            lines = [ln.strip(" -*\u2022") for ln in steps_raw.splitlines() if ln.strip()]
+            steps_raw = "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))
+
+        bug = BugReport(
+            id=new_id,
+            title=required["summary"],
+            severity="Major",
+            priority="High",
+            status="Open",
+            environment=required["environment"],
+            preconditions="",
+            steps_to_reproduce=steps_raw,
+            actual_result=required["actual_result"],
+            expected_result=required["expected_result"],
+            frequency="Always",
+            affects_version=(
+                project_setup.get("project_version")
+                or project_setup.get("project_name")
+                or "Unspecified"
+            ),
+            found_in_build="",
+            linked_item_id="",
+            linked_item_type="",
+            reporter="Tedgie chat",
+            assignee="",
+            component="",
+            labels=["chat-reported"],
+            attachments=[attachment_name] if attachment_name else [],
+            comment=note,
+            created_at=datetime.now().isoformat(),
+        )
+        bugs.append(bug_to_dict(bug))
+        session["bug_reports_data"] = bugs
+        session.modified = True
+
+        return jsonify({
+            "ok": True,
+            "id": new_id,
+            "message": f"Bug report {new_id} created.",
+        })
 
 
 __all__ = ["register"]

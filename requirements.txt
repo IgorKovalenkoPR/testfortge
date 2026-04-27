@@ -11,3 +11,4 @@ markdown==3.7
 playwright==1.49.1
 beautifulsoup4==4.12.3
 requests==2.32.3
+anthropic==0.97.0

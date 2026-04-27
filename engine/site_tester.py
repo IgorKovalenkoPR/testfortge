@@ -597,7 +597,7 @@ class SiteTestRunner:
                 return CheckResult("Failed",
                     f"Heading hierarchy broken: H{levels[i-1]} followed by H{levels[i]} (skipped level)")
         return CheckResult("Passed",
-            f"Heading hierarchy is correct: 1 H1, {len(headings)} total headings")
+            f"Heading hierarchy is well-formed: exactly 1 H1 and no skipped levels across {len(headings)} headings")
 
     def check_logo_displayed(self) -> CheckResult:
         if not self.home:
@@ -946,7 +946,7 @@ class SiteTestRunner:
         if self.home.has_viewport_meta:
             return CheckResult("Passed", "Viewport meta tag is present (responsive-ready)")
         return CheckResult("Failed",
-            "No <meta name='viewport'> tag — page may not render correctly on mobile")
+            "No <meta name='viewport'> tag — the browser falls back to a desktop-width viewport, so text and controls appear zoomed-out on mobile")
 
     def check_og_tags(self) -> CheckResult:
         if not self.home:
@@ -1059,7 +1059,7 @@ class SiteTestRunner:
             has.append("footer")
         if len(has) >= 2:
             return CheckResult("Passed",
-                f"Semantic structure found in correct order: {' → '.join(has)}")
+                f"Semantic landmarks present in source order: {' → '.join(has)}")
         return CheckResult("Failed",
             f"Incomplete semantic structure (found: {', '.join(has) or 'none'}) — expected header, main, footer")
 

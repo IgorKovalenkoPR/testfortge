@@ -1,19 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" role="img" aria-label="TestFortge">
-  <title>TestFortge mark</title>
+<!-- Browser-tab favicon. Mirrors static/img/testfortge-mark.svg so the
+     tab icon, sidebar brand and any export header all read as the same
+     logo. Kept as a self-contained file (no external refs) so it works
+     when served from /static at any age of HTTP cache. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TestForTge">
+  <title>TestForTge mark</title>
   <defs>
-    <linearGradient id="tfgCoralMark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#FF865C"/>
-      <stop offset="100%" stop-color="#FF8A59"/>
+    <linearGradient id="tfgCoralFav" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFB288"/>
+      <stop offset="60%" stop-color="#FF865C"/>
+      <stop offset="100%" stop-color="#E8643A"/>
+    </linearGradient>
+    <linearGradient id="tfgBladeFav" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#F2F2F2"/>
+      <stop offset="100%" stop-color="#BDBDBD"/>
     </linearGradient>
   </defs>
+
   <!-- Shield -->
-  <path d="M28 5 L48 12 V28 C48 40 38 48 28 52 C18 48 8 40 8 28 V12 Z"
-        fill="#111111"/>
-  <!-- Anvil (forge) -->
-  <path d="M18 30 H38 L34 26 H22 Z" fill="#FFFFFF"/>
-  <rect x="25" y="30" width="6" height="10" fill="#FFFFFF"/>
-  <rect x="20" y="40" width="16" height="3" rx="1" fill="#FFFFFF"/>
-  <!-- Spark -->
-  <circle cx="40" cy="18" r="2.4" fill="url(#tfgCoralMark)"/>
+  <path d="M32 3 L57 12 V30 C57 44 46 54 32 60 C18 54 7 44 7 30 V12 Z"
+        fill="url(#tfgCoralFav)" stroke="#FFFFFF" stroke-width="1.5"/>
+
+  <!-- Sword-T crossguard -->
+  <rect x="17" y="17" width="30" height="6" rx="1" fill="#FFFFFF"/>
+  <polygon points="14,17 17,15 17,25 14,23" fill="#FFFFFF"/>
+  <polygon points="50,17 47,15 47,25 50,23" fill="#FFFFFF"/>
+
+  <!-- Blade -->
+  <polygon points="29,23 35,23 33,47 31,47" fill="url(#tfgBladeFav)" stroke="#FFFFFF" stroke-width="0.5"/>
+
+  <!-- Pommel -->
+  <circle cx="32" cy="15" r="2.2" fill="#FFFFFF"/>
+
+  <!-- Forge sparks -->
+  <circle cx="47" cy="42" r="1.8" fill="#FFEFA8"/>
+  <circle cx="50" cy="38" r="1.0" fill="#FFD56B"/>
 </svg>

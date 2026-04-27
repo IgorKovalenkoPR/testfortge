@@ -421,7 +421,7 @@ def recommend_focus_areas(ctx: ProjectContext, content_text: str = "") -> dict:
     if analysis["has_auth"] and not any("auth" in m.get("module", "").lower() for m in critical_modules):
         critical_modules.append({
             "module": "Authentication & Authorization",
-            "why": "Detected in your requirements. Incorrect auth logic can expose sensitive data."
+            "why": "Detected in your requirements. Flaws in auth logic (missing checks, broken session handling, token leakage) can expose sensitive data."
         })
     if analysis["has_payments"] and not any("payment" in m.get("module", "").lower() for m in critical_modules):
         critical_modules.append({

@@ -565,7 +565,7 @@ class BrowserTestRunner:
                         severity="Minor",
                         status="Passed",
                         page_url=url,
-                        description="Tab navigation through form fields works correctly",
+                        description="Tab key moves focus through input, textarea and select fields in the order they appear in the DOM",
                     ))
             except Exception:
                 pass

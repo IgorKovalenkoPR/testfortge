@@ -64,8 +64,37 @@ a:hover { text-decoration: underline; }
     border-bottom: 1px solid rgba(255,255,255,.1);
     margin-bottom: .5rem;
 }
-.brand-icon { font-size: 1.5rem; }
-.brand-text { font-size: 1.2rem; font-weight: 700; color: #fff; }
+.brand-icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    /* Soft coral glow so the mark stays visible on any dark sidebar shade. */
+    filter: drop-shadow(0 2px 6px rgba(255, 134, 92, .35));
+}
+.brand-text {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    display: inline-flex;
+    align-items: baseline;
+}
+.brand-text .brand-primary { color: #FFFFFF; }
+.brand-text .brand-sword {
+    /* Sword-T: taller, coral, with a crossguard-like top border so the
+       letter silhouette reads as a sword sitting inside the wordmark.   */
+    display: inline-block;
+    padding: 0 2px;
+    font-size: 1.6rem;
+    font-weight: 900;
+    color: #FF865C;
+    text-shadow: 0 1px 0 #E8643A;
+    border-top: 3px solid #FF865C;
+    border-radius: 1px;
+    line-height: .85;
+    transform: translateY(1px);
+}
 
 .nav-steps { list-style: none; flex: 1; }
 .nav-steps li a {
@@ -274,7 +303,24 @@ select { cursor: pointer; }
 }
 .file-upload-area:hover, .file-upload-area.drag-over { border-color: var(--primary); background: var(--primary-light); }
 .upload-icon { font-size: 2rem; margin-bottom: .5rem; }
-.file-input-hidden { display: none; }
+/* Visually-hidden pattern — keeps the <input type="file"> in the DOM so
+   input.click() reliably opens the picker. Some browsers (Firefox,
+   Safari) silently ignore .click() on display:none inputs. Pointer
+   events are disabled so the hidden input never swallows clicks meant
+   for the surrounding drop zone. */
+.file-input-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+}
 .file-list { margin-top: .5rem; }
 .file-item { padding: .3rem .6rem; background: var(--border-light); border-radius: 4px; margin: .3rem 0; font-size: .85rem; }
 
@@ -803,6 +849,9 @@ input[type="date"]:focus {
 /* ── Form row 5 columns ──────────────────────────────────────── */
 .form-row-5 { display: flex; gap: .75rem; }
 .form-row-5 > .form-group { flex: 1; min-width: 0; }
+/* Give text inputs (like "Project name") roughly twice the width of
+   the sibling numeric inputs so their placeholders/values don't clip. */
+.form-row-5 > .form-group.form-col-wide { flex: 2; }
 
 input[type="number"] {
     width: 100%;
@@ -1164,8 +1213,8 @@ input[type="number"]:focus {
 
 .qa-chat-panel {
   position: fixed; right: 20px; bottom: 20px; z-index: 9999;
-  width: 360px; max-width: calc(100vw - 40px);
-  height: 520px; max-height: calc(100vh - 40px);
+  width: 400px; max-width: calc(100vw - 40px);
+  height: 560px; max-height: calc(100vh - 40px);
   background: #fff; border-radius: 14px;
   box-shadow: 0 20px 60px rgba(22,28,45,.22);
   display: none; flex-direction: column; overflow: hidden;
@@ -1218,8 +1267,10 @@ input[type="number"]:focus {
   padding: .5rem .6rem; display: flex; gap: .4rem; align-items: center;
 }
 .qa-chat-foot input {
-  flex: 1; border: 1px solid #dbdee7; border-radius: 8px;
-  padding: .5rem .7rem; font-size: .9rem; outline: none;
+  flex: 1 1 auto; min-width: 0; width: 100%;
+  border: 1px solid #dbdee7; border-radius: 8px;
+  padding: .5rem .7rem; font-size: .88rem; outline: none;
+  text-overflow: ellipsis;
 }
 .qa-chat-foot input:focus { border-color: #7c4dff; box-shadow: 0 0 0 3px rgba(124,77,255,.15); }
 .qa-chat-foot button {
@@ -1588,7 +1639,166 @@ input[type="text"]:focus, textarea:focus, select:focus {
     transform-origin: 50% 50%;
 }
 
+/* ── Tedgie chat mascot ────────────────────────────────────────── */
+.qa-chat-toggle.qa-chat-mascot {
+    /* Override default circular icon button so the armadillo stands out. */
+    background: #FFF8EB;
+    border: 2px solid #1F3864;
+    padding: 4px;
+}
+.qa-chat-toggle.qa-chat-mascot:hover { background: #FFF3D6; }
+.qa-chat-mascot-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    /* Tiny idle wiggle so users notice the mascot is interactive. */
+    animation: tedgie-wiggle 4s ease-in-out infinite;
+    transform-origin: 50% 65%;
+}
+@keyframes tedgie-wiggle {
+    0%, 80%, 100% { transform: rotate(0deg); }
+    85% { transform: rotate(-6deg); }
+    92% { transform: rotate(4deg); }
+}
+.qa-chat-headline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.qa-chat-mascot-sm {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
+
+/* Bug-form widget rendered inside the chat panel */
+.qa-chat-bugform {
+    background: #FFF8EB;
+    border: 1px solid #E0CDA8;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.qa-chat-bugform legend {
+    font-weight: 600;
+    color: #1F3864;
+    margin-bottom: 2px;
+    display: block;
+}
+.qa-chat-bugform label {
+    display: flex;
+    flex-direction: column;
+    font-size: .85rem;
+    color: #404040;
+    gap: 2px;
+}
+.qa-chat-bugform input[type=text],
+.qa-chat-bugform textarea,
+.qa-chat-bugform input[type=file] {
+    font: inherit;
+    padding: 6px 8px;
+    border: 1px solid #C9C9C9;
+    border-radius: 6px;
+    background: #fff;
+    width: 100%;
+    box-sizing: border-box;
+}
+.qa-chat-bugform textarea {
+    min-height: 56px;
+    resize: vertical;
+}
+.qa-chat-bugform .qa-bug-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.qa-chat-bugform button {
+    font: inherit;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+}
+.qa-chat-bugform button[type=submit] {
+    background: var(--tf-coral, #FF865C);
+    background-image: var(--tf-coral-grad, linear-gradient(135deg, #FF865C 0%, #FF8A59 100%));
+    color: #fff;
+    border-radius: var(--tf-radius-pill, 999px);
+    font-family: var(--tf-font-heading, inherit);
+    font-weight: 600;
+    padding: 6px 16px;
+    box-shadow: 0 2px 8px rgba(255, 134, 92, .25);
+}
+.qa-chat-bugform button[type=submit]:hover {
+    background: var(--tf-coral-hover, #FF6A36);
+    background-image: none;
+    box-shadow: 0 4px 12px rgba(255, 134, 92, .35);
+}
+.qa-chat-bugform button[type=submit]:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+.qa-chat-bugform button[type=button] {
+    background: #fff;
+    color: #404040;
+    border-color: #C9C9C9;
+}
+.qa-chat-bugform .qa-bug-error {
+    color: #B23C2D;
+    font-size: .8rem;
+}
+
+/* ── Back-to-Top button ───────────────────────────────────────── */
+.back-to-top {
+    position: fixed;
+    right: 24px;
+    /* Sit just above the chat toggle (which lives at bottom: 24px and is
+       roughly 56px tall + 16px gap). */
+    bottom: 96px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: var(--tf-coral, #FF865C);
+    background-image: var(--tf-coral-grad, linear-gradient(135deg, #FF865C 0%, #FF8A59 100%));
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(255, 134, 92, 0.32);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 998;             /* below chat panel (1000) but above content */
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .2s ease, transform .2s ease, background-color .15s ease, box-shadow .15s ease;
+    pointer-events: none;
+}
+.back-to-top[hidden] { display: none; }
+.back-to-top.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+.back-to-top:hover  {
+    background: var(--tf-coral-hover, #FF6A36);
+    box-shadow: 0 6px 18px rgba(255, 134, 92, .42);
+}
+.back-to-top:focus-visible {
+    outline: 3px solid var(--tf-coral-soft, #FFE9DE);
+    outline-offset: 2px;
+}
+.back-to-top svg,
+.back-to-top i,
+.back-to-top svg * { color: #fff; stroke: #fff; }
+.back-to-top svg { width: 22px; height: 22px; }
+
 /* ── Print override ───────────────────────────────────────────── */
 @media print {
-    .qa-chat-toggle, .qa-chat-panel { display: none !important; }
+    .qa-chat-toggle, .qa-chat-panel, .back-to-top { display: none !important; }
 }

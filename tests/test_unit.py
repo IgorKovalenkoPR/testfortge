@@ -108,13 +108,39 @@ class TestProfessionalChecklist:
         items = generate_professional_checklist(analysis)
         assert len(items) >= 50  # web_general has 76 checks
 
-    def test_all_items_start_with_verify(self):
+    def test_all_items_start_with_action_verb(self):
+        """Every checklist objective must open with a concrete action verb.
+
+        The original rule was ``startswith('Verify that')``; it was relaxed
+        after bug-report #7 asked us to use real interaction verbs
+        (``Click``, ``Tap``, ``Enter``, ``Open``, ``Rotate`` …) in the
+        steps rather than dressing every line in ``Verify that``. The test
+        now accepts any verb from the canonical action-verb whitelist, so
+        legitimate verb-led phrasing ("Click every menu item and verify …")
+        passes while abstract stubs like "System should behave correctly"
+        still fail.
+        """
         from engine.qa_persona import analyze_input, generate_professional_checklist
+
+        ACTION_VERBS = {
+            "Verify", "Click", "Tap", "Enter", "Type", "Fill", "Open", "Close",
+            "Submit", "Select", "Choose", "Navigate", "Visit", "Resize",
+            "Rotate", "Load", "Reload", "Refresh", "Scroll", "Hover", "Drag",
+            "Drop", "Focus", "Press", "Attempt", "Log", "Sign", "Check",
+            "Inspect", "Confirm", "Ensure", "Observe", "Read", "Count",
+            "Compare", "Measure", "Test", "Try", "Paste", "Clear", "Toggle",
+            "Simulate", "Capture", "Locate", "Search", "Crawl", "Fetch",
+            "Switch", "Restart", "Disable", "Enable", "Record", "Run", "Set",
+            "Apply", "Remove", "Add", "Download", "Upload",
+        }
         analysis = analyze_input([{"text": "https://example.com"}])
         items = generate_professional_checklist(analysis)
         for item in items:
-            assert item.objective.startswith("Verify that"), \
-                f"Bad objective: {item.objective[:80]}"
+            first = item.objective.split(None, 1)[0] if item.objective else ""
+            assert first in ACTION_VERBS, (
+                f"Objective does not start with an action verb: "
+                f"{item.objective[:80]!r}"
+            )
 
     def test_auth_checks_included_for_login(self):
         from engine.qa_persona import analyze_input, generate_professional_checklist
@@ -566,3 +592,134 @@ class TestQATeamLeadReview:
         )
         _, report = review_test_cases([tc])
         assert 0 <= report.quality_score <= 100
+
+
+# ═══════════════════════════════════════════════════════════════════
+# bug_report — ISTQB-mandatory metadata + step normalisation
+# ═══════════════════════════════════════════════════════════════════
+
+class TestBugReportSerialisation:
+    """ISTQB metadata fields must round-trip cleanly through dict/session."""
+
+    def test_round_trip_preserves_istqb_fields(self):
+        from engine.bug_report import BugReport, bug_to_dict, dict_to_bug
+        bug = BugReport(
+            id="BUG-001", title="Login does not accept valid credentials",
+            severity="Major", priority="High", status="Open",
+            environment="Windows 11 / Chrome / Desktop / 1920x1080",
+            preconditions="User account exists; site reachable.",
+            steps_to_reproduce="1. Open site\n2. Submit credentials",
+            actual_result="Login fails with 500.",
+            expected_result="User is redirected to dashboard.",
+            frequency="Always", affects_version="v1.0",
+            found_in_build="Windows11-Chrome@20260424T1500",
+            labels=["test_case", "category:negative"],
+        )
+        round_tripped = dict_to_bug(bug_to_dict(bug))
+        assert round_tripped.frequency == "Always"
+        assert round_tripped.affects_version == "v1.0"
+        assert round_tripped.found_in_build == "Windows11-Chrome@20260424T1500"
+        assert round_tripped.labels == ["test_case", "category:negative"]
+
+    def test_legacy_dict_loads_with_defaults(self):
+        """A bug snapshot saved before ISTQB fields existed must still load."""
+        from engine.bug_report import dict_to_bug
+        legacy = {
+            "id": "BUG-001", "title": "x", "severity": "Minor",
+            "priority": "Medium", "status": "Open", "environment": "",
+            "preconditions": "", "steps_to_reproduce": "",
+            "actual_result": "x", "expected_result": "y",
+        }
+        bug = dict_to_bug(legacy)
+        assert bug.frequency == "Always"
+        assert bug.affects_version == ""
+        assert bug.found_in_build == ""
+
+
+class TestStepsNormalisation:
+    """Free-form step blobs must coerce to a clean numbered list."""
+
+    def test_already_numbered_passes_through(self):
+        from engine.bug_report import normalize_steps_to_numbered_list
+        out = normalize_steps_to_numbered_list("1. Open page\n2. Click button\n3. Observe")
+        assert out == "1. Open page\n2. Click button\n3. Observe"
+
+    def test_inline_numbered_splits_correctly(self):
+        from engine.bug_report import normalize_steps_to_numbered_list
+        out = normalize_steps_to_numbered_list("1. Open page 2. Click button 3. Observe")
+        # All three steps must end up on their own lines.
+        assert out.count("\n") == 2
+        assert out.startswith("1. ")
+        assert "2. Click button" in out
+
+    def test_bulleted_input_renumbered(self):
+        from engine.bug_report import normalize_steps_to_numbered_list
+        out = normalize_steps_to_numbered_list("- Open page\n- Click button\n* Observe")
+        assert out.startswith("1. Open page")
+        assert "2. Click button" in out
+        assert "3. Observe" in out
+
+    def test_single_sentence_becomes_one_step(self):
+        from engine.bug_report import normalize_steps_to_numbered_list
+        out = normalize_steps_to_numbered_list("User attempts to log in.")
+        assert out == "1. User attempts to log in"
+
+    def test_empty_returns_empty(self):
+        from engine.bug_report import normalize_steps_to_numbered_list
+        assert normalize_steps_to_numbered_list("") == ""
+        assert normalize_steps_to_numbered_list("   \n  ") == ""
+
+
+class TestBugSynthesisFromChecklist:
+    """The previous bug — checklist-derived bugs had empty Steps to
+    Reproduce — is the regression this whole feature is closing. Pin
+    it so the field can never silently go empty again."""
+
+    def test_checklist_steps_are_never_empty(self):
+        from engine.qa_testers import _make_steps_for_checklist
+        steps = _make_steps_for_checklist(
+            objective="Verify that the search bar accepts long queries",
+            section="Search",
+            environment="Windows 11 / Chrome / Desktop / 1920x1080",
+            site_url="https://example.com",
+        )
+        assert steps  # non-empty
+        assert steps.startswith("1. ")
+        # Must mention the URL, the section, and end with an observation.
+        assert "https://example.com" in steps
+        assert "Search" in steps
+        assert "Observe" in steps.splitlines()[-1] or "observe" in steps.splitlines()[-1].lower()
+
+    def test_checklist_preconditions_are_never_empty(self):
+        from engine.qa_testers import _make_preconditions
+        pre = _make_preconditions(
+            item_type="checklist", section="Auth",
+            environment="Windows / Chrome / Desktop / 1920x1080",
+            site_url="https://example.com", item_preconditions="",
+        )
+        assert pre.endswith(".")
+        assert "https://example.com" in pre
+        # Should mention the platform/browser combo so a developer can
+        # replicate the run without consulting the original test plan.
+        assert "Chrome" in pre
+
+    def test_objective_keyword_picks_specific_action(self):
+        from engine.qa_testers import _make_steps_for_checklist
+        login_steps = _make_steps_for_checklist(
+            "Verify login works for valid credentials",
+            "Auth", "Win / Chrome / Desktop / 1920x1080", "https://x.com",
+        )
+        # The keyword "login" should yield the credentials-submission
+        # action, not the generic "perform the action: ..." fallback.
+        assert "credentials" in login_steps.lower()
+
+    def test_found_in_build_format(self):
+        from engine.qa_testers import _make_found_in_build
+        out = _make_found_in_build(
+            "Windows 11 / Chrome / Desktop / 1920x1080",
+            "2026-04-25T15:30:00+00:00",
+        )
+        # Format: <plat>-<browser>@<YYYYMMDDTHHMM>, no spaces.
+        assert " " not in out
+        assert "@" in out
+        assert out.startswith("Windows11-Chrome")

@@ -140,8 +140,12 @@ class AutomationRunner:
         # In headed mode we visibly slow the browser so the user can see
         # clicks / fills / navigations happen. In headless mode we don't
         # need the extra delay.
-        self.slow_mo_ms = slow_mo_ms if slow_mo_ms is not None else (250 if not headless else 0)
-        self.step_pause_ms = step_pause_ms if step_pause_ms is not None else (400 if not headless else 0)
+        # In headed mode we visibly slow the browser so the user can see
+        # clicks / fills / navigations happen. 500ms slow_mo + 700ms step
+        # pause is the smallest pair that makes activity legible without
+        # making the run feel sluggish.
+        self.slow_mo_ms = slow_mo_ms if slow_mo_ms is not None else (500 if not headless else 0)
+        self.step_pause_ms = step_pause_ms if step_pause_ms is not None else (700 if not headless else 0)
         self.credentials = credentials
         # Set to True once we've successfully authenticated inside a
         # browser context; the login sequence only needs to run once per
@@ -171,9 +175,36 @@ class AutomationRunner:
         )
         t0 = time.time()
 
+        # Launch args. In headed mode we ask Chrome to start maximised so
+        # the window is large and obvious; we also disable the
+        # "Chrome is being controlled by automated software" infobar that
+        # otherwise overlays the page (Playwright's default
+        # `--enable-automation` flag is what triggers it).
+        launch_args: list[str] = []
+        if not self.headless:
+            launch_args = [
+                "--start-maximized",
+                "--disable-blink-features=AutomationControlled",
+            ]
+
+        _logger.info(
+            "automation: launching chromium (headless=%s, slow_mo=%dms, "
+            "step_pause=%dms, scripts=%d, base_url=%s)",
+            self.headless, self.slow_mo_ms, self.step_pause_ms,
+            len(scripts), self.base_url or "<none>",
+        )
+
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless, slow_mo=self.slow_mo_ms)
+            browser = p.chromium.launch(
+                headless=self.headless,
+                slow_mo=self.slow_mo_ms,
+                args=launch_args,
+            )
             try:
+                # In headed mode give the user ~1 second to notice the
+                # window appearing before we start firing test cases at it.
+                if not self.headless:
+                    time.sleep(1.0)
                 for script in scripts:
                     sr = self._run_script(browser, script, run_dir)
                     report.scripts.append(sr)
@@ -194,13 +225,29 @@ class AutomationRunner:
         result = ScriptResult(tc_id=script.tc_id, summary=script.summary, status="passed")
         console_errors: list[str] = []
 
-        ctx_kwargs = dict(viewport={"width": self.viewport[0], "height": self.viewport[1]})
-        if self.record_video:
-            ctx_kwargs["record_video_dir"] = tc_dir
-            ctx_kwargs["record_video_size"] = {"width": self.viewport[0], "height": self.viewport[1]}
+        # In headed mode let the maximised window own the viewport so the
+        # user sees the real browser size. In headless mode we pin a
+        # 1280x800 viewport for stable screenshots/videos.
+        if self.headless:
+            ctx_kwargs = dict(viewport={"width": self.viewport[0], "height": self.viewport[1]})
+            if self.record_video:
+                ctx_kwargs["record_video_dir"] = tc_dir
+                ctx_kwargs["record_video_size"] = {"width": self.viewport[0], "height": self.viewport[1]}
+        else:
+            ctx_kwargs = dict(no_viewport=True)
+            if self.record_video:
+                ctx_kwargs["record_video_dir"] = tc_dir
+                ctx_kwargs["record_video_size"] = {"width": 1280, "height": 800}
 
         context = browser.new_context(**ctx_kwargs)
         page = context.new_page()
+        # In headed mode raise the window/tab to the front so it isn't
+        # hidden behind the IDE / Flask console when the run starts.
+        if not self.headless:
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
         page.set_default_timeout(self.default_timeout_ms)
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         page.on("pageerror", lambda exc: console_errors.append(str(exc)))
@@ -254,7 +301,27 @@ class AutomationRunner:
             sr.screenshot_before = _rel_url(before_path, self.storage_root)
 
             if step.action == "goto":
-                page.goto(step.target or self.base_url, wait_until="domcontentloaded")
+                # Make sure the window is in front before each navigation so
+                # the user actually sees the page load in headed mode.
+                if not self.headless:
+                    try: page.bring_to_front()
+                    except Exception: pass
+                target_url = step.target or self.base_url
+                if not target_url or not target_url.strip():
+                    raise AssertionError(
+                        "No URL to navigate to. Set 'Base URL' on the "
+                        "Automation page or include a URL in the test case."
+                    )
+                # Reject obviously malformed URLs early so Playwright
+                # doesn't error with "navigating to <garbage>" — see
+                # BUG-018 in the self-audit report.
+                if not (target_url.startswith("http://")
+                        or target_url.startswith("https://")):
+                    raise AssertionError(
+                        f"Invalid URL (must start with http:// or https://): "
+                        f"{target_url!r}"
+                    )
+                page.goto(target_url, wait_until="domcontentloaded")
                 # In headed mode perform a visible scroll so the user sees page activity
                 self._visible_scroll(page)
             elif step.action == "click":
@@ -333,6 +400,12 @@ class AutomationRunner:
             pass
         if self.headless:
             return
+        # Raise the window in headed mode so the highlight is visible
+        # even if the IDE / Flask console grabbed focus.
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
         try:
             # Highlight via inline style; revert shortly after.
             loc.evaluate(

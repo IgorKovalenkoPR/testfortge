@@ -1,47 +1,62 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 56" role="img" aria-label="TestFortge — a Testfort product">
-  <title>TestFortge</title>
-  <desc>Wordmark. &quot;TestFort&quot; in Testfort charcoal reads as the parent brand; the &quot;ge&quot; suffix in coral accent indicates the Forge product line.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" role="img" aria-label="TestForTge — Testfort + Forge">
+  <title>TestForTge</title>
+  <desc>Wordmark. "TestFor" reads as the Testfort heritage; a sword-shaped capital T bridges both halves so that reading from the right gives "TestFort" and reading leftward from the sword gives "Forge" with the "ge" suffix.</desc>
 
   <defs>
-    <linearGradient id="tfgCoral" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#FF865C"/>
-      <stop offset="100%" stop-color="#FF8A59"/>
+    <linearGradient id="tfgCoralWord" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFB288"/>
+      <stop offset="100%" stop-color="#E8643A"/>
     </linearGradient>
-
-    <!-- Subtle anvil/spark mark that evokes &quot;forge&quot; -->
-    <symbol id="tfgMark" viewBox="0 0 56 56">
-      <!-- Shield outline (Testfort heritage) -->
-      <path d="M28 5 L48 12 V28 C48 40 38 48 28 52 C18 48 8 40 8 28 V12 Z"
-            fill="#111111"/>
-      <!-- Forge anvil inside the shield -->
-      <path d="M18 30 H38 L34 26 H22 Z" fill="#FFFFFF"/>
-      <rect x="25" y="30" width="6" height="10" fill="#FFFFFF"/>
-      <rect x="20" y="40" width="16" height="3" rx="1" fill="#FFFFFF"/>
-      <!-- Spark accent -->
-      <circle cx="40" cy="18" r="2.2" fill="url(#tfgCoral)"/>
-    </symbol>
+    <linearGradient id="tfgBlade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="50%" stop-color="#E8ECF2"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
   </defs>
 
-  <!-- Left brand mark -->
-  <use href="#tfgMark" x="0" y="0" width="56" height="56"/>
-
-  <!-- Wordmark: TestFort in charcoal, ge in coral -->
-  <g font-family="'Poppins','Montserrat',system-ui,sans-serif"
-     font-weight="700"
-     font-size="32"
-     letter-spacing="-0.5">
-    <text x="66" y="38" fill="#111111">TestFort</text>
-    <text x="210" y="38" fill="url(#tfgCoral)">ge</text>
+  <!-- Left mark: shield + sword -->
+  <g>
+    <path d="M32 3 L57 12 V30 C57 44 46 54 32 60 C18 54 7 44 7 30 V12 Z"
+          fill="#FF865C"/>
+    <rect x="17" y="17" width="30" height="6" rx="1" fill="#FFFFFF"/>
+    <polygon points="14,17 17,15 17,25 14,23" fill="#FFFFFF"/>
+    <polygon points="50,17 47,15 47,25 50,23" fill="#FFFFFF"/>
+    <polygon points="29,23 35,23 33,47 31,47" fill="url(#tfgBlade)" stroke="#FFFFFF" stroke-width="0.4"/>
+    <circle cx="32" cy="15" r="2.2" fill="#FFFFFF"/>
   </g>
 
-  <!-- Small product descriptor under the wordmark -->
-  <text x="66" y="50"
+  <!-- Wordmark -->
+  <g font-family="'Poppins','Montserrat',system-ui,sans-serif"
+     font-weight="700"
+     font-size="30"
+     letter-spacing="-0.5">
+    <!-- "TestFor" in charcoal (the Testfort half, minus the final T) -->
+    <text x="74" y="40" fill="#111111">TestFor</text>
+    <!-- Sword-T: a larger, coral capital T that doubles as the sword
+         — the crossguard reads as the T's horizontal bar.            -->
+    <g transform="translate(188, 10)">
+      <!-- Pommel -->
+      <circle cx="16" cy="4" r="2.2" fill="#E8643A"/>
+      <!-- Crossguard -->
+      <rect x="2" y="8" width="28" height="6" rx="1" fill="url(#tfgCoralWord)"/>
+      <polygon points="0,8 2,6 2,16 0,14" fill="url(#tfgCoralWord)"/>
+      <polygon points="32,8 30,6 30,16 32,14" fill="url(#tfgCoralWord)"/>
+      <!-- Blade -->
+      <polygon points="13,14 19,14 17,42 15,42" fill="url(#tfgCoralWord)" stroke="#E8643A" stroke-width="0.4"/>
+    </g>
+    <!-- "ge" in coral — closes the "Forge" read if you scan right-to-left
+         from the sword-T back through "For". -->
+    <text x="228" y="40" fill="url(#tfgCoralWord)">ge</text>
+  </g>
+
+  <!-- Two-word hint -->
+  <text x="74" y="56"
         font-family="'Poppins',system-ui,sans-serif"
-        font-size="8"
+        font-size="7"
         font-weight="500"
         letter-spacing="3"
-        fill="#828282">
-    A TESTFORT PRODUCT
+        fill="#94A3B8">
+    TESTFORT  +  FORGE
   </text>
 </svg>

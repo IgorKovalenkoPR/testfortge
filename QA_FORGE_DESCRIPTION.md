@@ -183,9 +183,9 @@ A compact testing checklist for faster execution:
 **TestFort ID Format:** `{PREFIX}_{number}` — e.g., AUTH_001, CRT_002, SRCH_001
 
 **Per User Story generates:**
-1. Positive check: "Verify that [action] works correctly with valid data"
-2. Negative check: "Verify that [action] rejects invalid/empty input"
-3. Edge case check: "Verify that [action] handles boundary values"
+1. Positive check: "Verify that [action] completes with HTTP 2xx and the promised UI change when given valid data"
+2. Negative check: "Verify that [action] returns HTTP 4xx (or blocks client-side) when given invalid or empty input"
+3. Edge case check: "Verify that [action] accepts the documented minimum/maximum values and Unicode payloads without data loss"
 4. Acceptance criteria checks (up to 3 from the story)
 
 **Each item contains:**

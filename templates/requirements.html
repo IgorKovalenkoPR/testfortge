@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}TestFortge — {{ t.req_title }}{% endblock %}
+{% block title %}TestForTge — {{ t.req_title }}{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -59,29 +59,100 @@
 
 {% block scripts %}
 <script>
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('req_files');
-const fileList = document.getElementById('fileList');
-
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    fileInput.files = e.dataTransfer.files;
-    showFiles(fileInput.files);
-});
-fileInput.addEventListener('change', () => showFiles(fileInput.files));
-
-function showFiles(files) {
-    fileList.innerHTML = '';
-    for (const f of files) {
-        const div = document.createElement('div');
-        div.className = 'file-item';
-        div.textContent = `${f.name} (${(f.size/1024).toFixed(1)} KB)`;
-        fileList.appendChild(div);
+/* Same hardened drag-and-drop pattern as templates/_input_block.html.
+   See that file for the why — summary:
+     1. Block the browser's default file-drop behaviour at the window
+        level (otherwise the file opens in a new tab when the drop
+        lands outside — or slightly outside — the drop zone).
+     2. Use a visually-hidden-but-not-display:none file input so
+        programmatic .click() works in Firefox / Safari.             */
+(function () {
+    if (!window.__tfgeDropGuardInstalled) {
+        window.__tfgeDropGuardInstalled = true;
+        ['dragover', 'drop'].forEach(function (evt) {
+            window.addEventListener(evt, function (ev) {
+                var inZone = ev.target && ev.target.closest &&
+                             ev.target.closest('.file-upload-area');
+                if (!inZone) {
+                    ev.preventDefault();
+                }
+            }, false);
+        });
     }
-}
+
+    var zone   = document.getElementById('dropZone');
+    var input  = document.getElementById('req_files');
+    var listEl = document.getElementById('fileList');
+    if (!zone || !input || !listEl) return;
+    if (zone.dataset.tfgeBound === '1') return;
+    zone.dataset.tfgeBound = '1';
+
+    function humanSize(bytes) {
+        return bytes < 1024 * 1024
+            ? (bytes / 1024).toFixed(1) + ' KB'
+            : (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function render() {
+        listEl.innerHTML = '';
+        Array.from(input.files).forEach(function (f) {
+            var row = document.createElement('div');
+            row.className = 'file-item';
+            row.innerHTML =
+                '<span class="file-name"></span><span class="file-size"></span>';
+            row.querySelector('.file-name').textContent = f.name;
+            row.querySelector('.file-size').textContent = humanSize(f.size);
+            listEl.appendChild(row);
+        });
+    }
+
+    zone.addEventListener('click', function (ev) {
+        if (ev.target === input) return;
+        ev.preventDefault();
+        input.click();
+    });
+
+    zone.setAttribute('tabindex', '0');
+    zone.setAttribute('role', 'button');
+    zone.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            input.click();
+        }
+    });
+
+    ['dragenter', 'dragover'].forEach(function (name) {
+        zone.addEventListener(name, function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (ev.dataTransfer) {
+                ev.dataTransfer.dropEffect = 'copy';
+            }
+            zone.classList.add('drag-over');
+        });
+    });
+    zone.addEventListener('dragleave', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        zone.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        zone.classList.remove('drag-over');
+        var dt = ev.dataTransfer;
+        if (!dt || !dt.files || !dt.files.length) return;
+        try {
+            input.files = dt.files;
+        } catch (_) {
+            var t = new DataTransfer();
+            Array.from(dt.files).forEach(function (f) { t.items.add(f); });
+            input.files = t.files;
+        }
+        render();
+    });
+
+    input.addEventListener('change', render);
+})();
 </script>
 {% endblock %}

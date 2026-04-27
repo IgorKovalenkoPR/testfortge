@@ -126,6 +126,17 @@
         <a href="#" onclick="selectNone(); return false;" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
     </div>
 
+    {# Existing bug IDs become <datalist> suggestions so testers can link
+       a row to a previously-reported defect without leaving the page.    #}
+    {% if existing_bug_ids %}
+    <datalist id="existing-bug-ids">
+        {% for bid in existing_bug_ids %}<option value="{{ bid }}">{% endfor %}
+    </datalist>
+    {% endif %}
+
+    <p class="hint">{{ t.get('te_manual_status_hint',
+        'Leave Status as "Auto" to let the tester simulate / run real checks, or set Passed / Failed / Blocked manually. Attach an existing bug ID to link without creating a new one.') }}</p>
+
     {# Test Cases list #}
     <div id="items-tc" class="item-select-list" {% if not has_tc_data %}style="display:none"{% endif %}>
         {% if tc_items %}
@@ -135,12 +146,21 @@
                 {% set current_section.name = tc.section %}
                 <div class="item-section-label">{{ tc.section }}</div>
             {% endif %}
-            <label class="item-select-row">
+            <div class="item-select-row">
                 <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc">
                 <span class="item-id">{{ tc.id }}</span>
                 <span class="item-summary">{{ tc.summary }}</span>
                 <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
-            </label>
+                <select name="status_{{ tc.id }}" class="item-status-select" aria-label="Status for {{ tc.id }}">
+                    <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
+                    <option value="Passed">{{ t.get('passed', 'Passed') }}</option>
+                    <option value="Failed">{{ t.get('failed', 'Failed') }}</option>
+                    <option value="Blocked">{{ t.get('blocked', 'Blocked') }}</option>
+                </select>
+                <input type="text" name="bug_{{ tc.id }}" class="item-bug-input"
+                       list="existing-bug-ids" placeholder="{{ t.get('te_bug_placeholder', 'Bug ID') }}"
+                       aria-label="Bug ID for {{ tc.id }}">
+            </div>
         {% endfor %}
         {% endif %}
     </div>
@@ -154,12 +174,21 @@
                 {% set current_section.name = cl.section %}
                 <div class="item-section-label">{{ cl.section }}</div>
             {% endif %}
-            <label class="item-select-row">
+            <div class="item-select-row">
                 <input type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl">
                 <span class="item-id">{{ cl.id }}</span>
                 <span class="item-summary">{{ cl.objective }}</span>
                 <span class="item-badge badge-{{ cl.category | lower | replace(' ', '-') }}">{{ cl.category }}</span>
-            </label>
+                <select name="status_{{ cl.id }}" class="item-status-select" aria-label="Status for {{ cl.id }}">
+                    <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
+                    <option value="Passed">{{ t.get('passed', 'Passed') }}</option>
+                    <option value="Failed">{{ t.get('failed', 'Failed') }}</option>
+                    <option value="Blocked">{{ t.get('blocked', 'Blocked') }}</option>
+                </select>
+                <input type="text" name="bug_{{ cl.id }}" class="item-bug-input"
+                       list="existing-bug-ids" placeholder="{{ t.get('te_bug_placeholder', 'Bug ID') }}"
+                       aria-label="Bug ID for {{ cl.id }}">
+            </div>
         {% endfor %}
         {% endif %}
     </div>
@@ -425,13 +454,17 @@ toggleItemList();
 .url-chip:hover { background: var(--primary); color: white; }
 
 /* Item selection */
-.item-select-list { max-height: 400px; overflow-y: auto; border: 1px solid #e8eaf0; border-radius: 8px; padding: 8px; }
+.item-select-list { max-height: 460px; overflow-y: auto; border: 1px solid #e8eaf0; border-radius: 8px; padding: 8px; }
 .item-section-label { font-weight: 700; color: var(--primary); padding: 8px 6px 4px; font-size: 0.85em; border-bottom: 1px solid #e8eaf0; margin-bottom: 4px; }
-.item-select-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px; cursor: pointer; font-size: 0.88em; }
+.item-select-row { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 4px; font-size: 0.88em; flex-wrap: wrap; }
 .item-select-row:hover { background: #f4f5f7; }
-.item-id { font-weight: 700; color: var(--primary); min-width: 70px; font-size: 0.85em; }
-.item-summary { flex: 1; }
+.item-id { font-weight: 700; color: var(--primary); min-width: 78px; font-size: 0.85em; }
+.item-summary { flex: 1; min-width: 220px; }
 .item-badge { font-size: 0.75em; padding: 2px 8px; border-radius: 10px; }
+.item-status-select { width: 110px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.82em; background: #fff; }
+.item-status-select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.item-bug-input { width: 110px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.82em; }
+.item-bug-input:focus { outline: 2px solid var(--primary); outline-offset: -1px; border-color: var(--primary); }
 .select-actions { display: flex; gap: 8px; margin-bottom: 8px; }
 .btn-sm { padding: 4px 12px; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #555; }
 .btn-sm:hover { background: #eee; }

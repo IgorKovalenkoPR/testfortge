@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}TestFortge — {{ t.est_title }}{% endblock %}
+{% block title %}TestForTge — {{ t.est_title }}{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -26,8 +26,8 @@
   <div class="card">
     <h2>{{ t.est_config }}</h2>
 
-    <div class="form-row">
-      <div class="form-group">
+    <div class="form-row form-row-5">
+      <div class="form-group form-col-wide">
         <label>{{ t.est_project_name }}</label>
         <input type="text" name="project_name" value="{{ last.project_name or '' }}"
                placeholder="{{ t.est_project_name_ph }}">
@@ -47,7 +47,7 @@
         <input type="number" name="buffer_percent" min="0" max="100" step="1"
                value="{{ last.buffer_percent or 12 }}">
       </div>
-      <div class="form-group">
+      <div class="form-group form-col-wide">
         <label>{{ t.est_primary_platform }}</label>
         <input type="text" name="primary_platform" value="{{ last.primary_platform or 'Windows 10' }}">
       </div>

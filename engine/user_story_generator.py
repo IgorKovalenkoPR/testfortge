@@ -219,15 +219,15 @@ def _generate_acceptance_criteria(text: str, role: str) -> list[str]:
     # Auth-related
     if any(kw in lower for kw in ["login", "register", "auth", "password", "sign"]):
         criteria.append("Unauthorized users cannot access protected resources")
-        criteria.append("Session management works correctly (login, logout, timeout)")
+        criteria.append("Session lifecycle works as specified: login issues a session cookie, logout invalidates it, idle timeout forces re-authentication")
 
     # Data operations
     if any(kw in lower for kw in ["create", "add", "save", "store"]):
-        criteria.append("Data is persisted correctly in the database")
+        criteria.append("Submitted data is persisted to the backing store and visible on re-read with identical field values")
         criteria.append("Success confirmation is shown to the user")
 
     if any(kw in lower for kw in ["list", "display", "show", "view"]):
-        criteria.append("Data is displayed correctly and completely")
+        criteria.append("Every documented column is rendered, each row matches the source record, and the row count equals the source count")
         criteria.append("Empty state is handled gracefully")
 
     if any(kw in lower for kw in ["search", "filter", "sort"]):
@@ -247,7 +247,7 @@ def _generate_acceptance_criteria(text: str, role: str) -> list[str]:
         criteria.append("Security measures are implemented and verified")
 
     # Default negative criterion
-    criteria.append("Error handling works correctly for edge cases")
+    criteria.append("Edge-case inputs return an explicit error response (HTTP 4xx or inline validation) without leaking stack traces or reaching a partial-write state")
 
     return criteria[:6]  # Cap at 6 criteria
 

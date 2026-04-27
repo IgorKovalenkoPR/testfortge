@@ -45,17 +45,22 @@
     </div>
     <div class="bug-body">
         <table class="bug-details-table">
+            {# ── ISTQB-mandatory metadata ── #}
             <tr><td class="label">{{ t.get('bug_environment', 'Environment') }}</td><td>{{ bug.environment }}</td></tr>
-            {% if bug.preconditions %}
-            <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug.preconditions }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_frequency', 'Frequency') }}</td><td>{{ bug.frequency or 'Always' }}</td></tr>
+            {% if bug.affects_version %}
+            <tr><td class="label">{{ t.get('bug_affects_version', 'Affects Version') }}</td><td>{{ bug.affects_version }}</td></tr>
             {% endif %}
-            {% if bug.steps_to_reproduce %}
-            <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td><td><pre class="steps">{{ bug.steps_to_reproduce }}</pre></td></tr>
+            {% if bug.found_in_build %}
+            <tr><td class="label">{{ t.get('bug_found_in_build', 'Found in Build') }}</td><td><code>{{ bug.found_in_build }}</code></td></tr>
             {% endif %}
+            <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug.preconditions or '—' }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td><td><pre class="steps">{{ bug.steps_to_reproduce or '—' }}</pre></td></tr>
             <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td><td class="actual-result">{{ bug.actual_result }}</td></tr>
             {% if bug.expected_result %}
             <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td><td>{{ bug.expected_result }}</td></tr>
             {% endif %}
+            {# ── Jira workflow / traceability ── #}
             {% if bug.component %}
             <tr><td class="label">{{ t.get('bug_component', 'Component') }}</td><td>{{ bug.component }}</td></tr>
             {% endif %}
@@ -65,8 +70,17 @@
             {% if bug.reporter %}
             <tr><td class="label">{{ t.get('bug_reporter', 'Reporter') }}</td><td>{{ bug.reporter }}</td></tr>
             {% endif %}
+            {% if bug.assignee %}
+            <tr><td class="label">{{ t.get('bug_assignee', 'Assignee') }}</td><td>{{ bug.assignee }}</td></tr>
+            {% endif %}
+            {% if bug.labels %}
+            <tr><td class="label">{{ t.get('bug_labels', 'Labels') }}</td><td>{% for l in bug.labels %}<span class="bug-label">{{ l }}</span>{% endfor %}</td></tr>
+            {% endif %}
             {% if bug.created_at %}
             <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at[:19] }}</td></tr>
+            {% endif %}
+            {% if bug.comment %}
+            <tr><td class="label">{{ t.get('bug_comment', 'Comment') }}</td><td>{{ bug.comment }}</td></tr>
             {% endif %}
         </table>
     </div>
@@ -119,7 +133,9 @@
 .bug-details-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
 .bug-details-table .label { font-weight: 600; color: #555; width: 160px; white-space: nowrap; }
 .actual-result { color: #dc2626; font-weight: 500; }
-pre.steps { white-space: pre-wrap; font-family: inherit; margin: 0; }
+pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.92em; margin: 0; line-height: 1.5; }
+.bug-label { display: inline-block; background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; border-radius: 8px; padding: 1px 8px; font-size: 0.78em; margin-right: 4px; margin-bottom: 2px; }
+.bug-details-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 
 @media (max-width: 768px) { .bug-stats-row { flex-direction: column; } }
 </style>

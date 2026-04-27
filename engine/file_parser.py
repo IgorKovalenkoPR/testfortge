@@ -391,6 +391,82 @@ def _is_metadata_line(text: str) -> bool:
     return False
 
 
+# File extensions / structural tokens that should never become a feature.
+# Without this filter the parser treats lines like "generation.py" or
+# "requirements.txt" from a Markdown architecture diagram as standalone
+# requirements, then generates a TC for "Test the generation.py page".
+# That regression was reported as BUG-002…012, 014, 016, 017 in the
+# self-audit (bug_reports_project.md).
+_NON_FEATURE_EXTS = (
+    ".py", ".pyc", ".js", ".ts", ".tsx", ".jsx", ".json", ".yml", ".yaml",
+    ".toml", ".ini", ".cfg", ".conf", ".txt", ".log", ".lock", ".env",
+    ".example", ".sample", ".md", ".rst", ".sh", ".bat", ".ps1",
+    ".dockerfile", ".sql", ".html", ".css", ".scss", ".csv", ".tsv",
+    ".xml", ".xlsx", ".docx", ".pdf",
+)
+_NON_FEATURE_TOKENS = {
+    # bare filenames that occasionally appear without an extension
+    "dockerfile", "makefile", "rakefile", "procfile", "license", "changelog",
+    "readme", "manifest", "package", "gemfile", "pipfile", "go.sum", "go.mod",
+}
+_FILE_PATH_RE = re.compile(
+    r"""^\s*[├└│─\s]*       # tree drawing characters from ``` diagrams
+        ([A-Za-z0-9_./\\-]+ # path-like body
+        \.[A-Za-z0-9]{1,8}) # extension
+        (\s|$|/|\\)         # end-of-token boundary
+    """, re.VERBOSE,
+)
+_TREE_DIAGRAM_RE = re.compile(r"[├└│─]")
+
+
+def _is_non_feature_line(text: str) -> bool:
+    """True for lines that look like file paths, code-tree diagrams,
+    bare module names or other non-feature tokens.
+
+    Examples this catches:
+        ``generation.py``                  → file basename
+        ``├── routes/``                    → tree-diagram leaf
+        ``requirements.txt``               → tooling file
+        ``.env.example``                   → dotfile sample
+        ``app.py                ← Flask…`` → architecture-doc annotation
+        ``- generation.py — Route module`` → bullet wrapping a file path
+    """
+    t = text.strip()
+    if not t:
+        return False
+
+    # Tree drawing characters → architecture diagram, never a feature.
+    if _TREE_DIAGRAM_RE.search(t):
+        return True
+
+    # Strip a single leading bullet / numbering marker so the path-detection
+    # heuristic also catches "- generation.py — Route module".
+    body = re.sub(r'^\s*(?:[-*\u2022]|\d+[\.)])\s+', '', t)
+
+    # Whole-line / first-token match against file-extension list.
+    head = body.split()[0] if body.split() else ""
+    head_lc = head.lower().rstrip("/\\")
+    if head_lc in _NON_FEATURE_TOKENS:
+        return True
+    for ext in _NON_FEATURE_EXTS:
+        if head_lc.endswith(ext) and len(head) <= 60:
+            return True
+
+    # Inline path with arrow/comment ("app.py ← Flask application factory")
+    # — first word is path-like with extension, rest is annotation.
+    if _FILE_PATH_RE.match(body) and len(head) <= 60:
+        return True
+
+    # Numbered Markdown-style heading ("9. Версіонування та статистика" or
+    # "## 9. Versioning and stats") — these are section labels, not
+    # behaviours that can be tested. BUG-011 was caused by the heading
+    # "Версіонування та статистика" being promoted to a TC.
+    if re.match(r"^#{1,6}\s+\d+\.\s", t):
+        return True
+
+    return False
+
+
 def _is_conversational(text: str) -> bool:
     """Detect conversational/transcript fragments that should NOT be requirements."""
     lower = text.lower().strip()
@@ -572,7 +648,7 @@ _FEATURE_KEYWORDS: dict[str, tuple[str, str]] = {
     "comment":            ("content.comment",   "User can leave comments"),
     "subscribe":          ("content.subscribe", "User can subscribe"),
     # Navigation / Account
-    "dashboard":          ("nav.dashboard",     "Dashboard displays correctly"),
+    "dashboard":          ("nav.dashboard",     "Dashboard renders every configured widget with data"),
     "settings":           ("nav.settings",      "User can change settings"),
     "налаштування":       ("nav.settings",      "User can change settings"),
     "profile":            ("nav.profile",       "User can view profile"),
@@ -701,6 +777,13 @@ def split_into_requirements(lines: list[str]) -> list[ParsedRequirement]:
         if _is_metadata_line(text):
             continue
 
+        # Skip file paths, tree diagrams, code-block leftovers, numbered
+        # Markdown headings — these are not testable behaviours. Run
+        # BEFORE URL extraction so "generation.py" doesn't get matched
+        # as a domain by the loose URL regex.
+        if _is_non_feature_line(text):
+            continue
+
         # URL detection — emit a clean domain+path requirement for any line
         # that contains a URL (e.g. an instruction to generate tests for a
         # given web page).
@@ -739,7 +822,8 @@ def split_into_requirements(lines: list[str]) -> list[ParsedRequirement]:
         m = numbered_re.match(text)
         if m:
             req_text = m.group(1).strip()
-            if len(req_text) >= 5 and not _is_conversational(req_text):
+            if (len(req_text) >= 5 and not _is_conversational(req_text)
+                    and not _is_non_feature_line(req_text)):
                 structured.append(ParsedRequirement(
                     id=f"REQ-{counter:03d}", text=req_text, line_number=i + 1,
                 ))
@@ -750,7 +834,8 @@ def split_into_requirements(lines: list[str]) -> list[ParsedRequirement]:
         m = bullet_re.match(text)
         if m:
             req_text = m.group(1).strip()
-            if len(req_text) >= 5 and not _is_conversational(req_text):
+            if (len(req_text) >= 5 and not _is_conversational(req_text)
+                    and not _is_non_feature_line(req_text)):
                 structured.append(ParsedRequirement(
                     id=f"REQ-{counter:03d}", text=req_text, line_number=i + 1,
                 ))

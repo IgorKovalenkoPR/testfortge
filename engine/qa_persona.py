@@ -328,74 +328,73 @@ _CL = dict[str, list[tuple[str, str, str]]]  # type alias
 def _web_general_checks() -> _CL:
     return {
         "Header & Navigation": [
-            ("Verify that company logo is displayed on the page", "Positive", "High"),
-            ("Verify that company logo is redirected to the homepage when clicked", "Positive", "Medium"),
-            ("Verify that main navigation menu is displayed with all expected items", "Positive", "High"),
-            ("Verify that navigation links are redirected to correct pages", "Positive", "High"),
-            ("Verify that the active/current page is highlighted in the navigation", "Positive", "Medium"),
-            ("Verify that dropdown/submenu items are displayed on hover or click", "Positive", "Medium"),
-            ("Verify that navigation is collapsed into a hamburger menu on mobile viewport", "Positive", "High"),
-            ("Verify that the hamburger menu is opened and closed correctly", "Positive", "Medium"),
-            ("Verify that the page title is displayed correctly in the browser tab", "Positive", "Medium"),
-            ("Verify that breadcrumb navigation is displayed and functional (if applicable)", "Positive", "Low"),
+            ("Verify that the company logo is displayed in the Header", "Positive", "High"),
+            ("Click the company logo and verify the browser navigates to the Homepage URL", "Positive", "Medium"),
+            ("Verify that the main navigation menu in the Header lists every expected item", "Positive", "High"),
+            ("Click each navigation link and verify the browser opens the URL that matches the link label", "Positive", "High"),
+            ("Verify that the navigation item for the current page has the active visual state (highlight / underline / different background)", "Positive", "Medium"),
+            ("Hover a navigation item with a submenu and verify that the submenu becomes visible with all expected items", "Positive", "Medium"),
+            ("Resize the viewport to 375px and verify that the Header navigation collapses into a hamburger menu button", "Positive", "High"),
+            ("Tap the hamburger menu and verify the menu opens; tap outside and verify the menu closes", "Positive", "Medium"),
+            ("Verify that the browser tab title matches the page name shown in the Header", "Positive", "Medium"),
+            ("Verify that the breadcrumb trail shows the exact path the user navigated (if breadcrumbs are used on this page)", "Positive", "Low"),
         ],
         "Content & Layout": [
-            ("Verify that the page heading (H1) is displayed correctly", "Positive", "High"),
-            ("Verify that all text content is readable and properly formatted", "Positive", "High"),
-            ("Verify that all images are loaded without broken links", "Positive", "High"),
-            ("Verify that images have appropriate alt attributes", "Positive", "Medium"),
-            ("Verify that CTA (Call to Action) buttons are displayed and clickable", "Positive", "High"),
-            ("Verify that content sections are displayed in the correct order", "Positive", "Medium"),
-            ("Verify that no placeholder/Lorem Ipsum text is present", "Negative", "Medium"),
-            ("Verify that no overlapping or misaligned elements are present", "Negative", "Medium"),
-            ("Verify that text truncation is handled gracefully with ellipsis or expansion", "Edge Case", "Low"),
+            ("Verify that the page contains exactly one H1 element and its text matches the page topic", "Positive", "High"),
+            ("Verify that body text uses the site's declared font family and is legible (no clipped characters, no overflow)", "Positive", "High"),
+            ("Load the page and verify that every <img> element returns HTTP 200 (no broken icons)", "Positive", "High"),
+            ("Verify that every decorative image has alt=\"\" and every content image has a descriptive alt attribute", "Positive", "Medium"),
+            ("Verify that every CTA button (e.g. 'Buy', 'Sign Up', 'Submit') is visible above the fold and reacts to click", "Positive", "High"),
+            ("Verify that content sections appear in the order defined by the design spec (hero → features → pricing → footer, etc.)", "Positive", "Medium"),
+            ("Verify that the live page contains no 'Lorem Ipsum' or 'TBD' placeholder strings", "Negative", "Medium"),
+            ("Verify that no two visible elements overlap and every control stays inside its parent container at 1280px and 375px", "Negative", "Medium"),
+            ("Verify that long text (e.g. > 100 chars) in titles/cards is truncated with ellipsis and a tooltip reveals the full value", "Edge Case", "Low"),
         ],
         "Links & Media": [
-            ("Verify that all internal links are navigated to correct pages", "Positive", "High"),
-            ("Verify that all external links are opened in a new tab", "Positive", "Medium"),
-            ("Verify that no broken links (404) are present on the page", "Negative", "High"),
-            ("Verify that video/audio elements are played correctly (if present)", "Positive", "Medium"),
-            ("Verify that social media links are redirected to correct profiles", "Positive", "Medium"),
-            ("Verify that email links (mailto:) are opened in the default email client", "Positive", "Low"),
-            ("Verify that phone links (tel:) are initiated a call on mobile devices", "Positive", "Low"),
+            ("Click every internal link on the page and verify the destination URL is on the same origin and returns HTTP 200", "Positive", "High"),
+            ("Verify that every external link carries target=\"_blank\" and rel=\"noopener\"", "Positive", "Medium"),
+            ("Crawl every link on the page and verify none returns HTTP 404 or 5xx", "Negative", "High"),
+            ("Click play on each video/audio element and verify playback starts within 2 seconds with no decoder errors", "Positive", "Medium"),
+            ("Click each social-media link and verify the destination URL matches the brand's official account for that network", "Positive", "Medium"),
+            ("Click a mailto: link and verify the default email client opens with the prefilled recipient address", "Positive", "Low"),
+            ("Tap a tel: link on a mobile device and verify the dialer opens with the prefilled phone number", "Positive", "Low"),
         ],
         "Footer": [
-            ("Verify that footer is displayed at the bottom of the page", "Positive", "Medium"),
-            ("Verify that footer links are functional and redirected to correct pages", "Positive", "Medium"),
-            ("Verify that copyright information is displayed and up to date", "Positive", "Low"),
-            ("Verify that footer is displayed consistently across all pages", "Positive", "Low"),
+            ("Verify that the Footer is rendered at the bottom of the page and stays below the content on every viewport", "Positive", "Medium"),
+            ("Click every link inside the Footer and verify each destination returns HTTP 200 and matches the link label", "Positive", "Medium"),
+            ("Verify that the copyright line in the Footer shows the current year and the legal entity name from the design spec", "Positive", "Low"),
+            ("Visit at least three pages of the site and verify the Footer has the same structure and links on each page", "Positive", "Low"),
         ],
         "Forms & Input": [
-            ("Verify that all form fields are displayed with correct labels", "Positive", "High"),
-            ("Verify that required fields are marked with an asterisk or indicator", "Positive", "Medium"),
-            ("Verify that form is submitted successfully with all valid data", "Positive", "High"),
-            ("Verify that validation errors are displayed when required fields are left empty", "Negative", "High"),
-            ("Verify that email field is rejected with invalid format (e.g. 'test@', '@domain')", "Negative", "High"),
-            ("Verify that phone field is rejected with non-numeric characters", "Negative", "Medium"),
-            ("Verify that success confirmation is displayed after form submission", "Positive", "High"),
-            ("Verify that form data is not lost when validation error occurs", "Negative", "Medium"),
-            ("Verify that form fields are accepted with maximum length input", "Edge Case", "Medium"),
-            ("Verify that form fields are accepted with minimum length input", "Edge Case", "Medium"),
-            ("Verify that special characters are handled correctly in text fields", "Edge Case", "Medium"),
-            ("Verify that XSS payloads are sanitized in all input fields", "Security", "High"),
-            ("Verify that SQL injection is blocked in all input fields", "Security", "High"),
+            ("Verify that every form field has a visible label matching the spec (no placeholder-only labels)", "Positive", "High"),
+            ("Verify that every required field is marked with an asterisk and carries aria-required=\"true\"", "Positive", "Medium"),
+            ("Fill every field with valid sample data and submit: verify the backend accepts the payload and the UI shows a success state", "Positive", "High"),
+            ("Submit the form with required fields empty and verify an inline error appears next to each missing field", "Negative", "High"),
+            ("Enter invalid email values ('test@', '@domain', 'no-at-sign') and verify each is rejected with a 'valid email required' message", "Negative", "High"),
+            ("Enter letters into the phone field and verify the form blocks submission with a numeric-only message", "Negative", "Medium"),
+            ("Submit a valid form and verify that a success banner or toast appears within 2 seconds and the URL/state updates as designed", "Positive", "High"),
+            ("Enter valid data, trigger a validation error on one field, and verify the other fields keep their values", "Negative", "Medium"),
+            ("Enter the field's maximum allowed length (per spec) and verify the form submits without truncation or error", "Edge Case", "Medium"),
+            ("Enter the field's minimum allowed length and verify it passes validation", "Edge Case", "Medium"),
+            ("Enter Unicode and emoji characters (e.g. 'Привіт 🚀') and verify they survive submission and round-trip in the saved record", "Edge Case", "Medium"),
+            ("Submit '<script>alert(1)</script>' in every text field and verify it is stored/displayed as inert text, not executed", "Security", "High"),
+            ("Submit \"' OR 1=1 --\" in every text field and verify the response is a normal validation error, not a SQL error or changed result set", "Security", "High"),
         ],
         "Responsive Design": [
-            ("Verify that page layout is adapted correctly for mobile viewport (375px)", "Positive", "High"),
-            ("Verify that page layout is adapted correctly for tablet viewport (768px)", "Positive", "High"),
-            ("Verify that page layout is adapted correctly for desktop viewport (1280px+)", "Positive", "High"),
-            ("Verify that images are scaled proportionally on different screen sizes", "Positive", "Medium"),
-            ("Verify that no horizontal scrollbar is appeared on any viewport", "Negative", "High"),
-            ("Verify that text is readable without zooming on mobile devices", "Positive", "Medium"),
-            ("Verify that touch targets (buttons, links) are at least 44x44px on mobile", "Positive", "Medium"),
-            ("Verify that the page orientation change (portrait/landscape) is handled correctly", "Edge Case", "Low"),
+            ("Resize the viewport to 375px width and verify the layout uses a single column with no horizontal scrollbar", "Positive", "High"),
+            ("Resize the viewport to 768px width and verify the layout matches the tablet breakpoint of the design spec", "Positive", "High"),
+            ("Resize the viewport to 1280px+ and verify the layout matches the desktop breakpoint of the design spec", "Positive", "High"),
+            ("Resize the viewport between 375px and 1920px and verify images scale proportionally with no distortion or cropping of faces/text", "Positive", "Medium"),
+            ("Verify that no page state (normal, modal open, form focused) introduces a horizontal scrollbar at any viewport ≥ 320px", "Negative", "High"),
+            ("Open the page on a 375px viewport and verify every body text paragraph is legible at 100% zoom (font-size ≥ 14px)", "Positive", "Medium"),
+            ("Tap each interactive control on a mobile viewport (375px) and verify its hit area measures ≥ 44×44 CSS pixels including padding", "Positive", "Medium"),
+            ("Rotate a mobile device from portrait to landscape and verify the layout re-flows without truncation or fixed-position overlap", "Edge Case", "Low"),
         ],
-        "Cross-browser Compatibility": [
-            ("Verify that the page is rendered correctly in Google Chrome (latest)", "Positive", "High"),
-            ("Verify that the page is rendered correctly in Mozilla Firefox (latest)", "Positive", "High"),
-            ("Verify that the page is rendered correctly in Safari (latest)", "Positive", "Medium"),
-            ("Verify that the page is rendered correctly in Microsoft Edge (latest)", "Positive", "Medium"),
-        ],
+        # ── Cross-browser/cross-device checks deliberately removed ──
+        # These are environment variants of a single functional check and
+        # belong in the test-run configuration (browser/device dropdowns),
+        # not as standalone checklist rows. Testers can re-run any item
+        # on another browser via Test Execution → Environment.
         "Performance": [
             ("Verify that the page is loaded within 3 seconds on a standard connection", "Positive", "High"),
             ("Verify that no JavaScript console errors are present on page load", "Negative", "High"),
@@ -410,7 +409,7 @@ def _web_general_checks() -> _CL:
             ("Verify that focus indicators are visible on interactive elements", "Positive", "Medium"),
             ("Verify that screen reader can read all content in logical order", "Positive", "Medium"),
             ("Verify that form fields have associated labels for assistive technologies", "Positive", "Medium"),
-            ("Verify that ARIA roles and landmarks are used correctly", "Positive", "Low"),
+            ("Verify that every interactive region has an aria-role matching its purpose (navigation, main, complementary)", "Positive", "Low"),
         ],
         "Security (Basic)": [
             ("Verify that the page is served over HTTPS", "Positive", "High"),
@@ -423,7 +422,7 @@ def _web_general_checks() -> _CL:
             ("Verify that meta title is present and under 60 characters", "Positive", "Medium"),
             ("Verify that meta description is present and under 160 characters", "Positive", "Medium"),
             ("Verify that canonical URL is specified", "Positive", "Low"),
-            ("Verify that heading hierarchy is correct (single H1, logical H2-H6)", "Positive", "Low"),
+            ("Verify that the page has exactly one H1 and its H2/H3 tags do not skip levels", "Positive", "Low"),
         ],
     }
 
@@ -442,21 +441,21 @@ def _auth_checks() -> _CL:
             ("Verify that the user is logged in successfully with valid email and password", "Positive", "High"),
             ("Verify that the user is redirected to the expected page after successful login", "Positive", "High"),
             ("Verify that the session cookie/token is set after successful login", "Positive", "High"),
-            ("Verify that the username/avatar is displayed in the header after login", "Positive", "Medium"),
+            ("Verify that the username/avatar is displayed in the Header after login", "Positive", "Medium"),
             ("Verify that 'Remember me' is extended the session beyond browser close", "Positive", "Medium"),
         ],
         "Login — Negative": [
-            ("Verify that login is rejected with incorrect password", "Negative", "High"),
+            ("Verify that login is rejected with a password that does not match the stored hash", "Negative", "High"),
             ("Verify that login is rejected with non-existent email", "Negative", "High"),
             ("Verify that login is rejected when email field is left empty", "Negative", "High"),
             ("Verify that login is rejected when password field is left empty", "Negative", "High"),
-            ("Verify that the error message does not reveal which field is incorrect", "Negative", "High"),
+            ("Verify that the error message does not reveal which specific field failed validation (uniform 'invalid credentials' message)", "Negative", "High"),
             ("Verify that multiple failed attempts are triggered account lockout or CAPTCHA", "Negative", "High"),
         ],
         "Login — Edge Cases & Security": [
             ("Verify that email field is accepted with maximum length (254 characters)", "Edge Case", "Medium"),
             ("Verify that password field is accepted with special characters (!@#$%^&*)", "Edge Case", "Medium"),
-            ("Verify that login is handled correctly after session timeout", "Edge Case", "Medium"),
+            ("Verify that login returns the expected outcome per the spec after session timeout", "Edge Case", "Medium"),
             ("Verify that concurrent sessions from different devices are handled per policy", "Edge Case", "Medium"),
             ("Verify that SQL injection is blocked in the email field", "Security", "High"),
             ("Verify that XSS payload is sanitized in the email field", "Security", "High"),
@@ -521,18 +520,18 @@ def _search_checks() -> _CL:
             ("Verify that the search UI is not broken when no results are returned", "Negative", "Medium"),
         ],
         "Search — Edge Cases & Security": [
-            ("Verify that search is handled correctly with special characters (!@#$%^&*)", "Edge Case", "Medium"),
-            ("Verify that search is handled correctly with very long query (500+ characters)", "Edge Case", "Medium"),
-            ("Verify that search is handled correctly with Unicode/emoji characters", "Edge Case", "Low"),
+            ("Verify that search returns the expected outcome per the spec with special characters (!@#$%^&*)", "Edge Case", "Medium"),
+            ("Verify that search returns the expected outcome per the spec with very long query (500+ characters)", "Edge Case", "Medium"),
+            ("Verify that search returns the expected outcome per the spec with Unicode/emoji characters", "Edge Case", "Low"),
             ("Verify that SQL injection is blocked in the search field", "Security", "High"),
             ("Verify that XSS payload is sanitized in the search field", "Security", "High"),
         ],
         "Filter & Sort": [
-            ("Verify that filter options are displayed correctly", "Positive", "High"),
+            ("Verify that filter options are visible and matches the design spec", "Positive", "High"),
             ("Verify that results are updated when a filter is applied", "Positive", "High"),
             ("Verify that multiple filters are applied simultaneously", "Positive", "Medium"),
             ("Verify that applied filters are cleared when 'Reset' is clicked", "Positive", "Medium"),
-            ("Verify that sort options (A-Z, Z-A, date, price) are applied correctly", "Positive", "High"),
+            ("Verify that each sort option (A-Z, Z-A, date, price) reorders results in the expected direction and persists after a refresh", "Positive", "High"),
             ("Verify that the active sort/filter state is preserved after page navigation", "Positive", "Medium"),
             ("Verify that filter results show 'No matches' when no items match criteria", "Negative", "Medium"),
         ],
@@ -542,17 +541,17 @@ def _search_checks() -> _CL:
 def _forms_checks() -> _CL:
     return {
         "Form Fields — UI": [
-            ("Verify that all form fields are displayed with correct labels", "Positive", "High"),
+            ("Verify that all every form field has a visible label whose text matches the design spec", "Positive", "High"),
             ("Verify that required fields are indicated with an asterisk (*)", "Positive", "High"),
             ("Verify that placeholder text is displayed in empty fields", "Positive", "Low"),
-            ("Verify that field types are correct (email, number, date, etc.)", "Positive", "Medium"),
-            ("Verify that dropdown/select fields are displayed with correct options", "Positive", "Medium"),
+            ("Verify that every field uses the HTML input type declared in the spec (email, number, date, tel, url)", "Positive", "Medium"),
+            ("Verify that every dropdown lists every option from the spec in the declared order", "Positive", "Medium"),
             ("Verify that date picker is displayed and functional", "Positive", "Medium"),
         ],
         "Form Validation — Positive": [
             ("Verify that the form is submitted successfully with all valid data", "Positive", "High"),
             ("Verify that success message/notification is displayed after submission", "Positive", "High"),
-            ("Verify that submitted data is saved correctly in the system", "Positive", "High"),
+            ("Verify that the submitted payload appears in the backend storage with all fields intact", "Positive", "High"),
             ("Verify that the form is reset/redirected after successful submission", "Positive", "Medium"),
         ],
         "Form Validation — Negative": [
@@ -566,11 +565,11 @@ def _forms_checks() -> _CL:
         "Form — Edge Cases": [
             ("Verify that fields are accepted with minimum allowed length", "Edge Case", "Medium"),
             ("Verify that fields are accepted with maximum allowed length", "Edge Case", "Medium"),
-            ("Verify that fields are handled correctly at boundary values (min-1, max+1)", "Edge Case", "Medium"),
-            ("Verify that special characters are handled correctly in text fields", "Edge Case", "Medium"),
-            ("Verify that copy-paste is working correctly in all fields", "Edge Case", "Low"),
+            ("Verify that fields are returns the expected outcome per the spec at boundary values (min-1, max+1)", "Edge Case", "Medium"),
+            ("Verify that special characters are returns the expected outcome per the spec in text fields", "Edge Case", "Medium"),
+            ("Verify that copy-paste is producing the outcome defined in the design spec in all fields", "Edge Case", "Low"),
             ("Verify that double submission is prevented (double-click protection)", "Edge Case", "High"),
-            ("Verify that the form is submitted correctly using Tab + Enter navigation", "Edge Case", "Medium"),
+            ("Verify that the the form can be submitted using only Tab to reach the submit button and Enter to trigger it", "Edge Case", "Medium"),
         ],
     }
 
@@ -591,33 +590,33 @@ def _crud_checks(operation: str = "create") -> _CL:
                 (f"Verify that a new record is {past} successfully with valid data", "Positive", "High"),
                 (f"Verify that success confirmation is displayed after {label.lower()}", "Positive", "High"),
                 (f"Verify that the new record is appeared in the list view", "Positive", "High"),
-                (f"Verify that all submitted data is saved correctly in the database", "Positive", "High"),
+                (f"Verify that every submitted field appears in the database row with the exact value entered", "Positive", "High"),
             ],
             f"{label} — Negative": [
                 (f"Verify that {label.lower()} is rejected when required fields are empty", "Negative", "High"),
                 (f"Verify that {label.lower()} is rejected with invalid data format", "Negative", "High"),
-                (f"Verify that duplicate record {label.lower()} is handled correctly", "Negative", "Medium"),
+                (f"Verify that duplicate record {label.lower()} returns the expected outcome per the spec", "Negative", "Medium"),
                 (f"Verify that validation errors are displayed per field", "Negative", "High"),
             ],
             f"{label} — Edge Cases": [
-                (f"Verify that {label.lower()} is handled correctly with minimum length data", "Edge Case", "Medium"),
-                (f"Verify that {label.lower()} is handled correctly with maximum length data", "Edge Case", "Medium"),
+                (f"Verify that {label.lower()} returns the expected outcome per the spec with minimum length data", "Edge Case", "Medium"),
+                (f"Verify that {label.lower()} returns the expected outcome per the spec with maximum length data", "Edge Case", "Medium"),
                 (f"Verify that special characters are accepted in text fields", "Edge Case", "Medium"),
-                (f"Verify that concurrent {label.lower()} requests are handled correctly", "Edge Case", "Low"),
+                (f"Verify that concurrent {label.lower()} requests are returns the expected outcome per the spec", "Edge Case", "Low"),
             ],
         }
     elif operation == "read":
         return {
             f"{label} — Positive": [
-                (f"Verify that the {location} is displayed with correct data", "Positive", "High"),
-                (f"Verify that all data columns/fields are visible and correctly formatted", "Positive", "High"),
-                (f"Verify that pagination is working correctly when records exceed page limit", "Positive", "Medium"),
-                (f"Verify that data sorting is applied correctly", "Positive", "Medium"),
-                (f"Verify that detail view is displayed correctly when a record is selected", "Positive", "High"),
+                (f"Verify that the {location} shows the same values that were saved", "Positive", "High"),
+                (f"Verify that all data columns/fields are visible and formatted per the design spec (date format, currency symbol, thousands separator)", "Positive", "High"),
+                (f"Verify that pagination is producing the outcome defined in the design spec when records exceed page limit", "Positive", "Medium"),
+                (f"Verify that sorting reorders rows in ascending/descending order of the selected column", "Positive", "Medium"),
+                (f"Verify that detail view is visible and matches the design spec when a record is selected", "Positive", "High"),
             ],
             f"{label} — Negative & Edge Cases": [
                 (f"Verify that empty state is handled gracefully when no records exist", "Negative", "High"),
-                (f"Verify that the page is handled correctly when data loading fails", "Negative", "Medium"),
+                (f"Verify that the page returns the expected outcome per the spec when data loading fails", "Negative", "Medium"),
                 (f"Verify that a large dataset (1000+ records) is loaded without performance issues", "Edge Case", "Medium"),
             ],
         }
@@ -635,7 +634,7 @@ def _crud_checks(operation: str = "create") -> _CL:
                 (f"Verify that original data is preserved when validation error occurs", "Negative", "Medium"),
             ],
             f"{label} — Edge Cases": [
-                (f"Verify that concurrent edits to the same record are handled correctly", "Edge Case", "Medium"),
+                (f"Verify that concurrent edits to the same record are returns the expected outcome per the spec", "Edge Case", "Medium"),
                 (f"Verify that {label.lower()} without any changes is handled gracefully", "Edge Case", "Low"),
                 (f"Verify that unsaved changes warning is displayed when navigating away", "Edge Case", "Medium"),
             ],
@@ -650,11 +649,11 @@ def _crud_checks(operation: str = "create") -> _CL:
             ],
             f"{label} — Negative": [
                 (f"Verify that deletion is cancelled when 'Cancel' is clicked in confirmation", "Negative", "High"),
-                (f"Verify that related/dependent records are handled correctly on deletion", "Negative", "Medium"),
+                (f"Verify that related/dependent records are returns the expected outcome per the spec on deletion", "Negative", "Medium"),
             ],
             f"{label} — Edge Cases": [
-                (f"Verify that deleting the last record is handled correctly", "Edge Case", "Medium"),
-                (f"Verify that bulk deletion is working correctly (if supported)", "Edge Case", "Low"),
+                (f"Verify that deleting the last record returns the expected outcome per the spec", "Edge Case", "Medium"),
+                (f"Verify that bulk deletion is producing the outcome defined in the design spec (if supported)", "Edge Case", "Low"),
             ],
         }
 
@@ -663,8 +662,8 @@ def _payment_checks() -> _CL:
     return {
         "Cart": [
             ("Verify that items are added to the cart successfully", "Positive", "High"),
-            ("Verify that the cart is displayed the correct item count and total", "Positive", "High"),
-            ("Verify that item quantity is updated correctly in the cart", "Positive", "High"),
+            ("Verify that the cart is shows the item count and order total that match the sum of cart lines", "Positive", "High"),
+            ("Verify that changing quantity updates the line subtotal and the cart total immediately", "Positive", "High"),
             ("Verify that items are removed from the cart successfully", "Positive", "High"),
             ("Verify that the cart is preserved after page refresh", "Positive", "Medium"),
             ("Verify that the empty cart state is displayed when all items are removed", "Negative", "Medium"),
@@ -676,7 +675,7 @@ def _payment_checks() -> _CL:
             ("Verify that payment method selection is displayed", "Positive", "High"),
             ("Verify that the order is placed successfully with valid payment details", "Positive", "High"),
             ("Verify that order confirmation page/email is received after purchase", "Positive", "High"),
-            ("Verify that the order total is calculated correctly (items + tax + shipping)", "Positive", "High"),
+            ("Verify that the the order total equals sum(items) + tax + shipping, matching the backend calculation", "Positive", "High"),
         ],
         "Checkout — Negative": [
             ("Verify that checkout is rejected with invalid payment details", "Negative", "High"),
@@ -689,7 +688,7 @@ def _payment_checks() -> _CL:
             ("Verify that credit card number is masked in UI after entry", "Security", "High"),
             ("Verify that no payment data is stored in browser localStorage/cookies", "Security", "High"),
             ("Verify that double-charge is prevented on multiple submit clicks", "Edge Case", "High"),
-            ("Verify that the order is handled correctly when payment gateway times out", "Edge Case", "High"),
+            ("Verify that the order returns the expected outcome per the spec when payment gateway times out", "Edge Case", "High"),
             ("Verify that the cart is preserved when payment fails", "Edge Case", "Medium"),
         ],
     }
@@ -699,12 +698,12 @@ def _navigation_checks() -> _CL:
     return {
         "Navigation": [
             ("Verify that the main navigation menu is displayed on all pages", "Positive", "High"),
-            ("Verify that all menu items are redirected to the correct pages", "Positive", "High"),
+            ("Click every menu item and verify the destination URL matches the item label", "Positive", "High"),
             ("Verify that the current page is highlighted in the navigation", "Positive", "Medium"),
-            ("Verify that browser Back/Forward buttons are working correctly", "Positive", "Medium"),
-            ("Verify that the URL is updated correctly when navigating between pages", "Positive", "Medium"),
+            ("Verify that browser Back/Forward buttons are producing the outcome defined in the design spec", "Positive", "Medium"),
+            ("Verify that the browser URL changes to match the destination route on every navigation", "Positive", "Medium"),
             ("Verify that 404 page is displayed for non-existent URLs", "Negative", "High"),
-            ("Verify that deep links (direct URL access) are working correctly", "Positive", "Medium"),
+            ("Verify that deep links (direct URL access) are producing the outcome defined in the design spec", "Positive", "Medium"),
         ],
     }
 
@@ -965,11 +964,11 @@ def _auth_test_cases() -> list[TCTemplate]:
             category="Positive", priority="High", section="Authentication",
         ),
         TCTemplate(
-            summary="Verify that login is rejected when incorrect password is provided",
+            summary="Verify that login is rejected with an invalid-credentials message when the password does not match",
             preconditions="Application is accessible. Test user account is created.",
             steps=["Navigate to the login page",
                    "Enter a valid registered email address",
-                   "Enter an incorrect password",
+                   "Enter a password that does not match the stored hash",
                    "Click the 'Login' / 'Sign In' button"],
             test_data="Email: testuser@example.com, Password: WrongPass999",
             expected_result="Login should be rejected. Generic error message should be displayed (e.g. 'Invalid credentials'). No information about which field is wrong should be revealed.",
@@ -1000,7 +999,7 @@ def _auth_test_cases() -> list[TCTemplate]:
             preconditions="Application is accessible. Test user account is created.",
             steps=["Navigate to the login page",
                    "Enter a valid email address",
-                   "Enter an incorrect password",
+                   "Enter a password that does not match the stored hash",
                    "Repeat failed login 5+ times consecutively",
                    "Observe the system behavior"],
             test_data="Email: testuser@example.com, Password: WrongPass (repeated 5+ times)",
@@ -1033,7 +1032,7 @@ def _auth_test_cases() -> list[TCTemplate]:
 def _search_test_cases() -> list[TCTemplate]:
     return [
         TCTemplate(
-            summary="Verify that correct results are returned for a valid search query",
+            summary="Verify that the search returns items whose title or body contains the query string, ordered by relevance",
             preconditions="Application is accessible. Searchable data is present in the system.",
             steps=["Navigate to the page with search functionality",
                    "Enter a valid search term that matches existing data",
@@ -1109,14 +1108,14 @@ def _forms_test_cases() -> list[TCTemplate]:
             category="Security", priority="High", section="Forms",
         ),
         TCTemplate(
-            summary="Verify that form handles boundary values correctly",
+            summary="Verify that form accepts min and max boundary values and rejects min-1 / max+1",
             preconditions="Application is accessible. Form is opened.",
             steps=["Enter minimum length values in text fields (1 character)",
                    "Enter maximum length values in text fields",
                    "Enter special characters and Unicode in all text fields",
                    "Submit the form after each test"],
             test_data="Min: 'A', Max: 255 chars, Special: @#$%^&*(), Unicode: test",
-            expected_result="All boundary values should be handled correctly. No errors or data corruption should occur.",
+            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur.",
             category="Edge Case", priority="Medium", section="Forms",
         ),
     ]
@@ -1130,9 +1129,9 @@ def _payment_test_cases() -> list[TCTemplate]:
             steps=["Navigate to a product page",
                    "Click 'Add to Cart' button",
                    "Navigate to the cart page",
-                   "Verify the item is displayed with correct details"],
+                   "Verify the item shows the same name, price, and image that are stored on the product page"],
             test_data="Any available product",
-            expected_result="Product should be added to the cart. Cart count should be updated. Product details should be correct.",
+            expected_result="Product should be added to the cart. Cart count should be updated. Product details in the cart match the product page fields exactly.",
             category="Positive", priority="High", section="Payment & Checkout",
         ),
         TCTemplate(
@@ -1173,14 +1172,14 @@ def _payment_test_cases() -> list[TCTemplate]:
 def _navigation_test_cases() -> list[TCTemplate]:
     return [
         TCTemplate(
-            summary="Verify that all navigation menu items redirect to correct pages",
+            summary="Verify that every navigation menu item opens the URL that matches its label",
             preconditions="Application is accessible. Main page is loaded.",
             steps=["Identify all items in the navigation menu",
                    "Click each menu item one by one",
-                   "Verify the correct page is loaded for each item",
-                   "Verify the URL is updated correctly"],
+                   "Verify the destination URL matches the item label and the heading on the page matches",
+                   "Verify the browser URL changes to match the navigated route"],
             test_data="All navigation menu items",
-            expected_result="Each navigation item should redirect to the correct page. URL should match the expected route.",
+            expected_result="Every navigation item opens the URL that matches its label. The browser URL matches the route declared for that menu item.",
             category="Positive", priority="High", section="Navigation",
         ),
         TCTemplate(
@@ -1193,15 +1192,15 @@ def _navigation_test_cases() -> list[TCTemplate]:
             category="Negative", priority="High", section="Navigation",
         ),
         TCTemplate(
-            summary="Verify that browser Back and Forward buttons work correctly",
+            summary="Verify that the browser Back button returns to the previous route and Forward restores the next one",
             preconditions="Application is accessible. User has navigated through several pages.",
             steps=["Navigate through 3-4 different pages",
                    "Click the browser Back button",
-                   "Verify the previous page loads correctly",
+                   "Verify the URL returns to the previous route and the page renders the same layout it had before",
                    "Click the browser Forward button",
-                   "Verify the next page loads correctly"],
+                   "Verify the URL returns to the most recent route and the page renders the same layout it had before"],
             test_data="",
-            expected_result="Browser history navigation should work correctly. Pages should load without errors.",
+            expected_result="Browser Back and Forward restore the previous and next routes respectively. Each restored page renders without console errors or missing assets.",
             category="Positive", priority="Medium", section="Navigation",
         ),
     ]
@@ -1210,14 +1209,14 @@ def _navigation_test_cases() -> list[TCTemplate]:
 def _web_general_test_cases() -> list[TCTemplate]:
     return [
         TCTemplate(
-            summary="Verify that the homepage loads correctly and displays expected content",
+            summary="Verify that the Homepage loads within 3 seconds and shows the expected title, heading, and main content",
             preconditions="Application is accessible via browser.",
             steps=["Open the application URL in the browser",
-                   "Verify the page loads without errors",
-                   "Verify the page title is displayed correctly in the browser tab",
-                   "Verify the main heading (H1) is displayed"],
+                   "Wait for the document ready event and measure load time in DevTools Network tab",
+                   "Verify the browser tab title matches the value declared in the design spec",
+                   "Verify there is exactly one H1 element and its text matches the page topic"],
             test_data="Application URL",
-            expected_result="Homepage should load within 3 seconds. Page title and main heading should be displayed correctly. No JavaScript errors in console.",
+            expected_result="Homepage loads in under 3 seconds on a wired connection. Browser tab title and H1 match the spec. Network tab shows no 4xx/5xx and Console tab shows no JavaScript errors.",
             category="Positive", priority="High", section="General Web",
         ),
         TCTemplate(
@@ -1236,11 +1235,11 @@ def _web_general_test_cases() -> list[TCTemplate]:
             preconditions="Application is accessible.",
             steps=["Open the page in browser DevTools responsive mode",
                    "Set viewport width to 375px (mobile)",
-                   "Verify layout adapts correctly",
+                   "Verify the layout uses a single column and the Header collapses into a hamburger menu",
                    "Verify no horizontal scrollbar appears",
-                   "Verify text is readable without zooming"],
+                   "Verify that body text is ≥ 14px and readable at 100% zoom"],
             test_data="Viewport: 375x812 (iPhone)",
-            expected_result="Page layout should adapt to mobile. No horizontal scroll. Text should be readable. Touch targets should be adequate (44x44px).",
+            expected_result="Layout uses a single column at 375px. No horizontal scrollbar. Body font ≥ 14px. Every tap target measures ≥ 44×44 CSS pixels including padding.",
             category="Positive", priority="High", section="Responsive Design",
         ),
         TCTemplate(
@@ -1248,24 +1247,16 @@ def _web_general_test_cases() -> list[TCTemplate]:
             preconditions="Application is accessible.",
             steps=["Open the page in browser DevTools responsive mode",
                    "Set viewport width to 768px (tablet)",
-                   "Verify layout adapts correctly",
-                   "Verify no overlapping or misaligned elements"],
+                   "Verify the layout matches the tablet breakpoint of the design spec (e.g. two-column cards)",
+                   "Verify no two visible elements overlap and every container stays inside the 768px width"],
             test_data="Viewport: 768x1024 (iPad)",
-            expected_result="Page layout should adapt to tablet size. No overlapping elements. Content should be properly formatted.",
+            expected_result="Layout matches the tablet breakpoint defined in the design spec. No overlapping elements. No horizontal scrollbar.",
             category="Positive", priority="High", section="Responsive Design",
         ),
-        TCTemplate(
-            summary="Verify that the page works correctly in Chrome, Firefox, Safari, and Edge",
-            preconditions="Application is accessible. Multiple browsers are available.",
-            steps=["Open the page in Google Chrome (latest)",
-                   "Open the page in Mozilla Firefox (latest)",
-                   "Open the page in Safari (latest)",
-                   "Open the page in Microsoft Edge (latest)",
-                   "Compare rendering and functionality across browsers"],
-            test_data="",
-            expected_result="Page should render consistently across all browsers. No browser-specific visual or functional issues.",
-            category="Positive", priority="High", section="Cross-browser",
-        ),
+        # Cross-browser test case intentionally removed — the browser is a
+        # Test Execution environment variable (see the Environment card on
+        # /test-execution). Re-running any other case against a different
+        # browser is how we cover that axis without duplicating cases.
         TCTemplate(
             summary="Verify that the page loads within 3 seconds and has no console errors",
             preconditions="Application is accessible. Browser DevTools is open.",
@@ -1328,14 +1319,14 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
             category="Negative", priority="High", section=section,
         ),
         TCTemplate(
-            summary=f"Verify that {short_action} is handled correctly with boundary values",
+            summary=f"Verify that {short_action} returns the expected outcome per the spec with boundary values",
             preconditions="System is running. Feature is accessible.",
             steps=["Test with minimum allowed input values",
                    "Test with maximum allowed input values",
                    "Test with special characters and Unicode",
                    "Test with empty/null values"],
             test_data="Min: 1 char, Max: max length, Special: !@#$%^&*(), Empty: ''",
-            expected_result="All boundary values should be handled correctly. No errors or data corruption should occur.",
+            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur.",
             category="Edge Case", priority="Medium", section=section,
         ),
     ]
@@ -1358,18 +1349,54 @@ def _ac_to_test_case(criterion: str, action: str, section: str) -> TCTemplate:
 
 
 def _ac_negative_test_case(criterion: str, action: str, section: str) -> TCTemplate:
-    """Generate a negative test case for an acceptance criterion."""
+    """Generate a negative test case for an acceptance criterion.
+
+    Phrasing rules:
+      * If the criterion already negates ("cannot", "not allowed",
+        "no errors", ...) we phrase the negative TC as an attempt to
+        bypass that restriction — so the summary stays grammatical
+        ("Verify that the system blocks attempts to access protected
+        resources by unauthorized users") instead of producing the
+        contradictory "Verify that violation of 'unauthorized users
+        cannot ...' returns the expected outcome per the spec".
+      * Otherwise we phrase it as the negation of the positive
+        criterion ("Verify that the system rejects input that violates
+        '<criterion>'").
+    """
     short_cr = criterion[:120].rstrip(".")
     short_action = action[:60].rstrip(".")
+
+    # Detect criteria that already negate — they need different phrasing.
+    cr_lower = short_cr.lower()
+    NEG_TOKENS = (" cannot ", " can't ", " not allowed", " not permitted",
+                  " is not ", " are not ", " has no ", " have no ",
+                  " never ", " without ", " no error", " no console")
+    already_negative = any(tok in (" " + cr_lower + " ") for tok in NEG_TOKENS)
+
+    if already_negative:
+        summary = (f"Verify that the system enforces '{short_cr[:70]}' "
+                   f"and blocks attempts to bypass this restriction")
+        steps = ["Navigate to the feature under test",
+                 f"Attempt the action that the spec forbids: {short_action}",
+                 "Observe how the system responds"]
+        expected = (f"The system should enforce the restriction. The action "
+                    f"should be blocked with a clear, user-facing error.")
+    else:
+        summary = (f"Verify that the system rejects input that violates "
+                   f"'{short_cr[:70]}'")
+        steps = ["Navigate to the feature under test",
+                 f"Provide input/state that contradicts: {short_cr}",
+                 "Observe error handling and system behavior"]
+        expected = ("The system should reject the invalid input gracefully. "
+                    "An appropriate, user-facing error message should be "
+                    "displayed; no data should be persisted.")
+
     return TCTemplate(
-        summary=f"Verify that violation of '{short_cr[:70]}' is handled correctly",
+        summary=summary,
         preconditions=f"Feature '{short_action}' is accessible.",
-        steps=["Navigate to the feature under test",
-               "Attempt to violate the expected behavior",
-               f"Provide input/state that contradicts: {short_cr}",
-               "Observe error handling and system behavior"],
+        steps=steps,
         test_data="Invalid/edge-case data contradicting the criterion",
-        expected_result=f"The system should prevent or handle the violation gracefully. Appropriate error message should be displayed.",
+        expected_result=expected,
         category="Negative", priority="Medium", section=section,
     )
 
@@ -1405,14 +1432,14 @@ def _story_test_cases(story, section: str) -> list[TCTemplate]:
         # One edge-case TC for the overall action
         short_action = action[:80].rstrip(".")
         cases.append(TCTemplate(
-            summary=f"Verify that {short_action} is handled correctly with boundary values",
+            summary=f"Verify that {short_action} returns the expected outcome per the spec with boundary values",
             preconditions="System is running. Feature is accessible.",
             steps=["Test with minimum allowed input values",
                    "Test with maximum allowed input values",
                    "Test with special characters and Unicode",
                    "Test with empty/null values"],
             test_data="Min: 1 char, Max: max length, Special: !@#$%^&*(), Empty: ''",
-            expected_result="All boundary values should be handled correctly. No errors or data corruption should occur.",
+            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur.",
             category="Edge Case", priority="Medium", section=section,
         ))
     else:

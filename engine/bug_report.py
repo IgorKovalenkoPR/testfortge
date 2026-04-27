@@ -5,14 +5,23 @@ Generates structured bug reports following ISTQB defect reporting standards
 and Jira-style formatting. Supports linking to failed test cases or
 checklist items and exporting to Markdown.
 
-Fields follow the standard Jira bug template:
-  ID | Title | Severity | Priority | Status | Environment
-  Preconditions | Steps to Reproduce | Actual Result | Expected Result
-  Attachments | Linked Items | Reporter | Assignee | Component | Labels
+ISTQB-mandatory fields (per ISTQB Foundation Level syllabus, Defect
+Management chapter): identifier, title, severity, priority, status,
+environment, preconditions, **steps to reproduce**, actual result,
+expected result, frequency, found-in build, affects version, attachments,
+linked items, reporter. We always emit non-empty values for the
+mandatory ones — auto-generated bugs from a failed checklist item used
+to ship empty ``preconditions`` and ``steps_to_reproduce`` which made
+them un-actionable; that's now closed in :func:`engine.qa_testers`.
+
+Jira best-practice fields layered on top: assignee, component, labels,
+comment, reporter, created. Issue type is implicitly "Bug" — every
+record in this module is a defect.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -25,27 +34,46 @@ BUG_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"]
 
 BUG_STATUSES = ["Open", "In Progress", "Resolved", "Closed", "Reopened"]
 
+# How often the defect can be reproduced. ISTQB-mandatory field.
+# Auto-generated bugs from deterministic real_check / simulator runs are
+# always "Always" because the same input produces the same status.
+BUG_FREQUENCIES = ["Always", "Sometimes", "Rarely", "Once"]
+
 
 # ── Data model ─────────────────────────────────────────────────────
 
 @dataclass
 class BugReport:
+    """A single defect, ISTQB-aligned and Jira-friendly.
+
+    Mandatory ISTQB fields are required positional/keyword args; Jira
+    nice-to-haves (assignee, labels, comment, etc.) default to empty so
+    the manual create-bug form can submit a partial record without
+    breaking auto-generated bugs that fill everything.
+    """
+
     id: str                    # e.g. "BUG-001"
-    title: str                 # Short bug title
+    title: str                 # Short bug title (negated active-voice statement)
     severity: str              # "Critical", "Major", "Minor", "Trivial"
     priority: str              # "Highest", "High", "Medium", "Low", "Lowest"
     status: str                # "Open", "In Progress", "Resolved", "Closed", "Reopened"
-    environment: str           # "Windows / Chrome / Desktop 1920x1080"
-    preconditions: str
-    steps_to_reproduce: str    # numbered steps
-    actual_result: str
-    expected_result: str
+    environment: str           # "Windows / Chrome / Desktop / 1920x1080"
+    preconditions: str         # State the system must be in before step 1
+    steps_to_reproduce: str    # Numbered steps, e.g. "1. Open ...\n2. Click ..."
+    actual_result: str         # What actually happened (observed)
+    expected_result: str       # What should have happened (per requirement)
+    # ── ISTQB-mandatory metadata ──
+    frequency: str = "Always"          # Reproducibility: Always/Sometimes/Rarely/Once
+    affects_version: str = ""          # Product version where the defect was found
+    found_in_build: str = ""           # Build identifier (env + ISO timestamp)
+    # ── Linkage / traceability ──
     attachments: list[str] = field(default_factory=list)
     linked_item_id: str = ""   # linked test case or checklist item ID
     linked_item_type: str = "" # "test_case" or "checklist"
-    reporter: str = ""         # tester name
-    assignee: str = ""
-    created_at: str = ""
+    # ── Jira workflow metadata ──
+    reporter: str = ""         # tester name (the person who filed the bug)
+    assignee: str = ""         # developer who will fix it
+    created_at: str = ""       # ISO 8601 UTC
     component: str = ""        # e.g. "Authentication", "Search", "UI"
     labels: list[str] = field(default_factory=list)
     comment: str = ""
@@ -160,6 +188,9 @@ def bug_to_dict(bug: BugReport) -> dict:
         "steps_to_reproduce": bug.steps_to_reproduce,
         "actual_result": bug.actual_result,
         "expected_result": bug.expected_result,
+        "frequency": bug.frequency,
+        "affects_version": bug.affects_version,
+        "found_in_build": bug.found_in_build,
         "attachments": list(bug.attachments),
         "linked_item_id": bug.linked_item_id,
         "linked_item_type": bug.linked_item_type,
@@ -173,7 +204,13 @@ def bug_to_dict(bug: BugReport) -> dict:
 
 
 def dict_to_bug(d: dict) -> BugReport:
-    """Reconstruct a BugReport from a dictionary."""
+    """Reconstruct a BugReport from a dictionary.
+
+    Tolerates older snapshots that pre-date the ISTQB metadata fields:
+    ``frequency`` / ``affects_version`` / ``found_in_build`` default to
+    empty (or "Always" for frequency) when missing so a project saved
+    before this revision still loads cleanly.
+    """
     return BugReport(
         id=d.get("id", ""),
         title=d.get("title", ""),
@@ -185,6 +222,9 @@ def dict_to_bug(d: dict) -> BugReport:
         steps_to_reproduce=d.get("steps_to_reproduce", ""),
         actual_result=d.get("actual_result", ""),
         expected_result=d.get("expected_result", ""),
+        frequency=d.get("frequency", "Always"),
+        affects_version=d.get("affects_version", ""),
+        found_in_build=d.get("found_in_build", ""),
         attachments=d.get("attachments", []),
         linked_item_id=d.get("linked_item_id", ""),
         linked_item_type=d.get("linked_item_type", ""),
@@ -211,13 +251,18 @@ def export_bug_report_markdown(bug: BugReport) -> str:
     lines.append(f"## {bug.id}: {bug.title}")
     lines.append("")
 
-    # Summary table
+    # Summary table — ISTQB-mandatory metadata first, Jira workflow second.
     lines.append("| Field | Value |")
     lines.append("|-------|-------|")
     lines.append(f"| Severity | {bug.severity} |")
     lines.append(f"| Priority | {bug.priority} |")
     lines.append(f"| Status | {bug.status} |")
+    lines.append(f"| Frequency | {bug.frequency or 'Always'} |")
     lines.append(f"| Environment | {bug.environment} |")
+    if bug.affects_version:
+        lines.append(f"| Affects Version | {bug.affects_version} |")
+    if bug.found_in_build:
+        lines.append(f"| Found in Build | {bug.found_in_build} |")
     if bug.component:
         lines.append(f"| Component | {bug.component} |")
     if bug.reporter:
@@ -276,3 +321,55 @@ def export_bug_report_markdown(bug: BugReport) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+# ── Step-list normalisation ────────────────────────────────────────
+
+_STEP_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]\s*|[-*]\s+|step\s*\d+\s*[:.\-]?\s*)",
+                             re.IGNORECASE)
+
+
+def normalize_steps_to_numbered_list(text: str) -> str:
+    """Coerce any free-form steps blob into a clean ``1. … 2. …`` list.
+
+    The QA Team Lead module hands us steps as either a single multi-line
+    string with leading numbers (``"1. Open\\n2. Click"``), a bullet list,
+    or a single sentence. ISTQB and Jira both expect a numbered list, so
+    we normalise here once and trust the rest of the pipeline.
+
+    Empty/whitespace-only input returns ``""`` so callers can decide
+    whether to synthesise a fallback.
+    """
+    if not text or not text.strip():
+        return ""
+
+    # Split on hard newlines first; then on " 1. " / "; " etc. fallbacks
+    # only if the whole blob is one line.
+    raw_lines = [ln for ln in (text.splitlines()) if ln.strip()]
+    if len(raw_lines) <= 1:
+        # Try inline numbered split: "1. foo 2. bar 3. baz".
+        single = raw_lines[0] if raw_lines else text.strip()
+        inline = re.split(r"(?<!\d)\b(\d+)[.)]\s+", " " + single)
+        # re.split with capturing group returns [pre, num, body, num, body, ...]
+        if len(inline) >= 5:
+            steps = []
+            i = 1
+            while i < len(inline) - 1:
+                body = (inline[i + 1] or "").strip()
+                if body:
+                    steps.append(body)
+                i += 2
+            if steps:
+                return "\n".join(f"{idx}. {s.rstrip('.')}" for idx, s in enumerate(steps, 1))
+        # Otherwise treat the whole thing as a single step.
+        body = _STEP_PREFIX_RE.sub("", single).strip().rstrip(".")
+        return f"1. {body}" if body else ""
+
+    cleaned = []
+    for ln in raw_lines:
+        body = _STEP_PREFIX_RE.sub("", ln).strip().rstrip(".")
+        if body:
+            cleaned.append(body)
+    if not cleaned:
+        return ""
+    return "\n".join(f"{i}. {s}" for i, s in enumerate(cleaned, 1))

@@ -183,6 +183,144 @@ class TestE2EInstructionFiltering:
             assert "Verify that" in html
 
 
+class TestE2ETestExecution:
+    """Test Execution must auto-run selected items, set per-item statuses
+    and auto-create bug reports for Failed/Blocked results — exactly the
+    workflow the user re-asked for after the redesign."""
+
+    def _seed_checklist(self, client):
+        """Generate a checklist so /test-execution has something to run."""
+        client.post("/new-session")
+        resp = client.post("/checklist", data={
+            "input_text": ("User can log in with email and password\n"
+                           "User can search products\n"
+                           "User can complete checkout"),
+        })
+        assert resp.status_code == 200
+        return resp
+
+    def test_run_assigns_per_item_status_and_creates_bugs(self, client):
+        # Seed checklist data first so the page has items to run.
+        self._seed_checklist(client)
+
+        # GET shows the run form with our items.
+        resp = client.get("/test-execution")
+        assert resp.status_code == 200
+        assert b"Run Test Execution" in resp.data or b"te_start_run" in resp.data
+
+        # Fire a run with the default Auto status — backend should
+        # decide Passed/Failed/Blocked deterministically without us
+        # having to set anything.
+        resp = client.post("/test-execution", data={
+            "source": "checklist",
+            "tester_id": "mid_1",
+            "testing_types": "Functional",
+            "platform": "Windows 11",
+            "browser": "Chrome",
+            "device": "Desktop",
+            "screen_size": "1920x1080",
+            "cred_mode": "none",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+
+        with client.session_transaction() as s:
+            runs = s.get("test_runs", [])
+            bugs = s.get("bug_reports_data", [])
+
+        assert runs, "Expected at least one test run to be saved"
+        run = runs[-1]
+        stats = run["stats"]
+
+        # Every item gets a status — never an empty string. Source must
+        # be tagged so the UI knows whether it was real / simulated /
+        # manual. And the totals add up.
+        assert stats["total"] > 0, "Run must include at least one item"
+        for r in run["results"]:
+            assert r["status"] in ("Passed", "Failed", "Blocked")
+            assert r["source"] in ("manual", "real_check", "simulated")
+            assert r["item_id"]
+
+        # For every Failed/Blocked result there must be a real bug ID
+        # attached, and a corresponding bug record created in the
+        # bug_reports session store. This is the explicit user-stated
+        # contract: "статуси мали також проставлятися з додаванням ID
+        # багів, де перевірка Failed/Blocked".
+        failing = [r for r in run["results"]
+                   if r["status"] in ("Failed", "Blocked")]
+        if failing:
+            assert run["bug_count"] == len(failing)
+            assert len(bugs) >= len(failing)
+            for r in failing:
+                assert r["bug_id"], (
+                    f"Failed/Blocked result {r['item_id']} must carry a bug_id"
+                )
+                assert not r["bug_id"].startswith("__pending_"), (
+                    f"Pending placeholder leaked into saved run: {r['bug_id']}"
+                )
+                # The bug ID points at a real bug record.
+                assert any(b.get("id") == r["bug_id"] for b in bugs)
+
+            # ISTQB-mandatory fields contract: every auto-generated bug
+            # must carry preconditions, steps to reproduce, frequency,
+            # affects_version and found_in_build. The previous version
+            # left preconditions + steps_to_reproduce empty for every
+            # checklist-derived bug — pinning that here so the
+            # regression cannot come back.
+            for bug in bugs:
+                assert bug.get("preconditions"), (
+                    f"Bug {bug.get('id')} has empty preconditions"
+                )
+                steps = bug.get("steps_to_reproduce", "")
+                assert steps, f"Bug {bug.get('id')} has empty steps_to_reproduce"
+                # Steps must look like a numbered list.
+                assert steps.startswith("1. "), (
+                    f"Bug {bug.get('id')} steps not a numbered list: {steps!r}"
+                )
+                assert bug.get("frequency"), (
+                    f"Bug {bug.get('id')} missing ISTQB frequency"
+                )
+                assert bug.get("affects_version"), (
+                    f"Bug {bug.get('id')} missing affects_version"
+                )
+                assert bug.get("found_in_build"), (
+                    f"Bug {bug.get('id')} missing found_in_build"
+                )
+                # Linked traceability must point back at the source item.
+                assert bug.get("linked_item_id")
+                assert bug.get("linked_item_type") in ("test_case", "checklist")
+
+    def test_manual_status_overrides_auto(self, client):
+        self._seed_checklist(client)
+
+        # Grab one item ID to override.
+        with client.session_transaction() as s:
+            cl = s.get("checklist_data", [])
+        assert cl, "Seed step must produce checklist items"
+        target_id = cl[0]["id"]
+
+        resp = client.post("/test-execution", data={
+            "source": "checklist",
+            "tester_id": "mid_1",
+            "testing_types": "Functional",
+            "platform": "Windows 11",
+            "browser": "Chrome",
+            "device": "Desktop",
+            "screen_size": "1920x1080",
+            "cred_mode": "none",
+            f"status_{target_id}": "Failed",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+
+        with client.session_transaction() as s:
+            runs = s.get("test_runs", [])
+
+        run = runs[-1]
+        target = next(r for r in run["results"] if r["item_id"] == target_id)
+        assert target["status"] == "Failed"
+        assert target["source"] == "manual"
+        assert target["bug_id"], "Manual Failed status must still trigger a bug"
+
+
 class TestE2EMultiLanguageConsistency:
     """Generated data must be the same regardless of UI language."""
 

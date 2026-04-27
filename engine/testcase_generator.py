@@ -124,44 +124,49 @@ def _auth_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase]:
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that {action} is completed successfully with valid credentials",
-        "Application is accessible. Test user account is created.",
-        ["Open the application", "Navigate to the authentication page",
-         "Enter valid credentials", "Click Submit/Login button",
-         "Pay attention to the result"],
-        "Valid email and password",
-        "User should be authenticated successfully and redirected to the expected page."))
+        f"Log in with a valid account and confirm the session opens ({action})",
+        "Application is reachable. A pre-registered test account exists with a known password.",
+        ["Open the application base URL in the browser",
+         "Click the Sign In / Login link in the Header",
+         "Enter the registered email into the email field",
+         "Enter the matching password into the password field",
+         "Click the Submit button",
+         "Observe the URL and any authenticated UI elements that appear"],
+        "Valid email: existing registered address. Password: the one set for that account.",
+        "The URL changes to the post-login page (dashboard / account). Session cookie is set. The Header shows the user menu instead of the Sign In link. No error banner is rendered."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that {action} is rejected when invalid credentials are provided",
-        "Application is accessible. Authentication page is opened.",
-        ["Open the application", "Navigate to the authentication page",
-         "Enter invalid email/username", "Enter incorrect password",
-         "Click Submit/Login button"],
-        "Invalid email: test@invalid, Wrong password: abc123",
-        "Error message should be displayed. User should NOT be authenticated. No sensitive info should be leaked."))
+        f"Attempt login with a non-matching password and confirm the attempt is rejected ({action})",
+        "Application is reachable. Login page is opened.",
+        ["Enter a registered email into the email field",
+         "Enter a password that does not match the stored hash",
+         "Click the Submit button",
+         "Inspect the response body and any visible error banner"],
+        "Email: valid registered address. Password: deliberately wrong value, e.g. wrong-pass-123.",
+        "The URL stays on the login page. An error banner states the login was refused. The response body does not disclose whether the email or the password was the failing field. No session cookie is issued."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that validation is triggered for empty fields during {action}",
-        "Application is accessible. Authentication page is opened.",
-        ["Leave all fields empty", "Click Submit/Login button",
-         "Fill only email field, leave password empty, click Submit",
-         "Fill only password field, leave email empty, click Submit"],
+        f"Submit the login form with missing fields and confirm client-side validation fires ({action})",
+        "Application is reachable. Login page is opened.",
+        ["Leave both the email and the password fields empty and click Submit",
+         "Enter only the email, leave the password empty, then click Submit",
+         "Clear the email, enter only the password, then click Submit"],
         "",
-        "Validation errors should be shown for each required field. Form should not be submitted."))
+        "In each case the form does not issue a network request; the empty field is highlighted and an inline validation message identifies which field is required. The login page URL is unchanged."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Security",
-        f"Verify that brute-force and injection attacks are blocked during {action}",
-        "Application is accessible. Authentication page is opened.",
-        ["Attempt login with wrong password 5+ times consecutively",
-         "Verify account lockout or CAPTCHA appears",
-         "Try SQL injection in the email field (e.g., ' OR 1=1 --)",
-         "Try XSS payload in input fields"],
-        "SQL: ' OR 1=1 --, XSS: <script>alert(1)</script>",
-        "Brute-force protection should activate. Injection attacks should be sanitized. No system errors should occur."))
+        f"Probe the login form for brute-force throttling and injection handling ({action})",
+        "Application is reachable. Login page is opened. Rate-limit window is reset for the test account.",
+        ["Submit the login form six times in a row with a wrong password for the same email",
+         "Observe whether the next attempt shows a lockout message or a CAPTCHA challenge",
+         "Enter the SQL-injection payload into the email field and click Submit",
+         "Enter the XSS payload into the email field and click Submit",
+         "Open DevTools → Network and inspect the response for each attempt"],
+        "SQL payload: ' OR 1=1 --  |  XSS payload: <script>alert(1)</script>",
+        "After the throttling threshold the server responds with 429 or a CAPTCHA is rendered. The SQL payload is stored as literal text; no server-side error (500) is returned. The XSS payload is escaped in the DOM and the alert does not fire."))
     idx[0] += 1
 
     return cases
@@ -173,33 +178,37 @@ def _crud_create_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCa
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that {action} is performed successfully with valid data",
-        "User is authenticated. Creation form is accessible.",
-        ["Navigate to the creation form/page", "Fill all required fields with valid data",
-         "Click Save/Submit button", "Verify the new record appears in the list/view"],
-        "Valid data for all required fields",
-        "New record should be created successfully. Success message should be displayed. Data should be persisted."))
+        f"Submit the creation form with valid data and confirm the record is persisted ({action})",
+        "User is authenticated. Creation form route is reachable from the menu.",
+        ["Click the Create / New / Add button in the list view",
+         "Enter valid values into each required field in the form",
+         "Click the Save button",
+         "Open the list view again and locate the newly created row",
+         "Click the row to open the detail view and compare each field with the submitted values"],
+        "Valid data for every required field (respecting stated min/max lengths).",
+        "The POST request returns HTTP 200 or 201 with a record id. A success toast is rendered. The list view shows the new row at the expected position, and the detail view displays the exact submitted values."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that {action} is rejected when invalid or missing data is submitted",
+        f"Submit the creation form with empty or malformed input and confirm the server rejects it ({action})",
         "User is authenticated. Creation form is opened.",
-        ["Leave all required fields empty and click Submit",
-         "Enter invalid format data (letters in number fields, wrong email format)",
-         "Click Save/Submit button"],
-        "Empty fields, invalid email: @notvalid, letters in phone field",
-        "Record should NOT be created. Clear validation error messages should be displayed for each invalid field."))
+        ["Leave every required field empty and click Save",
+         "Enter an email without an @ sign into an email field",
+         "Enter letters into a numeric field",
+         "Click Save after each mutation and inspect the response in DevTools → Network"],
+        "Empty value, malformed email: notvalid, letters in a numeric field: abc.",
+        "The server returns HTTP 400 / 422 or client-side validation blocks the request. No new record appears in the list view. Each failing field is highlighted with an inline message identifying the rule that was violated."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that boundary values and special characters are handled correctly for {action}",
+        f"Test boundary lengths, Unicode payloads, and duplicate submission for {action}",
         "User is authenticated. Creation form is opened.",
-        ["Enter minimum length values (1 character) in text fields",
-         "Enter maximum length values in text fields",
-         "Enter special characters, Unicode, emoji in text fields",
-         "Attempt to submit duplicate data"],
-        "Min: 'A', Max: 255 chars, Special: @#$%^&*(), Emoji: test",
-        "System should handle boundary values correctly. Special characters should be accepted or properly sanitized."))
+        ["Enter a single-character value into each text field and click Save",
+         "Enter a value at the documented maximum length into each text field and click Save",
+         "Enter Unicode and emoji characters into a text field and click Save",
+         "Open a second browser tab, submit the identical record again, and click Save"],
+        "Min: A. Max: 255 chars of lorem ipsum. Unicode: Тест Ω 你好 . Duplicate: identical primary-key values.",
+        "Boundary-length submissions persist exactly as entered. Unicode / emoji round-trip through the detail view with the same code points. The duplicate attempt is rejected with HTTP 409 or a uniqueness-violation message instead of creating a second record."))
     idx[0] += 1
 
     return cases
@@ -211,23 +220,27 @@ def _crud_read_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that data is displayed correctly for {action}",
-        "User is authenticated. Test data is present in the system.",
-        ["Navigate to the view/list page", "Verify all expected data columns/fields are visible",
-         "Verify data formatting (dates, numbers, currencies)",
-         "Verify pagination works if applicable"],
-        "",
-        "Data should be displayed correctly, completely, and in the right format."))
+        f"Load the list view with seeded data and compare cell values against the source ({action})",
+        "User is authenticated. At least three seed records exist in the backing store.",
+        ["Open the list view URL in the browser",
+         "Count the rows rendered in the table body and compare with the seed count",
+         "Read the first row top-to-bottom and compare each cell with the source record",
+         "Scroll the horizontal axis (or widen the viewport) and confirm every declared column header is visible",
+         "Locate the first date cell and confirm the format matches the documented locale (e.g. YYYY-MM-DD)",
+         "Click the next-page control and confirm the URL gains a page parameter and the table swaps to the next slice"],
+        "At least three seeded records with varied dates, numbers and currency values.",
+        "The row count matches the seed count exactly. Every declared column header is present. Date, number and currency cells render in the documented format. Pagination advances the URL and the table body, and the page-number control reflects the new page."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that empty state is handled gracefully for {action}",
-        "User is authenticated. No data is present for this view.",
-        ["Navigate to the view/list page",
-         "Verify appropriate empty state message is shown",
-         "Verify no errors or broken layout"],
+        f"Load the list view with zero rows and confirm the empty state is rendered ({action})",
+        "User is authenticated. No records exist for this view (fresh tenant or filtered to zero).",
+        ["Open the list view URL in the browser",
+         "Scan the page for the empty-state element (icon + message + call-to-action)",
+         "Open DevTools → Console and confirm no red errors were logged",
+         "Inspect the layout — the Header, Footer and sidebars are still present and aligned"],
         "",
-        "Empty state should be handled gracefully with appropriate message. No broken UI elements should be present."))
+        "A dedicated empty-state block is rendered with an explanatory message. No JavaScript errors appear in the console. The page chrome (Header, Footer, navigation) remains laid out; no ghost rows or skeleton loaders are stuck on screen."))
     idx[0] += 1
 
     return cases
@@ -239,24 +252,27 @@ def _crud_update_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCa
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that {action} is saved successfully with valid changes",
-        "User is authenticated. Record to be edited is present in the system.",
-        ["Navigate to the edit form of an existing record",
-         "Verify form is pre-filled with current data",
-         "Modify one or more fields with valid data",
-         "Click Save/Submit button",
-         "Verify changes are persisted and displayed correctly"],
-        "Updated valid data",
-        "Record should be updated successfully. Changes should be persisted. Success message should be shown."))
+        f"Edit an existing record, save, and confirm the change round-trips through the detail view ({action})",
+        "User is authenticated. A known record exists and its current values are captured.",
+        ["Click the target row in the list view to open the detail view",
+         "Click the Edit button",
+         "Confirm each form field is pre-populated with the existing value",
+         "Change at least one field to a new valid value and note the exact new value",
+         "Click Save",
+         "Reload the detail view via the browser refresh control",
+         "Compare every field with the notes taken before the edit and with the new value entered"],
+        "A new valid value for one field, different from the current stored value.",
+        "The PUT / PATCH request returns HTTP 200. The success toast references the updated record. After reload the edited field shows the new value, every other field is unchanged, and the updated_at timestamp has advanced."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that {action} is rejected when invalid data is submitted",
-        "User is authenticated. Edit form is opened.",
-        ["Clear a required field", "Enter invalid data format",
-         "Click Save/Submit button"],
-        "Empty required field, invalid format data",
-        "Invalid changes should be rejected. Validation error messages should be displayed. Original data should be preserved."))
+        f"Attempt to save invalid or missing data and confirm the original values are preserved ({action})",
+        "User is authenticated. The edit form of an existing record is open.",
+        ["Clear a required field and click Save",
+         "Enter a malformed value (e.g. bad email format) into a validated field and click Save",
+         "Leave the form open, navigate back to the list view, then reopen the same record"],
+        "Empty value for a required field. Malformed email: notvalid.",
+        "The server returns HTTP 400 / 422 or the client blocks submission. An inline error identifies the failing field. When the record is reopened from the list view its fields match the pre-edit values, confirming no partial write reached the store."))
     idx[0] += 1
 
     return cases
@@ -268,22 +284,29 @@ def _crud_delete_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCa
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that {action} is completed successfully and record is removed",
-        "User is authenticated. Record to be deleted is present in the system.",
-        ["Select the record to delete", "Click Delete button",
-         "Confirm the deletion in the confirmation dialog",
-         "Verify record is removed from the list"],
+        f"Delete an existing record through the confirmation dialog and confirm it no longer appears ({action})",
+        "User is authenticated. A known record exists (id recorded).",
+        ["Open the list view",
+         "Note the row count in the table footer / pagination summary",
+         "Click the target row to open the detail view",
+         "Click the Delete button",
+         "Click Confirm in the modal dialog",
+         "Wait for the redirect back to the list view",
+         "Search the list for the deleted record id",
+         "Try to open the detail URL of the deleted record directly in the address bar"],
         "",
-        "Record should be deleted successfully. Success message should be shown. Record should no longer appear."))
+        "The DELETE request returns HTTP 200 or 204. The row count decreases by one. A confirmation toast is displayed. Searching for the deleted id yields no results. Opening its detail URL returns HTTP 404 (or the configured not-found view)."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that {action} is cancelled when confirmation is declined",
-        "User is authenticated. Confirmation dialog is displayed.",
-        ["Click Cancel on deletion confirmation dialog",
-         "Verify the record still exists and is unchanged"],
+        f"Open the delete confirmation dialog, click Cancel, and confirm the record is untouched ({action})",
+        "User is authenticated. The delete confirmation modal is visible for a known record.",
+        ["Click the Cancel button (or the close-X control) on the confirmation modal",
+         "Verify the modal closes without issuing a network request (check DevTools → Network)",
+         "Open the same record from the list view",
+         "Compare every field with the pre-cancel values"],
         "",
-        "Record should NOT be deleted. Data should remain intact."))
+        "No DELETE request is sent. The record is still present in the list view and the detail view shows the original field values with an unchanged updated_at."))
     idx[0] += 1
 
     return cases
@@ -295,33 +318,37 @@ def _search_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase]:
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that correct results are returned for {action}",
-        "User is authenticated. Searchable data is present in the system.",
-        ["Enter a valid search term that matches existing data",
-         "Submit search", "Verify results match the search criteria",
-         "Verify result count is accurate"],
-        "Search term matching existing data",
-        "Search should return accurate, relevant results. Result count should match."))
+        f"Search for a known seeded term and compare the returned rows against expectations ({action})",
+        "User is authenticated. A seed record exists whose title/name contains the known term.",
+        ["Click the search input in the Header / toolbar",
+         "Enter the known term exactly as stored",
+         "Press Enter or click the Search button",
+         "Count the rows in the result table and compare with the pre-computed expected count",
+         "Read the first result row and confirm the term is present in the expected column"],
+        "Search term: a substring that appears in exactly one seeded record.",
+        "The request returns HTTP 200 within 2 s. The result count shown in the UI equals the expected count. Each returned row contains the search term in at least one displayed column. The query is reflected in the URL so the result set is shareable."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that 'no results' message is displayed when no matches are found for {action}",
-        "User is authenticated. Search functionality is available.",
-        ["Enter a search term with no matching data",
-         "Submit search", "Verify 'No results' message is displayed"],
-        "Search term: 'xyznonexistent123'",
-        "'No results found' message should be displayed. No errors should occur."))
+        f"Search for a term that does not exist and confirm the empty-results state is shown ({action})",
+        "User is authenticated. Search bar is visible.",
+        ["Click the search input",
+         "Enter a string that is guaranteed not to exist in the dataset",
+         "Press Enter",
+         "Observe the results area and any suggestion text"],
+        "Search term: xyznonexistent123.",
+        "Zero rows are rendered. An explicit 'No results' message is shown in place of the table. No red error banner or console error appears. The URL still carries the query so the empty state is bookmarkable."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that special input is handled correctly for {action}",
-        "User is authenticated. Search functionality is available.",
-        ["Search with special characters (!@#$%^&*)",
-         "Search with a very long string (500+ characters)",
-         "Search with SQL injection attempt",
-         "Search with empty query"],
-        "Special: !@#$%, Long: 500+ chars, SQL: ' OR 1=1 --",
-        "All edge cases should be handled without errors or security issues."))
+        f"Submit unusual payloads to the search input and inspect how they are handled ({action})",
+        "User is authenticated. Search bar is visible.",
+        ["Enter a string of special characters into the search input and press Enter",
+         "Paste a 500-character string into the search input and press Enter",
+         "Enter the SQL-injection payload into the search input and press Enter",
+         "Clear the input entirely and press Enter"],
+        "Special: !@#$%^&*  |  Long: 500+ chars  |  SQL: ' OR 1=1 --",
+        "Each query returns within the timeout with HTTP 200 or 400. The long string is either accepted or rejected with a length-limit message; the server does not 500. The SQL payload is treated as literal text and does not return the full dataset. The empty query either shows the full list or an explicit prompt; no stack trace is shown."))
     idx[0] += 1
 
     return cases
@@ -333,35 +360,43 @@ def _payment_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase]:
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that payment is completed successfully for {action}",
-        "User is authenticated. Items are added to the cart. Payment gateway is configured.",
-        ["Proceed to checkout page", "Verify order summary is correct",
-         "Enter valid payment details", "Confirm payment",
-         "Verify order confirmation and receipt"],
-        "Valid card: 4242 4242 4242 4242, Exp: 12/28, CVC: 123",
-        "Payment should complete successfully. Order confirmation should be displayed with correct amount."))
+        f"Complete a checkout with a test-mode approved card and verify the order + receipt ({action})",
+        "User is authenticated. Cart contains at least one item with a known price. Payment gateway is in test mode.",
+        ["Click the cart icon in the Header to open the cart view",
+         "Note the displayed subtotal, tax and grand total",
+         "Click the Checkout button",
+         "Enter the gateway test card number, expiry and CVC into the payment form",
+         "Click Pay / Place Order",
+         "Wait for the redirect to the order-confirmation page",
+         "Compare the amount on the confirmation page with the grand total noted earlier",
+         "Open the gateway dashboard (or the orders admin) and locate the transaction id"],
+        "Test card: 4242 4242 4242 4242. Expiry: 12/28. CVC: 123.",
+        "The POST /checkout request returns HTTP 200 with an order id. The confirmation page shows the same grand total the cart displayed. The receipt email (if configured) is queued. The gateway records exactly one authorisation for the expected amount."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that declined payment is handled gracefully for {action}",
-        "Checkout page is opened. Payment form is displayed.",
-        ["Enter payment details that will be declined",
-         "Submit payment", "Verify error message is displayed",
-         "Verify cart/order is preserved for retry"],
-        "Declined card: 4000 0000 0000 0002",
-        "Payment decline should be handled gracefully. Clear error message should be displayed. Cart should be preserved."))
+        f"Attempt checkout with a declined test card and confirm the cart is preserved ({action})",
+        "User is authenticated. Checkout page is open with a populated cart. Payment gateway is in test mode.",
+        ["Enter the declined test card number, any valid expiry, and any CVC into the payment form",
+         "Click Pay / Place Order",
+         "Inspect the error banner rendered on the checkout page",
+         "Click the cart icon in the Header and verify the line items and totals"],
+        "Declined test card: 4000 0000 0000 0002. Expiry: 12/28. CVC: 123.",
+        "The gateway response is surfaced as a red error banner stating the card was declined, without leaking raw gateway codes or stack traces. The cart contents and totals are unchanged, so the user can retry with a different card."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that payment timeout and double-charge are prevented for {action}",
-        "Payment confirmation step is reached. Network conditions are simulated.",
-        ["Simulate network timeout during payment processing",
-         "Check if payment was charged or not",
-         "Verify no duplicate charges exist",
-         "Verify order status is consistent with payment state"],
-        "",
-        "No duplicate charges should occur. Order and payment states should be consistent.",
-        comment="Critical edge case - verify with payment gateway logs"))
+        f"Interrupt the payment request and verify no duplicate charge occurs on retry ({action})",
+        "User is authenticated. Checkout page is open. DevTools is open to throttle / block the payment request.",
+        ["Enter valid test card details into the payment form",
+         "Open DevTools \u2192 Network and set the payment endpoint to Offline",
+         "Click Pay / Place Order and wait for the client timeout",
+         "Re-enable the Network and click Pay / Place Order a second time",
+         "Open the gateway dashboard and count authorisations for this order",
+         "Compare the order status in the admin with the charge state in the gateway"],
+        "Test card: 4242 4242 4242 4242.",
+        "Exactly one authorisation exists in the gateway dashboard. The order status in the admin matches the charge state (both paid, or both unpaid). The user never sees a 500 page; the retry either succeeds or is rejected with an idempotency-replay message.",
+        comment="Critical edge case \u2014 pair with a gateway-logs audit after each release."))
     idx[0] += 1
 
     return cases
@@ -370,36 +405,39 @@ def _payment_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase]:
 def _generic_tests(sn: int, story: UserStory, idx: list[int]) -> list[TestCase]:
     prefix, section = _SECTION_PREFIXES["generic"]
     action = _short(story.action)
+    story_text = _short(story.original_text, 140)
     cases = []
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Positive",
-        f"Verify that {action} is functioning as expected",
-        "System is running. User is authenticated (if applicable).",
-        ["Set up required preconditions",
-         f"Execute the action: {_short(story.action, 60)}",
-         "Verify the expected outcome"],
+        f"Exercise the happy path for: {action}",
+        f"System is reachable. If the feature needs authentication, the user is logged in. Relevant seed data exists per the story: {story_text}",
+        ["Open the entry point referenced by the story (page, menu item or API endpoint)",
+         f"Perform the action described by the story: {_short(story.action, 80)}",
+         "Capture the network response code and body via DevTools \u2192 Network",
+         "Observe the UI change that the story promises (new row, toast, navigation, updated counter)"],
         "",
-        f"Feature should work as specified: {_short(story.original_text, 120)}"))
+        f"The action returns HTTP 2xx. The UI change promised by the story is visible without a page reload. The backing store reflects the change on a subsequent read. Story under test: {story_text}"))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Negative",
-        f"Verify that errors are handled correctly for {action}",
-        "System is running. Feature is accessible.",
-        ["Provide invalid or missing input",
-         "Attempt the action",
-         "Verify error message is user-friendly and informative"],
-        "Invalid/empty input data",
-        "Invalid input should be rejected with appropriate, user-friendly error message."))
+        f"Drive the feature with invalid or missing input and confirm the rejection is explicit ({action})",
+        "System is reachable. Feature entry point is open.",
+        ["Leave a required field empty (or omit a required parameter) and trigger the action",
+         "Supply a malformed value (wrong type, out-of-range number, bad email format) and trigger the action",
+         "Inspect the HTTP response code and the rendered error message for each attempt"],
+        "Empty required field. Malformed value for a typed field.",
+        "Each invalid attempt returns HTTP 400 / 422 (or is blocked client-side before the network request). The error message names the failing field and the rule that was violated. No partial write reaches the backing store."))
     idx[0] += 1
 
     cases.append(_make_tc(sn, idx[0], section, prefix, story, "Edge Case",
-        f"Verify that edge cases are handled without errors for {action}",
-        "System is running. Feature is accessible.",
-        ["Test with boundary values (min, max, empty, overflow)",
-         "Test with special characters / Unicode / emoji",
-         "Test with concurrent access if applicable"],
-        "Boundary: 0, 1, MAX, -1; Special: @#$%^&*()",
-        "Edge cases should be handled without errors or data corruption."))
+        f"Push boundary, Unicode, and concurrent inputs through the feature ({action})",
+        "System is reachable. Feature entry point is open.",
+        ["Submit the documented minimum value (0, 1 or an empty-but-allowed payload) and capture the response",
+         "Submit the documented maximum value (max-length string, max-allowed number) and capture the response",
+         "Submit a Unicode-heavy payload (Cyrillic, CJK, emoji) and reopen the record",
+         "Open a second browser session and trigger the same action at the same time from both sessions"],
+        "Min: 0 / A. Max: documented upper bound. Unicode: Тест Ω 你好 . Concurrency: same payload from two sessions.",
+        "Min and max values persist exactly as entered. Unicode round-trips through the detail view with matching code points. Concurrent submissions either both succeed with distinct ids or the second is rejected with a conflict message; the store never ends up in a half-written state."))
     idx[0] += 1
 
     return cases
