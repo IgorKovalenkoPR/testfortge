@@ -47,3 +47,9 @@ _build_requirements_docx.js
 build_requirements_docx.js
 TestFortge_Requirements*.docx
 TestFortge_Requirements_*.docx
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
