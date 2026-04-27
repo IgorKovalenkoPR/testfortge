@@ -57,6 +57,10 @@ class AnalysisResult:
     raw_requirements: list[str] = field(default_factory=list)
     browser_findings: list[dict] = field(default_factory=list)  # real browser test results
     flows: list[str] = field(default_factory=list)   # detected named flows (e.g. "checkout_flow")
+    # Per-page crawler data (title / h1 / headings / nav / buttons / forms)
+    # — drives site-specific test-case generation. One dict per crawled URL.
+    site_pages: list[dict] = field(default_factory=list)
+    site_type: str = "generic"  # wordpress / spa / ecommerce / news / dashboard / landing / static
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -233,6 +237,26 @@ def analyze_input(requirements: list[dict],
             from .site_crawler import crawl_site
             site_analysis = crawl_site(result.url)
             result.features = list(site_analysis.features_detected)
+            result.site_type = site_analysis.site_type
+            # Capture per-page structural data so the TC generator can emit
+            # site-specific test cases that reference the actual page titles,
+            # H1s, headings, nav items, buttons and forms — not just generic
+            # boilerplate. Trim long fields so we don't blow up exports.
+            for p in site_analysis.pages:
+                if p.error:  # 404 / unreachable — skip
+                    continue
+                result.site_pages.append({
+                    "url": p.url,
+                    "title": (p.title or "")[:120],
+                    "h1": (p.h1 or "")[:120],
+                    "headings": [h[:80] for h in (p.headings or [])[:6]],
+                    "nav_links": [n[:60] for n in (p.nav_links or [])[:8]],
+                    "buttons": [b[:60] for b in (p.buttons or [])[:6]],
+                    "forms": p.forms or [],
+                    "has_video": bool(p.has_video),
+                    "images_count": int(p.images_count or 0),
+                    "links_internal_count": len(p.links_internal or []),
+                })
 
             # Features the crawler can authoritatively confirm or deny.
             # Remove keyword-guessed areas that the crawler did NOT find.
@@ -1460,6 +1484,256 @@ _AREA_TC_FN: dict[str, callable] = {
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 3b. Site-specific (per-page) test-case generation
+# ═══════════════════════════════════════════════════════════════════
+#
+# Generic baseline TCs (Forms / Navigation / HTTPS / Responsive) are
+# applicable but identical across products. To make TestForTge output
+# meaningful for a specific URL, this section emits TCs derived from
+# what the crawler actually saw on each page: the H1, the headings,
+# button labels, nav items, real form fields, presence of video etc.
+
+def _slugify_section(label: str) -> str:
+    """Build a stable section name from a page label (H1 or path)."""
+    label = (label or "").strip()
+    # Drop trailing site-name suffix common in <title> ("News - football.ua")
+    label = re.sub(r"\s*[\|\-–——]\s*[^|\-–——]+$", "", label)
+    label = label[:60].rstrip(" .|-—")
+    return label or "Page"
+
+
+def _path_label(url: str) -> str:
+    """Turn a URL into a short user-facing label (the path or domain)."""
+    m = re.match(r"https?://([^/]+)(/.*)?", url)
+    if not m:
+        return url[:40]
+    host, path = m.group(1), (m.group(2) or "/")
+    label = path.strip("/").replace("/", " > ") or host
+    return label.replace("-", " ").replace("_", " ")[:60]
+
+
+def _form_label(form: dict) -> str:
+    """Describe a form by its action or fields when no other anchor exists."""
+    action = form.get("action") or ""
+    if action:
+        a = re.sub(r"^https?://[^/]+", "", action).strip("/") or "root"
+        return f"form @ /{a}"
+    names = [(f.get("name") or f.get("placeholder") or "").strip()
+             for f in (form.get("fields") or [])]
+    names = [n for n in names if n][:3]
+    return f"form ({', '.join(names) or '?'})"
+
+
+def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
+    """Generate test cases anchored in actual crawled page data.
+
+    Strategy
+    --------
+    * Per page: 1 content-render TC (title + H1 + main sections).
+    * Per page: 1 internal-link health TC if it links out to many pages.
+    * If page has buttons → 1 button-action TC listing real labels.
+    * If page has video → 1 video-playback TC (per page that actually has it).
+    * If page has a real business form → field-grounded form submission
+      TC instead of the abstract "fill all fields" template.
+    * One global "primary navigation" TC listing the actual top-nav items.
+    * One global search relevance TC (only when search is detected).
+    """
+    cases: list[TCTemplate] = []
+    pages = analysis.site_pages or []
+    if not pages:
+        return cases
+
+    # 1) Site-wide primary-navigation TC using real top-nav labels
+    top_nav = []
+    seen = set()
+    for p in pages:
+        for n in (p.get("nav_links") or [])[:6]:
+            n_norm = n.strip().lower()
+            if n_norm and n_norm not in seen and len(n) <= 40:
+                seen.add(n_norm)
+                top_nav.append(n.strip())
+            if len(top_nav) >= 8:
+                break
+        if len(top_nav) >= 8:
+            break
+    if top_nav:
+        nav_str = " · ".join(top_nav)
+        cases.append(TCTemplate(
+            summary=f"Verify that the primary navigation exposes the documented sections: {nav_str[:90]}",
+            preconditions=f"Site is reachable at {analysis.url}.",
+            steps=[
+                "Open the homepage in a browser",
+                "Locate the primary navigation (top bar / header)",
+                f"Confirm the following items are present and clickable: {nav_str[:200]}",
+                "Click each item one by one and verify the URL changes and the destination renders the matching heading",
+            ],
+            test_data=f"Navigation labels observed by crawler: {nav_str[:240]}",
+            expected_result=(
+                "Every documented navigation item is rendered, clickable and "
+                "leads to a route whose page heading matches its label. No 404 "
+                "or empty-state pages on any of the items."
+            ),
+            category="Positive", priority="High", section="Site Navigation",
+        ))
+
+    # 2) Per-page content & UI test cases
+    MAX_PAGES = 8  # cap so a 200-page site doesn't drown the spreadsheet
+    for p in pages[:MAX_PAGES]:
+        url = p.get("url", "")
+        title = p.get("title") or p.get("h1") or _path_label(url)
+        h1 = p.get("h1") or ""
+        headings = p.get("headings") or []
+        buttons = p.get("buttons") or []
+        forms = p.get("forms") or []
+        has_video = p.get("has_video")
+        path_label = _path_label(url)
+        section = f"Page: {_slugify_section(title or path_label)}"
+
+        # 2a — content render TC referencing the real H1 + sections
+        section_list = ", ".join(h for h in headings[:3]) if headings else ""
+        content_steps = [f"Open the URL: {url}",
+                         "Wait for the page to fully load (DOMContentLoaded + main images)"]
+        if h1:
+            content_steps.append(f"Verify the visible H1 reads: \"{h1[:80]}\"")
+        if section_list:
+            content_steps.append(f"Verify the page renders the following sections: {section_list[:150]}")
+        content_steps.append("Open DevTools Console — confirm there are no JavaScript errors")
+        cases.append(TCTemplate(
+            summary=f"Verify that {path_label} renders its primary content as observed by the crawler",
+            preconditions=f"User can reach {url} from a fresh browser session.",
+            steps=content_steps,
+            test_data=f"URL: {url}",
+            expected_result=(
+                f"The page loads with its declared title (\"{title[:80]}\") and "
+                f"H1 (\"{h1[:80] or '—'}\"). All observed sections are visible. "
+                f"No JavaScript errors are emitted on first paint."
+            ),
+            category="Positive", priority="High", section=section,
+        ))
+
+        # 2b — interactive button TC (only when there are real buttons)
+        if buttons:
+            real_btns = [b for b in buttons
+                         if 2 <= len(b.strip()) <= 40
+                         and b.strip().lower() not in {"×", "x", "ok", "?", "close"}]
+            real_btns = real_btns[:5]
+            if real_btns:
+                btns_str = ", ".join(f'"{b}"' for b in real_btns)
+                cases.append(TCTemplate(
+                    summary=f"Verify that the interactive controls on {path_label} respond to user clicks",
+                    preconditions=f"{url} is loaded.",
+                    steps=[f"Open {url}",
+                           f"Locate each of the following controls: {btns_str}",
+                           "Click each control in turn and observe the resulting UI state (modal opens, content loads, navigation occurs, etc.)",
+                           "Confirm no JavaScript errors appear in DevTools Console"],
+                    test_data=f"Button labels seen on the page: {btns_str}",
+                    expected_result=(
+                        "Every listed control either navigates the user to "
+                        "the expected destination, opens its associated dialog "
+                        "or triggers its documented action without console errors."
+                    ),
+                    category="Positive", priority="Medium", section=section,
+                ))
+
+        # 2c — video TC (only when a video element was actually present)
+        if has_video:
+            cases.append(TCTemplate(
+                summary=f"Verify that embedded video on {path_label} loads and plays",
+                preconditions=f"{url} is loaded in a browser with audio/video enabled.",
+                steps=[f"Open {url}",
+                       "Locate the embedded video player",
+                       "Click the play control",
+                       "Verify the video starts playing within 3 seconds",
+                       "Verify pause / mute / fullscreen controls respond"],
+                test_data=f"Page: {url}",
+                expected_result="Video starts playing within 3 s of clicking play; pause/mute/fullscreen behave as expected; no media errors in console.",
+                category="Positive", priority="Medium", section=section,
+            ))
+
+        # 2d — form TC grounded in real fields, instead of the abstract template
+        for form in forms:
+            real_fields = [f for f in (form.get("fields") or [])
+                           if f.get("type") not in ("hidden", "submit", "button")]
+            if not real_fields:
+                continue
+            named = [(f.get("name") or f.get("placeholder") or f.get("type", "field")) for f in real_fields]
+            named = [str(n) for n in named if n][:6]
+            if not named:
+                continue
+            has_password = any(f.get("type") == "password" for f in real_fields)
+            label = _form_label(form)
+            if has_password:
+                # Treat as login/registration form
+                summary = f"Verify that submitting the {label} on {path_label} with valid credentials succeeds"
+                steps = [f"Open {url}",
+                         f"Fill the form fields ({', '.join(named)}) with valid values",
+                         "Click the submit / sign-in button",
+                         "Observe the response — successful auth should redirect or unlock content"]
+                expected = "Form submits successfully, the server returns 2xx and the user is redirected to the post-auth page or sees a success state."
+                category = "Positive"
+            else:
+                summary = f"Verify that the {label} on {path_label} accepts valid input and submits cleanly"
+                steps = [f"Open {url}",
+                         f"Fill the fields ({', '.join(named)}) with valid values",
+                         "Submit the form",
+                         "Observe network response and UI confirmation"]
+                expected = "Form submits successfully (HTTP 2xx). UI shows confirmation state. No console errors."
+                category = "Positive"
+            cases.append(TCTemplate(
+                summary=summary[:120],
+                preconditions=f"{url} is reachable; the form '{label}' is rendered on the page.",
+                steps=steps,
+                test_data=f"Fields observed: {', '.join(named)}",
+                expected_result=expected,
+                category=category, priority="High", section=section,
+            ))
+            # Negative TC for this specific form
+            cases.append(TCTemplate(
+                summary=f"Verify that the {label} on {path_label} rejects empty / malformed input"[:120],
+                preconditions=f"{url} is reachable; the form '{label}' is rendered.",
+                steps=[f"Open {url}",
+                       "Submit the form with all fields empty",
+                       f"Submit the form with malformed values (e.g. invalid email, mismatched password) for: {', '.join(named[:3])}",
+                       "Inspect the rendered validation messages and HTTP responses"],
+                test_data=f"Empty values; malformed values for: {', '.join(named[:3])}",
+                expected_result="Each invalid attempt is blocked client- or server-side with a field-specific error message. No partial write reaches the backing store.",
+                category="Negative", priority="High", section=section,
+            ))
+            break  # one form per page is enough — avoid duplicates
+
+    # 3) Site-search relevance (only when crawler actually saw a search input)
+    if "search" in (analysis.areas or []) and pages:
+        # Pick a topical seed query from the site's own headings
+        topical = ""
+        for p in pages:
+            for h in (p.get("headings") or [])[:3]:
+                if 3 <= len(h.split()) <= 6:
+                    topical = h
+                    break
+            if topical:
+                break
+        seed = topical or (pages[0].get("h1") or pages[0].get("title") or "news")
+        cases.append(TCTemplate(
+            summary=f"Verify that the on-site search returns results relevant to a topical query (\"{seed[:60]}\")",
+            preconditions=f"Site search is reachable from {analysis.url}.",
+            steps=["Open the homepage",
+                   "Click the search input / icon",
+                   f"Submit the query: \"{seed[:80]}\"",
+                   "Inspect the result list and the first three items"],
+            test_data=f"Query: {seed[:120]}",
+            expected_result=(
+                "Search returns at least one result. The first three results "
+                "are topically relevant to the query and link to existing pages "
+                "(no 404). An empty-state message is rendered when the query "
+                "yields no matches."
+            ),
+            category="Positive", priority="High", section="Site Search",
+        ))
+
+    return cases
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 3c. Named flow generators (end-to-end playbooks)
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1605,8 +1879,31 @@ def generate_professional_test_cases(analysis: AnalysisResult,
     """
     cases: list[TCTemplate] = []
 
-    # Area-specific test cases from knowledge base (supplementary)
+    # 1) Site-specific test cases derived from real crawler data — these
+    #    reference the actual H1s, sections, buttons, forms and nav items
+    #    that the crawler observed on the URL. Generated FIRST so that
+    #    when they cover an area (navigation / forms) we can suppress the
+    #    duplicated generic baseline below.
+    site_cases = _site_specific_test_cases(analysis)
+    cases.extend(site_cases)
+    site_covers_navigation = any(c.section == "Site Navigation" for c in site_cases)
+    site_covers_forms      = any(c.section.startswith("Page: ") and "form" in c.summary.lower()
+                                  for c in site_cases)
+    site_covers_search     = any(c.section == "Site Search" for c in site_cases)
+
+    # 2) Area-specific generic baselines — emitted only when the site
+    #    didn't already get site-specific coverage for that area. This
+    #    prevents the spreadsheet from carrying both a "verify that the
+    #    form accepts valid input" generic case and a site-specific
+    #    "verify that the login form on /sign-in accepts valid input"
+    #    for the same form.
     for area in analysis.areas:
+        if area == "navigation" and site_covers_navigation:
+            continue
+        if area == "forms" and site_covers_forms:
+            continue
+        if area == "search" and site_covers_search:
+            continue
         fn = _AREA_TC_FN.get(area)
         if fn:
             cases.extend(fn())
