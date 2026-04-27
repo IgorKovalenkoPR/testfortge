@@ -50,8 +50,13 @@ def register(app: Flask) -> None:
 
         if request.method == "POST":
             source = request.form.get("source", "test_cases")
+            # The Testing Types / Assigned Tester / Test Account UI was
+            # removed — testing scope is now driven by the prompt that
+            # produced the test cases (see Test Cases / Checklist pages).
+            # We keep accepting the fields if posted (older bookmarks /
+            # automation), but otherwise default sensibly.
             tester_id = request.form.get("tester_id", "mid_1")
-            testing_types = request.form.getlist("testing_types") or ["Functional"]
+            testing_types = request.form.getlist("testing_types") or ["Regression"]
             selected_ids = request.form.getlist("selected_items")
 
             credentials = credentials_from_form(request.form)

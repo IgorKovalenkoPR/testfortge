@@ -322,112 +322,12 @@
     </div>
 </div>
 
-{# ── Testing Types ── #}
-<div class="card">
-    <h3 class="card-title">{{ t.get('te_testing_types', 'Testing Types') }}</h3>
-    <p class="hint">{{ t.get('te_select_types', 'Select one or more testing types') }}</p>
-    <div class="checkbox-grid">
-        {% for tt in testing_types %}
-        <label class="checkbox-card">
-            <input type="checkbox" name="testing_types" value="{{ tt }}" {% if tt == "Functional" %}checked{% endif %}>
-            <span>{{ tt }}</span>
-        </label>
-        {% endfor %}
-    </div>
-</div>
-
-{# ── Tester ── #}
-<div class="card">
-    <h3 class="card-title">{{ t.get('te_tester', 'Assigned Tester') }}</h3>
-    <select name="tester_id" class="tester-select">
-        {% for tester in testers %}
-        <option value="{{ tester.id }}">{{ tester.name }} ({{ tester.level }})</option>
-        {% endfor %}
-    </select>
-</div>
-
-{# ── Test Account / Credentials ── #}
-<div class="card">
-    <h3 class="card-title">{{ t.get('creds_title', 'Test Account') }}</h3>
-    <p class="subtitle">{{ t.get('creds_help_te',
-       'Optional. Provide credentials if the test cases or checklist require authenticated access, or generate a throw-away test account.') }}</p>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="none"
-                 {% if cred.mode in ('', 'none') %}checked{% endif %}>
-          {{ t.get('creds_mode_none', 'No authentication needed') }}
-        </label>
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="provided"
-                 {% if cred.mode == 'provided' %}checked{% endif %}>
-          {{ t.get('creds_mode_provided', 'Use existing account') }}
-        </label>
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="generated"
-                 {% if cred.mode == 'generated' %}checked{% endif %}>
-          {{ t.get('creds_mode_generated', 'Generate test account') }}
-        </label>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label>{{ t.get('creds_login_url', 'Login page URL') }}</label>
-        <input type="url" name="cred_login_url"
-               value="{{ cred.login_url or '' }}"
-               placeholder="https://example.com/login">
-      </div>
-      <div class="form-group">
-        <label>{{ t.get('creds_username', 'Username / email') }}</label>
-        <input type="text" name="cred_username" autocomplete="off"
-               value="{{ cred.username or '' }}"
-               placeholder="qa.tester@example.com">
-      </div>
-      <div class="form-group">
-        <label>{{ t.get('creds_password', 'Password') }}</label>
-        <input type="password" name="cred_password" autocomplete="new-password"
-               placeholder="{% if cred.password %}{{ t.get('creds_kept', '(kept from previous run)') }}{% endif %}">
-      </div>
-    </div>
-
-    <details style="margin-top:.5rem">
-      <summary>{{ t.get('creds_advanced', 'Advanced: registration URL / display name') }}</summary>
-      <div class="form-row" style="margin-top:.5rem">
-        <div class="form-group">
-          <label>{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
-          <input type="url" name="cred_register_url"
-                 value="{{ cred.register_url or '' }}"
-                 placeholder="https://example.com/signup">
-        </div>
-        <div class="form-group">
-          <label>{{ t.get('creds_display_name', 'Display name') }}</label>
-          <input type="text" name="cred_display_name"
-                 value="{{ cred.display_name or '' }}">
-        </div>
-      </div>
-    </details>
-
-    {% if cred.mode == 'generated' and cred.username %}
-    <div class="alert alert-info" style="margin-top:.5rem">
-      <strong>{{ t.get('creds_generated_label', 'Generated test account:') }}</strong>
-      <code>{{ cred.username }}</code> / <code>{{ cred.password }}</code>
-      {% if cred.notes %}<br><small>{{ cred.notes }}</small>{% endif %}
-    </div>
-    {% endif %}
-
-    <p style="margin-top:.5rem">
-      <button type="submit" formaction="{{ url_for('test_execution_generate_account') }}"
-              formmethod="POST" class="btn btn-secondary">
-        <i data-lucide="key-round" class="icon-sm"></i> {{ t.get('creds_generate_now', 'Generate test account now') }}
-      </button>
-    </p>
-</div>
+{# Testing Types / Assigned Tester / Test Account were removed in
+   favour of a single environment-driven run. Defaults applied by
+   the route: testing_types=["Regression"], tester_id="mid_1",
+   credentials=none. Testing scope is now driven by the prompt that
+   produced the test cases / checklist (see Test Cases / Checklist
+   pages). #}
 
 <button type="submit" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
 </form>

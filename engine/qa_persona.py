@@ -29,6 +29,7 @@ class CheckItem:
     category: str          # Positive / Negative / Edge Case / Security / Performance / Accessibility
     priority: str = "Medium"  # High / Medium / Low
     section: str = ""
+    testing_type: str = ""  # see TCTemplate.testing_type
 
 
 @dataclass
@@ -43,6 +44,12 @@ class TCTemplate:
     priority: str = "Medium"
     section: str = ""
     comment: str = ""
+    # ``testing_type`` tags a case for prompt-driven filtering. Empty
+    # by default so ``_detect_testing_type`` (in testcase_generator)
+    # can tag the case by heuristic (section / summary). Generators
+    # that already know the right testing type — SEO / Usability /
+    # Localization — set the field explicitly and bypass the heuristic.
+    testing_type: str = ""
 
 
 @dataclass
@@ -1524,6 +1531,169 @@ def _form_label(form: dict) -> str:
     return f"form ({', '.join(names) or '?'})"
 
 
+def _seo_test_cases() -> list[TCTemplate]:
+    """SEO baseline applicable to any public web product."""
+    return [
+        TCTemplate(
+            summary="Verify that every public page has a unique, non-empty <title> under 60 characters",
+            preconditions="The site is reachable and indexable.",
+            steps=[
+                "Visit the homepage and at least 3 representative inner pages",
+                "Inspect <head><title> via DevTools or `view-source:`",
+                "Verify each title is non-empty, unique across pages, and <= 60 characters",
+            ],
+            test_data="Pages: /, /about, /contact, /<feature>",
+            expected_result="Every audited page has its own descriptive <title>, none are duplicated, none exceed 60 chars.",
+            category="Positive", priority="High", section="SEO",
+            testing_type="SEO",
+        ),
+        TCTemplate(
+            summary="Verify that every page has a meta description (50-160 chars) and canonical URL",
+            preconditions="Site is reachable.",
+            steps=[
+                "View page source on the homepage and 3 representative inner pages",
+                "Confirm <meta name=\"description\"> exists with 50-160 chars",
+                "Confirm <link rel=\"canonical\"> points to the page's primary URL",
+            ],
+            test_data="HTML head of each audited page",
+            expected_result="Each page declares a meaningful meta description in the 50-160-char range and a canonical link pointing to itself (or its preferred variant).",
+            category="Positive", priority="High", section="SEO",
+            testing_type="SEO",
+        ),
+        TCTemplate(
+            summary="Verify that robots.txt and sitemap.xml are reachable and consistent",
+            preconditions="Site is reachable.",
+            steps=[
+                "Open /robots.txt — verify HTTP 200 and that it references a Sitemap directive",
+                "Open the Sitemap URL — verify HTTP 200 and valid XML",
+                "Spot-check 3 URLs from the sitemap return HTTP 200",
+            ],
+            test_data="/robots.txt, /sitemap.xml",
+            expected_result="Both files return HTTP 200. robots.txt declares the sitemap. Sample sitemap URLs resolve without 4xx/5xx.",
+            category="Positive", priority="Medium", section="SEO",
+            testing_type="SEO",
+        ),
+        TCTemplate(
+            summary="Verify that Open Graph and Twitter Card meta tags are present on shareable pages",
+            preconditions="Site is reachable.",
+            steps=[
+                "Open the homepage and one content/article page",
+                "Verify presence of og:title, og:description, og:image, og:url",
+                "Verify presence of twitter:card, twitter:title, twitter:description",
+                "Use a card validator (e.g. opengraph.xyz) and confirm preview renders",
+            ],
+            test_data="Homepage URL + one content URL",
+            expected_result="Both pages render a clean Open Graph + Twitter Card preview when shared on Slack/Telegram/X. og:image loads and is at least 1200×630.",
+            category="Positive", priority="Medium", section="SEO",
+            testing_type="SEO",
+        ),
+        TCTemplate(
+            summary="Verify that all images on the homepage have meaningful alt attributes",
+            preconditions="Homepage is reachable.",
+            steps=["Open the homepage",
+                   "Run an a11y/SEO audit (Lighthouse or `document.querySelectorAll('img:not([alt]), img[alt=\"\"]')`)",
+                   "Inspect every <img> for an alt attribute"],
+            test_data="Homepage <img> elements",
+            expected_result="Every <img> has an alt attribute. Decorative images may use alt=\"\" but the attribute itself is present. No img is missing alt.",
+            category="Positive", priority="Medium", section="SEO",
+            testing_type="SEO",
+        ),
+    ]
+
+
+def _usability_test_cases() -> list[TCTemplate]:
+    """Heuristic usability baseline applicable to any web product."""
+    return [
+        TCTemplate(
+            summary="Verify that the primary call-to-action on the homepage is visible above the fold",
+            preconditions="Homepage is reachable in a 1280×800 viewport.",
+            steps=["Open the homepage at 1280×800",
+                   "Confirm the primary CTA (e.g. Sign up / Buy / Start) is visible without scrolling",
+                   "Confirm it has sufficient colour contrast and a clearly clickable affordance"],
+            test_data="Viewport: 1280×800",
+            expected_result="The primary CTA is visible above the fold, has a contrasting background, and is recognisable as a clickable control on first glance.",
+            category="Positive", priority="High", section="Usability",
+            testing_type="Usability",
+        ),
+        TCTemplate(
+            summary="Verify that body text uses a readable font size (>= 14 px) and adequate line-height",
+            preconditions="Any content page is loaded at 1280×800.",
+            steps=["Open a content-rich page",
+                   "Inspect computed font-size and line-height of the main body text",
+                   "Verify body font-size is at least 14 px and line-height is between 1.4 and 1.7"],
+            test_data="Body paragraphs",
+            expected_result="Body text reads cleanly at default zoom: font-size >= 14 px, line-height 1.4-1.7. No paragraphs use < 12 px.",
+            category="Positive", priority="Medium", section="Usability",
+            testing_type="Usability",
+        ),
+        TCTemplate(
+            summary="Verify that interactive controls have visible hover and focus states",
+            preconditions="Any page with multiple links / buttons is loaded.",
+            steps=["Hover over each navigation link, button and interactive icon",
+                   "Tab through the same controls using only the keyboard",
+                   "Confirm both states are visually distinct from the default state"],
+            test_data="Top nav, primary CTA, footer links",
+            expected_result="Every interactive element has a clearly different appearance on hover and on keyboard focus. No control silently absorbs focus.",
+            category="Positive", priority="Medium", section="Usability",
+            testing_type="Usability",
+        ),
+        TCTemplate(
+            summary="Verify that error and empty states are user-friendly, not raw stack traces",
+            preconditions="Application is reachable.",
+            steps=["Trigger a known-bad URL (404)",
+                   "Trigger a form submission with invalid input",
+                   "If the app exposes search, search for nonsense to hit an empty-state"],
+            test_data="/this-does-not-exist-123, malformed form input, query: ‘zzzqqqxxx’",
+            expected_result="Each error / empty state is rendered with a friendly message and a recovery CTA (link home, retry, contact). No raw 500 page or stack trace leaks.",
+            category="Negative", priority="High", section="Usability",
+            testing_type="Usability",
+        ),
+    ]
+
+
+def _localization_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
+    """Localization checks — emitted when the site exposes multi-language UI."""
+    pages = analysis.site_pages or []
+    multi_lang = False
+    for p in pages:
+        nav_blob = " ".join(p.get("nav_links") or []).lower()
+        title_blob = (p.get("title") or "").lower()
+        if any(t in nav_blob for t in ("ua", "укр", "рус", "eng", "english", "deutsch", "polski", "español")):
+            multi_lang = True
+            break
+        # Mixed Cyrillic + Latin signals likely multi-language site
+        if re.search(r"[а-яіїєґ]", title_blob) and re.search(r"[a-z]{3,}", title_blob):
+            multi_lang = True
+            break
+    if not pages or not multi_lang:
+        return []
+    return [
+        TCTemplate(
+            summary="Verify that the language switcher changes UI strings without breaking the layout",
+            preconditions=f"Site is reachable at {analysis.url}.",
+            steps=["Open the homepage in the default language",
+                   "Use the language switcher (header / footer) to toggle to each available language",
+                   "Verify visible UI strings change consistently",
+                   "Verify no layout breaks (text overflow, clipped buttons, broken alignment)"],
+            test_data="All language toggles exposed in nav/footer",
+            expected_result="Switching language replaces the visible UI strings end-to-end. The layout adapts to longer translations without overflow or clipping. The selected language persists on subsequent navigation.",
+            category="Positive", priority="High", section="Localization",
+            testing_type="Localization",
+        ),
+        TCTemplate(
+            summary="Verify that html[lang] reflects the active locale and matches the rendered text",
+            preconditions="Site supports more than one language.",
+            steps=["Switch to each available language",
+                   "Open DevTools and inspect the <html lang=\"…\"> attribute",
+                   "Confirm it changes per locale (e.g. uk, en, ru, pl)"],
+            test_data="Locale toggles + DevTools",
+            expected_result="The lang attribute on <html> changes to the active locale on every switch. Screen readers and browsers receive the correct language hint.",
+            category="Positive", priority="Medium", section="Localization",
+            testing_type="Localization",
+        ),
+    ]
+
+
 def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
     """Generate test cases anchored in actual crawled page data.
 
@@ -1907,6 +2077,19 @@ def generate_professional_test_cases(analysis: AnalysisResult,
         fn = _AREA_TC_FN.get(area)
         if fn:
             cases.extend(fn())
+
+    # 3) Non-functional baselines that apply to any public web product
+    #    when a URL is in scope. These cover the most common testing
+    #    types beyond "functional" so the default output is genuine
+    #    regression scope (functional + smoke + perf + security +
+    #    accessibility + SEO + usability + localization). Custom-prompt
+    #    narrowing (see ``generate_test_cases``) can later filter the
+    #    set down to specific testing types if the user asked for a
+    #    narrower scope.
+    if analysis.url:
+        cases.extend(_seo_test_cases())
+        cases.extend(_usability_test_cases())
+        cases.extend(_localization_test_cases(analysis))
 
     # Named-flow playbooks (e.g. "checkout_flow") — expanded per-phase
     for flow_key in getattr(analysis, "flows", []) or []:
