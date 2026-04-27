@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestForTge — AI-powered QA framework | Testfort</title>
+<meta name="description" content="From requirements to deployable test artefacts in minutes. TestForTge parses your specs, generates test cases, runs Playwright automation and ships QA reports — all in one Flask-based framework.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --tf-ink:        #0E1117;
+  --tf-ink-2:      #161B26;
+  --tf-card:       #1A2030;
+  --tf-card-2:     #232A3D;
+  --tf-line:       #2C3447;
+  --tf-mute:       #8C94A6;
+  --tf-text:       #E6E9F0;
+  --tf-text-soft:  #C5CAD7;
+  --tf-coral:      #FF865C;
+  --tf-coral-hi:   #FF6A36;
+  --tf-coral-soft: #FFE9DE;
+  --tf-navy:       #14274A;
+  --tf-navy-hi:    #1F3864;
+  --tf-blue:       #5B8DEF;
+  --tf-grad:       linear-gradient(135deg,#FF865C 0%,#FF6A36 100%);
+  --tf-grad-soft:  linear-gradient(135deg,rgba(255,134,92,.18) 0%,rgba(255,106,54,.10) 100%);
+  --tf-radius:     14px;
+  --tf-radius-sm:  10px;
+  --tf-radius-pill:999px;
+  --tf-shadow:     0 16px 40px rgba(0,0,0,.35);
+  --tf-shadow-sm:  0 6px 20px rgba(0,0,0,.25);
+  --tf-mono:       'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --tf-font:       'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--tf-font);
+  color:var(--tf-text);
+  background:var(--tf-ink);
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+img,svg{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+.container{max-width:1180px;margin:0 auto;padding:0 24px}
+
+/* ── NAV ─────────────────────────────────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:50;
+  background:rgba(14,17,23,.85);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(255,255,255,.05);
+}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;letter-spacing:-.01em}
+.brand-mark{
+  width:34px;height:34px;border-radius:9px;
+  background:var(--tf-grad);
+  display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;
+  box-shadow:0 6px 16px rgba(255,134,92,.35);
+}
+.brand-tx span:first-child{color:var(--tf-text)}
+.brand-tx span:nth-child(2){color:var(--tf-coral)}
+.nav-links{display:flex;gap:28px;font-size:14px;color:var(--tf-text-soft)}
+.nav-links a:hover{color:var(--tf-coral)}
+.nav-cta{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border-radius:var(--tf-radius-pill);
+  background:var(--tf-grad);color:#fff;font-weight:600;font-size:14px;
+  box-shadow:0 6px 18px rgba(255,134,92,.35);transition:transform .12s ease, box-shadow .12s ease}
+.nav-cta:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(255,134,92,.45)}
+@media (max-width:760px){.nav-links{display:none}}
+
+/* ── HERO ────────────────────────────────────────────────────── */
+.hero{
+  position:relative;overflow:hidden;
+  padding:96px 0 80px;
+  background:
+    radial-gradient(1200px 500px at 75% -10%, rgba(255,134,92,.18), transparent 60%),
+    radial-gradient(900px 400px at 10% 30%, rgba(91,141,239,.10), transparent 60%);
+}
+.hero-inner{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+@media (max-width:960px){.hero-inner{grid-template-columns:1fr;gap:40px}}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--tf-coral);
+  padding:6px 12px;border:1px solid rgba(255,134,92,.35);border-radius:var(--tf-radius-pill);
+  background:rgba(255,134,92,.06);
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--tf-coral);box-shadow:0 0 12px var(--tf-coral)}
+.hero h1{
+  font-size:clamp(36px,5.2vw,60px);line-height:1.05;letter-spacing:-.02em;
+  margin:18px 0 18px;font-weight:800;color:#fff;
+}
+.hero h1 .accent{
+  background:var(--tf-grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.hero p.lead{
+  color:var(--tf-text-soft);font-size:18px;max-width:560px;margin:0 0 28px;
+}
+.hero-ctas{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:14px 22px;border-radius:var(--tf-radius-pill);
+  font-weight:600;font-size:15px;border:0;transition:transform .12s ease, box-shadow .12s ease;
+}
+.btn-primary{background:var(--tf-grad);color:#fff;box-shadow:0 8px 22px rgba(255,134,92,.35)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(255,134,92,.45)}
+.btn-ghost{
+  background:transparent;color:var(--tf-text);
+  border:1px solid var(--tf-line);
+}
+.btn-ghost:hover{border-color:var(--tf-coral);color:var(--tf-coral)}
+.hero-trust{margin-top:36px;display:flex;flex-wrap:wrap;gap:18px 28px;color:var(--tf-mute);font-size:13px}
+.hero-trust span{display:inline-flex;align-items:center;gap:8px}
+.hero-trust .dot{width:6px;height:6px;border-radius:50%;background:var(--tf-coral)}
+
+/* Hero terminal mockup */
+.hero-mock{
+  position:relative;
+  border-radius:var(--tf-radius);
+  background:linear-gradient(180deg,#1A2030 0%, #131826 100%);
+  border:1px solid var(--tf-line);
+  box-shadow:var(--tf-shadow);
+  padding:14px 16px 18px;
+  font-family:var(--tf-mono);font-size:12.5px;line-height:1.55;
+  color:#D5DAE6;
+  overflow:hidden;
+}
+.hero-mock::before{
+  content:"";position:absolute;inset:-1px -1px auto -1px;height:34px;
+  background:linear-gradient(180deg,rgba(255,134,92,.18),transparent);
+  border-radius:var(--tf-radius) var(--tf-radius) 0 0;pointer-events:none;
+}
+.mock-bar{display:flex;align-items:center;gap:6px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:12px}
+.mock-bar i{width:11px;height:11px;border-radius:50%}
+.mock-bar i:nth-child(1){background:#FF5F57}
+.mock-bar i:nth-child(2){background:#FEBC2E}
+.mock-bar i:nth-child(3){background:#27C840}
+.mock-bar span{margin-left:auto;font-size:11px;color:var(--tf-mute)}
+.line{display:block}
+.l-prompt{color:var(--tf-coral)}
+.l-cmd{color:#fff}
+.l-mute{color:var(--tf-mute)}
+.l-ok{color:#3CCB7F}
+.l-warn{color:#F0B95B}
+
+/* ── SECTIONS ────────────────────────────────────────────────── */
+.section{padding:96px 0}
+.section-tight{padding:72px 0}
+.section h2{
+  font-size:clamp(28px,3.4vw,42px);line-height:1.1;margin:0 0 14px;font-weight:800;letter-spacing:-.015em;color:#fff;
+  text-align:center;
+}
+.section h2 .accent{
+  background:var(--tf-grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.section .sub{text-align:center;color:var(--tf-text-soft);max-width:640px;margin:0 auto 44px;font-size:16px}
+
+/* ── CAPABILITY CARDS ───────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media (max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:600px){.cards{grid-template-columns:1fr}}
+.card{
+  background:var(--tf-card);
+  border:1px solid var(--tf-line);
+  border-radius:var(--tf-radius);
+  padding:24px;
+  transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.card:hover{transform:translateY(-3px);border-color:rgba(255,134,92,.45);box-shadow:var(--tf-shadow-sm)}
+.card .icon{
+  width:42px;height:42px;border-radius:10px;
+  background:var(--tf-grad-soft);
+  border:1px solid rgba(255,134,92,.25);
+  color:var(--tf-coral);
+  display:grid;place-items:center;margin-bottom:14px;
+}
+.card h3{font-size:18px;margin:0 0 8px;color:#fff;font-weight:700;letter-spacing:-.01em}
+.card p{margin:0;color:var(--tf-text-soft);font-size:14px;line-height:1.6}
+
+/* ── WORKFLOW (the showcase) ─────────────────────────────────── */
+.wf{position:relative;padding:0}
+.wf-tabs{display:flex;gap:8px;justify-content:center;margin:0 0 36px;flex-wrap:wrap}
+.wf-tab{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:10px 18px;border-radius:var(--tf-radius-pill);
+  background:transparent;color:var(--tf-text-soft);border:1px solid var(--tf-line);
+  font-weight:500;font-size:14px;transition:all .15s ease;
+}
+.wf-tab:hover{border-color:var(--tf-coral);color:var(--tf-coral)}
+.wf-tab .dot{width:8px;height:8px;border-radius:50%;background:var(--tf-mute)}
+.wf-tab[data-role="you"] .dot{background:var(--tf-blue)}
+.wf-tab[data-role="testfortge"] .dot{background:var(--tf-coral)}
+.wf-tab[data-role="both"] .dot{background:linear-gradient(135deg,var(--tf-blue),var(--tf-coral));background:#A78BFA}
+.wf-tab.active{background:var(--tf-card);color:#fff;border-color:var(--tf-coral)}
+.wf-track{position:relative;padding:24px 0}
+.wf-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible}
+.wf-conn{
+  fill:none;stroke-width:1.5;
+  stroke-dasharray:4 6;
+  stroke-linecap:round;
+  opacity:0;
+  transition:opacity .8s ease, stroke .35s ease;
+}
+.wf-conn.in{opacity:.55}
+.wf-conn[data-role="you"]{stroke:#5B8DEF}
+.wf-conn[data-role="testfortge"]{stroke:#FF865C}
+.wf-conn[data-role="both"]{stroke:#A78BFA}
+.wf-conn.fade{opacity:.10}
+/* Soft glow halo behind the line — gives the path a tube-of-light feel */
+.wf-conn-glow{
+  fill:none;stroke-width:10;
+  stroke-linecap:round;
+  opacity:0;
+  transition:opacity .8s ease;
+}
+.wf-conn-glow.in{opacity:.10}
+.wf-conn-glow[data-role="you"]{stroke:#5B8DEF}
+.wf-conn-glow[data-role="testfortge"]{stroke:#FF865C}
+.wf-conn-glow[data-role="both"]{stroke:#A78BFA}
+.wf-conn-glow.fade{opacity:.03}
+/* Tech-stack labels flowing along the connector */
+.wf-flow-text{
+  font-family:var(--tf-mono);
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  opacity:0;
+  transition:opacity .8s ease;
+}
+.wf-flow-text.in{opacity:.95}
+.wf-flow-text[data-role="you"]{fill:#9CB7F0}
+.wf-flow-text[data-role="testfortge"]{fill:#FFB48F}
+.wf-flow-text[data-role="both"]{fill:#C9B6FB}
+.wf-flow-text.fade{opacity:.12}
+.wf-step{
+  position:relative;z-index:1;
+  display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center;
+  margin:0 0 60px;transition:opacity .25s ease, filter .25s ease;
+}
+.wf-step:nth-child(odd) .wf-mock{order:1}
+.wf-step:nth-child(odd) .wf-text{order:2}
+.wf-step:nth-child(even) .wf-mock{order:2}
+.wf-step:nth-child(even) .wf-text{order:1;text-align:right}
+@media (max-width:900px){
+  .wf-step{grid-template-columns:1fr;gap:18px;margin-bottom:42px}
+  .wf-step .wf-text,.wf-step .wf-mock{order:initial !important;text-align:left !important}
+}
+.wf-step.dim,.wf-step.reveal.in.dim{opacity:.18;filter:saturate(.4)}
+.wf-step.hide{display:none}
+
+.wf-text .badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:var(--tf-radius-pill);
+  font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  border:1px solid;
+}
+.badge[data-role="you"]{background:rgba(91,141,239,.10);color:#9CB7F0;border-color:rgba(91,141,239,.35)}
+.badge[data-role="testfortge"]{background:rgba(255,134,92,.10);color:var(--tf-coral);border-color:rgba(255,134,92,.35)}
+.badge[data-role="both"]{background:rgba(167,139,250,.10);color:#B9A4FB;border-color:rgba(167,139,250,.35)}
+.wf-text h3{font-size:24px;margin:14px 0 10px;font-weight:700;color:#fff;letter-spacing:-.01em;line-height:1.2}
+.wf-text h3 .num{color:var(--tf-coral);font-family:var(--tf-mono);font-weight:600;font-size:20px;margin-right:8px}
+.wf-text p{color:var(--tf-text-soft);font-size:15px;margin:0 0 14px;max-width:440px}
+.wf-step:nth-child(even) .wf-text p{margin-left:auto}
+.wf-text ul{margin:0;padding:0;list-style:none;color:var(--tf-text-soft);font-size:14px;display:flex;flex-direction:column;gap:6px;max-width:440px}
+.wf-step:nth-child(even) .wf-text ul{margin-left:auto;align-items:flex-end}
+.wf-text li{display:inline-flex;gap:8px;align-items:flex-start}
+.wf-step:nth-child(even) .wf-text li{flex-direction:row-reverse}
+.wf-text li::before{content:"";flex:0 0 auto;width:5px;height:5px;border-radius:50%;background:var(--tf-coral);margin-top:8px}
+
+/* Mockup chrome */
+.wf-mock{
+  background:linear-gradient(180deg,#1A2030 0%,#131826 100%);
+  border:1px solid var(--tf-line);
+  border-radius:var(--tf-radius);
+  box-shadow:var(--tf-shadow);
+  overflow:hidden;
+}
+.wf-mock-head{
+  padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.05);
+  display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.18);
+}
+.wf-mock-head i{width:11px;height:11px;border-radius:50%}
+.wf-mock-head i:nth-child(1){background:#FF5F57}
+.wf-mock-head i:nth-child(2){background:#FEBC2E}
+.wf-mock-head i:nth-child(3){background:#27C840}
+.wf-mock-head span{margin-left:auto;font-size:11px;color:var(--tf-mute);font-family:var(--tf-mono)}
+.wf-mock-body{padding:18px;font-family:var(--tf-mono);font-size:12.5px;line-height:1.6;color:#D5DAE6}
+
+/* mockup helpers */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px}
+.kv b{color:#fff;font-weight:600}
+.pill{display:inline-block;padding:2px 10px;border-radius:var(--tf-radius-pill);font-size:11px;font-weight:600;font-family:var(--tf-font);letter-spacing:.02em}
+.pill-coral{background:rgba(255,134,92,.16);color:var(--tf-coral)}
+.pill-blue{background:rgba(91,141,239,.16);color:var(--tf-blue)}
+.pill-green{background:rgba(60,203,127,.16);color:#3CCB7F}
+.pill-warn{background:rgba(240,185,91,.16);color:#F0B95B}
+.pill-red{background:rgba(255,107,107,.16);color:#FF8585}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
+.row:last-child{border-bottom:0}
+.dropzone{
+  border:1.5px dashed rgba(255,134,92,.45);
+  background:rgba(255,134,92,.04);
+  border-radius:10px;padding:20px;text-align:center;
+  font-family:var(--tf-font);color:var(--tf-text-soft);font-size:13px;
+}
+.dropzone .big{font-size:28px;color:var(--tf-coral);margin-bottom:6px}
+.fields{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.field{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;border:1px solid var(--tf-line);border-radius:8px;
+  font-family:var(--tf-font);font-size:13px;color:var(--tf-text-soft);background:rgba(255,255,255,.02);
+}
+.field .ic{color:var(--tf-coral);font-weight:700}
+.tabs-mini{display:flex;gap:6px;margin-bottom:12px}
+.tab-mini{padding:5px 10px;font-family:var(--tf-font);font-size:11.5px;border-radius:6px;color:var(--tf-mute);border:1px solid var(--tf-line)}
+.tab-mini.on{background:var(--tf-coral);color:#fff;border-color:transparent}
+.bar{display:flex;justify-content:space-between;font-family:var(--tf-font);font-size:12px;margin-top:14px;color:var(--tf-text-soft)}
+.bar b{color:#fff}
+.progress{height:6px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:6px}
+.progress > i{display:block;height:100%;background:var(--tf-grad)}
+
+/* ── BENEFITS ─────────────────────────────────────────────── */
+.bens{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+@media (max-width:900px){.bens{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:520px){.bens{grid-template-columns:1fr}}
+.ben{
+  background:var(--tf-card);border:1px solid var(--tf-line);border-radius:var(--tf-radius);
+  padding:22px;
+}
+.ben .num{font-family:var(--tf-mono);font-size:32px;font-weight:700;
+  background:var(--tf-grad);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-.02em}
+.ben h4{margin:6px 0;font-size:15px;color:#fff}
+.ben p{margin:0;font-size:13px;color:var(--tf-text-soft);line-height:1.55}
+
+/* ── FAQ ───────────────────────────────────────────────────── */
+.faq{display:flex;flex-direction:column;gap:10px;max-width:820px;margin:0 auto}
+.faq-item{
+  background:var(--tf-card);
+  border:1px solid var(--tf-line);
+  border-radius:var(--tf-radius);
+  transition:border-color .2s ease, background .2s ease;
+}
+.faq-item:hover{border-color:rgba(255,134,92,.35)}
+.faq-item[open]{border-color:rgba(255,134,92,.55);background:var(--tf-card-2)}
+.faq-item summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:18px 22px;font-weight:600;font-size:16px;color:#fff;
+  user-select:none;line-height:1.4;
+}
+.faq-item summary::-webkit-details-marker,
+.faq-item summary::marker{display:none;content:""}
+.faq-item .faq-mark{
+  flex:0 0 auto;
+  display:grid;place-items:center;
+  width:30px;height:30px;border-radius:50%;
+  background:var(--tf-grad-soft);
+  border:1px solid rgba(255,134,92,.30);
+  color:var(--tf-coral);
+  font-size:18px;font-weight:600;line-height:1;
+  transition:transform .25s ease, background .2s ease;
+}
+.faq-item[open] .faq-mark{transform:rotate(45deg);background:rgba(255,134,92,.18)}
+.faq-item .faq-body{
+  padding:0 22px 20px;
+  color:var(--tf-text-soft);font-size:15px;line-height:1.65;
+  max-width:680px;
+}
+.faq-item .faq-body code{
+  font-family:var(--tf-mono);font-size:.92em;
+  padding:1px 6px;border-radius:4px;
+  background:rgba(255,134,92,.12);color:var(--tf-coral);
+}
+
+/* ── POWERED BY ───────────────────────────────────────────── */
+.powered{
+  background:linear-gradient(135deg,var(--tf-coral) 0%,var(--tf-coral-hi) 100%);
+  border-radius:var(--tf-radius);
+  padding:32px;display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:center;
+  color:#fff;
+}
+@media (max-width:760px){.powered{grid-template-columns:1fr}}
+.powered .label{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;opacity:.85}
+.powered .stack{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.stack-pill{padding:7px 14px;border-radius:var(--tf-radius-pill);background:rgba(255,255,255,.18);font-size:13px;font-weight:600;border:1px solid rgba(255,255,255,.30)}
+.powered p{margin:0;font-size:15px;line-height:1.6;max-width:600px}
+
+/* ── CTA ─────────────────────────────────────────────────── */
+.cta{
+  background:
+    radial-gradient(800px 320px at 50% 0%, rgba(255,134,92,.20), transparent 60%),
+    var(--tf-ink-2);
+  border:1px solid var(--tf-line);
+  border-radius:18px;
+  padding:56px 32px;
+  text-align:center;
+}
+.cta h2{margin:0 0 12px;font-size:clamp(26px,3vw,38px);color:#fff}
+.cta p{margin:0 auto 26px;color:var(--tf-text-soft);max-width:560px}
+.cta .row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;border-bottom:0;padding:0}
+
+/* ── FOOTER ──────────────────────────────────────────────── */
+.foot{padding:40px 0 56px;border-top:1px solid rgba(255,255,255,.06);color:var(--tf-mute);font-size:13px}
+.foot-inner{display:flex;justify-content:space-between;flex-wrap:wrap;gap:18px;align-items:center}
+.foot a:hover{color:var(--tf-coral)}
+
+/* ── Animations on scroll ─────────────────────────────────── */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .55s ease, transform .55s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce){
+  .reveal{transition:none;opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ─── NAV ──────────────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="container nav-inner">
+    <a href="#" class="brand" aria-label="TestForTge by Testfort">
+      <span class="brand-mark">T</span>
+      <span class="brand-tx"><span>TestFor</span><span>T</span><span>ge</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="#capabilities">Capabilities</a>
+      <a href="#workflow">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a href="#contact">Contact</a>
+    </div>
+    <a href="#contact" class="nav-cta">Request a demo →</a>
+  </div>
+</nav>
+
+<!-- ─── HERO ─────────────────────────────────────────────────── -->
+<header class="hero">
+  <div class="container hero-inner">
+    <div class="reveal">
+      <span class="eyebrow"><span class="dot"></span>By Testfort · QA framework</span>
+      <h1>From requirements to <span class="accent">production-grade tests</span> in minutes.</h1>
+      <p class="lead">
+        TestForTge is an AI-assisted QA framework that turns specs, docs and
+        live URLs into structured test cases, checklists, Playwright scripts
+        and exec-ready reports — without abandoning your team's process.
+      </p>
+      <div class="hero-ctas">
+        <a href="#contact" class="btn btn-primary">Request a demo →</a>
+        <a href="#workflow" class="btn btn-ghost">See how it works</a>
+      </div>
+    </div>
+
+    <!-- Hero terminal mockup -->
+    <div class="hero-mock reveal" aria-hidden="true">
+      <div class="mock-bar"><i></i><i></i><i></i><span>tedgie · QA assistant</span></div>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">testfortge</span> <span class="l-mute">ingest --url https://shop.example.com</span></span>
+      <span class="line l-mute">  parsing &nbsp;... <span class="l-ok">OK</span> &nbsp;( 47 user stories, 9 categories )</span>
+      <span class="line l-mute">  generating test cases ... <span class="l-ok">OK</span> &nbsp;( 218 cases · positive/negative/edge )</span>
+      <span class="line l-mute">  estimating effort ... <span class="l-ok">OK</span> &nbsp;( 84.5 h · PERT · 1 platform )</span>
+      <span class="line l-mute">  running automation ... <span class="l-ok">42 pass</span> · <span class="l-warn">1 review</span></span>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">export</span> <span class="l-mute">xlsx → testfort_qa_pack.xlsx</span></span>
+      <span class="line l-ok">  ✓ ready · 12.4 MB · TestRail / Zephyr / qase.io compatible</span>
+    </div>
+  </div>
+</header>
+
+<!-- ─── CAPABILITIES ────────────────────────────────────────── -->
+<section class="section" id="capabilities">
+  <div class="container">
+    <h2>What TestForTge does for your <span class="accent">QA team</span></h2>
+    <p class="sub">Six core capabilities. One Flask app. No vendor lock-in — every artefact exports to the tools you already use.</p>
+    <div class="cards">
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+        </div>
+        <h3>Requirement ingestion</h3>
+        <p>PDF, DOCX, XLSX, CSV, MD, plain text — or a live URL. Crawls, parses, extracts atomic user stories with categories &amp; priorities.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <h3>Test cases &amp; checklists</h3>
+        <p>Positive, negative and edge-case test cases reviewed by a built-in QA Lead pass. Compact checklists in the TestFort format. Exports to MD / HTML / CSV / XLSX.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+        </div>
+        <h3>QA estimation</h3>
+        <p>PERT-based hours from the same input — minutes-per-TC × features × platforms, with compatibility, bug rate and PM overhead applied. Full XLSX breakdown ready for clients.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+        </div>
+        <h3>Manual &amp; automated execution</h3>
+        <p>Step-by-step manual runs with environment + credentials capture, or one-click Playwright headless automation with video and screenshot artefacts.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6l4-4z"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>
+        </div>
+        <h3>Bug reports &amp; metrics</h3>
+        <p>Structured bug forms (severity, priority, repro steps, attachments). One-click Markdown export of the whole bug base. Live status &amp; coverage dashboards.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 11a3 3 0 0 1 6 0v1H9v-1z"/><circle cx="12" cy="16" r="1"/></svg>
+        </div>
+        <h3>Tedgie — QA assistant</h3>
+        <p>Built-in AI chat with context of your project. Answers questions about Estimation, Test Cases, Automation, and generates bug-form drafts on demand.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ─── WORKFLOW ────────────────────────────────────────────── -->
+<section class="section section-tight wf" id="workflow">
+  <div class="container">
+    <h2>How we <span class="accent">work together</span></h2>
+    <p class="sub">From the first dropped spec to a deployable QA pack — clear roles, shared workspace, real-time iteration.</p>
+
+    <!-- Filter tabs -->
+    <div class="wf-tabs" role="tablist" aria-label="Filter workflow steps">
+      <button class="wf-tab active" data-filter="all">All steps</button>
+      <button class="wf-tab" data-filter="you" data-role="you"><span class="dot"></span>You</button>
+      <button class="wf-tab" data-filter="testfortge" data-role="testfortge"><span class="dot"></span>TestForTge</button>
+      <button class="wf-tab" data-filter="both" data-role="both"><span class="dot"></span>Both</button>
+    </div>
+
+    <div class="wf-track">
+      <svg class="wf-svg" aria-hidden="true"></svg>
+
+      <!-- Step 01 — YOU -->
+      <article class="wf-step reveal" data-role="you">
+        <div class="wf-mock">
+          <div class="wf-mock-head"><i></i><i></i><i></i><span>testfortge.app/test-cases</span></div>
+          <div class="wf-mock-body">
+            <div class="dropzone">
+              <div class="big">↑</div>
+              Drop spec, screenshots, video — or paste a URL
+              <div class="fields">
+                <div class="field"><span class="ic">▸</span> https://shop.example.com/checkout</div>
+                <div class="field"><span class="ic">▸</span> requirements_v3.pdf <span style="margin-left:auto;color:var(--tf-mute);font-size:11px">2.4 MB</span></div>
+                <div class="field"><span class="ic">▸</span> wireframes.docx <span style="margin-left:auto;color:var(--tf-mute);font-size:11px">786 KB</span></div>
+              </div>
+            </div>
+            <div class="bar" style="margin-top:14px"><span>Source</span><b>Multi-input · 64 MB cap</b></div>
+          </div>
+        </div>
+        <div class="wf-text">
+          <span class="badge" data-role="you">You</span>
+          <h3><span class="num">01.</span>You drop the requirements</h3>
+          <p>Paste a feature URL, upload a PDF/DOCX/XLSX, or just type the user stories. TestForTge accepts whatever format the dev team gave you.</p>
+          <ul>
+            <li>9 supported file types + crawl-on-URL</li>
+            <li>64 MB upload cap per request</li>
+            <li>Saved to a versioned project snapshot</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- Step 02 — TESTFORTGE -->
+      <article class="wf-step reveal" data-role="testfortge">
+        <div class="wf-mock">
+          <div class="wf-mock-head"><i></i><i></i><i></i><span>parser · user-stories</span></div>
+          <div class="wf-mock-body">
+            <div style="margin-bottom:10px">
+              <span class="pill pill-coral">parsed</span>
+              <span class="pill pill-blue" style="margin-left:6px">9 categories</span>
+              <span class="pill pill-green" style="margin-left:6px">47 stories</span>
+            </div>
+            <div class="row"><span class="pill pill-coral">P1</span> As a guest, I want to add an item to cart without signup</div>
+            <div class="row"><span class="pill pill-coral">P1</span> As a user, I want to apply a promo code at checkout</div>
+            <div class="row"><span class="pill pill-warn">P2</span> As an admin, I want to override pricing on a single SKU</div>
+            <div class="row"><span class="pill pill-blue">P3</span> As a returning user, I want my address auto-filled</div>
+            <div class="row" style="border:0;color:var(--tf-mute);font-style:italic">+ 43 more · click any story to drill into traceability</div>
+          </div>
+        </div>
+        <div class="wf-text">
+          <span class="badge" data-role="testfortge">TestForTge</span>
+          <h3><span class="num">02.</span>We parse, classify, prioritise</h3>
+          <p>The framework breaks the input into atomic user stories, assigns priority and category, and builds a story ↔ test-case traceability matrix automatically.</p>
+          <ul>
+            <li>Persona &amp; role detection (guest / user / admin)</li>
+            <li>Page-number / artefact scrubbing on PDFs</li>
+            <li>Saved to your project — re-runnable any time</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- Step 03 — TESTFORTGE -->
+      <article class="wf-step reveal" data-role="testfortge">
+        <div class="wf-mock">
+          <div class="wf-mock-head"><i></i><i></i><i></i><span>generated · 218 test cases</span></div>
+          <div class="wf-mock-body">
+            <div class="tabs-mini">
+              <span class="tab-mini on">Test Cases</span>
+              <span class="tab-mini">Checklist</span>
+              <span class="tab-mini">Estimation</span>
+            </div>
+            <div class="row"><span class="pill pill-green">PASS</span><b style="color:#fff">TC-018</b><span style="color:var(--tf-mute);font-size:12px">Verify that adding 2 items updates cart total</span></div>
+            <div class="row"><span class="pill pill-green">PASS</span><b style="color:#fff">TC-019</b><span style="color:var(--tf-mute);font-size:12px">Verify that promo PROMO10 reduces total by 10%</span></div>
+            <div class="row"><span class="pill pill-warn">REVIEW</span><b style="color:#fff">TC-020</b><span style="color:var(--tf-mute);font-size:12px">Verify negative quantity is rejected client-side</span></div>
+            <div class="row"><span class="pill pill-coral">EDGE</span><b style="color:#fff">TC-021</b><span style="color:var(--tf-mute);font-size:12px">Verify cart with 999 items doesn't time out</span></div>
+            <div class="bar"><span>Coverage</span><b>positive · negative · edge</b></div>
+            <div class="progress"><i style="width:78%"></i></div>
+          </div>
+        </div>
+        <div class="wf-text">
+          <span class="badge" data-role="testfortge">TestForTge</span>
+          <h3><span class="num">03.</span>We generate the QA pack</h3>
+          <p>Test cases (positive / negative / edge), TestFort-format checklists and PERT-based hour estimates. Reviewed in the same pass by a built-in QA Lead module that fixes voice drift, dup IDs and page-number leftovers.</p>
+          <ul>
+            <li>Markdown · HTML · CSV · XLSX exports</li>
+            <li>Compatible with TestRail, Zephyr, qase.io</li>
+            <li>Estimation breakdown shipped as a separate workbook</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- Step 04 — BOTH -->
+      <article class="wf-step reveal" data-role="both">
+        <div class="wf-mock">
+          <div class="wf-mock-head"><i></i><i></i><i></i><span>execution · live</span></div>
+          <div class="wf-mock-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="border:1px solid var(--tf-line);border-radius:8px;padding:10px">
+                <div style="font-family:var(--tf-font);font-size:12px;color:var(--tf-mute);margin-bottom:4px">Manual run · QA</div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="pill pill-green">142 PASS</span>
+                  <span class="pill pill-red">3 FAIL</span>
+                  <span class="pill pill-warn">2 BLOCK</span>
+                </div>
+              </div>
+              <div style="border:1px solid var(--tf-line);border-radius:8px;padding:10px">
+                <div style="font-family:var(--tf-font);font-size:12px;color:var(--tf-mute);margin-bottom:4px">Automation · Playwright</div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="pill pill-green">42 PASS</span>
+                  <span class="pill pill-warn">1 REVIEW</span>
+                </div>
+              </div>
+            </div>
+            <div class="bar" style="margin-top:14px"><span>Pass rate</span><b>96.6 %</b></div>
+            <div class="progress"><i style="width:96.6%"></i></div>
+            <div style="margin-top:14px;font-family:var(--tf-font);font-size:12px;color:var(--tf-mute)">▸ video.mp4 · screenshots · har trace per step</div>
+          </div>
+        </div>
+        <div class="wf-text">
+          <span class="badge" data-role="both">You + TestForTge</span>
+          <h3><span class="num">04.</span>You run, we record</h3>
+          <p>Step the team through manual cases — or hand the same set to Playwright headless. Either way TestForTge captures pass/fail/blocked, environment, and per-step artefacts.</p>
+          <ul>
+            <li>Async job queue · 429 with Retry-After on overflow</li>
+            <li>Screenshots, video, HAR per Playwright run</li>
+            <li>Auto-generated test accounts on demand</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- Step 05 — TESTFORTGE -->
+      <article class="wf-step reveal" data-role="testfortge">
+        <div class="wf-mock">
+          <div class="wf-mock-head"><i></i><i></i><i></i><span>delivery · qa-pack-v3.zip</span></div>
+          <div class="wf-mock-body">
+            <div class="kv" style="margin-bottom:14px">
+              <span style="color:var(--tf-mute)">Test cases</span>      <b>218 · XLSX, MD</b>
+              <span style="color:var(--tf-mute)">Checklist</span>       <b>1 · TestFort format</b>
+              <span style="color:var(--tf-mute)">Estimation</span>      <b>84.5 h · PERT</b>
+              <span style="color:var(--tf-mute)">Bug reports</span>     <b>7 · severity-coded</b>
+              <span style="color:var(--tf-mute)">Automation runs</span> <b>3 · video + HAR</b>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span class="pill pill-coral">XLSX</span>
+              <span class="pill pill-coral">Markdown</span>
+              <span class="pill pill-coral">CSV</span>
+              <span class="pill pill-coral">HTML</span>
+              <span class="pill pill-blue">TestRail</span>
+              <span class="pill pill-blue">Zephyr</span>
+              <span class="pill pill-blue">qase.io</span>
+            </div>
+          </div>
+        </div>
+        <div class="wf-text">
+          <span class="badge" data-role="testfortge">TestForTge</span>
+          <h3><span class="num">05.</span>We deliver a deployable QA pack</h3>
+          <p>Everything is exported as one self-contained pack — ready to share with stakeholders, drop into your tracker, or hand off to the next sprint's regression run.</p>
+          <ul>
+            <li>Stakeholder-friendly XLSX/MD reports</li>
+            <li>One-click re-run on a new release</li>
+            <li>Project snapshots — restore any past state</li>
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ─── POWERED BY ──────────────────────────────────────────── -->
+<section class="section-tight">
+  <div class="container">
+    <div class="powered reveal">
+      <div>
+        <div class="label">Powered by</div>
+        <div class="stack">
+          <span class="stack-pill">Flask 3.1</span>
+          <span class="stack-pill">Playwright 1.49</span>
+          <span class="stack-pill">Anthropic Claude</span>
+          <span class="stack-pill">openpyxl · pypdf</span>
+          <span class="stack-pill">Testfort QA process</span>
+        </div>
+      </div>
+      <p>The framework is engineered in-house at Testfort and battle-tested on real client engagements. Every line of generated content is reviewable, exportable and free of vendor lock-in.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FAQ ─────────────────────────────────────────────────── -->
+<section class="section section-tight" id="faq">
+  <div class="container">
+    <h2>Frequently asked <span class="accent">questions</span></h2>
+    <p class="sub">Short answers from real client conversations — open any item to expand.</p>
+    <div class="faq">
+      <details class="faq-item reveal">
+        <summary>Is TestForTge self-hosted or a SaaS?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Self-hosted. It's a Flask application you run on your own infrastructure — Docker, a VM, or bare-metal. Specs, generated artefacts and bug reports never leave your network. No data is sent to a third party unless you explicitly turn on the optional AI mode.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>What inputs does it accept?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <code>PDF</code>, <code>DOCX</code>, <code>XLSX</code>, <code>CSV</code>, <code>MD</code>, <code>TXT</code>, <code>HTML</code>, <code>PNG/JPG</code> and short videos as evidence — plus a live URL crawler that extracts features straight from a deployed page. The framework normalizes everything into atomic user stories with categories, priorities and a story ↔ test-case traceability matrix.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Does it replace my QA team?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          No — it removes the boilerplate hours. TestForTge produces a <em>first draft</em>: structured test cases (positive/negative/edge), a TestFort-format checklist, a PERT-based estimation and Playwright scripts. Your QA Lead reviews and adjusts before signing off. The built-in QA-Lead pass already fixes voice drift, duplicate IDs and PDF artefacts before you see the output.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Can I use it without sending data to an LLM provider?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Yes. The default mode runs entirely offline: rule-based generators for test cases, checklists, estimation and the Tedgie chat assistant. AI mode is opt-in via an Anthropic API key when you want richer free-form suggestions — turn it on in <code>.env</code>, turn it off any time, no migration required.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Will the exports work with TestRail / Zephyr / qase.io?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Drop-in. Test cases and checklists export to Markdown, HTML, CSV and XLSX in column shapes those tools accept directly. Estimation ships as a separate XLSX workbook with the full breakdown — minutes-per-TC × features × platforms, compatibility, bug rate and PM overhead — ready for client sign-off.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>How does the built-in automation work?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          One click. The framework synthesises Playwright scripts directly from your test cases, runs them headless in Chromium, and captures video, screenshots and a per-step HAR trace. Async job queue with a per-session concurrency cap means you can launch a new run while a previous one is still finishing.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>What about security &amp; compliance?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          CSRF on every state-changing request, HttpOnly + SameSite cookies, strict CSP, path-traversal guards on asset serving, optional Basic-Auth gate for shared deployments. All session data is filesystem-bound and rotated on server restart. Threat model and security posture are documented in the framework's <code>REQUIREMENTS.md</code>.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>How do I try it on my project?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Book a 30-minute walk-through with our QA team. Bring a real spec — a PDF, a Confluence page, a URL — and you'll leave the call with a generated draft test plan and an estimation workbook for your stack. Pricing and engagement model are scoped on the call.
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ─── CTA ─────────────────────────────────────────────────── -->
+<section class="section section-tight" id="contact">
+  <div class="container">
+    <div class="cta reveal">
+      <h2>Ready to ship QA <span class="accent">faster</span>?</h2>
+      <p>Book a 30-minute walk-through with our QA team — bring your spec, leave with a draft test plan.</p>
+      <div class="row">
+        <a href="https://testfort.com/contact" class="btn btn-primary">Request a demo →</a>
+        <a href="https://testfort.com/" class="btn btn-ghost">Visit testfort.com</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FOOT ────────────────────────────────────────────────── -->
+<footer class="foot">
+  <div class="container foot-inner">
+    <div>© Testfort. TestForTge is a Testfort product.</div>
+    <div style="display:flex;gap:18px">
+      <a href="https://testfort.com/">testfort.com</a>
+      <a href="https://testfort.com/contact">Contact</a>
+      <a href="#workflow">How it works</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // ── Workflow connector lines ──────────────────────────────
+  // Draws an S-shaped dashed SVG path between consecutive mockup
+  // cards so the workflow reads as a continuous flow (matching the
+  // QArea reference). Recomputed on resize; respects role colors.
+  const track = document.querySelector('.wf-track');
+  const svg   = document.querySelector('.wf-svg');
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // QA tech-stack pools — one per connector. The pool is repeated
+  // along the path twice ("LIST · LIST") so that as `startOffset`
+  // animates by one full list-length the visual loop is seamless.
+  const STACKS = [
+    // 01 → 02 · You drops requirements → TestForTge parses
+    'PDF · DOCX · XLSX · CSV · MD · TXT · HTML · PNG · JPG · MP4 · WebM · GIF · MOV · URL crawl · BeautifulSoup · pypdf · python-docx · openpyxl',
+    // 02 → 03 · parse → generate
+    'User stories · Personas · Traceability · Categories · Priorities · Boundary · Equivalence partition · Decision tables · State transition · Pairwise · Risk matrix · ISTQB',
+    // 03 → 04 · generate → execute
+    'Functional · Smoke · Regression · Sanity · Acceptance · Exploratory · Compatibility · Localization · Accessibility · Security · Performance · API · UI · E2E · Integration · Unit',
+    // 04 → 05 · execute → deliver
+    'Playwright · Selenium · Cypress · Puppeteer · Charles · Postman · JMeter · Burp Suite · Lighthouse · Android Studio · Xcode · Appium · ADB · BrowserStack · iOS · Android · Windows · macOS · Ubuntu · Chrome · Firefox · Safari · Edge · pytest · TestRail · Zephyr · qase.io · GitHub Actions · Docker · Allure',
+  ];
+
+  // Slight per-connector duration variation so the four streams
+  // never line up — keeps the surface visually busy even at idle.
+  const DURATIONS = [22, 26, 24, 30];
+
+  function drawConnectors(){
+    if (!track || !svg) return;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    const trackBox = track.getBoundingClientRect();
+    const W = trackBox.width, H = track.offsetHeight;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width',  W);
+    svg.setAttribute('height', H);
+
+    const stepEls = Array.from(track.querySelectorAll('.wf-step'));
+    if (stepEls.length < 2) return;
+
+    // Skip drawing on stacked layout (single column) — would overlap
+    // text and look noisy.
+    const stacked = window.matchMedia('(max-width: 900px)').matches;
+    if (stacked) return;
+
+    // <defs> holds reusable paths that <textPath> elements reference
+    // by id. Without putting them in <defs>, browsers will still
+    // honour them, but having a clean def block keeps the markup tidy.
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    svg.appendChild(defs);
+
+    for (let i = 0; i < stepEls.length - 1; i++) {
+      const a = stepEls[i].querySelector('.wf-mock');
+      const b = stepEls[i + 1].querySelector('.wf-mock');
+      if (!a || !b) continue;
+
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+
+      // Anchor: bottom-center of A → top-center of B (in track coords)
+      const x1 = ar.left - trackBox.left + ar.width / 2;
+      const y1 = ar.bottom - trackBox.top;
+      const x2 = br.left - trackBox.left + br.width / 2;
+      const y2 = br.top - trackBox.top;
+
+      // Cubic bezier: vertical handles produce a smooth S-curve when
+      // mocks alternate left↔right.
+      const dy = Math.max(60, (y2 - y1) * 0.55);
+      const c1x = x1, c1y = y1 + dy;
+      const c2x = x2, c2y = y2 - dy;
+      const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+
+      const role = stepEls[i + 1].dataset.role || 'testfortge';
+
+      // 1) Path inside <defs> — only used for <textPath href> reference.
+      const pathId = `wfp-${i}-${Date.now().toString(36)}`;
+      const defPath = document.createElementNS(SVG_NS, 'path');
+      defPath.setAttribute('id', pathId);
+      defPath.setAttribute('d', d);
+      defPath.setAttribute('fill', 'none');
+      defs.appendChild(defPath);
+
+      // 2) Soft glow halo behind the line (no events, decorative)
+      const glow = document.createElementNS(SVG_NS, 'path');
+      glow.setAttribute('class', 'wf-conn-glow');
+      glow.setAttribute('d', d);
+      glow.setAttribute('data-role', role);
+      svg.appendChild(glow);
+
+      // 3) Visible dashed line itself
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('class', 'wf-conn');
+      path.setAttribute('d', d);
+      path.setAttribute('data-role', role);
+      svg.appendChild(path);
+
+      // 4) Flowing tech-stack labels — repeated twice so the SMIL
+      //    animation can loop seamlessly. We wrap with a thin space
+      //    separator so the join between the two copies is invisible.
+      const stack = STACKS[i % STACKS.length] + '   ·   ' + STACKS[i % STACKS.length] + '   ';
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('class', 'wf-flow-text');
+      text.setAttribute('data-role', role);
+      text.setAttribute('dy', '-3');
+
+      const tp = document.createElementNS(SVG_NS, 'textPath');
+      tp.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#' + pathId);
+      tp.setAttribute('href', '#' + pathId);
+      tp.setAttribute('startOffset', '100%');
+      tp.textContent = stack;
+
+      // SMIL animation drives startOffset from off-end to off-start
+      // continuously; works without JS once the SVG is in the DOM.
+      const anim = document.createElementNS(SVG_NS, 'animate');
+      anim.setAttribute('attributeName', 'startOffset');
+      anim.setAttribute('from', '120%');
+      anim.setAttribute('to', '-120%');
+      anim.setAttribute('dur', `${DURATIONS[i % DURATIONS.length]}s`);
+      anim.setAttribute('repeatCount', 'indefinite');
+      tp.appendChild(anim);
+
+      text.appendChild(tp);
+      svg.appendChild(text);
+
+      // Reveal the lot once it's in the DOM
+      setTimeout(() => {
+        glow.classList.add('in');
+        path.classList.add('in');
+        text.classList.add('in');
+      }, 30);
+    }
+  }
+
+  // Recompute on resize / fonts loaded / image flux. We use setTimeout
+  // (not requestAnimationFrame) because the page may be rendered inside
+  // an inactive tab/iframe where rAF is throttled to ~0Hz.
+  let pending = 0;
+  function scheduleRedraw(){
+    clearTimeout(pending);
+    pending = setTimeout(drawConnectors, 0);
+  }
+  window.addEventListener('resize', scheduleRedraw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawConnectors);
+  // Run synchronously now, plus delayed passes once fonts/images settle.
+  drawConnectors();
+  setTimeout(drawConnectors, 200);
+  setTimeout(drawConnectors, 800);
+
+  // ── Workflow tab filter ───────────────────────────────────
+  const tabs = document.querySelectorAll('.wf-tab');
+  const steps = document.querySelectorAll('.wf-step');
+  function applyFilter(f){
+    steps.forEach(s => {
+      const role = s.dataset.role;
+      s.classList.remove('hide','dim');
+      if (f === 'all') return;
+      if (f === 'both') {
+        if (role !== 'both') s.classList.add('dim');
+      } else {
+        if (role !== f && role !== 'both') s.classList.add('dim');
+      }
+    });
+    // Mirror the filter onto the connector lines, glow halos AND
+    // flowing tech-stack labels so they fade together with their
+    // step. Connector i sits between step i and step i+1.
+    if (!svg) return;
+    const groups = [
+      svg.querySelectorAll('.wf-conn'),
+      svg.querySelectorAll('.wf-conn-glow'),
+      svg.querySelectorAll('.wf-flow-text'),
+    ];
+    const visible = el => {
+      const r = el.dataset.role;
+      if (f === 'both') return r === 'both';
+      return r === f || r === 'both';
+    };
+    groups.forEach(list => {
+      list.forEach((c, idx) => {
+        c.classList.remove('fade');
+        if (f === 'all') return;
+        const src = steps[idx], dest = steps[idx + 1];
+        if (!visible(src) || !visible(dest)) c.classList.add('fade');
+      });
+    });
+  }
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    applyFilter(t.dataset.filter);
+  }));
+
+  // ── Reveal on scroll ──────────────────────────────────────
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ── Smooth-scroll for in-page anchors ─────────────────────
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', (e) => {
+      const id = a.getAttribute('href').slice(1);
+      const el = id && document.getElementById(id);
+      if (!el) return;
+      e.preventDefault();
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+})();
+</script>
+</body>
+</html>
