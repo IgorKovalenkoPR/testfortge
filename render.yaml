@@ -1,0 +1,60 @@
+# Render Blueprint for TestFortge.
+#
+# When you connect this GitHub repo to a Render workspace via "New +" →
+# "Blueprint" → pick this repo, Render reads this file and pre-fills the
+# service config. You only need to fill in two secret env vars (the Basic
+# Auth user/password) in the Render dashboard before the first deploy.
+#
+# Free tier specifics:
+#   * 512 MB RAM / 0.1 CPU per service.
+#   * Service sleeps after ~15 min of inactivity; first request after sleep
+#     wakes it in ~30 s. Acceptable for ad-hoc QA review, NOT for client
+#     demos — bump to the Starter plan ($7/mo) for always-on.
+#   * Free tier ships with no persistent disk: snapshots, sessions and
+#     uploaded files are wiped on every redeploy. The framework already
+#     rotates sessions on every server start (SERVER_START_TIME marker),
+#     so this is consistent with documented behaviour.
+#
+services:
+  - type: web
+    name: testfortge
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    # The Dockerfile CMD binds to a hardcoded :5000; Render injects $PORT
+    # at runtime, so we override the CMD here to honour it.
+    dockerCommand: >-
+      gunicorn
+      --bind 0.0.0.0:$PORT
+      --workers 2 --threads 4 --worker-class gthread
+      --timeout 120 --graceful-timeout 30
+      --access-logfile - --error-logfile -
+      app:app
+    healthCheckPath: /healthz
+    envVars:
+      # Auto-generated once, persisted by Render — keeps sessions valid
+      # across redeploys.
+      - key: SECRET_KEY
+        generateValue: true
+      # Render serves over HTTPS; flips Secure cookies + strict CSRF SSL.
+      - key: BEHIND_HTTPS
+        value: "1"
+      # Run-mode flags
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json
+      # Basic Auth gate — fill these in the Render dashboard before deploy.
+      # `sync: false` means Render will NOT pull them from a generated
+      # value or the file; they stay in the dashboard as secrets.
+      - key: TESTFORTGE_BASIC_USER
+        sync: false
+      - key: TESTFORTGE_BASIC_PASSWORD
+        sync: false
+      # Optional: turn on Tedgie AI mode by setting an Anthropic API key.
+      # Leave empty for rule-based fallback.
+      - key: ANTHROPIC_API_KEY
+        sync: false
