@@ -18,6 +18,8 @@ from engine.log import get_logger
 from engine.qa_testers import (
     TESTERS, PLATFORMS, BROWSERS, DEVICES, MOBILE_WEB,
     SCREEN_SIZES, TESTING_TYPES,
+    WEB_PLATFORMS, WEB_BROWSERS, MOBILE_WEB_OSES, MOBILE_WEB_BROWSERS,
+    MOBILE_RESOLUTIONS, IOS_DEVICES, ANDROID_DEVICES,
     get_tester, execute_items,
 )
 from engine.bug_report import (
@@ -73,22 +75,64 @@ def register(app: Flask) -> None:
                     if val:
                         manual_bug_refs[item_id] = val
 
-            # Resolve environment — "__custom" selects the corresponding
-            # free-text input, otherwise use the dropdown value.
-            platform = request.form.get("platform_custom") or request.form.get("platform", "Windows")
-            browser = request.form.get("browser_custom") or request.form.get("browser", "Chrome")
-            device = request.form.get("device_custom") or request.form.get("device", "Desktop")
-            screen = request.form.get("screen_custom") or request.form.get("screen_size", "1920x1080")
-            if platform == "__custom":
-                platform = request.form.get("platform_custom", "Windows")
-            if browser == "__custom":
-                browser = request.form.get("browser_custom", "Chrome")
-            if device == "__custom":
-                device = request.form.get("device_custom", "Desktop")
-            if screen == "__custom":
-                screen = request.form.get("screen_custom", "1920x1080")
+            # Resolve environment — one run targets exactly one
+            # environment kind. The UI shows only that kind's inputs;
+            # we read just those and build a human-readable string.
+            env_type = (request.form.get("env_type") or "web").strip().lower()
 
-            environment = f"{platform} / {browser} / {device} / {screen}"
+            def _resolve_custom(val: str, custom_field: str, default: str) -> str:
+                if val == "__custom":
+                    return (request.form.get(custom_field, "") or "").strip() or default
+                return val or default
+
+            if env_type == "mobile_web":
+                os_name = request.form.get("mw_os", "iOS").strip() or "iOS"
+                browser = request.form.get("mw_browser", "Chrome").strip() or "Chrome"
+                resolution = _resolve_custom(
+                    request.form.get("mw_resolution", "375x812"),
+                    "mw_resolution_custom", "375x812",
+                )
+                version = (request.form.get("mw_version", "") or "").strip()
+                bits = [f"Mobile Web · {os_name}", browser, resolution]
+                if version:
+                    bits.append(f"OS {version}")
+                environment = " / ".join(bits)
+            elif env_type == "ios":
+                device = _resolve_custom(
+                    request.form.get("ios_device", "iPhone 15"),
+                    "ios_device_custom", "iPhone",
+                )
+                version = (request.form.get("ios_version", "") or "").strip()
+                build = (request.form.get("ios_build", "") or "").strip()
+                bits = ["iOS", device]
+                if version:
+                    bits.append(f"iOS {version}")
+                if build:
+                    bits.append(f"build {build}")
+                environment = " / ".join(bits)
+            elif env_type == "android":
+                device = _resolve_custom(
+                    request.form.get("android_device", "Pixel 8"),
+                    "android_device_custom", "Android device",
+                )
+                version = (request.form.get("android_version", "") or "").strip()
+                build = (request.form.get("android_build", "") or "").strip()
+                bits = ["Android", device]
+                if version:
+                    bits.append(f"Android {version}")
+                if build:
+                    bits.append(f"build {build}")
+                environment = " / ".join(bits)
+            else:
+                # Web (default)
+                env_type = "web"
+                platform = request.form.get("web_platform", "Windows").strip() or "Windows"
+                browser = request.form.get("web_browser", "Chrome").strip() or "Chrome"
+                version = (request.form.get("web_version", "") or "").strip()
+                bits = [f"Web · {platform}", browser]
+                if version:
+                    bits.append(version)
+                environment = " / ".join(bits)
 
             items_data = tc_data if source == "test_cases" else cl_data
             item_type = "test_case" if source == "test_cases" else "checklist"
@@ -215,6 +259,15 @@ def register(app: Flask) -> None:
                                platforms=PLATFORMS, browsers=BROWSERS,
                                devices=DEVICES, mobile_web=MOBILE_WEB,
                                screen_sizes=SCREEN_SIZES,
+                               # Per-env-kind option pools for the new
+                               # 4-tab Test Environment selector.
+                               web_platforms=WEB_PLATFORMS,
+                               web_browsers=WEB_BROWSERS,
+                               mobile_web_oses=MOBILE_WEB_OSES,
+                               mobile_web_browsers=MOBILE_WEB_BROWSERS,
+                               mobile_resolutions=MOBILE_RESOLUTIONS,
+                               ios_devices=IOS_DEVICES,
+                               android_devices=ANDROID_DEVICES,
                                testing_types=TESTING_TYPES, testers=TESTERS,
                                cred=cred.as_public_dict())
 

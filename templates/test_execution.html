@@ -194,44 +194,130 @@
     </div>
 </div>
 
-{# ── Environment ── #}
-<div class="card">
+{# ── Environment (one run = one environment) ─────────────────────
+   The tester picks ONE of the four environment kinds; only the
+   inputs relevant to that kind are visible. Hidden fields keep
+   posting empty strings so the route can read them safely. JS at
+   the bottom of the file (te_envSwitch) handles the toggling. #}
+<div class="card te-env-card">
     <h3 class="card-title">{{ t.get('te_environment', 'Test Environment') }}</h3>
-    <div class="form-grid">
-        <div class="form-group">
-            <label>{{ t.get('te_platform', 'Platform') }}</label>
-            <select name="platform" id="platform-select">
-                {% for p in platforms %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
-            </select>
-            <input type="text" name="platform_custom" id="platform-custom" placeholder="Enter custom platform" style="display:none; margin-top:6px">
+    <p class="hint">{{ t.get('te_env_hint',
+        'Pick one environment for this test run. Each environment captures the version of the OS/browser under test in a free-text field.') }}</p>
+
+    <div class="te-env-tabs" role="tablist" data-te-env-tabs>
+        <label class="te-env-tab">
+            <input type="radio" name="env_type" value="web" checked>
+            <span><strong>Web</strong><small>{{ t.get('te_env_web_help', 'desktop browser on Windows / macOS / Linux') }}</small></span>
+        </label>
+        <label class="te-env-tab">
+            <input type="radio" name="env_type" value="mobile_web">
+            <span><strong>Mobile Web</strong><small>{{ t.get('te_env_mw_help', 'a browser on a phone / tablet') }}</small></span>
+        </label>
+        <label class="te-env-tab">
+            <input type="radio" name="env_type" value="ios">
+            <span><strong>iOS</strong><small>{{ t.get('te_env_ios_help', 'native iOS app on iPhone / iPad') }}</small></span>
+        </label>
+        <label class="te-env-tab">
+            <input type="radio" name="env_type" value="android">
+            <span><strong>Android</strong><small>{{ t.get('te_env_android_help', 'native Android app on phone / tablet') }}</small></span>
+        </label>
+    </div>
+
+    {# ── Web ───────────────────────────────────────────────── #}
+    <div class="te-env-panel" data-env="web">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>{{ t.get('te_platform', 'Platform') }}</label>
+                <select name="web_platform">
+                    {% for p in web_platforms %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_browser', 'Browser') }}</label>
+                <select name="web_browser">
+                    {% for b in web_browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_version', 'Version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="web_version" placeholder="{{ t.get('te_web_version_ph', 'e.g. Chrome 138 on Win 11') }}">
+            </div>
         </div>
-        <div class="form-group">
-            <label>{{ t.get('te_browser', 'Browser') }}</label>
-            <select name="browser" id="browser-select">
-                {% for b in browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
-                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
-            </select>
-            <input type="text" name="browser_custom" id="browser-custom" placeholder="Enter custom browser" style="display:none; margin-top:6px">
+    </div>
+
+    {# ── Mobile Web ──────────────────────────────────────────── #}
+    <div class="te-env-panel" data-env="mobile_web" hidden>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>{{ t.get('te_device_os', 'Device OS') }}</label>
+                <select name="mw_os">
+                    {% for o in mobile_web_oses %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_browser', 'Browser') }}</label>
+                <select name="mw_browser">
+                    {% for b in mobile_web_browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_resolution', 'Device resolution') }}</label>
+                <select name="mw_resolution">
+                    {% for label, size in mobile_resolutions.items() %}
+                        <option value="{{ size }}">{{ label }} ({{ size }})</option>
+                    {% endfor %}
+                    <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+                </select>
+                <input type="text" name="mw_resolution_custom" placeholder="e.g. 414x896" style="display:none; margin-top:6px">
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="mw_version" placeholder="{{ t.get('te_mw_version_ph', 'e.g. iOS 17.4 / Android 14') }}">
+            </div>
         </div>
-        <div class="form-group">
-            <label>{{ t.get('te_device', 'Device / Mobile Web') }}</label>
-            <select name="device" id="device-select">
-                {% for d in devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-                <optgroup label="Mobile Web">
-                    {% for mw in mobile_web %}<option value="{{ mw }}">{{ mw }}</option>{% endfor %}
-                </optgroup>
-                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
-            </select>
-            <input type="text" name="device_custom" id="device-custom" placeholder="Enter custom device" style="display:none; margin-top:6px">
+    </div>
+
+    {# ── iOS native ─────────────────────────────────────────── #}
+    <div class="te-env-panel" data-env="ios" hidden>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>{{ t.get('te_device_model', 'Device model') }}</label>
+                <select name="ios_device">
+                    {% for d in ios_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+                    <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+                </select>
+                <input type="text" name="ios_device_custom" placeholder="e.g. iPhone 16 Pro" style="display:none; margin-top:6px">
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="ios_version" placeholder="{{ t.get('te_ios_version_ph', 'e.g. iOS 17.4.1') }}">
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="ios_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
+            </div>
         </div>
-        <div class="form-group">
-            <label>{{ t.get('te_screen_size', 'Screen Size') }}</label>
-            <select name="screen_size" id="screen-select">
-                {% for name, size in screen_sizes.items() %}<option value="{{ size }}">{{ name }} ({{ size }})</option>{% endfor %}
-                <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
-            </select>
-            <input type="text" name="screen_custom" id="screen-custom" placeholder="e.g. 1440x900" style="display:none; margin-top:6px">
+    </div>
+
+    {# ── Android native ─────────────────────────────────────── #}
+    <div class="te-env-panel" data-env="android" hidden>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>{{ t.get('te_device_model', 'Device model') }}</label>
+                <select name="android_device">
+                    {% for d in android_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+                    <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
+                </select>
+                <input type="text" name="android_device_custom" placeholder="e.g. OnePlus 13" style="display:none; margin-top:6px">
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="android_version" placeholder="{{ t.get('te_android_version_ph', 'e.g. Android 14') }}">
+            </div>
+            <div class="form-group">
+                <label>{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input type="text" name="android_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
+            </div>
         </div>
     </div>
 </div>
@@ -380,16 +466,47 @@ function selectNone() {
     document.querySelectorAll(cls).forEach(function(cb) { cb.checked = false; });
 }
 
-// Show custom inputs for "Custom..." options
-['platform', 'browser', 'device', 'screen'].forEach(function(name) {
-    var sel = document.getElementById(name + '-select');
-    var inp = document.getElementById(name + '-custom');
-    if (sel && inp) {
-        sel.addEventListener('change', function() {
-            inp.style.display = sel.value === '__custom' ? 'block' : 'none';
+// ── Test Environment: panel switcher ──────────────────────────
+// Show only the panel for the selected env_type radio. Hidden
+// panels still post their default values (so the route always
+// reads strings), but only the active panel's fields end up in
+// the assembled environment string.
+(function te_envSwitch() {
+    var radios = document.querySelectorAll('input[name="env_type"]');
+    var panels = document.querySelectorAll('.te-env-panel');
+    function show(active) {
+        panels.forEach(function (p) {
+            var match = p.getAttribute('data-env') === active;
+            p.hidden = !match;
         });
     }
-});
+    radios.forEach(function (r) {
+        r.addEventListener('change', function () {
+            if (r.checked) show(r.value);
+        });
+    });
+    var initial = document.querySelector('input[name="env_type"]:checked');
+    if (initial) show(initial.value);
+})();
+
+// "Custom..." -> reveal the matching free-text input. Looks for any
+// <select> with sibling <input type=text> whose value flips to
+// "__custom".
+(function te_customSelectToggle() {
+    var pairs = [
+        ['select[name="mw_resolution"]', 'input[name="mw_resolution_custom"]'],
+        ['select[name="ios_device"]',     'input[name="ios_device_custom"]'],
+        ['select[name="android_device"]', 'input[name="android_device_custom"]'],
+    ];
+    pairs.forEach(function (pair) {
+        var sel = document.querySelector(pair[0]);
+        var inp = document.querySelector(pair[1]);
+        if (!sel || !inp) return;
+        sel.addEventListener('change', function () {
+            inp.style.display = sel.value === '__custom' ? 'block' : 'none';
+        });
+    });
+})();
 
 // Toggle run details
 function toggleRunDetails(id) {

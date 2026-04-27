@@ -135,6 +135,53 @@ SCREEN_SIZES: dict[str, str] = {
 }
 
 
+# ─── Environment-aware option pools (Test Execution UI) ─────────
+# A test run targets exactly one environment kind. The constants below
+# back the per-kind dropdowns so the user only sees options that make
+# sense for the selected environment (Web vs Mobile Web vs native iOS
+# vs native Android). Each kind also accepts a free-text version field
+# in the UI so the tester can record the exact OS / browser build.
+
+WEB_PLATFORMS: list[str] = ["Windows", "macOS", "Linux", "ChromeOS"]
+
+WEB_BROWSERS: list[str] = ["Chrome", "Microsoft Edge", "Firefox", "Safari", "Opera", "Brave"]
+
+MOBILE_WEB_OSES: list[str] = ["iOS", "Android"]
+
+MOBILE_WEB_BROWSERS: list[str] = [
+    "Safari (iOS)", "Chrome", "Microsoft Edge", "Firefox",
+    "Samsung Internet", "Opera Mobile",
+]
+
+# Common mobile / tablet device-pixel resolutions. Keys are user-facing
+# labels, values are the WxH string we store on the run.
+MOBILE_RESOLUTIONS: dict[str, str] = {
+    "iPhone 15 Pro Max": "430x932",
+    "iPhone 14/15": "390x844",
+    "iPhone 13 mini / SE": "375x667",
+    "Pixel 7 / 8": "412x915",
+    "Galaxy S22 / S23": "360x780",
+    "Galaxy Note": "412x914",
+    "iPad Air / Pro 11\"": "820x1180",
+    "iPad Pro 12.9\"": "1024x1366",
+    "Android Tablet": "800x1280",
+}
+
+# Native device-model presets — purely suggestions; the tester can
+# always override with the free-text Custom field shown in the UI.
+IOS_DEVICES: list[str] = [
+    "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15", "iPhone 14",
+    "iPhone 13 mini", "iPhone SE (3rd gen)",
+    "iPad Pro 12.9\"", "iPad Air", "iPad mini",
+]
+
+ANDROID_DEVICES: list[str] = [
+    "Google Pixel 8 Pro", "Google Pixel 7", "Samsung Galaxy S24 Ultra",
+    "Samsung Galaxy S23", "Samsung Galaxy A54", "Xiaomi Redmi Note 13",
+    "OnePlus 12", "Samsung Galaxy Tab S9",
+]
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 5. Test Execution Status Constants
 # ═══════════════════════════════════════════════════════════════════
