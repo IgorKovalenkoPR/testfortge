@@ -302,11 +302,27 @@ def _parse_custom_prompt(custom_prompt: str) -> dict:
 
 def generate_user_stories(requirements: list[ParsedRequirement],
                           custom_prompt: str = "") -> list[UserStory]:
-    """Convert a list of parsed requirements into User Stories."""
+    """Convert a list of parsed requirements into User Stories.
+
+    Synthetic URL-seed requirements (those produced by
+    ``file_parser._extract_url_requirement`` to flow a bare URL down
+    the pipeline so the crawler picks it up) are skipped here — they
+    have no actionable content and would otherwise produce a generic
+    "Verify that the X page works" story whose downstream test cases
+    are empty boilerplate. The crawler + browser-tester pipelines in
+    :mod:`engine.qa_persona` produce site-specific TCs from the URL on
+    their own.
+    """
     stories = []
     directives = _parse_custom_prompt(custom_prompt)
+    next_idx = 1
 
-    for idx, req in enumerate(requirements, start=1):
+    for req in requirements:
+        if getattr(req, "is_url_seed", False):
+            continue
+
+        idx = next_idx
+        next_idx += 1
         role = directives["force_role"] or _detect_role(req.text)
         action = _extract_action(req.text)
         benefit = _extract_benefit(req.text)

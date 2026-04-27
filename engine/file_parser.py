@@ -79,6 +79,11 @@ class ParsedRequirement:
     text: str
     source_file: str = ""
     line_number: int = 0
+    # ``True`` when the requirement was synthesised from a bare URL by
+    # ``_extract_url_requirement`` — it has no actual story content,
+    # exists only so qa_persona's analyzer can detect the URL and crawl
+    # the site. Downstream story generation must skip these entries.
+    is_url_seed: bool = False
 
 
 def allowed_file(filename: str) -> bool:
@@ -794,6 +799,7 @@ def split_into_requirements(lines: list[str]) -> list[ParsedRequirement]:
                 id=f"REQ-{counter:03d}",
                 text=f"Test the {url_req} page",
                 line_number=i + 1,
+                is_url_seed=True,
             ))
             counter += 1
             continue

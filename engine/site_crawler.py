@@ -404,18 +404,60 @@ def _detect_features(analysis: SiteAnalysis, all_html: str):
         if analysis.has_search:
             break
 
-    # Forms
+    # Forms — distinguish "business" forms (auth, signup, contact,
+    # checkout) from utility forms (site search, single-field newsletter
+    # opt-in). Generic Forms baseline TCs only make sense for the
+    # former. A news/info site (e.g. football.ua) typically exposes
+    # only a search box + a 1-field newsletter — those should NOT
+    # trigger the generic "Forms" suite that talks about email
+    # validation and required fields the site doesn't actually have.
+    _BUSINESS_FIELD_NAMES = {
+        "password", "passwd", "pwd", "pass",
+        "email", "e-mail", "mail",
+        "name", "firstname", "first_name", "lastname", "last_name", "fullname", "full_name",
+        "phone", "tel", "mobile", "address", "city", "country", "zip", "postal",
+        "company", "organization", "subject", "message", "comment", "comments",
+        "card", "cardnumber", "card_number", "cvv", "expiry",
+        "username", "user", "login", "account",
+    }
     for page in analysis.pages:
         for form in page.forms:
             real_fields = [f for f in form.get("fields", [])
                            if f.get("type") not in ("hidden", "submit", "button")]
-            if len(real_fields) >= 2:
-                analysis.has_forms = True
-                analysis.forms_found.append({
-                    "page": page.url,
-                    "action": form.get("action", ""),
-                    "fields": real_fields,
-                })
+            if not real_fields:
+                continue
+            # An auth form (any password field) is always a business form.
+            has_password = any(f.get("type") == "password" for f in real_fields)
+            # A search-only form ⇒ skip. Catches single-field site search
+            # even when the input has type="text" with name="q"/"query".
+            if len(real_fields) == 1:
+                only = real_fields[0]
+                only_type = only.get("type", "")
+                only_name = (only.get("name") or "").lower()
+                if only_type == "search" or any(t in only_name for t in ("search", "query", " q ", "_q", "q_", "find")):
+                    continue
+                # 1-field newsletter (just email) — too thin to drive
+                # a meaningful Forms TC suite.
+                if not has_password:
+                    continue
+            # Multi-field form: count business-named fields. Require
+            # ≥2 named business fields OR the presence of a password
+            # field. This filters out 2-field utility forms whose names
+            # don't match anything we recognise (random search filters
+            # with two inputs, comment widgets that just take name+text
+            # without an explicit "email"/"comment" naming).
+            named = {(f.get("name") or "").lower() for f in real_fields}
+            business_match = sum(1 for n in named if any(b in n for b in _BUSINESS_FIELD_NAMES))
+            is_business_form = has_password or business_match >= 2
+            if not is_business_form:
+                continue
+            analysis.has_forms = True
+            analysis.forms_found.append({
+                "page": page.url,
+                "action": form.get("action", ""),
+                "fields": real_fields,
+                "is_auth": has_password,
+            })
         if analysis.has_forms:
             break
 
