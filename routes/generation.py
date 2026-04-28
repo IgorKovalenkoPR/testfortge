@@ -7,7 +7,11 @@
 
 from __future__ import annotations
 
-from flask import Flask, Response, flash, g, render_template, request, session
+import os
+import tempfile
+
+from flask import Flask, Response, flash, g, redirect, render_template, request, session, url_for
+from werkzeug.utils import secure_filename
 
 from engine.file_parser import split_into_requirements
 from engine.qa_persona import is_instruction
@@ -20,6 +24,8 @@ from engine.exporter import (
     export_csv_testcases, export_csv_checklist,
     export_xlsx_testcases, export_xlsx_checklist,
 )
+from engine.imports import parse_test_cases as import_parse_test_cases
+from engine.imports import parse_checklist as import_parse_checklist
 
 from ._shared import (
     reconstruct_stories, reconstruct_test_cases, reconstruct_checklist,
@@ -148,6 +154,116 @@ def register(app: Flask) -> None:
 
         return render_template("checklist.html", checklist=[], has_data=False,
                                errors=[], resource_urls=[])
+
+    # ── Upload existing TC / CL packs ──────────────────────────────
+    # Lets a tester import a previously-built test pack so it can be
+    # run via /test-execution (manual) or /automation (Playwright).
+    # Format is inferred from the uploaded filename's extension.
+    _UPLOAD_EXTS = {"xlsx", "csv", "md", "markdown", "json"}
+
+    def _save_upload(file_storage) -> tuple[str, str] | tuple[None, str]:
+        """Persist the upload to a temp file. Returns (path, filename)
+        or (None, error_message)."""
+        if not file_storage or not file_storage.filename:
+            return (None, g.t.get("upload_no_file", "No file selected."))
+        filename = secure_filename(file_storage.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in _UPLOAD_EXTS:
+            return (None, g.t.get(
+                "upload_bad_ext",
+                f"Unsupported file type ‘{ext}’. Use one of: xlsx, csv, md, json."))
+        # Use a tempfile under UPLOAD_FOLDER so the existing 64 MB cap
+        # and write-permission probes apply uniformly.
+        upload_dir = app.config.get("UPLOAD_FOLDER") or tempfile.gettempdir()
+        os.makedirs(upload_dir, exist_ok=True)
+        fd, path = tempfile.mkstemp(prefix="tc_import_", suffix=f"_{filename}",
+                                    dir=upload_dir)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                file_storage.save(out)
+        except Exception as exc:
+            return (None, f"Could not save the uploaded file: {exc}")
+        return (path, filename)
+
+    @app.route("/test-cases/upload", methods=["POST"])
+    def test_cases_upload():
+        path, filename = _save_upload(request.files.get("upload_file"))
+        if not path:
+            flash(filename, "error")
+            return redirect(url_for("test_cases_page"))
+        try:
+            cases = import_parse_test_cases(path, filename)
+        except Exception as exc:
+            flash(f"Import failed: {exc}", "error")
+            return redirect(url_for("test_cases_page"))
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+        if not cases:
+            flash(g.t.get(
+                "upload_no_rows",
+                "No test cases were recognised in the file. Check that it has a "
+                "header row and at least an ‘ID’ + ‘Summary’ + ‘Steps’ column."),
+                "error")
+            return redirect(url_for("test_cases_page"))
+
+        mode = (request.form.get("upload_mode") or "replace").lower()
+        existing = session.get("test_cases_data", []) if mode == "append" else []
+        merged = existing + [tc_to_dict(tc) for tc in cases]
+        session["test_cases_data"] = merged
+        # Imported packs don't carry their own user stories, so reset
+        # the traceability matrix — it would otherwise reference IDs
+        # that no longer exist.
+        session.pop("traceability_data", None)
+
+        flash(
+            g.t.get("upload_tc_ok",
+                    f"Imported {len(cases)} test case(s) from {filename}.")
+            + (f" Total now: {len(merged)}." if mode == "append" else ""),
+            "success",
+        )
+        return redirect(url_for("test_cases_page"))
+
+    @app.route("/checklist/upload", methods=["POST"])
+    def checklist_upload():
+        path, filename = _save_upload(request.files.get("upload_file"))
+        if not path:
+            flash(filename, "error")
+            return redirect(url_for("checklist_page"))
+        try:
+            items = import_parse_checklist(path, filename)
+        except Exception as exc:
+            flash(f"Import failed: {exc}", "error")
+            return redirect(url_for("checklist_page"))
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+        if not items:
+            flash(g.t.get(
+                "upload_no_rows_cl",
+                "No checklist items were recognised in the file. Check that it "
+                "has a header row and at least an ‘Objective’ column."),
+                "error")
+            return redirect(url_for("checklist_page"))
+
+        mode = (request.form.get("upload_mode") or "replace").lower()
+        existing = session.get("checklist_data", []) if mode == "append" else []
+        merged = existing + [cl_to_dict(it) for it in items]
+        session["checklist_data"] = merged
+
+        flash(
+            g.t.get("upload_cl_ok",
+                    f"Imported {len(items)} checklist item(s) from {filename}.")
+            + (f" Total now: {len(merged)}." if mode == "append" else ""),
+            "success",
+        )
+        return redirect(url_for("checklist_page"))
 
     @app.route("/export/<fmt>")
     def export(fmt):

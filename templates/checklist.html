@@ -18,6 +18,43 @@
     </div>
 </form>
 
+{# ── Upload existing checklist ───────────────────────────────────── #}
+<form method="POST" action="{{ url_for('checklist_upload') }}"
+      enctype="multipart/form-data" class="card upload-existing">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3 class="card-title">
+        <i data-lucide="upload-cloud" class="icon-sm"></i>
+        {{ t.get('cl_upload_title', 'Upload existing checklist') }}
+    </h3>
+    <p class="hint">
+        {{ t.get('cl_upload_hint',
+            'Drop an existing checklist (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the items in the session for manual or automated execution. Recognised headers include any variant of ID, Section, Objective, Category, Priority, Status, Testing Type.') }}
+    </p>
+    <div class="form-row" style="align-items:flex-end; gap:12px;">
+        <div class="form-group" style="flex:1">
+            <label>{{ t.get('cl_upload_file', 'File') }}</label>
+            <input type="file" name="upload_file" required
+                   accept=".xlsx,.csv,.md,.markdown,.json">
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="radio" name="upload_mode" value="replace" checked>
+                {{ t.get('cl_upload_replace', 'Replace current checklist') }}
+            </label>
+            <label>
+                <input type="radio" name="upload_mode" value="append">
+                {{ t.get('cl_upload_append', 'Append to current checklist') }}
+            </label>
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-secondary">
+                <i data-lucide="upload" class="icon-sm"></i>
+                {{ t.get('cl_upload_btn', 'Upload') }}
+            </button>
+        </div>
+    </div>
+</form>
+
 {% if resource_urls %}
 <div class="card" style="background:#f8fafe; margin-bottom:16px;">
     <h3 class="card-title" style="font-size:0.95em;"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>

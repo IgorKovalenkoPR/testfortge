@@ -82,6 +82,7 @@ def tc_to_dict(tc: TestCase) -> dict:
         "expected_result": tc.expected_result, "issues": tc.issues,
         "comment": tc.comment, "user_story_id": tc.user_story_id,
         "category": tc.category, "priority": tc.priority, "status": tc.status,
+        "testing_type": getattr(tc, "testing_type", "Functional"),
     }
 
 
@@ -90,6 +91,7 @@ def cl_to_dict(cl: ChecklistItem) -> dict:
         "id": cl.id, "section": cl.section, "objective": cl.objective,
         "comments": cl.comments, "user_story_id": cl.user_story_id,
         "category": cl.category, "priority": cl.priority, "status": cl.status,
+        "testing_type": getattr(cl, "testing_type", "Functional"),
     }
 
 
