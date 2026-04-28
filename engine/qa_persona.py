@@ -317,8 +317,16 @@ def analyze_input(requirements: list[dict],
         try:
             from .browser_tester import get_or_run as browser_get_or_run
             from dataclasses import asdict
+            # Cap synchronous browser-tester work so a sync /test-cases
+            # POST doesn't tie up a Render free-tier worker for >2 min.
+            # ``TESTFORTGE_BROWSER_PAGES`` lets you opt-in to deeper
+            # checks (e.g. on a beefier deploy or via the async endpoint).
+            import os
+            sync_max_pages = int(os.environ.get("TESTFORTGE_BROWSER_PAGES", "5"))
+            sync_timeout_ms = int(os.environ.get("TESTFORTGE_BROWSER_TIMEOUT_MS", "5000"))
             browser_report = browser_get_or_run(
-                result.url, max_pages=10,
+                result.url, max_pages=sync_max_pages,
+                timeout_ms=sync_timeout_ms,
                 site_analysis=site_analysis,
             )
             result.browser_findings = [asdict(f) for f in browser_report.findings]

@@ -14,6 +14,7 @@ by MAX_CONTENT_LENGTH; payloads exceeding it return HTTP 413.
 """
 
 import os
+import re
 import mimetypes
 
 # Force-register the canonical MIME types for static assets BEFORE Flask
@@ -104,6 +105,53 @@ def nl2br_filter(s):
     if not s:
         return s
     return markupsafe.Markup(str(markupsafe.escape(s)).replace('\n', '<br>\n'))
+
+
+@app.template_filter('bug_field')
+def bug_field_filter(s):
+    """Render a free-text bug-report field, auto-splitting numbered lists.
+
+    Tedgie's chat bug-form (and any pasted text) often arrives like
+    ``"1. Foo 2. Bar 3. Baz"`` — a single line with inline enumeration.
+    Steps to Reproduce already gets a ``<pre>`` block that respects
+    newlines, but Actual Result / Expected Result / Comment used to
+    render as flowing prose, which made enumerated lists hard to read.
+
+    This filter:
+    * Returns the value untouched (escaped) for short single-item text
+      (so a normal sentence still flows).
+    * Splits on ``" N. "`` boundaries when 2+ numbered items are
+      detected — including the case where the source had no newlines.
+    * Preserves original newlines if the writer already split items.
+    * Wraps multi-item content in a ``<pre class="steps">`` block so
+      it visually matches Steps to Reproduce.
+    """
+    if not s:
+        return "—"
+    text = str(s).strip()
+    # Detect inline-numbered enumerations: "1. ... 2. ... 3. ..."
+    inline = re.search(r"(?:^|\s)\d+\.\s+\S", text)
+    has_multiple = len(re.findall(r"(?:^|[\s\n])\d+\.\s+", text)) >= 2
+    has_newlines = "\n" in text
+    if not (has_newlines or (inline and has_multiple)):
+        return text  # ordinary prose, render as-is
+
+    # Split into items keyed by leading "N. "
+    if has_multiple:
+        # Insert a line break before every " N. " marker. The lookbehind
+        # ``(?<=\D)`` plus the ``\s+`` ensures we don't trip on
+        # decimals like "1.2.3" (no whitespace between digits) or
+        # version strings like "v1.5.0" (the second digit-block has no
+        # trailing space). The lookahead requires a space after the
+        # dot — that excludes "1.2." substrings inside semver text.
+        normalised = re.sub(r"(?<=\D)\s+(\d+\.\s)", r"\n\1", text)
+    else:
+        normalised = text
+
+    escaped = markupsafe.escape(normalised)
+    return markupsafe.Markup(
+        f'<pre class="steps">{escaped}</pre>'
+    )
 
 
 # ── Security headers + session hygiene ───────────────────────────

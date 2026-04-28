@@ -12,6 +12,60 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => alert.remove(), 300);
         }, 5000);
     });
+
+    // ── Loading overlay for slow generation endpoints ─────────────
+    // /test-cases, /checklist and /estimation/run can take 30-90 s on
+    // a free-tier instance because they crawl the URL + run a real
+    // headless browser. Without feedback the user thinks the page hung
+    // and reloads, which discards the upload + re-runs the crawl.
+    // This overlay shows a spinner with a clear "this can take a
+    // minute" message once any matching form is submitted, and lets
+    // the user cancel by reloading the tab.
+    const SLOW_PATHS = ['/test-cases', '/checklist', '/estimation/run', '/estimation'];
+    const isSlowEndpoint = (form) => {
+        const action = form.getAttribute('action') || window.location.pathname;
+        const url = new URL(action, window.location.origin);
+        if (form.method && form.method.toUpperCase() !== 'POST') return false;
+        // Skip the upload form on /test-cases or /checklist — it's fast.
+        if (form.action && /\/upload$/.test(url.pathname)) return false;
+        if (form.classList && form.classList.contains('upload-existing')) return false;
+        return SLOW_PATHS.some(p => url.pathname === p);
+    };
+
+    const showOverlay = () => {
+        if (document.getElementById('tf-loading-overlay')) return;
+        const ov = document.createElement('div');
+        ov.id = 'tf-loading-overlay';
+        ov.innerHTML = `
+            <div class="tf-loading-card">
+              <div class="tf-loading-spinner" aria-hidden="true"></div>
+              <h3 class="tf-loading-title">Working on it…</h3>
+              <p class="tf-loading-msg">
+                We're crawling the URL and running real browser checks.
+                This usually takes <strong>30 – 90 seconds</strong> for a
+                fresh URL on the free instance. Please don't reload —
+                progress would be lost.
+              </p>
+              <p class="tf-loading-tip">
+                Tip: subsequent runs against the same URL are
+                significantly faster (results are cached for 5 min).
+              </p>
+            </div>`;
+        document.body.appendChild(ov);
+    };
+
+    document.querySelectorAll('form').forEach(form => {
+        if (!isSlowEndpoint(form)) return;
+        form.addEventListener('submit', () => {
+            // Disable the submit button so the user can't double-fire.
+            form.querySelectorAll('button[type=submit]').forEach(btn => {
+                btn.disabled = true;
+                if (!btn.dataset.origText) btn.dataset.origText = btn.innerHTML;
+                btn.innerHTML = btn.dataset.origText + ' …';
+            });
+            showOverlay();
+        });
+    });
 });
 
 /* ── Tab switching (global) ──────────────────────────────────── */

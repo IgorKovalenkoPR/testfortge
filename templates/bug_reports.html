@@ -56,9 +56,9 @@
             {% endif %}
             <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug.preconditions or '—' }}</td></tr>
             <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td><td><pre class="steps">{{ bug.steps_to_reproduce or '—' }}</pre></td></tr>
-            <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td><td class="actual-result">{{ bug.actual_result }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td><td class="actual-result">{{ bug.actual_result | bug_field }}</td></tr>
             {% if bug.expected_result %}
-            <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td><td>{{ bug.expected_result }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td><td>{{ bug.expected_result | bug_field }}</td></tr>
             {% endif %}
             {# ── Jira workflow / traceability ── #}
             {% if bug.component %}
@@ -80,7 +80,7 @@
             <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at[:19] }}</td></tr>
             {% endif %}
             {% if bug.comment %}
-            <tr><td class="label">{{ t.get('bug_comment', 'Comment') }}</td><td>{{ bug.comment }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_comment', 'Comment') }}</td><td>{{ bug.comment | bug_field }}</td></tr>
             {% endif %}
         </table>
     </div>

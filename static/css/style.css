@@ -1798,6 +1798,55 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .back-to-top svg * { color: #fff; stroke: #fff; }
 .back-to-top svg { width: 22px; height: 22px; }
 
+/* ── Generate / Estimation loading overlay ─────────────────────── */
+#tf-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(15, 18, 25, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: tf-fade-in .25s ease;
+}
+@keyframes tf-fade-in { from { opacity: 0 } to { opacity: 1 } }
+.tf-loading-card {
+    max-width: 460px;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+    padding: 28px 32px;
+    text-align: center;
+    color: #1F2937;
+}
+.tf-loading-spinner {
+    width: 44px; height: 44px;
+    margin: 0 auto 14px;
+    border: 4px solid rgba(255, 134, 92, .15);
+    border-top-color: var(--tf-coral, #FF865C);
+    border-radius: 50%;
+    animation: tf-spin 0.9s linear infinite;
+}
+.tf-loading-title {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--tf-coral-hi, #FF6A36);
+}
+.tf-loading-msg {
+    margin: 0 0 10px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #4B5563;
+}
+.tf-loading-tip {
+    margin: 0;
+    font-size: 12.5px;
+    color: #6B7280;
+    line-height: 1.45;
+}
+
 /* ── Test Execution · Environment kind tabs ───────────────────── */
 .te-env-card .te-env-tabs {
     display: grid;
