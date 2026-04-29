@@ -521,6 +521,154 @@ TOPIC_TRIGGERS: dict[str, tuple[str, ...]] = {
 }
 
 
+# ── Glossary lookup (definitional questions) ─────────────────────
+# Triggered by message patterns like "what is a bug?", "що таке дефект",
+# "define test case", "explain failure". The lookup runs *before*
+# detect_topic / bug-form classification so an ISTQB definition is
+# always preferred over a more conversational intent.
+
+# UA + EN aliases for each TERMS_GLOSSARY key. Lowercased substrings.
+GLOSSARY_ALIASES: dict[str, tuple[str, ...]] = {
+    "error": ("error", "mistake", "помилка"),
+    "defect": ("defect", "fault", "bug", "дефект", "баг", "помилка коду"),
+    "failure": ("failure", "збій", "відмова"),
+    "root cause": ("root cause", "корінна причина", "першопричина"),
+    "test case": ("test case", "тест кейс", "тест-кейс", "тесткейс"),
+    "test condition": ("test condition", "тестова умова", "умова тестування"),
+    "test basis": ("test basis", "тестова база", "база тестування"),
+    "test object": ("test object", "об'єкт тестування", "обʼєкт тестування"),
+    "test objective": ("test objective", "мета тестування", "ціль тестування"),
+    "testware": ("testware", "тестваре", "тестовий артефакт"),
+    "verification": ("verification", "верифікація"),
+    "validation": ("validation", "валідація"),
+    "static testing": ("static testing", "статичне тестування"),
+    "dynamic testing": ("dynamic testing", "динамічне тестування"),
+    "qa": ("quality assurance", "qa", "забезпечення якості"),
+    "coverage": ("coverage", "покриття"),
+    "traceability": ("traceability", "трасування", "трасуванність"),
+    "regression testing": ("regression testing", "регресійне тестування",
+                           "регресія"),
+    "confirmation testing": ("confirmation testing", "re-testing",
+                              "підтверджуюче тестування"),
+    "smoke testing": ("smoke testing", "smoke", "димне тестування"),
+    "test plan": ("test plan", "тест-план", "тест план"),
+    "entry criteria": ("entry criteria", "критерії входу"),
+    "exit criteria": ("exit criteria", "критерії виходу"),
+    "risk": ("risk", "ризик"),
+}
+
+# Phrases that signal a definitional intent (not an action). Substring
+# match — must appear before / around a glossary alias.
+_DEFINE_INTENT_EN: tuple[str, ...] = (
+    "what is", "what's", "whats", "define", "definition of",
+    "meaning of", "explain ", "explanation of", "tell me about",
+    "describe ",
+)
+_DEFINE_INTENT_UA: tuple[str, ...] = (
+    "що таке", "що це", "що значить", "поясни", "розкажи про",
+    "розкажи що таке", "значення", "визначення",
+)
+
+
+def detect_glossary_term(message: str) -> str | None:
+    """Return the matched TERMS_GLOSSARY key if *message* asks for a
+    definition, or None.
+
+    Two-stage detector:
+      1. The message must contain at least one definitional cue
+         ("what is", "що таке", "define", "поясни", ...).
+      2. After stripping that cue, the message must mention an alias
+         of a known glossary term.
+
+    Mention-only sentences (e.g. "found a bug") deliberately fall
+    through — they are routed by the bug-form classifier instead.
+    """
+    low = (message or "").strip().lower()
+    if not low:
+        return None
+    has_define_cue = any(cue in low for cue in _DEFINE_INTENT_EN) or \
+                     any(cue in low for cue in _DEFINE_INTENT_UA)
+    if not has_define_cue:
+        return None
+    # Pick the longest matching alias to avoid 'bug' winning over
+    # 'defect' / 'fault' when both appear (rare but cheap to handle).
+    best_term: str | None = None
+    best_len = 0
+    for term, aliases in GLOSSARY_ALIASES.items():
+        for alias in aliases:
+            if alias in low and len(alias) > best_len:
+                best_term = term
+                best_len = len(alias)
+    return best_term
+
+
+# Section reference for each term — quoted in the answer footer so
+# students studying for CTFL can jump straight to the syllabus.
+_GLOSSARY_REFS: dict[str, str] = {
+    "error": "ISTQB CTFL §1.2.3",
+    "defect": "ISTQB CTFL §1.2.3",
+    "failure": "ISTQB CTFL §1.2.3",
+    "root cause": "ISTQB CTFL §1.2.3",
+    "test case": "ISTQB CTFL §1.4 / §4",
+    "test condition": "ISTQB CTFL §4.1",
+    "test basis": "ISTQB CTFL §1.4.1",
+    "test object": "ISTQB CTFL §1.1",
+    "test objective": "ISTQB CTFL §1.1",
+    "testware": "ISTQB CTFL §1.4 / §5",
+    "verification": "ISTQB CTFL §1.1.2",
+    "validation": "ISTQB CTFL §1.1.2",
+    "static testing": "ISTQB CTFL §3.1",
+    "dynamic testing": "ISTQB CTFL §1.1 / §4",
+    "qa": "ISTQB CTFL §1.1.1",
+    "coverage": "ISTQB CTFL §4 / §5",
+    "traceability": "ISTQB CTFL §5.3",
+    "regression testing": "ISTQB CTFL §2.2.3",
+    "confirmation testing": "ISTQB CTFL §2.2.3",
+    "smoke testing": "ISTQB CTFL §2.2.2",
+    "test plan": "ISTQB CTFL §5.1.1",
+    "entry criteria": "ISTQB CTFL §1.4.4",
+    "exit criteria": "ISTQB CTFL §1.4.4",
+    "risk": "ISTQB CTFL §5.4",
+}
+
+
+def answer_glossary_term(term: str, lang: str = "en") -> "IstqbAnswer | None":
+    """Render a definitional answer pulling verbatim from TERMS_GLOSSARY.
+
+    The follow-up suggestions intentionally point at the closest related
+    topic so users can drill deeper without retyping a query."""
+    body = TERMS_GLOSSARY.get(term)
+    if not body:
+        return None
+    ref = _GLOSSARY_REFS.get(term, "ISTQB CTFL")
+    title_en = f"{term.title()} — {ref}"
+    follow = {
+        "defect": ["What is a failure?",
+                   "What is the difference between error, defect and failure?",
+                   "Show defect lifecycle"],
+        "failure": ["What is a defect?",
+                    "Show error vs defect vs failure",
+                    "Show seven testing principles"],
+        "error": ["What is a defect?",
+                  "Root-cause analysis",
+                  "Show seven testing principles"],
+        "test case": ["What is a test condition?",
+                      "Show test design techniques",
+                      "Show coverage"],
+        "verification": ["What is validation?",
+                         "Verification vs validation"],
+        "validation": ["What is verification?",
+                       "Verification vs validation"],
+        "regression testing": ["What is confirmation testing?",
+                                "Show test types"],
+        "confirmation testing": ["What is regression testing?",
+                                  "Show test types"],
+        "qa": ["QA vs testing",
+                "What is dynamic testing?"],
+    }.get(term, ["Show seven testing principles", "Show test process activities"])
+    return IstqbAnswer(title=title_en, body=body, follow_up=follow)
+
+
 def detect_topic(message: str) -> str | None:
     """Return the matching ISTQB topic key for *message* or None."""
     low = (message or "").lower()

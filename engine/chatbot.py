@@ -932,7 +932,30 @@ _BUG_REPORT_TRIGGERS_UA = [
 ]
 
 
+# Definitional cues — when one of these is in the message, the user
+# is asking *about* a bug (theory question), NOT trying to file one.
+# We block the bug-form intent in that case so glossary / ISTQB topic
+# can answer first.
+_DEFINITIONAL_CUES: tuple[str, ...] = (
+    "what is", "what's", "whats", "what are", "define", "definition of",
+    "meaning of", "explain ", "explanation of", "tell me about",
+    "describe ", "differen", "vs ", " vs.", "examples of",
+    "що таке", "що це", "що значить", "поясни", "розкажи про",
+    "розкажи що таке", "значення", "визначення", "різниця між",
+    "приклади",
+)
+
+
 def _wants_bug_form(low: str) -> bool:
+    """Strict bug-form intent classifier.
+
+    Only fires when the message clearly states the user wants to *file*
+    a bug — i.e. matches one of the curated trigger phrases. Bare
+    mentions of the word 'bug' / 'баг' (e.g. 'what is a bug?',
+    'що таке баг') no longer hijack the conversation; they fall through
+    to the ISTQB glossary lookup."""
+    if any(cue in low for cue in _DEFINITIONAL_CUES):
+        return False
     return _any(low, _BUG_REPORT_TRIGGERS_EN) or _any(low, _BUG_REPORT_TRIGGERS_UA)
 
 
@@ -997,6 +1020,34 @@ def _istqb_detect_topic(message: str) -> str | None:
         return detect_topic(message)
     except Exception:
         return None
+
+
+def _istqb_detect_glossary(message: str) -> str | None:
+    """Wrapper around istqb_knowledge.detect_glossary_term — keeps the
+    main chatbot dispatch self-contained even when istqb_knowledge is
+    optional."""
+    try:
+        from .istqb_knowledge import detect_glossary_term
+        return detect_glossary_term(message)
+    except Exception:
+        return None
+
+
+def _istqb_glossary_reply(term: str, lang: str) -> ChatReply | None:
+    """Render the canonical ISTQB definitional answer for *term*."""
+    try:
+        from .istqb_knowledge import answer_glossary_term
+        ans = answer_glossary_term(term, lang)
+    except Exception:
+        return None
+    if ans is None:
+        return None
+    text = f"**{ans.title}**\n\n{ans.body}"
+    return ChatReply(
+        text=text,
+        intent=f"istqb_glossary:{term}",
+        suggestions=ans.follow_up,
+    )
 
 
 def _istqb_reply(topic: str, lang: str) -> ChatReply | None:
@@ -1073,10 +1124,15 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     if _any(low, _GRATITUDE):
         return _gratitude(lang)
 
-    # Explicit bug-form trigger always wins so the user can shortcut to
-    # filing a report regardless of the rest of the message.
-    if _wants_bug_form(low):
-        return _bug_form_reply(lang)
+    # Definitional questions ("what is a bug", "що таке дефект", ...) —
+    # always answered with the verbatim ISTQB glossary entry. Runs
+    # *before* the bug-form trigger so a theory question can never be
+    # mistaken for an attempt to file a report.
+    glossary_term = _istqb_detect_glossary(raw)
+    if glossary_term is not None:
+        glos_reply = _istqb_glossary_reply(glossary_term, lang)
+        if glos_reply is not None:
+            return glos_reply
 
     # ISTQB CTFL theory questions — handled BEFORE the AI call so the
     # rule-based answer carries the verbatim syllabus wording the user
@@ -1087,6 +1143,12 @@ def respond(message: str, lang: str = "en") -> ChatReply:
         ist_reply = _istqb_reply(istqb_topic, lang)
         if ist_reply is not None:
             return ist_reply
+
+    # Bug-form trigger — only after definitional / theory checks have
+    # passed, and only when the message has an explicit filing verb
+    # ('file a bug', 'submit a bug', 'хочу створити баг'...).
+    if _wants_bug_form(low):
+        return _bug_form_reply(lang)
 
     # AI-backed reply (Anthropic Claude). Falls through to rule-based on
     # any failure.
