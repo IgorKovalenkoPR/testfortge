@@ -1118,10 +1118,19 @@ def respond(message: str, lang: str = "en") -> ChatReply:
         return _default_help(lang)
 
     # Greeting / gratitude (fast path) — cheap and deterministic, no AI
-    # round-trip needed.
-    if _any(low, _GREETINGS) and len(low) < 40:
+    # round-trip needed. Token-level match (whole word) rather than bare
+    # substring to avoid false positives like "shift left" → 'hi' in
+    # 'shift', or "severity vs priority" → 'ty ' in 'severity'.
+    _tokens = set(re.findall(r"\w+", low, flags=re.UNICODE))
+    def _has_token_phrase(phrase: str) -> bool:
+        # Single token: must equal one of the message tokens.
+        # Multi-token phrase: must appear as a contiguous substring.
+        if " " in phrase.strip():
+            return phrase.strip() in low
+        return phrase.strip() in _tokens
+    if any(_has_token_phrase(g) for g in _GREETINGS) and len(low) < 40:
         return _greeting(lang)
-    if _any(low, _GRATITUDE):
+    if any(_has_token_phrase(g) for g in _GRATITUDE):
         return _gratitude(lang)
 
     # Definitional questions ("what is a bug", "що таке дефект", ...) —
@@ -1186,6 +1195,37 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     # "What can you do" / generic help
     if _any(low, _ASK_HELP_EN) or _any(low, _ASK_HELP_UA):
         return _default_help(lang)
+
+    # Loose ISTQB lookup — last attempt before treating the message as
+    # a vague requirement. Catches short chip-style messages
+    # ("Testing types", "severity", "test plan") that didn't carry a
+    # definitional cue. We only fire when the message is short enough
+    # that misclassification is unlikely — anything ≤6 words.
+    word_count = len(low.split())
+    if 0 < word_count <= 6:
+        # First try ISTQB topic detection without the cue requirement.
+        loose_topic = _istqb_detect_topic(raw)
+        if loose_topic is not None:
+            ist_reply = _istqb_reply(loose_topic, lang)
+            if ist_reply is not None:
+                return ist_reply
+        # Then try a glossary alias match (no cue required, since the
+        # entire message *is* effectively the term).
+        try:
+            from .istqb_knowledge import GLOSSARY_ALIASES
+        except Exception:
+            GLOSSARY_ALIASES = {}
+        best_term: str | None = None
+        best_len = 0
+        for term, aliases in GLOSSARY_ALIASES.items():
+            for alias in aliases:
+                if alias in low and len(alias) > best_len:
+                    best_term = term
+                    best_len = len(alias)
+        if best_term is not None:
+            glos_reply = _istqb_glossary_reply(best_term, lang)
+            if glos_reply is not None:
+                return glos_reply
 
     # Last resort — treat as a requirement that needs clarification
     return _clarify_requirement(lang, raw)

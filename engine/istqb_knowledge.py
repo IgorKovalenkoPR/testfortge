@@ -152,6 +152,40 @@ TERMS_GLOSSARY: dict[str, str] = {
         "level = likelihood × impact. Tested via risk-based testing, where "
         "test effort is prioritised by risk."
     ),
+    "severity": (
+        "Severity is the degree of impact a defect has on the test object — "
+        "i.e. how badly the system is affected when the defect is exercised. "
+        "ISTQB scale (illustrative): Critical / High / Medium / Low. "
+        "Severity is technical and assessed by testers; it is independent of "
+        "priority, which is a business decision."
+    ),
+    "priority": (
+        "Priority is the urgency with which a defect should be fixed — a "
+        "business decision driven by stakeholders, release plans and risk. "
+        "ISTQB scale (illustrative): High / Medium / Low. A high-severity "
+        "defect can have low priority (rare workflow) and vice-versa "
+        "(low-severity but on the demo path)."
+    ),
+    "defect lifecycle": (
+        "The defect lifecycle (defect workflow) is the sequence of states a "
+        "defect report moves through after it is logged. Typical states: "
+        "New / Open → Assigned → In progress → Fixed → Re-test (confirmation "
+        "testing) → Closed, with branches Rejected / Deferred / Duplicate. "
+        "Status transitions are enforced by the defect-management tool."
+    ),
+    "defect management": (
+        "Defect management is the process of recognising, recording, "
+        "classifying, investigating, fixing and closing defects. ISTQB-mandatory "
+        "metadata for each report: id, title, severity, priority, status, "
+        "reporter, found-in build, environment, steps to reproduce, expected "
+        "vs actual result, attachments and references."
+    ),
+    "test scenario": (
+        "A test scenario (also: test idea) is a high-level description of "
+        "what to test — usually one user-flow or business case. A scenario "
+        "is later decomposed into concrete test cases with steps, inputs and "
+        "expected results. Often used in exploratory testing and BDD."
+    ),
 }
 
 
@@ -403,30 +437,43 @@ class IstqbAnswer:
 TOPIC_TRIGGERS: dict[str, tuple[str, ...]] = {
     "principles": (
         "seven principle", "7 principle", "testing principle",
-        "семи принцип", "сім принцип", "принципи тестування",
         "principles of testing", "istqb principles",
+        "principles", "test principle",
+        "семи принцип", "сім принцип", "принципи тестування",
+        "принципи тест",
     ),
     "process": (
         "test process", "test activities", "test lifecycle",
-        "процес тестування", "етапи тестування",
-        "stages of testing", "test phases",
+        "stages of testing", "test phases", "testing process",
+        "test workflow", "test stages", "phases of testing",
+        "процес тестування", "процес тесту", "етапи тестування",
+        "фази тестування", "життєвий цикл тест",
     ),
     "levels": (
-        "test level", "test levels", "unit test", "component test",
-        "integration test", "system test", "acceptance test",
-        "uat", "рівні тестування", "юніт", "компонентне тест",
-        "інтеграційне", "системне", "приймальне",
+        "test level", "test levels", "testing levels", "testing level",
+        "levels of testing", "level of testing",
+        "unit test", "component test", "integration test",
+        "system test", "acceptance test", "uat",
+        "рівні тестування", "рівень тестування", "рівні тесту",
+        "юніт", "компонентне тест", "інтеграційне", "системне",
+        "приймальне",
     ),
     "types": (
-        "test type", "test types", "functional vs non-functional",
-        "non-functional test", "black-box", "white-box",
-        "blackbox", "whitebox", "grey-box", "gray-box",
-        "види тестування", "типи тестування",
+        "test type", "test types", "testing type", "testing types",
+        "type of testing", "types of testing", "kinds of testing",
+        "functional vs non-functional", "non-functional test",
+        "black-box", "white-box", "blackbox", "whitebox",
+        "grey-box", "gray-box",
+        "види тестування", "вид тестування", "типи тестування",
+        "тип тестування", "тип тесту", "види тесту",
         "функціональне тестування", "нефункціональне",
     ),
     "techniques": (
-        "test technique", "test design technique", "техніки тестування",
-        "техніка тестування", "design techniques", "test cases technique",
+        "test technique", "test techniques", "test design technique",
+        "test design techniques", "test cases technique",
+        "design technique", "design techniques", "test design",
+        "техніка тестування", "техніки тестування",
+        "техніки дизайну", "дизайн тест",
     ),
     "equivalence": (
         "equivalence partition", "equivalence class",
@@ -518,6 +565,35 @@ TOPIC_TRIGGERS: dict[str, tuple[str, ...]] = {
         "istqb", "ctfl", "foundation level", "ictc",
         "сертифікація istqb", "сертификация istqb",
     ),
+    "severity": (
+        "severity", "defect severity", "bug severity",
+        "severity vs priority", "severity scale",
+        "критичність", "ступінь дефекту", "критичність дефекту",
+    ),
+    "priority": (
+        "priority", "defect priority", "bug priority",
+        "priority vs severity", "priority scale",
+        "пріоритет", "пріоритет дефекту", "пріоритет багу",
+    ),
+    "defect_lifecycle": (
+        "defect lifecycle", "defect life cycle", "defect status",
+        "bug lifecycle", "bug life cycle", "defect workflow",
+        "defect states", "bug states", "defect flow",
+        "життєвий цикл дефекту", "життєвий цикл багу",
+        "статус дефекту", "статуси дефекту", "статуси багу",
+    ),
+    "defect_management": (
+        "defect management", "defect tracking", "bug tracking",
+        "defect handling", "bug management", "defect process",
+        "bug report metadata", "what goes into a bug report",
+        "управління дефектами", "управління багами",
+        "трекінг дефектів", "трекінг багів",
+    ),
+    "test_scenario": (
+        "test scenario", "test idea", "scenario vs test case",
+        "test case vs test scenario",
+        "тестовий сценарій", "сценарій тестування",
+    ),
 }
 
 
@@ -555,6 +631,16 @@ GLOSSARY_ALIASES: dict[str, tuple[str, ...]] = {
     "entry criteria": ("entry criteria", "критерії входу"),
     "exit criteria": ("exit criteria", "критерії виходу"),
     "risk": ("risk", "ризик"),
+    "severity": ("severity", "критичність", "ступінь дефекту"),
+    "priority": ("priority", "пріоритет", "пріоритет дефекту"),
+    "defect lifecycle": ("defect lifecycle", "defect life cycle",
+                          "bug lifecycle", "defect status",
+                          "життєвий цикл дефекту", "статус дефекту"),
+    "defect management": ("defect management", "defect tracking",
+                           "bug tracking", "defect handling",
+                           "управління дефектами"),
+    "test scenario": ("test scenario", "test idea",
+                       "тестовий сценарій", "сценарій тестування"),
 }
 
 # Phrases that signal a definitional intent (not an action). Substring
@@ -629,6 +715,11 @@ _GLOSSARY_REFS: dict[str, str] = {
     "entry criteria": "ISTQB CTFL §1.4.4",
     "exit criteria": "ISTQB CTFL §1.4.4",
     "risk": "ISTQB CTFL §5.4",
+    "severity": "ISTQB CTFL §5.5",
+    "priority": "ISTQB CTFL §5.5",
+    "defect lifecycle": "ISTQB CTFL §5.5",
+    "defect management": "ISTQB CTFL §5.5",
+    "test scenario": "ISTQB CTFL §4",
 }
 
 
@@ -916,6 +1007,51 @@ def answer_topic(topic: str, lang: str = "en") -> IstqbAnswer | None:
                   "but not vice-versa."),
             follow_up=["Show statement vs branch coverage",
                        "Show traceability"],
+        )
+    if topic == "severity":
+        return IstqbAnswer(
+            title="Severity (ISTQB CTFL §5.5)",
+            body=TERMS_GLOSSARY["severity"],
+            follow_up=["What is priority?",
+                       "Severity vs priority — examples",
+                       "Show defect lifecycle",
+                       "What goes into a bug report?"],
+        )
+    if topic == "priority":
+        return IstqbAnswer(
+            title="Priority (ISTQB CTFL §5.5)",
+            body=TERMS_GLOSSARY["priority"],
+            follow_up=["What is severity?",
+                       "Severity vs priority — examples",
+                       "Show defect lifecycle",
+                       "What goes into a bug report?"],
+        )
+    if topic == "defect_lifecycle":
+        return IstqbAnswer(
+            title="Defect lifecycle (ISTQB CTFL §5.5)",
+            body=TERMS_GLOSSARY["defect lifecycle"],
+            follow_up=["What is confirmation testing?",
+                       "What is severity?",
+                       "What is priority?",
+                       "What goes into a bug report?"],
+        )
+    if topic == "defect_management":
+        return IstqbAnswer(
+            title="Defect management (ISTQB CTFL §5.5)",
+            body=TERMS_GLOSSARY["defect management"],
+            follow_up=["Show defect lifecycle",
+                       "What is severity?",
+                       "What is priority?",
+                       "What is a defect report?"],
+        )
+    if topic == "test_scenario":
+        return IstqbAnswer(
+            title="Test scenario (ISTQB CTFL §4)",
+            body=TERMS_GLOSSARY["test scenario"],
+            follow_up=["What is a test case?",
+                       "Test scenario vs test case",
+                       "Show test design techniques",
+                       "What is exploratory testing?"],
         )
     if topic == "istqb_general":
         return IstqbAnswer(
