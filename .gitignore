@@ -4,6 +4,9 @@ __pycache__/
 flask_session/
 uploads/
 storage/
+# Local SQLite/SQLAlchemy fallback DBs — Postgres is the prod backend.
+*.db
+*.sqlite3
 .env
 *.egg-info/
 dist/

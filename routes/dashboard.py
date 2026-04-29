@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from flask import Flask, render_template, session
 
-from ._shared import saved_projects
+from engine import db as _db
+
+from ._shared import get_session_id
 
 
 def _compute_dashboard_metrics() -> dict:
@@ -114,8 +116,15 @@ def register(app: Flask) -> None:
     @app.route("/")
     def index():
         metrics = _compute_dashboard_metrics()
+        # Scope the project list by session-id so different browser
+        # sessions don't see each other's projects on the same DB.
+        try:
+            projects = _db.list_projects(owner_sid=get_session_id())
+        except Exception:  # pragma: no cover — surface UI even with a sad DB
+            projects = []
         return render_template("index.html",
-                               projects=saved_projects(),
+                               projects=projects,
+                               active_project_id=session.get("project_id"),
                                metrics=metrics)
 
 

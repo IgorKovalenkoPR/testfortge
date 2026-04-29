@@ -12,12 +12,10 @@ current-request object in where needed.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
 import uuid
-from datetime import datetime
 
 from flask import current_app, request, session
 from werkzeug.utils import secure_filename
@@ -204,60 +202,6 @@ def get_session_id(session_obj=None) -> str:
     return sid
 
 
-# ── Project directory naming ─────────────────────────────────────
-
-def get_project_dir(name: str) -> str:
-    safe = "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(" ", "_")
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(current_app.config["STORAGE_FOLDER"], f"{safe or 'project'}_{ts}")
-
-
-# ── Saved-projects cache ─────────────────────────────────────────
-# Keyed on (STORAGE_FOLDER mtime, entry count); 10-second TTL.
-_PROJECTS_CACHE: dict = {"ts": 0.0, "fp": None, "data": []}
-_PROJECTS_TTL_SECONDS = 10.0
-
-
-def invalidate_projects_cache() -> None:
-    _PROJECTS_CACHE["ts"] = 0.0
-    _PROJECTS_CACHE["fp"] = None
-
-
-def saved_projects() -> list[dict]:
-    storage = current_app.config["STORAGE_FOLDER"]
-    if not os.path.exists(storage):
-        return []
-
-    try:
-        st = os.stat(storage)
-        fp = (st.st_mtime_ns, len(os.listdir(storage)))
-    except OSError as exc:
-        log.warning("list storage dir failed: %s", exc)
-        return []
-
-    now = time.time()
-    if (_PROJECTS_CACHE["fp"] == fp
-            and now - _PROJECTS_CACHE["ts"] < _PROJECTS_TTL_SECONDS):
-        return _PROJECTS_CACHE["data"]
-
-    projects: list[dict] = []
-    for d in sorted(os.listdir(storage), reverse=True):
-        meta_path = os.path.join(storage, d, "meta.json")
-        if not os.path.isfile(meta_path):
-            continue
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            log.warning("read meta.json failed for %s: %s", d, exc)
-            continue
-        meta["folder"] = d
-        projects.append(meta)
-
-    _PROJECTS_CACHE.update(ts=now, fp=fp, data=projects)
-    return projects
-
-
 __all__ = [
     # constants
     "SAFE_FOLDER_RE", "SAFE_ASSET_RE", "URL_PATTERN", "GENERATED_KEYS",
@@ -268,7 +212,7 @@ __all__ = [
     # input parsing
     "parse_page_input",
     # resource helpers
-    "extract_resource_urls", "get_project_dir",
-    # projects cache
-    "saved_projects", "invalidate_projects_cache",
+    "extract_resource_urls",
+    # session
+    "get_session_id",
 ]

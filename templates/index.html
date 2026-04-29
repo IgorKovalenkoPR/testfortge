@@ -16,6 +16,56 @@
     </a>
 </div>
 
+{# ── Active-project picker (DB-backed) ─────────────────────────── #}
+<div class="card project-picker">
+    <h2>{{ t.get('active_project_title', 'Active Project') }}</h2>
+    <p class="hint">{{ t.get('active_project_hint',
+        'All generated artefacts (estimation, test cases, checklists, bug reports, run results, metrics) are saved against the project you select here.') }}</p>
+
+    <div class="picker-status">
+        {% if active_project_id %}
+            <span class="picker-active-badge">
+                <i data-lucide="folder-open" class="icon-sm"></i>
+                {{ t.get('active_project_label', 'Active') }}:
+                <strong>{{ session['project_setup'].get('project_name', '—') }}</strong>
+            </span>
+        {% else %}
+            <span class="picker-empty">
+                <i data-lucide="folder-x" class="icon-sm"></i>
+                {{ t.get('active_project_none',
+                    'No active project. Create one below — every module needs an active project to save data.') }}
+            </span>
+        {% endif %}
+    </div>
+
+    <form method="POST" action="{{ url_for('db_create_project') }}" class="picker-create-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-row form-row-3">
+            <div class="form-group">
+                <label for="picker-name">{{ t.get('project_name', 'Project name') }} *</label>
+                <input type="text" id="picker-name" name="project_name" required
+                       placeholder="{{ t.get('project_name_placeholder', 'e.g. Acme Checkout v3') }}">
+            </div>
+            <div class="form-group">
+                <label for="picker-url">{{ t.get('base_url_label', 'Base URL') }}</label>
+                <input type="url" id="picker-url" name="base_url"
+                       placeholder="https://example.com">
+            </div>
+            <div class="form-group">
+                <label for="picker-desc">{{ t.get('description_label', 'Description') }}</label>
+                <input type="text" id="picker-desc" name="description"
+                       placeholder="{{ t.get('description_placeholder', 'Short context — optional') }}">
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i data-lucide="plus" class="icon-sm"></i>
+                {{ t.get('create_and_activate', 'Create &amp; activate') }}
+            </button>
+        </div>
+    </form>
+</div>
+
 {% if session.get('test_cases_data') or session.get('checklist_data') %}
 <div class="card card-highlight">
     <h2>{{ t.current_project }}{% if session.get('project_setup', {}).get('project_name') %}: {{ session['project_setup'].get('project_name', '') }}{% endif %}</h2>
@@ -316,22 +366,37 @@
                 <th>{{ t.project_name }}</th>
                 <th>{{ t.nav_test_cases }}</th>
                 <th>{{ t.nav_checklist }}</th>
+                <th>{{ t.get('nav_bug_reports', 'Bugs') }}</th>
                 <th>{{ t.sr_date }}</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for p in projects %}
-            <tr>
-                <td><strong>{{ p.project_name }}</strong></td>
+            <tr {% if p.folder == active_project_id %}class="row-active"{% endif %}>
+                <td>
+                    <strong>{{ p.project_name }}</strong>
+                    {% if p.folder == active_project_id %}
+                    <span class="pill pill-active">{{ t.get('active_project_label', 'Active') }}</span>
+                    {% endif %}
+                </td>
                 <td>{{ p.get('test_cases_count', 0) }}</td>
                 <td>{{ p.get('checklist_count', 0) }}</td>
+                <td>{{ p.get('bug_count', 0) }}</td>
                 <td class="meta-text">{{ p.saved_at[:16] }}</td>
                 <td>
-                    <a href="{{ url_for('load_project', folder=p.folder) }}" class="btn btn-xs">{{ t.load }}</a>
-                    <form method="POST" action="{{ url_for('delete_project', folder=p.folder) }}" style="display:inline"
+                    {% if p.folder != active_project_id %}
+                    <form method="POST" action="{{ url_for('db_select_project', project_id=p.folder) }}" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-xs btn-secondary" aria-label="Activate">
+                            <i data-lucide="check" class="icon-sm"></i> {{ t.get('activate', 'Activate') }}
+                        </button>
+                    </form>
+                    {% endif %}
+                    <a href="{{ url_for('load_project', project_id=p.folder) }}" class="btn btn-xs">{{ t.load }}</a>
+                    <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs btn-danger" aria-label="Delete"><i data-lucide="trash-2" class="icon-sm"></i></button>
                     </form>
                 </td>

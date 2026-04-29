@@ -15,6 +15,15 @@
 #     rotates sessions on every server start (SERVER_START_TIME marker),
 #     so this is consistent with documented behaviour.
 #
+databases:
+  # Free-tier Postgres (256 MB, 1 GB storage). The web service references
+  # this by name to wire DATABASE_URL automatically.
+  - name: testfortge-db
+    plan: free
+    region: frankfurt
+    databaseName: testfortge
+    user: testfortge
+
 services:
   - type: web
     name: testfortge
@@ -41,6 +50,13 @@ services:
       app:app
     healthCheckPath: /healthz
     envVars:
+      # Postgres connection string injected by Render from the
+      # ``testfortge-db`` database service declared above. SQLAlchemy
+      # rewrites ``postgres://`` → ``postgresql+psycopg2://`` at runtime.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: testfortge-db
+          property: connectionString
       # Auto-generated once, persisted by Render — keeps sessions valid
       # across redeploys.
       - key: SECRET_KEY

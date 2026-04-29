@@ -37,6 +37,7 @@ from flask_compress import Compress
 
 import config as _config
 from engine import basic_auth
+from engine import db as _db
 from engine.i18n import get_lang
 from engine.log import get_logger
 from routes import register_all
@@ -46,6 +47,15 @@ log = get_logger("testfortge")
 
 app = Flask(__name__)
 _config.apply(app)
+# Bring up the persistence layer immediately after config so every
+# subsequent import (route modules, helpers) can rely on a live engine.
+# `init_db` is idempotent and will create the schema if missing — it's
+# the only DDL hook we run at boot.
+try:
+    _db.init_db()
+except Exception:  # pragma: no cover — surface DB outage at startup
+    log.exception("Database initialisation failed")
+    raise
 Session(app)
 # Gzip/Brotli responses — static assets + JSON payloads benefit most.
 Compress(app)

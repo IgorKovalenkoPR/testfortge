@@ -21,6 +21,7 @@ import time
 
 from flask import Flask, current_app, jsonify
 
+from engine import db as _db
 from engine.job_queue import DONE, FAILED, PENDING, RUNNING, get_queue
 from engine.log import get_logger
 
@@ -67,6 +68,7 @@ def register(app: Flask) -> None:
                 app.config.get("STORAGE_FOLDER", "")),
             "upload_dir_writable": _check_writable(
                 app.config.get("UPLOAD_FOLDER", "")),
+            "database_reachable": _db.ping(),
         }
         ok = all(checks.values())
         status_code = 200 if ok else 503
@@ -95,6 +97,13 @@ def register(app: Flask) -> None:
             by_status[j.status] = by_status.get(j.status, 0) + 1
             by_kind[j.kind] = by_kind.get(j.kind, 0) + 1
 
+        # DB record counts — cheap and useful for sanity-checking a deploy.
+        try:
+            db_counts = _db.count_records()
+        except Exception as exc:  # pragma: no cover — keep /metrics live even if DB is sad
+            log.warning("metrics: db count failed: %s", exc)
+            db_counts = {"error": "unavailable"}
+
         return jsonify({
             "uptime_seconds": round(time.time() - _boot_ts, 1),
             "job_queue": {
@@ -103,6 +112,7 @@ def register(app: Flask) -> None:
                 "by_kind": by_kind,
                 "in_flight": by_status[PENDING] + by_status[RUNNING],
             },
+            "database": db_counts,
             "limits": {
                 "max_content_length": app.config.get("MAX_CONTENT_LENGTH"),
                 "chat_message_max_chars": app.config.get(

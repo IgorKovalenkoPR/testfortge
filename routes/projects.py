@@ -1,116 +1,195 @@
-"""TestFortge — Saved-project management routes.
+"""TestFortge — Project-management routes (DB-backed).
 
-  * POST /new-session            — clear current session's generated data
-  * POST /save-project           — snapshot session to STORAGE_FOLDER/<ts>
-  * GET  /load-project/<folder>  — hydrate session from a saved snapshot
-  * POST /delete-project/<folder> — remove a saved snapshot
+  * POST /new-session                   — clear current session's generated data
+  * POST /save-project                  — upsert active project in the DB
+                                          (also persists TC / CL snapshots)
+  * GET  /load-project/<project_id>     — hydrate session from the DB
+  * POST /delete-project/<project_id>   — drop a project (cascades children)
+  * POST /projects/db/create            — explicit "Create new project" form
+  * POST /projects/db/select/<project_id> — switch the active project
+                                            without loading its data into
+                                            the current session
+
+The legacy ``storage/<timestamp>/`` JSON-snapshot model has been
+removed; everything now lives in the relational schema declared in
+:mod:`engine.db`.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import shutil
-from datetime import datetime
-
 from flask import Flask, abort, flash, redirect, request, session, url_for
 
+from engine import db as _db
 from engine.log import get_logger
 
 from ._shared import (
-    GENERATED_KEYS, SAFE_FOLDER_RE,
-    get_project_dir, invalidate_projects_cache,
+    GENERATED_KEYS, cl_to_dict, get_session_id, tc_to_dict,
 )
 
 log = get_logger(__name__)
 
 
+# A project_id is a 32-char uuid hex string. The validator keeps the
+# url-routing decoupled from the DB layer — bad input is short-circuited
+# before any query runs.
+_PROJECT_ID_LEN = 32
+
+
+def _is_valid_project_id(s: str | None) -> bool:
+    if not s or len(s) != _PROJECT_ID_LEN:
+        return False
+    return all(c in "0123456789abcdef" for c in s)
+
+
+def _set_active_project(project_id: str, name: str,
+                        base_url: str | None = None) -> None:
+    """Mirror the active project into the session so templates and
+    sidebar widgets stay in sync."""
+    setup = session.get("project_setup") or {}
+    setup["project_name"] = name
+    if base_url:
+        setup["base_url"] = base_url
+    session["project_setup"] = setup
+    session["project_id"] = project_id
+
+
 def register(app: Flask) -> None:
-    """Attach project-storage routes on the app."""
+    """Attach project-management routes on the app."""
 
     @app.route("/new-session", methods=["POST"])
     def new_session():
-        """Clear all generated data, start fresh."""
+        """Clear all generated data and the active project pointer."""
         for key in GENERATED_KEYS:
             session.pop(key, None)
+        session.pop("project_id", None)
         return redirect(url_for("index"))
 
     @app.route("/save-project", methods=["POST"])
     def save_project():
-        project_name = request.form.get("project_name", "").strip()
+        """Upsert the active project and snapshot in-session TC / CL.
+
+        The form only requires ``project_name`` — everything else is
+        sourced from the current session so we keep the existing
+        "Save current work" UX with a single click.
+        """
+        project_name = (request.form.get("project_name") or "").strip()
         if not project_name:
-            project_name = session.get("project_setup", {}).get("project_name", "Project")
-        setup = session.get("project_setup", {})
-        setup["project_name"] = project_name
-        session["project_setup"] = setup
+            project_name = (session.get("project_setup") or {}) \
+                .get("project_name", "Project")
 
-        project_dir = get_project_dir(project_name)
-        os.makedirs(project_dir, exist_ok=True)
+        base_url = (session.get("project_setup") or {}).get("base_url") \
+            or (session.get("project_setup") or {}).get("project_url")
 
-        meta = {
-            "project_name": project_name,
-            "saved_at": datetime.now().isoformat(),
-            "requirements_count": len(session.get("raw_requirements", [])),
-            "test_cases_count": len(session.get("test_cases_data", [])),
-            "checklist_count": len(session.get("checklist_data", [])),
-        }
-        with open(os.path.join(project_dir, "meta.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        try:
+            project_id = _db.upsert_project(
+                name=project_name,
+                base_url=base_url,
+                description=None,
+                owner_sid=get_session_id(),
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index"))
 
-        with open(os.path.join(project_dir, "session_data.json"), "w", encoding="utf-8") as f:
-            json.dump({
-                "project_setup": session.get("project_setup", {}),
-                "raw_requirements": session.get("raw_requirements", []),
-                "user_stories": session.get("user_stories", []),
-                "test_cases_data": session.get("test_cases_data", []),
-                "checklist_data": session.get("checklist_data", []),
-                "custom_prompt": session.get("custom_prompt", ""),
-                "execution_results": session.get("execution_results", {}),
-                "bug_reports_data": session.get("bug_reports_data", []),
-                "test_runs": session.get("test_runs", []),
-            }, f, ensure_ascii=False, indent=2)
+        _set_active_project(project_id, project_name, base_url)
 
-        invalidate_projects_cache()
+        # Persist current TC/CL snapshots so /load-project later
+        # rehydrates exactly what the user had on screen.
+        tc_data = session.get("test_cases_data") or []
+        cl_data = session.get("checklist_data") or []
+        try:
+            if tc_data:
+                _db.save_test_cases(project_id, tc_data)
+            if cl_data:
+                _db.save_checklist(project_id, cl_data)
+        except Exception:  # pragma: no cover — flash-and-survive
+            log.exception("save-project: failed to persist TC/CL snapshot")
+
         flash(f"Project saved: {project_name}", "success")
         return redirect(url_for("index"))
 
-    @app.route("/load-project/<folder>")
-    def load_project(folder):
-        if not SAFE_FOLDER_RE.fullmatch(folder):
+    @app.route("/load-project/<project_id>")
+    def load_project(project_id):
+        """Hydrate the current session from a stored project."""
+        if not _is_valid_project_id(project_id):
             abort(400)
-        data_path = os.path.join(app.config["STORAGE_FOLDER"], folder, "session_data.json")
-        if not os.path.isfile(data_path):
+        meta = _db.get_project(project_id)
+        if not meta:
             flash("Project not found.", "error")
             return redirect(url_for("index"))
-        with open(data_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        for key in ("project_setup", "raw_requirements", "user_stories",
-                    "test_cases_data", "checklist_data", "custom_prompt",
-                    "execution_results", "bug_reports_data", "test_runs"):
-            if key in data:
-                session[key] = data[key]
-        if session.get("test_cases_data"):
+
+        # Reset only the generated keys — leave preferences (lang, etc.)
+        # intact so the user doesn't lose their UI state on a load.
+        for key in GENERATED_KEYS:
+            session.pop(key, None)
+
+        _set_active_project(meta["id"], meta["name"], meta.get("base_url"))
+
+        tcs = _db.load_test_cases(project_id)
+        cls = _db.load_checklist(project_id)
+        bugs = _db.list_bugs(project_id=project_id)
+        if tcs:
+            session["test_cases_data"] = tcs
             session["_show_tc_once"] = True
-        if session.get("checklist_data"):
+        if cls:
+            session["checklist_data"] = cls
             session["_show_cl_once"] = True
-        flash(f"Project '{data.get('project_setup', {}).get('project_name', '')}' loaded.", "success")
+        if bugs:
+            session["bug_reports_data"] = bugs
+
+        flash(f"Project '{meta['name']}' loaded.", "success")
         return redirect(url_for("index"))
 
-    @app.route("/delete-project/<folder>", methods=["POST"])
-    def delete_project(folder):
-        if not SAFE_FOLDER_RE.fullmatch(folder):
+    @app.route("/delete-project/<project_id>", methods=["POST"])
+    def delete_project(project_id):
+        if not _is_valid_project_id(project_id):
             abort(400)
-        project_dir = os.path.join(app.config["STORAGE_FOLDER"], folder)
-        # Resolve and confirm the canonicalised path still lives under
-        # STORAGE_FOLDER before any destructive operation.
-        storage_root = os.path.realpath(app.config["STORAGE_FOLDER"])
-        real_target = os.path.realpath(project_dir)
-        if not real_target.startswith(storage_root + os.sep):
+        _db.delete_project(project_id)
+        # If the active project was just deleted, clear the pointer too.
+        if session.get("project_id") == project_id:
+            session.pop("project_id", None)
+            (session.get("project_setup") or {}).pop("project_name", None)
+        flash("Project deleted.", "success")
+        return redirect(url_for("index"))
+
+    # ── Explicit project-picker actions ────────────────────────────
+
+    @app.route("/projects/db/create", methods=["POST"])
+    def db_create_project():
+        """Create a fresh project from the dashboard picker form."""
+        name = (request.form.get("project_name") or "").strip()
+        base_url = (request.form.get("base_url") or "").strip() or None
+        description = (request.form.get("description") or "").strip() or None
+        if not name:
+            flash("Project name is required.", "error")
+            return redirect(url_for("index"))
+
+        try:
+            project_id = _db.upsert_project(
+                name=name, base_url=base_url, description=description,
+                owner_sid=get_session_id(),
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index"))
+
+        # Newly-created project becomes the active one — but we don't
+        # touch GENERATED_KEYS so any in-flight work survives the click.
+        _set_active_project(project_id, name, base_url)
+        flash(f"Project '{name}' created and activated.", "success")
+        return redirect(url_for("index"))
+
+    @app.route("/projects/db/select/<project_id>", methods=["POST"])
+    def db_select_project(project_id):
+        """Activate an existing project without overwriting session data."""
+        if not _is_valid_project_id(project_id):
             abort(400)
-        if os.path.isdir(real_target):
-            shutil.rmtree(real_target)
-            invalidate_projects_cache()
-            flash("Project deleted.", "success")
+        meta = _db.get_project(project_id)
+        if not meta:
+            flash("Project not found.", "error")
+            return redirect(url_for("index"))
+        _set_active_project(meta["id"], meta["name"], meta.get("base_url"))
+        flash(f"Active project: {meta['name']}", "success")
         return redirect(url_for("index"))
 
 

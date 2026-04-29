@@ -1912,6 +1912,34 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .te-env-panel[hidden] { display: none; }
 .te-env-card .muted { color: var(--tf-mute, #8C94A6); font-weight: normal; font-size: 12px; }
 
+/* ── Active-project picker (Dashboard) ────────────────────────── */
+.project-picker .picker-status {
+    margin: 12px 0 16px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(255, 134, 92, .07);
+    border: 1px dashed rgba(255, 134, 92, .35);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; color: #2A3548;
+}
+.project-picker .picker-status .icon-sm { color: var(--tf-coral, #FF865C); }
+.project-picker .picker-active-badge strong { color: var(--tf-coral-hi, #FF6A36); margin-left: 4px; }
+.project-picker .picker-empty { color: #6A7488; }
+.project-picker .picker-create-form .form-actions {
+    margin-top: 10px; display: flex; justify-content: flex-end;
+}
+.pill {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 999px; font-size: 11px; font-weight: 600;
+    margin-left: 6px; vertical-align: middle;
+}
+.pill-active {
+    background: rgba(255, 134, 92, .15);
+    color: var(--tf-coral-hi, #FF6A36);
+    border: 1px solid rgba(255, 134, 92, .35);
+}
+.row-active { background: rgba(255, 134, 92, .04); }
+
 /* ── Print override ──────────────────────────────────────────────────────────── */
 @media print {
     .qa-chat-toggle, .qa-chat-panel, .back-to-top { display: none !important; }
