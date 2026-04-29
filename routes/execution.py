@@ -80,94 +80,93 @@ def register(app: Flask) -> None:
                     if val:
                         manual_bug_refs[item_id] = val
 
-            # Resolve environment — one run targets exactly one
-            # environment kind. The UI shows only that kind's inputs;
-            # we read just those and build a human-readable string.
-            env_type = (request.form.get("env_type") or "web").strip().lower()
+            # ── Resolve selected environments (multi-checkbox) ─────
+            # User may pick one or more env types — each selected env
+            # produces its own run record so testers can compare side-
+            # by-side (e.g. Web vs iOS for the same TC pack).
+            env_types = [e.strip().lower() for e in
+                          request.form.getlist("env_type") if e.strip()]
+            if not env_types:
+                env_types = ["web"]  # safety default
 
             def _resolve_custom(val: str, custom_field: str, default: str) -> str:
                 if val == "__custom":
                     return (request.form.get(custom_field, "") or "").strip() or default
                 return val or default
 
-            if env_type == "mobile_web":
-                os_name = request.form.get("mw_os", "iOS").strip() or "iOS"
-                browser = request.form.get("mw_browser", "Chrome").strip() or "Chrome"
-                resolution = _resolve_custom(
-                    request.form.get("mw_resolution", "375x812"),
-                    "mw_resolution_custom", "375x812",
-                )
-                version = (request.form.get("mw_version", "") or "").strip()
-                bits = [f"Mobile Web · {os_name}", browser, resolution]
-                if version:
-                    bits.append(f"OS {version}")
-                environment = " / ".join(bits)
-            elif env_type == "ios":
-                device = _resolve_custom(
-                    request.form.get("ios_device", "iPhone 15"),
-                    "ios_device_custom", "iPhone",
-                )
-                version = (request.form.get("ios_version", "") or "").strip()
-                build = (request.form.get("ios_build", "") or "").strip()
-                bits = ["iOS", device]
-                if version:
-                    bits.append(f"iOS {version}")
-                if build:
-                    bits.append(f"build {build}")
-                environment = " / ".join(bits)
-            elif env_type == "android":
-                device = _resolve_custom(
-                    request.form.get("android_device", "Pixel 8"),
-                    "android_device_custom", "Android device",
-                )
-                version = (request.form.get("android_version", "") or "").strip()
-                build = (request.form.get("android_build", "") or "").strip()
-                bits = ["Android", device]
-                if version:
-                    bits.append(f"Android {version}")
-                if build:
-                    bits.append(f"build {build}")
-                environment = " / ".join(bits)
-            else:
+            def _build_env_string(et: str) -> str:
+                if et == "mobile_web":
+                    os_name = request.form.get("mw_os", "iOS").strip() or "iOS"
+                    browser = request.form.get("mw_browser", "Chrome").strip() or "Chrome"
+                    resolution = _resolve_custom(
+                        request.form.get("mw_resolution", "375x812"),
+                        "mw_resolution_custom", "375x812",
+                    )
+                    version = (request.form.get("mw_version", "") or "").strip()
+                    bits = [f"Mobile Web · {os_name}", browser, resolution]
+                    if version:
+                        bits.append(f"OS {version}")
+                    return " / ".join(bits)
+                if et == "ios":
+                    device = _resolve_custom(
+                        request.form.get("ios_device", "iPhone 15"),
+                        "ios_device_custom", "iPhone",
+                    )
+                    version = (request.form.get("ios_version", "") or "").strip()
+                    build = (request.form.get("ios_build", "") or "").strip()
+                    bits = ["iOS", device]
+                    if version:
+                        bits.append(f"iOS {version}")
+                    if build:
+                        bits.append(f"build {build}")
+                    return " / ".join(bits)
+                if et == "android":
+                    device = _resolve_custom(
+                        request.form.get("android_device", "Pixel 8"),
+                        "android_device_custom", "Android device",
+                    )
+                    version = (request.form.get("android_version", "") or "").strip()
+                    build = (request.form.get("android_build", "") or "").strip()
+                    bits = ["Android", device]
+                    if version:
+                        bits.append(f"Android {version}")
+                    if build:
+                        bits.append(f"build {build}")
+                    return " / ".join(bits)
                 # Web (default)
-                env_type = "web"
                 platform = request.form.get("web_platform", "Windows").strip() or "Windows"
                 browser = request.form.get("web_browser", "Chrome").strip() or "Chrome"
                 version = (request.form.get("web_version", "") or "").strip()
                 bits = [f"Web · {platform}", browser]
                 if version:
                     bits.append(version)
-                environment = " / ".join(bits)
+                return " / ".join(bits)
 
             items_data = tc_data if source == "test_cases" else cl_data
             item_type = "test_case" if source == "test_cases" else "checklist"
 
-            # First http URL wins — used for real-site testing when provided.
-            site_url = ""
-            for url in resource_urls:
-                if url.startswith("http"):
-                    site_url = url
-                    break
+            # ── Automation configuration (folded in from Automation QA) ──
+            # When the tester supplies a Base URL, web / mobile-web envs
+            # additionally drive a Playwright session — capturing
+            # screenshots, optional video, and live-watching the run when
+            # ``headless=No`` is chosen. iOS / Android native fall back
+            # to the deterministic simulator.
+            base_url = (request.form.get("base_url") or "").strip()
+            scope = (request.form.get("scope") or "all").strip().lower()
+            headless = request.form.get("headless", "1") == "1"
+            record_video = request.form.get("record_video", "1") == "1"
+            session["automation_base_url"] = base_url
 
-            execution = execute_items(
-                items=items_data,
-                item_type=item_type,
-                tester_id=tester_id,
-                environment=environment,
-                testing_types=testing_types,
-                selected_ids=selected_ids or None,
-                site_url=site_url,
-                manual_statuses=manual_statuses or None,
-                manual_bug_refs=manual_bug_refs or None,
-            )
+            # Pick the URL used by the deterministic site-tester. Prefer
+            # the explicit Base URL the user just typed; fall back to
+            # the Resource URLs panel if they didn't.
+            site_url = base_url
+            if not site_url:
+                for url in resource_urls:
+                    if url.startswith("http"):
+                        site_url = url
+                        break
 
-            # Assign real bug IDs to new bugs and stamp ``affects_version``
-            # from the saved project setup so every defect carries the
-            # full ISTQB-mandatory metadata. Engine-side we left
-            # ``affects_version`` blank because the engine has no
-            # awareness of Flask sessions; we fill it here.
-            existing_bugs = [dict_to_bug(b) for b in session.get("bug_reports_data", [])]
-            all_bugs = session.get("bug_reports_data", [])
             project_setup = session.get("project_setup", {}) or {}
             affects_version = (
                 project_setup.get("project_version")
@@ -175,76 +174,151 @@ def register(app: Flask) -> None:
                 or project_setup.get("project_name")
                 or "Unspecified"
             )
-            bug_id_map: dict[str, str] = {}
-            for bug_dict in execution["bugs"]:
-                new_id = generate_bug_id(
-                    existing_bugs + [dict_to_bug(b) for b in all_bugs[len(existing_bugs):]]
-                )
-                bug_dict["id"] = new_id
-                if not bug_dict.get("affects_version"):
-                    bug_dict["affects_version"] = affects_version
-                linked = bug_dict.get("linked_item_id", "")
-                bug_id_map[linked] = new_id
-                all_bugs.append(bug_dict)
-
-            for r in execution["results"]:
-                if r["bug_id"].startswith("__pending_"):
-                    r["bug_id"] = bug_id_map.get(r["item_id"], r["bug_id"])
-
-            session["bug_reports_data"] = all_bugs
-
             tester = get_tester(tester_id)
             tester_name = tester.name if tester else tester_id
-            run_record = {
-                "run_id": len(test_runs) + 1,
-                "source": source,
-                "tester_id": tester_id,
-                "tester_name": tester_name,
-                "environment": environment,
-                "testing_types": ", ".join(testing_types),
-                "results": execution["results"],
-                "stats": execution["stats"],
-                "bug_count": len(execution["bugs"]),
-                "site_url": site_url,
-                "created_at": datetime.now().isoformat(),
-            }
-            test_runs.append(run_record)
+            all_bugs = session.get("bug_reports_data", [])
+            existing_bugs = [dict_to_bug(b) for b in all_bugs]
+
+            # Resolve "Re-run failed only" scope by trimming selected_ids
+            if scope == "failed":
+                last_run_results = (test_runs[-1]["results"]
+                                     if test_runs else [])
+                failed_ids = [r["item_id"] for r in last_run_results
+                              if r.get("status") in ("Failed", "Blocked")]
+                if failed_ids:
+                    selected_ids = list(set(selected_ids) & set(failed_ids)) \
+                                    if selected_ids else failed_ids
+
+            # ── Optional Playwright run (Web / Mobile Web only, when
+            #    base_url provided). One automation pass is shared across
+            #    web-style envs because Playwright drives the same URL.
+            automation_assets: dict[str, dict] = {}
+            wants_automation = bool(base_url) and source == "test_cases" and any(
+                et in ("web", "mobile_web") for et in env_types
+            )
+            if wants_automation:
+                try:
+                    from engine.automation_qa import scripts_from_session
+                    from engine.automation_runner import AutomationRunner
+                    from routes.automation import STORAGE_ROOT
+                    scripts = scripts_from_session(items_data, base_url)
+                    runner = AutomationRunner(
+                        storage_root=STORAGE_ROOT,
+                        base_url=base_url,
+                        headless=headless,
+                        record_video=record_video,
+                        credentials=credentials if credentials.is_active() else None,
+                    )
+                    auto_report = runner.run(scripts)
+                    # Index by case ID so the per-env loop below can pull
+                    # screenshots / videos / status into the right run row.
+                    for r in (auto_report.results or []):
+                        cid = getattr(r, "case_id", None) or getattr(r, "id", None)
+                        if cid:
+                            automation_assets[cid] = {
+                                "status": getattr(r, "status", ""),
+                                "video": getattr(r, "video_path", "") or "",
+                                "screenshots": list(getattr(r, "screenshots", []) or []),
+                                "duration_ms": getattr(r, "duration_ms", 0),
+                            }
+                    session["automation_report"] = {
+                        "passed": auto_report.passed,
+                        "failed": auto_report.failed,
+                        "blocked": auto_report.blocked,
+                        "run_id": auto_report.run_id,
+                    }
+                except Exception as exc:
+                    log.warning("Automation pass failed (non-fatal): %s", exc)
+
+            # ── Per-environment runs ──
+            run_summaries = []
+            bug_total = 0
+            for et in env_types:
+                environment = _build_env_string(et)
+                execution = execute_items(
+                    items=items_data,
+                    item_type=item_type,
+                    tester_id=tester_id,
+                    environment=environment,
+                    testing_types=testing_types,
+                    selected_ids=selected_ids or None,
+                    site_url=site_url,
+                    manual_statuses=manual_statuses or None,
+                    manual_bug_refs=manual_bug_refs or None,
+                )
+
+                # Promote pending bug IDs and stamp ISTQB metadata
+                bug_id_map: dict[str, str] = {}
+                for bug_dict in execution["bugs"]:
+                    new_id = generate_bug_id(
+                        existing_bugs + [dict_to_bug(b) for b in all_bugs[len(existing_bugs):]]
+                    )
+                    bug_dict["id"] = new_id
+                    if not bug_dict.get("affects_version"):
+                        bug_dict["affects_version"] = affects_version
+                    bug_dict["environment"] = environment
+                    bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                    all_bugs.append(bug_dict)
+                for r in execution["results"]:
+                    if r["bug_id"].startswith("__pending_"):
+                        r["bug_id"] = bug_id_map.get(r["item_id"], r["bug_id"])
+                    # Decorate with automation assets when available
+                    asset = automation_assets.get(r["item_id"])
+                    if asset and et in ("web", "mobile_web"):
+                        if asset.get("video"):
+                            r["video"] = asset["video"]
+                        if asset.get("screenshots"):
+                            r["screenshots"] = asset["screenshots"]
+
+                run_record = {
+                    "run_id": len(test_runs) + 1,
+                    "source": source,
+                    "tester_id": tester_id,
+                    "tester_name": tester_name,
+                    "environment": environment,
+                    "env_type": et,
+                    "testing_types": ", ".join(testing_types),
+                    "results": execution["results"],
+                    "stats": execution["stats"],
+                    "bug_count": len(execution["bugs"]),
+                    "site_url": site_url,
+                    "base_url": base_url,
+                    "headless": headless,
+                    "record_video": record_video,
+                    "automation_used": (et in ("web", "mobile_web") and wants_automation),
+                    "created_at": datetime.now().isoformat(),
+                }
+                test_runs.append(run_record)
+                run_summaries.append((environment, execution["stats"], len(execution["bugs"])))
+                bug_total += len(execution["bugs"])
+
+            session["bug_reports_data"] = all_bugs
             session["test_runs"] = test_runs
 
-            # Build a detailed, honest flash so the tester knows exactly
-            # what just happened: how many checks were real HTTP probes
-            # against the resource URL versus deterministic simulation.
-            stats = execution["stats"]
-            sources = stats.get("sources", {})
-            real_n = sources.get("real_check", 0)
-            sim_n = sources.get("simulated", 0)
-            man_n = sources.get("manual", 0)
-            bug_n = len(execution["bugs"])
-            parts = [
-                g.t.get("te_results_saved",
-                        "Test execution results saved successfully") + ".",
-                f"{stats['passed']} Passed / {stats['failed']} Failed / "
-                f"{stats['blocked']} Blocked ({stats['pass_rate']}% pass rate).",
-            ]
-            if site_url and real_n:
+            # Aggregated flash message: one line per env + grand totals
+            parts = [g.t.get("te_results_saved",
+                              "Test execution results saved successfully") + "."]
+            for env_str, stats, bug_n in run_summaries:
                 parts.append(
-                    f"{real_n} item(s) auto-checked against {site_url}; "
-                    f"{sim_n} simulated; {man_n} manual."
+                    f"[{env_str}] {stats['passed']} P / {stats['failed']} F / "
+                    f"{stats['blocked']} B ({stats['pass_rate']}%)"
+                    + (f", {bug_n} bug(s)" if bug_n else "")
+                    + "."
                 )
-            elif site_url and not real_n:
+            if base_url and wants_automation:
                 parts.append(
-                    f"No checks could be matched to {site_url}; "
-                    f"{sim_n} simulated; {man_n} manual."
+                    f"Playwright session ran against {base_url} "
+                    f"({'headless' if headless else 'visible'}, "
+                    f"{'video on' if record_video else 'no video'})."
                 )
-            else:
+            elif not base_url:
                 parts.append(
-                    "No resource URL configured — results are deterministic "
-                    "simulations. Add a URL on the Requirements page to "
-                    "enable real HTTP/HTML checks."
+                    "No Base URL configured — results are deterministic "
+                    "simulations. Add Base URL to enable Playwright-driven runs."
                 )
-            if bug_n:
+            if bug_total:
                 parts.append(
-                    f"{bug_n} bug report(s) auto-created for Failed/Blocked "
+                    f"{bug_total} bug report(s) auto-created for Failed/Blocked "
                     f"items — see the Bug Reports page."
                 )
             flash(" ".join(parts), "success")
@@ -260,6 +334,12 @@ def register(app: Flask) -> None:
                                tc_items=tc_data, cl_items=cl_data,
                                test_runs=test_runs,
                                resource_urls=resource_urls,
+                               # Pre-fill Base URL from the previous run so
+                               # the tester doesn't retype it. Empty string
+                               # is fine — the template falls back to the
+                               # first resource URL.
+                               last_base_url=session.get(
+                                   "automation_base_url", ""),
                                existing_bug_ids=existing_bug_ids,
                                platforms=PLATFORMS, browsers=BROWSERS,
                                devices=DEVICES, mobile_web=MOBILE_WEB,

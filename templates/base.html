@@ -58,12 +58,9 @@
                     {{ t.get('nav_test_execution', 'Test Execution') }}
                 </a>
             </li>
-            <li class="{% if request.endpoint == 'automation_page' %}active{% endif %}">
-                <a href="{{ url_for('automation_page') }}">
-                    <span class="step-icon"><i data-lucide="bot" class="icon-sm"></i></span>
-                    {{ t.nav_automation if t.get('nav_automation') else 'Automation QA' }}
-                </a>
-            </li>
+            {# Automation QA was merged into Test Execution — the
+               unified module now drives both manual and Playwright-
+               based runs from a single page. #}
             <li class="{% if request.endpoint == 'bug_reports_page' %}active{% endif %}">
                 <a href="{{ url_for('bug_reports_page') }}">
                     <span class="step-icon"><i data-lucide="bug" class="icon-sm"></i></span>

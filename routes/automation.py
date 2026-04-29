@@ -54,20 +54,12 @@ MAX_CONCURRENT_JOBS_PER_SESSION = int(
 def register(app: Flask) -> None:
     @app.route("/automation", methods=["GET"])
     def automation_page():
-        lang = session.get("lang", "en")
-        t = get_lang(lang)
-        tc_data = session.get("test_cases_data", [])
-        report = session.get("automation_report")
-        metrics = None
-        if report:
-            metrics = compute_automation_metrics(report, len(tc_data))
-        cred = credentials_from_session(session.get("automation_credentials"))
-        return render_template(
-            "automation.html", t=t, lang=lang,
-            tc_count=len(tc_data), report=report, metrics=metrics,
-            last_base_url=session.get("automation_base_url", ""),
-            cred=cred.as_public_dict(),
-        )
+        # Automation QA was merged into Test Execution. The /automation
+        # asset endpoints (status, asset/<path>, run-async) are still
+        # registered below for back-compat with bookmarks and existing
+        # automation runs, but the GET landing now points users to the
+        # unified module.
+        return redirect(url_for("test_execution_page"))
 
     @app.route("/automation/generate-account", methods=["POST"])
     def automation_generate_account():
