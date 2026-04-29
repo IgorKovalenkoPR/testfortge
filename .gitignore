@@ -39,11 +39,13 @@ ui_audit_tool.zip
 flask.log
 *.log
 
-# Tunnel binaries + tunnel logs — entire ad-hoc `tools/` directory.
-# cloudflared.exe is 66 MB and tunnel session logs are local-only.
-# Drop the binary as a release asset / download on demand instead of
-# committing.
-tools/
+# Tunnel binaries + tunnel logs in `tools/` — cloudflared.exe is 66 MB
+# and tunnel session logs are local-only. Drop the binary as a release
+# asset / download on demand instead of committing. We use the
+# pattern `tools/*` (not `tools/`) so explicit re-includes below can
+# whitelist individual scripts.
+tools/*
+!tools/build_istqb_corpus.py
 
 # Temporary DOCX build helpers and generated artefacts
 _build_requirements_docx.js

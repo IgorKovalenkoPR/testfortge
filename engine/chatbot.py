@@ -1227,6 +1227,21 @@ def respond(message: str, lang: str = "en") -> ChatReply:
             if glos_reply is not None:
                 return glos_reply
 
+    # ISTQB RAG retriever — searches the syllabus + textbook corpus
+    # for the closest passage. Only fires for messages that look like
+    # genuine theory questions (≥3 tokens) so a stray one-word phrase
+    # doesn't pull a tangential paragraph. Score-thresholded so weak
+    # matches still fall through to clarification.
+    if len(low.split()) >= 3:
+        try:
+            from . import istqb_rag
+            rag_reply = istqb_rag.answer(raw, lang)
+        except Exception as exc:
+            _logger.warning("istqb_rag failed, falling through: %s", exc)
+            rag_reply = None
+        if rag_reply is not None:
+            return rag_reply
+
     # Last resort — treat as a requirement that needs clarification
     return _clarify_requirement(lang, raw)
 
