@@ -260,10 +260,16 @@ button{font:inherit;cursor:pointer}
   padding:5px 12px;border-radius:var(--tf-radius-pill);
   font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
   border:1px solid;
+  /* Sit above the animated tag-stream that runs along the connector
+     curves; without an explicit stacking the curved labels can show
+     through the semi-transparent badge tint. */
+  position:relative;z-index:2;
 }
-.badge[data-role="you"]{background:rgba(91,141,239,.10);color:#9CB7F0;border-color:rgba(91,141,239,.35)}
-.badge[data-role="testfortge"]{background:rgba(255,134,92,.10);color:var(--tf-coral);border-color:rgba(255,134,92,.35)}
-.badge[data-role="both"]{background:rgba(167,139,250,.10);color:#B9A4FB;border-color:rgba(167,139,250,.35)}
+/* Two-layer fill: a solid page-ink underlay masks the connector's flowing
+   text, then a tinted gradient gives the badge its role colour. */
+.badge[data-role="you"]{background:linear-gradient(rgba(91,141,239,.10),rgba(91,141,239,.10)),var(--tf-ink);color:#9CB7F0;border-color:rgba(91,141,239,.35)}
+.badge[data-role="testfortge"]{background:linear-gradient(rgba(255,134,92,.10),rgba(255,134,92,.10)),var(--tf-ink);color:var(--tf-coral);border-color:rgba(255,134,92,.35)}
+.badge[data-role="both"]{background:linear-gradient(rgba(167,139,250,.10),rgba(167,139,250,.10)),var(--tf-ink);color:#B9A4FB;border-color:rgba(167,139,250,.35)}
 .wf-text h3{font-size:24px;margin:14px 0 10px;font-weight:700;color:#fff;letter-spacing:-.01em;line-height:1.2}
 .wf-text h3 .num{color:var(--tf-coral);font-family:var(--tf-mono);font-weight:600;font-size:20px;margin-right:8px}
 .wf-text p{color:var(--tf-text-soft);font-size:15px;margin:0 0 14px;max-width:440px}
