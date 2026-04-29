@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TestForTge — AI-powered QA framework | Testfort</title>
-<meta name="description" content="From requirements to deployable test artefacts in minutes. TestForTge parses your specs, generates test cases, runs Playwright automation and ships QA reports — all in one Flask-based framework.">
+<meta name="description" content="From requirements to a deployable QA pack in minutes. TestForTge ingests specs, docs and live URLs, generates test cases, checklists and PERT estimations, then runs manual or Playwright automation across Web, Mobile Web, iOS and Android — every artefact stored per project in Postgres.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -446,11 +446,14 @@ button{font:inherit;cursor:pointer}
   <div class="container hero-inner">
     <div class="reveal">
       <span class="eyebrow"><span class="dot"></span>By Testfort · QA framework</span>
-      <h1>From requirements to <span class="accent">production-grade tests</span> in minutes.</h1>
+      <h1>From requirements to a <span class="accent">deployable QA pack</span> — in minutes, not sprints.</h1>
       <p class="lead">
-        TestForTge is an AI-assisted QA framework that turns specs, docs and
-        live URLs into structured test cases, checklists, Playwright scripts
-        and exec-ready reports — without abandoning your team's process.
+        TestForTge is an AI-assisted QA workspace that ingests your specs,
+        docs and live URLs and turns them into structured test cases,
+        checklists, PERT estimations and one-click manual or Playwright
+        runs across Web, Mobile Web, iOS and Android — all stored per
+        project, with full history and export to the tools your team
+        already uses.
       </p>
       <div class="hero-ctas">
         <a href="#contact" class="btn btn-primary">Request a demo →</a>
@@ -461,12 +464,16 @@ button{font:inherit;cursor:pointer}
     <!-- Hero terminal mockup -->
     <div class="hero-mock reveal" aria-hidden="true">
       <div class="mock-bar"><i></i><i></i><i></i><span>tedgie · QA assistant</span></div>
-      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">testfortge</span> <span class="l-mute">ingest --url https://shop.example.com</span></span>
-      <span class="line l-mute">  parsing &nbsp;... <span class="l-ok">OK</span> &nbsp;( 47 user stories, 9 categories )</span>
-      <span class="line l-mute">  generating test cases ... <span class="l-ok">OK</span> &nbsp;( 218 cases · positive/negative/edge )</span>
-      <span class="line l-mute">  estimating effort ... <span class="l-ok">OK</span> &nbsp;( 84.5 h · PERT · 1 platform )</span>
-      <span class="line l-mute">  running automation ... <span class="l-ok">42 pass</span> · <span class="l-warn">1 review</span></span>
-      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">export</span> <span class="l-mute">xlsx → testfort_qa_pack.xlsx</span></span>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">testfortge</span> <span class="l-mute">project create "Acme Checkout v3" --base-url https://shop.acme.com</span></span>
+      <span class="line l-ok">  ✓ project &nbsp;created · stored in Postgres · 0 artefacts</span>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">testfortge</span> <span class="l-mute">ingest --pdf spec.pdf --url https://shop.acme.com</span></span>
+      <span class="line l-mute">  parsing &nbsp;............... <span class="l-ok">OK</span> &nbsp;( 47 user stories · 9 categories )</span>
+      <span class="line l-mute">  generating test cases &nbsp;.. <span class="l-ok">OK</span> &nbsp;( 218 cases · positive/negative/edge )</span>
+      <span class="line l-mute">  estimating effort &nbsp;...... <span class="l-ok">OK</span> &nbsp;( 84.5 h · PERT · 4 envs )</span>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">testfortge</span> <span class="l-mute">execute --env web,mobile-web --record-video</span></span>
+      <span class="line l-mute">  web · Chrome 138 / Win 11 &nbsp;... <span class="l-ok">42 pass</span> · <span class="l-warn">1 review</span></span>
+      <span class="line l-mute">  mobile-web · Safari iOS 17 &nbsp;.. <span class="l-ok">39 pass</span> · <span class="l-warn">4 review</span> · 5 bug drafts → Tedgie</span>
+      <span class="line"><span class="l-prompt">▸</span> <span class="l-cmd">export</span> <span class="l-mute">xlsx → acme_checkout_v3_qa_pack.xlsx</span></span>
       <span class="line l-ok">  ✓ ready · 12.4 MB · TestRail / Zephyr / qase.io compatible</span>
     </div>
   </div>
@@ -476,7 +483,7 @@ button{font:inherit;cursor:pointer}
 <section class="section" id="capabilities">
   <div class="container">
     <h2>What TestForTge does for your <span class="accent">QA team</span></h2>
-    <p class="sub">Six core capabilities. One Flask app. No vendor lock-in — every artefact exports to the tools you already use.</p>
+    <p class="sub">Seven capabilities. One Flask app. Multi-project workspace backed by Postgres. No vendor lock-in — every artefact exports to the tools your team already uses.</p>
     <div class="cards">
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
@@ -503,22 +510,29 @@ button{font:inherit;cursor:pointer}
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
         </div>
-        <h3>Manual &amp; automated execution</h3>
-        <p>Step-by-step manual runs with environment + credentials capture, or one-click Playwright headless automation with video and screenshot artefacts.</p>
+        <h3>Test execution</h3>
+        <p>One module for both flows: step-by-step manual runs and one-click Playwright automation. Target Web, Mobile Web, iOS or Android in the same run, headless or visible, with optional video capture and per-case screenshot evidence.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6l4-4z"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>
         </div>
         <h3>Bug reports &amp; metrics</h3>
-        <p>Structured bug forms (severity, priority, repro steps, attachments). One-click Markdown export of the whole bug base. Live status &amp; coverage dashboards.</p>
+        <p>Structured bug forms (severity, priority, repro steps, attachments) — kept in the project DB and auto-linked to the failing test case and the run that produced them. Live status, coverage and severity dashboards. One-click Markdown / CSV export of the whole bug base.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 11a3 3 0 0 1 6 0v1H9v-1z"/><circle cx="12" cy="16" r="1"/></svg>
         </div>
-        <h3>Tedgie — QA assistant</h3>
-        <p>Built-in AI chat with context of your project. Answers questions about Estimation, Test Cases, Automation, and generates bug-form drafts on demand.</p>
+        <h3>Tedgie — ISTQB-grounded QA assistant</h3>
+        <p>Built-in AI chat trained on the ISTQB Foundation Level Syllabus and certification-prep material. Answers theory questions with verbatim syllabus wording, walks juniors through test design techniques, and turns free-form bug descriptions from end-users into structured drafts that land directly in your Bug Reports queue for triage.</p>
+      </article>
+      <article class="card reveal">
+        <div class="icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+        </div>
+        <h3>Multi-project workspace</h3>
+        <p>Every artefact — test cases, checklists, estimations, runs, bugs, dashboard snapshots — is stored per project in Postgres. Switch context with a click, browse history of estimations, watch coverage trends across releases, and ship a deployable QA pack for each project independently.</p>
       </article>
     </div>
   </div>
@@ -659,8 +673,9 @@ button{font:inherit;cursor:pointer}
         <div class="wf-text">
           <span class="badge" data-role="both">You + TestForTge</span>
           <h3><span class="num">04.</span>You run, we record</h3>
-          <p>Step the team through manual cases — or hand the same set to Playwright headless. Either way TestForTge captures pass/fail/blocked, environment, and per-step artefacts.</p>
+          <p>Pick one or more environments — Web, Mobile Web, iOS or Android — and run the same set manually with the team or hand it to Playwright headless. Pass/fail/blocked, environment, and per-step evidence are captured for every case in the active project.</p>
           <ul>
+            <li>Multi-environment runs — one record per environment, side by side</li>
             <li>Async job queue · 429 with Retry-After on overflow</li>
             <li>Screenshots, video, HAR per Playwright run</li>
             <li>Auto-generated test accounts on demand</li>
@@ -694,11 +709,11 @@ button{font:inherit;cursor:pointer}
         <div class="wf-text">
           <span class="badge" data-role="testfortge">TestForTge</span>
           <h3><span class="num">05.</span>We deliver a deployable QA pack</h3>
-          <p>Everything is exported as one self-contained pack — ready to share with stakeholders, drop into your tracker, or hand off to the next sprint's regression run.</p>
+          <p>Everything is exported as one self-contained pack — ready to share with stakeholders, drop into your tracker, or hand off to the next sprint's regression run. Estimation history, run history and metric snapshots stay in the project DB so you can chart trends across releases.</p>
           <ul>
-            <li>Stakeholder-friendly XLSX/MD reports</li>
+            <li>Stakeholder-friendly XLSX / MD / CSV / HTML reports</li>
+            <li>Per-project history — estimations, runs, bugs, dashboard trends</li>
             <li>One-click re-run on a new release</li>
-            <li>Project snapshots — restore any past state</li>
           </ul>
         </div>
       </article>
@@ -754,6 +769,13 @@ button{font:inherit;cursor:pointer}
       </details>
 
       <details class="faq-item reveal">
+        <summary>Is Tedgie's QA knowledge actually trustworthy?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Tedgie is grounded in the <strong>ISTQB Foundation Level (CTFL v4.0.1) syllabus</strong> and a certification-prep textbook — testing principles, the test process, levels &amp; types, all design techniques (equivalence partitioning, BVA, decision tables, state transition, exploratory, error-guessing), reviews and risk-based testing. Definitional questions ("what is a defect?", "test scenario vs test case?") return verbatim syllabus wording with a section reference, so juniors learning for the exam get the right answer the first time.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
         <summary>Can I use it without sending data to an LLM provider?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
           Yes. The default mode runs entirely offline: rule-based generators for test cases, checklists, estimation and the Tedgie chat assistant. AI mode is opt-in via an Anthropic API key when you want richer free-form suggestions — turn it on in <code>.env</code>, turn it off any time, no migration required.
@@ -777,7 +799,21 @@ button{font:inherit;cursor:pointer}
       <details class="faq-item reveal">
         <summary>What about security &amp; compliance?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
-          CSRF on every state-changing request, HttpOnly + SameSite cookies, strict CSP, path-traversal guards on asset serving, optional Basic-Auth gate for shared deployments. All session data is filesystem-bound and rotated on server restart. Threat model and security posture are documented in the framework's <code>REQUIREMENTS.md</code>.
+          CSRF on every state-changing request, HttpOnly + SameSite cookies, strict CSP, path-traversal guards on asset serving, optional Basic-Auth gate for shared deployments. Project data lives in your own Postgres instance (or local SQLite for dev) — never on a third-party server. Threat model and security posture are documented in the framework's <code>REQUIREMENTS.md</code>.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Can I run multiple projects in parallel?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Yes. Every run is scoped to an active project — create as many as you need from the dashboard, each with its own base URL and description. Test cases, checklists, estimations, runs, bugs and dashboard snapshots are stored separately per project, so the team can switch context without polluting another release's history.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Where is my data stored — and can I export it?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          In your own Postgres database (Render, your VM, on-prem — your call). All nine tables — projects, test cases, checklists, bug reports, estimations, execution runs, per-case results, dashboard snapshots, Tedgie submissions — are queryable with vanilla SQL. Every artefact also exports to XLSX / MD / CSV / HTML directly from the UI, so a stakeholder hand-off needs zero database access.
         </div>
       </details>
 
@@ -1009,13 +1045,13 @@ button{font:inherit;cursor:pointer}
     applyFilter(t.dataset.filter);
   }));
 
-  // ── Reveal on scroll ──────────────────────────────────────
+  // ── Reveal on scroll ──────────────────────────────
   const io = new IntersectionObserver((entries) => {
     entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
   }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
-  // ── Smooth-scroll for in-page anchors ─────────────────────
+  // ── Smooth-scroll for in-page anchors ─────────────────────────
   document.querySelectorAll('a[href^="#"]').forEach(a => {
     a.addEventListener('click', (e) => {
       const id = a.getAttribute('href').slice(1);
@@ -1029,3 +1065,4 @@ button{font:inherit;cursor:pointer}
 </script>
 </body>
 </html>
+        
