@@ -964,18 +964,57 @@ def _ai_system_prompt(lang: str) -> str:
         "Bug Reports, and a Chat assistant (you). "
         "Your job is to help QA engineers (1) understand how the framework "
         "works, (2) clarify requirements before generation, (3) walk through "
-        "module workflows, and (4) collect bug reports. "
+        "module workflows, (4) collect bug reports, and (5) answer "
+        "testing-theory questions like an ISTQB-certified consultant. "
         "Keep answers concise (2-5 sentences unless asked for detail), "
         "professional, no emojis. Refer to yourself as Tedgie. "
         "When the user describes a bug or wants to report one, end your reply "
         "with the literal token <BUG_FORM/> on its own line — the UI uses "
         "that to open a structured bug-form."
     )
+    # Append the ISTQB CTFL persona so theory answers stay aligned with
+    # the v4.0.1 syllabus terminology and structure.
+    try:
+        from .istqb_knowledge import istqb_persona_prompt
+        base += istqb_persona_prompt()
+    except Exception:
+        pass
+
     if lang == "ua":
         base += " Reply in Ukrainian."
     else:
         base += " Reply in English."
     return base
+
+
+# ── ISTQB rule-based helpers ──────────────────────────────────────
+
+def _istqb_detect_topic(message: str) -> str | None:
+    """Thin wrapper around istqb_knowledge.detect_topic — present here
+    so chatbot tests can monkey-patch detection in isolation."""
+    try:
+        from .istqb_knowledge import detect_topic
+        return detect_topic(message)
+    except Exception:
+        return None
+
+
+def _istqb_reply(topic: str, lang: str) -> ChatReply | None:
+    """Render the canonical ISTQB answer for *topic* as a ChatReply."""
+    try:
+        from .istqb_knowledge import answer_topic
+    except Exception:
+        return None
+    ans = answer_topic(topic, lang)
+    if ans is None:
+        return None
+    text = f"**{ans.title}**\n\n{ans.body}"
+    return ChatReply(
+        text=text,
+        intent=f"istqb:{topic}",
+        suggestions=ans.follow_up[:3] if ans.follow_up else [],
+        follow_up=ans.follow_up[:6] if ans.follow_up else [],
+    )
 
 
 def _ai_respond(message: str, lang: str) -> ChatReply | None:
@@ -1038,6 +1077,16 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     # filing a report regardless of the rest of the message.
     if _wants_bug_form(low):
         return _bug_form_reply(lang)
+
+    # ISTQB CTFL theory questions — handled BEFORE the AI call so the
+    # rule-based answer carries the verbatim syllabus wording the user
+    # is studying for. The AI persona still picks up ISTQB-flavoured
+    # questions that don't match these keyword triggers.
+    istqb_topic = _istqb_detect_topic(raw)
+    if istqb_topic is not None:
+        ist_reply = _istqb_reply(istqb_topic, lang)
+        if ist_reply is not None:
+            return ist_reply
 
     # AI-backed reply (Anthropic Claude). Falls through to rule-based on
     # any failure.
