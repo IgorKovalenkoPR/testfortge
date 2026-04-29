@@ -82,19 +82,40 @@ class BrowserTestRunner:
     MAX_PAGES = 20
     MAX_LINKS_PER_PAGE = 25
     TIMEOUT_MS = 8000
-    VIEWPORTS = [
+    # All three viewports give the broadest responsive coverage but
+    # cost three full page-loads per URL. On constrained instances
+    # (Render free, 0.1 CPU) this triples sync work; setting
+    # ``TESTFORTGE_BROWSER_VIEWPORTS=desktop`` keeps just one and
+    # cuts browser-tester time by ~66%. Accepted values:
+    # ``all`` (default), ``desktop``, ``mobile``, ``tablet``.
+    _ALL_VIEWPORTS = [
         (375, 812, "mobile"),
         (768, 1024, "tablet"),
         (1280, 800, "desktop"),
     ]
+    VIEWPORTS = _ALL_VIEWPORTS
 
     def __init__(self, base_url: str, max_pages: int = 20,
-                 timeout_ms: int = 8000, site_analysis=None):
+                 timeout_ms: int = 8000, site_analysis=None,
+                 viewports: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.max_pages = min(max_pages, self.MAX_PAGES)
         self.timeout_ms = timeout_ms
         self._pw = None
         self._browser = None
+        # Pick viewport set. ``viewports`` accepts: None / "all"
+        # → all three; "desktop" / "mobile" / "tablet" → just that
+        # one. On constrained instances (Render free) running a single
+        # viewport cuts browser-tester time by ~66%.
+        kind = (viewports or "").lower()
+        if kind in ("desktop",):
+            self.VIEWPORTS = [(1280, 800, "desktop")]
+        elif kind in ("mobile",):
+            self.VIEWPORTS = [(375, 812, "mobile")]
+        elif kind in ("tablet",):
+            self.VIEWPORTS = [(768, 1024, "tablet")]
+        else:
+            self.VIEWPORTS = self._ALL_VIEWPORTS
 
         # Reuse crawler data if available
         if site_analysis:
@@ -925,19 +946,21 @@ _CACHE_TTL = 300  # 5 minutes
 
 def get_or_run(base_url: str, max_pages: int = 20,
                timeout_ms: int = 8000,
-               site_analysis=None) -> BrowserTestReport:
+               site_analysis=None,
+               viewports: str | None = None) -> BrowserTestReport:
     """Run browser tests with caching (5-minute TTL).
 
     Returns a cached report if one exists for the same URL+max_pages
-    and is less than 5 minutes old.
+    +viewports tuple and is less than 5 minutes old.
     """
-    key = (base_url.rstrip("/"), max_pages)
+    key = (base_url.rstrip("/"), max_pages, viewports or "all")
     if key in _BROWSER_REPORT_CACHE:
         ts, cached_report = _BROWSER_REPORT_CACHE[key]
         if time.monotonic() - ts < _CACHE_TTL:
             return cached_report
 
-    with BrowserTestRunner(base_url, max_pages, timeout_ms, site_analysis) as runner:
+    with BrowserTestRunner(base_url, max_pages, timeout_ms,
+                            site_analysis, viewports=viewports) as runner:
         report = runner.run_all()
 
     _BROWSER_REPORT_CACHE[key] = (time.monotonic(), report)

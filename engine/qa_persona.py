@@ -319,15 +319,23 @@ def analyze_input(requirements: list[dict],
             from dataclasses import asdict
             # Cap synchronous browser-tester work so a sync /test-cases
             # POST doesn't tie up a Render free-tier worker for >2 min.
-            # ``TESTFORTGE_BROWSER_PAGES`` lets you opt-in to deeper
-            # checks (e.g. on a beefier deploy or via the async endpoint).
+            # Three env vars tune the per-instance budget:
+            #   TESTFORTGE_BROWSER_PAGES       (default 5, was 10)
+            #   TESTFORTGE_BROWSER_TIMEOUT_MS  (default 5000, was 8000)
+            #   TESTFORTGE_BROWSER_VIEWPORTS   (default "desktop", was "all" — 3 viewports)
+            # On Render free (0.1 CPU, 512 MB) defaults keep worst-case
+            # browser work to ~25 s instead of ~75 s. Beefier deploys
+            # can opt back into full coverage by setting
+            # TESTFORTGE_BROWSER_VIEWPORTS=all.
             import os
             sync_max_pages = int(os.environ.get("TESTFORTGE_BROWSER_PAGES", "5"))
             sync_timeout_ms = int(os.environ.get("TESTFORTGE_BROWSER_TIMEOUT_MS", "5000"))
+            sync_viewports = os.environ.get("TESTFORTGE_BROWSER_VIEWPORTS", "desktop")
             browser_report = browser_get_or_run(
                 result.url, max_pages=sync_max_pages,
                 timeout_ms=sync_timeout_ms,
                 site_analysis=site_analysis,
+                viewports=sync_viewports,
             )
             result.browser_findings = [asdict(f) for f in browser_report.findings]
         except Exception:

@@ -24,11 +24,19 @@ services:
     dockerfilePath: ./Dockerfile
     # The Dockerfile CMD binds to a hardcoded :5000; Render injects $PORT
     # at runtime, so we override the CMD here to honour it.
+    # Free-tier specifics (0.1 CPU, 512 MB RAM):
+    #  * Crawling a real URL + Playwright across 5 pages can take
+    #    90-180 s. Bumped --timeout to 300 so gunicorn stops killing
+    #    mid-crawl with 502.
+    #  * Reduced --workers from 2 to 1 — Playwright Chromium needs
+    #    ~250 MB and 2 simultaneous workers OOM the 512 MB instance.
+    #  * --threads 4 still serves smaller GETs (Tedgie chat, exports,
+    #    health probes) concurrently while a long POST is in flight.
     dockerCommand: >-
       gunicorn
       --bind 0.0.0.0:$PORT
-      --workers 2 --threads 4 --worker-class gthread
-      --timeout 120 --graceful-timeout 30
+      --workers 1 --threads 4 --worker-class gthread
+      --timeout 300 --graceful-timeout 30
       --access-logfile - --error-logfile -
       app:app
     healthCheckPath: /healthz
