@@ -1860,6 +1860,8 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .te-env-tab {
     position: relative;
     display: flex;
+    align-items: flex-start;
+    gap: 10px;
     cursor: pointer;
     border: 1.5px solid var(--tf-line, #DDE2EC);
     border-radius: 10px;
@@ -1872,12 +1874,21 @@ input[type="text"]:focus, textarea:focus, select:focus {
     opacity: 0;
     pointer-events: none;
 }
+.te-env-tab input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
+    cursor: pointer;
+    accent-color: var(--tf-coral, #FF865C);
+}
 .te-env-tab span {
     display: flex;
     flex-direction: column;
     gap: 2px;
     font-size: 14px;
     color: #2A3548;
+    min-width: 0;
 }
 .te-env-tab span strong {
     font-weight: 600;
@@ -1901,7 +1912,7 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .te-env-panel[hidden] { display: none; }
 .te-env-card .muted { color: var(--tf-mute, #8C94A6); font-weight: normal; font-size: 12px; }
 
-/* ── Print override ───────────────────────────────────────────── */
+/* ── Print override ──────────────────────────────────────────────────────────── */
 @media print {
     .qa-chat-toggle, .qa-chat-panel, .back-to-top { display: none !important; }
 }
