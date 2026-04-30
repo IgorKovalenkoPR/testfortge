@@ -31,8 +31,36 @@ from engine.site_crawler import crawl_site
 from engine.file_parser import parse_file, allowed_file
 from engine.job_queue import get_queue, DONE, FAILED
 
+from engine import db as _db
+
 from .automation import STORAGE_ROOT, MAX_CONCURRENT_JOBS_PER_SESSION
-from ._shared import get_session_id
+from ._shared import get_session_id, ensure_active_project
+
+
+def _persist_estimation(input_payload: dict, result_dict: dict) -> None:
+    """Append an estimation snapshot to the project's history table.
+
+    Best-effort: a DB outage must not break the user-facing flow,
+    so we log + swallow on failure. Each compute = a new row."""
+    pid = ensure_active_project()
+    if not pid:
+        return
+    # Pick a single canonical hour figure for the column, falling back
+    # in priority order. None when the result_dict is unrecognisable.
+    total_hours = (
+        result_dict.get("full_total_expected")
+        or result_dict.get("one_plat_total_expected")
+        or result_dict.get("total_hours")
+    )
+    try:
+        _db.save_estimation(
+            pid,
+            input_payload=input_payload or {},
+            result_payload=result_dict or {},
+            total_hours=float(total_hours) if total_hours is not None else None,
+        )
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("persist estimation failed: %s", exc)
 
 log = get_logger(__name__)
 
@@ -193,7 +221,21 @@ def register(app: Flask) -> None:
             max_testing_stretch=max_testing_stretch,
         )
 
-        session["estimation_result"] = asdict(result)
+        result_dict = asdict(result)
+        session["estimation_result"] = result_dict
+        _persist_estimation(
+            input_payload={
+                "source": source,
+                "source_ref": source_ref,
+                "primary_platform": primary_platform,
+                "additional_platforms": additional_platforms,
+                "compatibility_rate": compatibility_rate,
+                "bug_report_rate": bug_report_rate,
+                "pm_overhead": pm_overhead,
+                "max_testing_stretch": max_testing_stretch,
+            },
+            result_dict=result_dict,
+        )
         flash(
             f"Estimation complete: {result.total_tc} test cases, "
             f"{result.one_plat_total_expected:.1f}h (one platform), "
@@ -333,6 +375,13 @@ def register(app: Flask) -> None:
         if job.status == DONE and job.result is not None:
             session["estimation_result"] = job.result
             payload["result"] = job.result
+            # Mirror the result into the project's estimation history.
+            # Async path doesn't have access to the original form values
+            # the way the sync handler did, so we fall back to job.meta.
+            _persist_estimation(
+                input_payload=getattr(job, "meta", {}) or {},
+                result_dict=job.result,
+            )
         return jsonify(payload)
 
     @app.route("/estimation/export", methods=["GET"])

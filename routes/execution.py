@@ -32,9 +32,61 @@ from engine.test_credentials import (
     generate_test_account,
 )
 
-from ._shared import extract_resource_urls
+from engine import db as _db
+
+from ._shared import extract_resource_urls, ensure_active_project
 
 log = get_logger(__name__)
+
+
+def _bug_dict_to_db_row(bug_dict: dict) -> dict:
+    """Reshape an in-session BugReport dict into the keys engine.db.save_bug
+    expects. Anything outside the canonical column set ends up in BugReport.extra."""
+    return {
+        "id":                  bug_dict.get("id"),
+        "title":               bug_dict.get("title"),
+        "severity":            bug_dict.get("severity"),
+        "priority":            bug_dict.get("priority"),
+        "status":              bug_dict.get("status") or "Open",
+        "environment":         bug_dict.get("environment"),
+        "browser":             bug_dict.get("browser"),
+        "os":                  bug_dict.get("os"),
+        "version":             bug_dict.get("affects_version") or bug_dict.get("version"),
+        "steps_to_reproduce":  bug_dict.get("steps_to_reproduce"),
+        "actual_result":       bug_dict.get("actual_result"),
+        "expected_result":     bug_dict.get("expected_result"),
+        "comment":             bug_dict.get("comment"),
+        "reporter":            bug_dict.get("reporter"),
+        # Pass everything else (frequency, labels, attachments, found_in_build,
+        # linked_item_id, etc.) through the .extra JSON column.
+        "frequency":           bug_dict.get("frequency"),
+        "affects_version":     bug_dict.get("affects_version"),
+        "found_in_build":      bug_dict.get("found_in_build"),
+        "linked_item_id":      bug_dict.get("linked_item_id"),
+        "linked_item_type":    bug_dict.get("linked_item_type"),
+        "assignee":            bug_dict.get("assignee"),
+        "component":           bug_dict.get("component"),
+        "labels":              bug_dict.get("labels"),
+        "attachments":         bug_dict.get("attachments"),
+        "preconditions":       bug_dict.get("preconditions"),
+        "created_at":          bug_dict.get("created_at"),
+    }
+
+
+def _persist_bug(bug_dict: dict, source: str = "manual",
+                 run_id: int | None = None) -> int | None:
+    """Mirror an in-session bug into BugReport. Best-effort write."""
+    pid = ensure_active_project()
+    if not pid:
+        return None
+    payload = _bug_dict_to_db_row(bug_dict)
+    if run_id is not None:
+        payload["run_id"] = run_id
+    try:
+        return _db.save_bug(pid, payload, source=source)
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("persist bug failed: %s", exc)
+        return None
 
 
 def register(app: Flask) -> None:
@@ -235,6 +287,31 @@ def register(app: Flask) -> None:
             bug_total = 0
             for et in env_types:
                 environment = _build_env_string(et)
+
+                # Open a run row in Postgres BEFORE execution so the
+                # auto-generated bugs and per-case results can attach to it.
+                db_run_id = None
+                try:
+                    pid = ensure_active_project()
+                    if pid:
+                        db_run_id = _db.start_execution_run(
+                            pid,
+                            env_payload={
+                                "env_type": et,
+                                "environment": environment,
+                                "tester_id": tester_id,
+                                "tester_name": tester_name,
+                                "testing_types": testing_types,
+                                "source": source,
+                                "site_url": site_url,
+                            },
+                            browser_visibility=("headless" if headless else "visible"),
+                            record_video=bool(record_video),
+                            base_url=base_url,
+                        )
+                except Exception as exc:  # pragma: no cover — best-effort
+                    log.warning("start_execution_run failed: %s", exc)
+
                 execution = execute_items(
                     items=items_data,
                     item_type=item_type,
@@ -258,6 +335,9 @@ def register(app: Flask) -> None:
                         bug_dict["affects_version"] = affects_version
                     bug_dict["environment"] = environment
                     bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                    # Mirror to Postgres with execution context attached.
+                    _persist_bug(bug_dict, source="execution",
+                                 run_id=db_run_id)
                     all_bugs.append(bug_dict)
                 for r in execution["results"]:
                     if r["bug_id"].startswith("__pending_"):
@@ -269,6 +349,31 @@ def register(app: Flask) -> None:
                             r["video"] = asset["video"]
                         if asset.get("screenshots"):
                             r["screenshots"] = asset["screenshots"]
+
+                # Stream per-case results into Postgres.
+                if db_run_id is not None:
+                    for r in execution["results"]:
+                        try:
+                            _db.save_case_result(
+                                db_run_id,
+                                case_external_id=r.get("item_id"),
+                                case_kind=("test_case"
+                                           if item_type == "test_cases"
+                                           else "checklist_item"),
+                                status=r.get("status"),
+                                evidence_path=(r.get("video")
+                                                or (r.get("screenshots") or [None])[0]),
+                                notes=r.get("comment"),
+                            )
+                        except Exception as exc:  # pragma: no cover
+                            log.warning("save_case_result failed: %s", exc)
+                    try:
+                        _db.finish_execution_run(
+                            db_run_id, status="completed",
+                            stats=execution.get("stats") or {},
+                        )
+                    except Exception as exc:  # pragma: no cover
+                        log.warning("finish_execution_run failed: %s", exc)
 
                 run_record = {
                     "run_id": len(test_runs) + 1,
@@ -423,8 +528,10 @@ def register(app: Flask) -> None:
             created_at=datetime.now().isoformat(),
         )
 
-        bugs.append(bug_to_dict(bug))
+        bug_d = bug_to_dict(bug)
+        bugs.append(bug_d)
         session["bug_reports_data"] = bugs
+        _persist_bug(bug_d, source="manual")
 
         flash(g.t.get("bug_saved", "Bug report created successfully") + f" ({new_id})",
               "success")

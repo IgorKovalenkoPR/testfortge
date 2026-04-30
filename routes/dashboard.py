@@ -112,6 +112,30 @@ def _compute_dashboard_metrics() -> dict:
     }
 
 
+# Module-local cache so we don't pound DB every dashboard load.
+_LAST_SNAPSHOT_AT: dict[str, float] = {}
+_SNAPSHOT_THROTTLE_SEC = 3600  # one snapshot per project per hour
+
+
+def _maybe_snapshot_metrics(project_id: str, metrics: dict) -> None:
+    """Write a dashboard_metric_snapshot at most once per project per hour.
+
+    Skipped silently when there's no active project or when no artefact
+    data has been generated yet (the dashboard is empty)."""
+    import time as _time
+    if not project_id or not metrics or not metrics.get("has_data"):
+        return
+    last = _LAST_SNAPSHOT_AT.get(project_id, 0.0)
+    if _time.time() - last < _SNAPSHOT_THROTTLE_SEC:
+        return
+    try:
+        _db.save_metric_snapshot(project_id, metrics)
+        _LAST_SNAPSHOT_AT[project_id] = _time.time()
+    except Exception as exc:  # pragma: no cover — best-effort
+        from engine.log import get_logger
+        get_logger(__name__).warning("metric snapshot failed: %s", exc)
+
+
 def register(app: Flask) -> None:
     @app.route("/")
     def index():
@@ -122,6 +146,9 @@ def register(app: Flask) -> None:
             projects = _db.list_projects(owner_sid=get_session_id())
         except Exception:  # pragma: no cover — surface UI even with a sad DB
             projects = []
+        # Persist a metric snapshot when the active project actually has
+        # data — gives us a points-in-time series for trend charts later.
+        _maybe_snapshot_metrics(session.get("project_id") or "", metrics)
         return render_template("index.html",
                                projects=projects,
                                active_project_id=session.get("project_id"),

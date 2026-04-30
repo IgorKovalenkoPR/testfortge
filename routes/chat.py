@@ -15,6 +15,10 @@ from datetime import datetime
 from flask import Flask, jsonify, request, session
 from werkzeug.utils import secure_filename
 
+from engine import db as _db
+
+from ._shared import ensure_active_project
+
 from engine.chatbot import respond_dict as _chatbot_respond
 from engine.bug_report import (
     BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
@@ -170,9 +174,56 @@ def register(app: Flask) -> None:
             comment=note,
             created_at=datetime.now().isoformat(),
         )
-        bugs.append(bug_to_dict(bug))
+        bug_d = bug_to_dict(bug)
+        bugs.append(bug_d)
         session["bug_reports_data"] = bugs
         session.modified = True
+
+        # Mirror to Postgres: a Tedgie-sourced BugReport row + an audit
+        # entry in tedgie_submission so we can later see *what* the user
+        # submitted (raw form payload) even if the bug row is mutated.
+        bug_db_id = None
+        try:
+            pid = ensure_active_project()
+            if pid:
+                # Build the same shape engine.db.save_bug expects.
+                db_payload = {
+                    "id":                 new_id,
+                    "title":              bug.title,
+                    "severity":           bug.severity,
+                    "priority":           bug.priority,
+                    "status":             bug.status,
+                    "environment":        bug.environment,
+                    "steps_to_reproduce": bug.steps_to_reproduce,
+                    "actual_result":      bug.actual_result,
+                    "expected_result":    bug.expected_result,
+                    "comment":            bug.comment,
+                    "reporter":           bug.reporter,
+                    "preconditions":      bug.preconditions,
+                    "frequency":          bug.frequency,
+                    "affects_version":    bug.affects_version,
+                    "labels":             bug.labels,
+                    "attachments":        bug.attachments,
+                    "created_at":         bug.created_at,
+                }
+                bug_db_id = _db.save_bug(pid, db_payload, source="tedgie")
+                _db.save_tedgie_submission(
+                    project_id=pid,
+                    raw_payload={
+                        "summary":            required["summary"],
+                        "environment":        required["environment"],
+                        "steps_to_reproduce": required["steps_to_reproduce"],
+                        "actual_result":      required["actual_result"],
+                        "expected_result":    required["expected_result"],
+                        "note":               note,
+                        "attachment_name":    attachment_name,
+                    },
+                    reporter="Tedgie chat",
+                    classified_into_bug_id=bug_db_id,
+                )
+        except Exception as exc:  # pragma: no cover — best-effort
+            log = __import__("engine.log", fromlist=["get_logger"]).get_logger(__name__)
+            log.warning("Tedgie bug persist failed: %s", exc)
 
         return jsonify({
             "ok": True,

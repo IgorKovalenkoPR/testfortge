@@ -27,11 +27,41 @@ from engine.exporter import (
 from engine.imports import parse_test_cases as import_parse_test_cases
 from engine.imports import parse_checklist as import_parse_checklist
 
+from engine import db as _db
+from engine.log import get_logger
+
 from ._shared import (
     reconstruct_stories, reconstruct_test_cases, reconstruct_checklist,
     tc_to_dict, cl_to_dict, story_to_dict,
-    parse_page_input, extract_resource_urls,
+    parse_page_input, extract_resource_urls, ensure_active_project,
 )
+
+_log = get_logger(__name__)
+
+
+def _persist_test_cases(tc_dicts: list[dict]) -> None:
+    """Mirror the in-session TC list into Postgres for the active project.
+
+    Best-effort: a DB outage must not block the user from seeing their
+    generated cases on screen. Errors are logged and swallowed."""
+    pid = ensure_active_project()
+    if not pid:
+        return
+    try:
+        _db.save_test_cases(pid, tc_dicts)
+    except Exception as exc:  # pragma: no cover — best-effort write
+        _log.warning("persist test cases failed: %s", exc)
+
+
+def _persist_checklist(cl_dicts: list[dict]) -> None:
+    """Same contract as :func:`_persist_test_cases` but for Checklist."""
+    pid = ensure_active_project()
+    if not pid:
+        return
+    try:
+        _db.save_checklist(pid, cl_dicts)
+    except Exception as exc:  # pragma: no cover
+        _log.warning("persist checklist failed: %s", exc)
 
 
 def register(app: Flask) -> None:
@@ -81,8 +111,10 @@ def register(app: Flask) -> None:
                                        has_data=False, errors=errors)
 
             trace = generate_traceability(new_stories, tc_list)
-            session["test_cases_data"] = [tc_to_dict(tc) for tc in tc_list]
+            tc_dicts = [tc_to_dict(tc) for tc in tc_list]
+            session["test_cases_data"] = tc_dicts
             session["traceability_data"] = trace
+            _persist_test_cases(tc_dicts)
             return render_template("test_cases.html",
                                    test_cases=tc_list, traceability=trace,
                                    has_data=True, errors=errors,
@@ -140,7 +172,9 @@ def register(app: Flask) -> None:
                 return render_template("checklist.html",
                                        checklist=[], has_data=False, errors=errors)
 
-            session["checklist_data"] = [cl_to_dict(cl) for cl in cl_list]
+            cl_dicts = [cl_to_dict(cl) for cl in cl_list]
+            session["checklist_data"] = cl_dicts
+            _persist_checklist(cl_dicts)
             return render_template("checklist.html", checklist=cl_list,
                                    has_data=True, errors=errors,
                                    resource_urls=extract_resource_urls())
@@ -214,6 +248,7 @@ def register(app: Flask) -> None:
         existing = session.get("test_cases_data", []) if mode == "append" else []
         merged = existing + [tc_to_dict(tc) for tc in cases]
         session["test_cases_data"] = merged
+        _persist_test_cases(merged)
         # Imported packs don't carry their own user stories, so reset
         # the traceability matrix — it would otherwise reference IDs
         # that no longer exist.
@@ -256,6 +291,7 @@ def register(app: Flask) -> None:
         existing = session.get("checklist_data", []) if mode == "append" else []
         merged = existing + [cl_to_dict(it) for it in items]
         session["checklist_data"] = merged
+        _persist_checklist(merged)
 
         flash(
             g.t.get("upload_cl_ok",

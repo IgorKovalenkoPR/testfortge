@@ -202,6 +202,46 @@ def get_session_id(session_obj=None) -> str:
     return sid
 
 
+# ── Active-project resolver (Phase 2) ────────────────────────────
+
+def ensure_active_project(session_obj=None) -> str:
+    """Return the active project id, creating one if the user hasn't
+    explicitly picked one yet.
+
+    The auto-created project is named ``"Untitled project YYYY-MM-DD HH:MM"``
+    so the user can spot it later in the dashboard and rename via the
+    picker. Owner_sid is set so it stays scoped to the caller's session.
+
+    Centralising this logic keeps every Phase-2 hook (estimation, TC,
+    checklist, bugs, runs, Tedgie submissions) on the same code path —
+    no module has to re-implement the "no active project" UX.
+    """
+    from datetime import datetime as _dt
+    # Local import to avoid circular dependency between routes/_shared
+    # and engine.db (which doesn't depend on us, but the import order
+    # at module-load is fragile when chained with Flask).
+    from engine import db as _db
+
+    sess = session_obj if session_obj is not None else session
+    pid = sess.get("project_id")
+    if pid:
+        return pid
+
+    sid = get_session_id(sess)
+    name = "Untitled project " + _dt.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        pid = _db.upsert_project(name=name, owner_sid=sid)
+    except Exception as exc:
+        log.warning("ensure_active_project: auto-create failed: %s", exc)
+        return ""
+    sess["project_id"] = pid
+    setup = sess.get("project_setup") or {}
+    setup.setdefault("project_name", name)
+    sess["project_setup"] = setup
+    sess.modified = True if hasattr(sess, "modified") else None
+    return pid
+
+
 __all__ = [
     # constants
     "SAFE_FOLDER_RE", "SAFE_ASSET_RE", "URL_PATTERN", "GENERATED_KEYS",
@@ -215,4 +255,5 @@ __all__ = [
     "extract_resource_urls",
     # session
     "get_session_id",
+    "ensure_active_project",
 ]
