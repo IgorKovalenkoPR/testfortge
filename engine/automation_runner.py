@@ -128,7 +128,7 @@ def _locator(page, target: str):
 class AutomationRunner:
     def __init__(self, storage_root: str, base_url: str,
                  headless: bool = True, viewport: tuple[int, int] = (1280, 800),
-                 record_video: bool = True, default_timeout_ms: int = 8000,
+                 record_video: bool = True, default_timeout_ms: int = 5000,
                  slow_mo_ms: int | None = None, step_pause_ms: int | None = None,
                  credentials: TestCredentials | None = None):
         self.storage_root = storage_root
@@ -347,7 +347,7 @@ class AutomationRunner:
                 self._scroll_and_highlight(page, loc)
                 loc.check()
             elif step.action == "expect_text":
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(150)
                 if step.value:
                     content = page.content()
                     if step.value.lower() not in content.lower():
@@ -414,7 +414,7 @@ class AutomationRunner:
                 "el.style.outlineOffset = '2px'; "
                 "setTimeout(() => { el.style.outline = prev; }, 600); }"
             )
-            page.wait_for_timeout(250)
+            page.wait_for_timeout(120)
         except Exception:
             pass
 
@@ -478,7 +478,7 @@ class AutomationRunner:
                 p_loc.press("Enter")
 
             page.wait_for_load_state("domcontentloaded", timeout=self.default_timeout_ms)
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(250)
 
             self._screenshot(page, after_path)
             sr.screenshot_after = _rel_url(after_path, self.storage_root)
@@ -508,7 +508,7 @@ class AutomationRunner:
         """
         try:
             page.goto(cred.register_url, wait_until="domcontentloaded")
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(150)
             # Email / username
             for sel in ("input[type='email']",
                         "input[name*='email' i]",
@@ -588,6 +588,6 @@ class AutomationRunner:
                 "  window.scrollTo({top: 0, behavior:'smooth'});"
                 "}"
             )
-            page.wait_for_timeout(600)
+            page.wait_for_timeout(300)
         except Exception:
             pass

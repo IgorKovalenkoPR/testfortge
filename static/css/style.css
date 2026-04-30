@@ -1940,6 +1940,56 @@ input[type="text"]:focus, textarea:focus, select:focus {
 }
 .row-active { background: rgba(255, 134, 92, .04); }
 
+
+/* ── Test Execution: section toggle + selected counter ─────────── */
+.te-counter{
+    display:inline-block;margin-left:auto;font-size:13px;color:#4B5563;
+    padding:4px 12px;border-radius:999px;background:rgba(255,134,92,.10);
+    border:1px solid rgba(255,134,92,.25);
+}
+.te-counter strong{color:var(--tf-coral-hi,#FF6A36);font-weight:600}
+.select-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.item-section-label.section-toggle{
+    display:flex;align-items:center;gap:8px;cursor:pointer;
+    padding:6px 10px;margin:14px 0 6px;
+    border-left:3px solid var(--tf-coral,#FF865C);
+    background:rgba(255,134,92,.05);
+    border-radius:4px;
+    font-weight:600;color:#14274A;
+}
+.item-section-label.section-toggle:hover{background:rgba(255,134,92,.10)}
+.item-section-label .section-cb{cursor:pointer;width:16px;height:16px;accent-color:var(--tf-coral,#FF865C)}
+
+/* ── Test Execution: progress overlay during run ─────────────── */
+.te-run-overlay{
+    position:fixed;inset:0;background:rgba(14,17,23,.78);
+    display:flex;align-items:center;justify-content:center;
+    z-index:9999;backdrop-filter:blur(6px);
+}
+.te-run-overlay[hidden]{display:none}
+.te-run-card{
+    background:#fff;color:#14274A;padding:28px 32px;
+    border-radius:14px;max-width:460px;text-align:center;
+    box-shadow:0 16px 40px rgba(0,0,0,.35);
+}
+.te-run-card h3{margin:0 0 8px;font-size:18px;font-weight:700}
+.te-run-card p{margin:0 0 16px;font-size:14px;color:#4B5563;line-height:1.5}
+.te-run-card .te-eta{
+    display:block;margin-top:8px;font-size:13px;color:var(--tf-coral-hi,#FF6A36);
+    font-variant-numeric:tabular-nums;
+}
+.te-run-bar{
+    height:4px;width:100%;border-radius:999px;overflow:hidden;
+    background:rgba(255,134,92,.15);position:relative;
+}
+.te-run-bar::after{
+    content:"";position:absolute;left:-30%;top:0;bottom:0;width:30%;
+    background:var(--tf-grad,linear-gradient(135deg,#FF865C 0%,#FF6A36 100%));
+    animation:te-run-slide 1.2s linear infinite;
+}
+@keyframes te-run-slide{
+    0%{left:-30%} 100%{left:100%}
+}
 /* ── Print override ──────────────────────────────────────────────────────────── */
 @media print {
     .qa-chat-toggle, .qa-chat-panel, .back-to-top { display: none !important; }

@@ -124,6 +124,10 @@
     <div class="select-actions">
         <a href="#" onclick="selectAll(); return false;" class="btn btn-sm">{{ t.get('all', 'All') }}</a>
         <a href="#" onclick="selectNone(); return false;" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
+        <span id="te-selected-counter" class="te-counter" aria-live="polite">
+            {{ t.get('te_selected_label', 'Selected') }}: <strong id="te-selected-now">0</strong>
+            / <span id="te-selected-total">0</span>
+        </span>
     </div>
 
     {# Existing bug IDs become <datalist> suggestions so testers can link
@@ -140,14 +144,18 @@
     {# Test Cases list #}
     <div id="items-tc" class="item-select-list" {% if not has_tc_data %}style="display:none"{% endif %}>
         {% if tc_items %}
-        {% set current_section = namespace(name='') %}
+        {% set current_section = namespace(name='', idx=0) %}
         {% for tc in tc_items %}
             {% if tc.section != current_section.name %}
                 {% set current_section.name = tc.section %}
-                <div class="item-section-label">{{ tc.section }}</div>
+                {% set current_section.idx = current_section.idx + 1 %}
+                <label class="item-section-label section-toggle" data-section-id="tc-sec-{{ current_section.idx }}">
+                    <input type="checkbox" class="section-cb" data-target=".sec-tc-{{ current_section.idx }}" checked>
+                    <span class="section-name">{{ tc.section }}</span>
+                </label>
             {% endif %}
             <div class="item-select-row">
-                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc">
+                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc sec-tc-{{ current_section.idx }}" data-section="tc-sec-{{ current_section.idx }}">
                 <span class="item-id">{{ tc.id }}</span>
                 <span class="item-summary">{{ tc.summary }}</span>
                 <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
@@ -168,14 +176,18 @@
     {# Checklist items list #}
     <div id="items-cl" class="item-select-list" style="display:none">
         {% if cl_items %}
-        {% set current_section = namespace(name='') %}
+        {% set current_section = namespace(name='', idx=0) %}
         {% for cl in cl_items %}
             {% if cl.section != current_section.name %}
                 {% set current_section.name = cl.section %}
-                <div class="item-section-label">{{ cl.section }}</div>
+                {% set current_section.idx = current_section.idx + 1 %}
+                <label class="item-section-label section-toggle" data-section-id="cl-sec-{{ current_section.idx }}">
+                    <input type="checkbox" class="section-cb" data-target=".sec-cl-{{ current_section.idx }}" checked>
+                    <span class="section-name">{{ cl.section }}</span>
+                </label>
             {% endif %}
             <div class="item-select-row">
-                <input type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl">
+                <input type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl sec-cl-{{ current_section.idx }}" data-section="cl-sec-{{ current_section.idx }}">
                 <span class="item-id">{{ cl.id }}</span>
                 <span class="item-summary">{{ cl.objective }}</span>
                 <span class="item-badge badge-{{ cl.category | lower | replace(' ', '-') }}">{{ cl.category }}</span>
@@ -445,8 +457,21 @@
     </p>
 </div>
 
-<button type="submit" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
+<button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
 </form>
+
+{# ── Run progress overlay (shown while POST is in flight) ── #}
+<div id="te-run-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
+  <div class="te-run-card">
+    <h3>{{ t.get('te_overlay_title', 'Test execution in progress…') }}</h3>
+    <p>
+      {{ t.get('te_overlay_body',
+          'TestForTge is running your selected items across every chosen environment. The page will reload automatically once the run completes — please don\'t close the tab.') }}
+      <span class="te-eta" id="te-overlay-eta"></span>
+    </p>
+    <div class="te-run-bar" aria-hidden="true"></div>
+  </div>
+</div>
 
 {% endif %}
 
@@ -468,19 +493,90 @@ function toggleItemList() {
         document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = true; });
         document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = false; });
     }
+    if (typeof teUpdateCounter === 'function') {
+        teSyncSectionCheckboxes();
+        teUpdateCounter();
+    }
 }
 
 function selectAll() {
     var source = document.querySelector('input[name="source"]:checked');
     var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
     document.querySelectorAll(cls).forEach(function(cb) { cb.checked = true; });
+    teSyncSectionCheckboxes();
+    teUpdateCounter();
 }
 
 function selectNone() {
     var source = document.querySelector('input[name="source"]:checked');
     var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
     document.querySelectorAll(cls).forEach(function(cb) { cb.checked = false; });
+    teSyncSectionCheckboxes();
+    teUpdateCounter();
 }
+
+// ── Selected-counter + section-level toggles ────────────────────
+function teActiveItemSelector() {
+    var source = document.querySelector('input[name="source"]:checked');
+    return source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
+}
+
+function teUpdateCounter() {
+    var sel = teActiveItemSelector();
+    var nodes = document.querySelectorAll(sel);
+    var checked = 0;
+    nodes.forEach(function(cb) { if (cb.checked && !cb.disabled) checked++; });
+    var nowEl = document.getElementById('te-selected-now');
+    var totalEl = document.getElementById('te-selected-total');
+    if (nowEl) nowEl.textContent = checked;
+    if (totalEl) totalEl.textContent = nodes.length;
+}
+
+function teSyncSectionCheckboxes() {
+    document.querySelectorAll('.section-cb').forEach(function(secCb) {
+        var target = secCb.dataset.target;
+        if (!target) return;
+        var children = document.querySelectorAll(target);
+        if (!children.length) return;
+        var on = 0, off = 0;
+        children.forEach(function(c) { if (c.checked) on++; else off++; });
+        secCb.checked = on > 0 && off === 0;
+        secCb.indeterminate = on > 0 && off > 0;
+    });
+}
+
+// Delegated listeners — one for the whole card so dynamically-loaded
+// content (rare here, but keeps it future-proof) keeps working.
+(function teBindSelection(){
+    var card = document.getElementById('items-tc');
+    var card2 = document.getElementById('items-cl');
+    function onChange(ev) {
+        var t = ev.target;
+        if (t.classList.contains('section-cb')) {
+            var sel = t.dataset.target;
+            if (sel) {
+                document.querySelectorAll(sel).forEach(function(c) {
+                    if (!c.disabled) c.checked = t.checked;
+                });
+            }
+            t.indeterminate = false;
+            teUpdateCounter();
+            return;
+        }
+        if (t.classList.contains('item-cb')) {
+            teSyncSectionCheckboxes();
+            teUpdateCounter();
+        }
+    }
+    [card, card2].forEach(function(el) {
+        if (el) el.addEventListener('change', onChange);
+    });
+    // Initial paint after DOM ready (template renders all checked).
+    document.addEventListener('DOMContentLoaded', function() {
+        teSyncSectionCheckboxes();
+        teUpdateCounter();
+    });
+})();
 
 // ── Test Environment: multi-checkbox panel switcher ──────────
 // User may pick one or more environments. We show the panel for
@@ -556,6 +652,42 @@ function toggleRunDetails(id) {
 
 // Init
 toggleItemList();
+
+// ── Run progress overlay ─────────────────────────────────────
+(function teRunOverlay(){
+  var form = document.getElementById('exec-config-form');
+  var overlay = document.getElementById('te-run-overlay');
+  var etaEl = document.getElementById('te-overlay-eta');
+  if (!form || !overlay) return;
+
+  function computeEta() {
+    // Per-case ~1.6s manual / ~3.5s with Playwright, multiplied by env count.
+    var sel = teActiveItemSelector ? teActiveItemSelector() : '.item-cb-tc';
+    var nodes = document.querySelectorAll(sel);
+    var n = 0;
+    nodes.forEach(function(c) { if (c.checked && !c.disabled) n++; });
+    var envs = document.querySelectorAll('input[name="env_type"]:checked').length || 1;
+    var baseUrl = (document.querySelector('input[name="base_url"]') || {}).value || '';
+    var perCase = baseUrl ? 3.5 : 1.6;
+    var totalSec = Math.max(2, Math.round(n * envs * perCase));
+    var mins = Math.floor(totalSec / 60);
+    var secs = totalSec % 60;
+    return (mins > 0 ? mins + 'm ' : '') + secs + 's';
+  }
+
+  form.addEventListener('submit', function(ev) {
+    // Only show overlay for the main Run button — auxiliary buttons
+    // (e.g. "Generate test account") use formaction and shouldn't trigger
+    // a long progress bar.
+    var submitter = ev.submitter || document.activeElement;
+    if (submitter && submitter.id !== 'te-run-button') return;
+    if (etaEl) etaEl.textContent = '~ ' + computeEta();
+    overlay.hidden = false;
+  });
+  // If the user hits browser-back from a page that triggered the overlay,
+  // bfcache may restore the page with overlay still visible — hide it.
+  window.addEventListener('pageshow', function() { overlay.hidden = true; });
+})();
 </script>
 
 <style>
