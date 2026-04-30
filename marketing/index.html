@@ -426,6 +426,28 @@ button{font:inherit;cursor:pointer}
 @media (prefers-reduced-motion: reduce){
   .reveal{transition:none;opacity:1;transform:none}
 }
+
+/* ── Back-to-Top button ───────────────────────────────────────── */
+.back-to-top{
+  position:fixed;right:24px;bottom:24px;
+  width:48px;height:48px;border-radius:50%;
+  border:none;cursor:pointer;color:#fff;
+  background:var(--tf-grad);
+  box-shadow:0 8px 22px rgba(255,134,92,.35);
+  display:flex;align-items:center;justify-content:center;
+  z-index:60;
+  opacity:0;transform:translateY(8px);
+  transition:opacity .2s ease, transform .2s ease, box-shadow .15s ease, background .15s ease;
+  pointer-events:none;
+}
+.back-to-top[hidden]{display:none}
+.back-to-top.is-visible{opacity:1;transform:translateY(0);pointer-events:auto}
+.back-to-top:hover{box-shadow:0 12px 28px rgba(255,134,92,.45)}
+.back-to-top:focus-visible{outline:3px solid var(--tf-coral-soft);outline-offset:3px}
+.back-to-top svg{width:22px;height:22px;color:#fff;stroke:#fff;fill:none}
+@media (prefers-reduced-motion: reduce){
+  .back-to-top{transition:opacity .12s linear, transform .12s linear}
+}
 </style>
 </head>
 <body>
@@ -1058,6 +1080,37 @@ button{font:inherit;cursor:pointer}
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
   // ── Smooth-scroll for in-page anchors ─────────────────────────
+  // ── Back-to-Top button ─────────────────────────────────────
+  const btt = document.getElementById('back-to-top');
+  if (btt) {
+    const SHOW_AFTER_PX = 250;
+    let bttTicking = false;
+    function bttUpdate(){
+      const y = window.scrollY || document.documentElement.scrollTop;
+      if (y > SHOW_AFTER_PX) {
+        btt.hidden = false;
+        btt.classList.add('is-visible');
+      } else {
+        btt.classList.remove('is-visible');
+        // Hide after the fade-out so it stays out of the AT focus order.
+        setTimeout(() => {
+          if (!btt.classList.contains('is-visible')) btt.hidden = true;
+        }, 220);
+      }
+      bttTicking = false;
+    }
+    window.addEventListener('scroll', () => {
+      if (!bttTicking) {
+        window.requestAnimationFrame(bttUpdate);
+        bttTicking = true;
+      }
+    }, { passive: true });
+    btt.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    bttUpdate();
+  }
+
   document.querySelectorAll('a[href^="#"]').forEach(a => {
     a.addEventListener('click', (e) => {
       const id = a.getAttribute('href').slice(1);
@@ -1069,6 +1122,16 @@ button{font:inherit;cursor:pointer}
   });
 })();
 </script>
+
+<button type="button" id="back-to-top" class="back-to-top"
+        aria-label="Back to top" title="Back to top" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <line x1="12" y1="19" x2="12" y2="5"/>
+    <polyline points="5 12 12 5 19 12"/>
+  </svg>
+</button>
+
 </body>
 </html>
-        
+                                                                                                                                                                                                                     
