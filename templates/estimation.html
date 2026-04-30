@@ -26,12 +26,14 @@
   <div class="card">
     <h2>{{ t.est_config }}</h2>
 
-    <div class="form-row form-row-5">
-      <div class="form-group form-col-wide">
-        <label>{{ t.est_project_name }}</label>
-        <input type="text" name="project_name" value="{{ last.project_name or '' }}"
-               placeholder="{{ t.est_project_name_ph }}">
-      </div>
+    {# Project name on its own block — block-level form-group spans the
+       full card width, so the placeholder is never clipped. #}
+    <div class="form-group">
+      <label>{{ t.est_project_name }}</label>
+      <input type="text" name="project_name" value="{{ last.project_name or '' }}"
+             placeholder="{{ t.est_project_name_ph }}" style="width:100%">
+    </div>
+    <div class="form-row form-row-4">
       <div class="form-group">
         <label>{{ t.est_additional_platforms }}</label>
         <input type="number" name="additional_platforms" min="0" max="50" step="1"
@@ -47,7 +49,7 @@
         <input type="number" name="buffer_percent" min="0" max="100" step="1"
                value="{{ last.buffer_percent or 12 }}">
       </div>
-      <div class="form-group form-col-wide">
+      <div class="form-group">
         <label>{{ t.est_primary_platform }}</label>
         <input type="text" name="primary_platform" value="{{ last.primary_platform or 'Windows 10' }}">
       </div>
@@ -151,6 +153,64 @@
   <p><a class="btn btn-secondary" href="{{ url_for('estimation_export') }}">
       <i data-lucide="save" class="icon-sm"></i> {{ t.est_export }}</a></p>
 </div>
+
+{# ── History calibration hint (always visible — actionable). #}
+{% if result and result.history_hint %}
+<div class="card est-history-card">
+  <p class="hint" style="margin:0">
+    <i data-lucide="history" class="icon-sm"></i>
+    <strong>{{ t.get('est_history_label', 'Calibration vs your past projects') }}:</strong>
+    {{ result.history_hint }}
+  </p>
+</div>
+{% endif %}
+
+{# ── PERT analysis (collapsible — the core deliverable is the legacy
+     MIN/MAX/AVG numbers above; PERT is a confidence overlay surfaced
+     when the user wants statistical detail). #}
+{% if result and result.pert_expected %}
+<details class="card est-pert-card">
+  <summary style="cursor:pointer;font-weight:600">
+    <i data-lucide="bar-chart-3" class="icon icon-coral"></i>
+    {{ t.get('est_pert_toggle', 'Show PERT confidence (advanced)') }}
+  </summary>
+  <p class="hint" style="margin-top:.75rem">
+    <strong>{{ t.get('est_pert_what', 'What this is.') }}</strong>
+    {{ t.get('est_pert_explainer',
+        'A second-opinion view of the same estimate, expressed as a '
+        'distribution rather than a single number. μ is the most likely '
+        'total; σ is how much the actual hours might vary. The 68% / 95% '
+        'bands show where the actual effort is statistically expected to '
+        'land — useful for sprint buffers and "best/worst case" '
+        'conversations with stakeholders. The XLSX deliverable stays '
+        'on the legacy figures above; this panel is informational only.') }}
+  </p>
+  <p class="hint" style="margin-top:.25rem;font-size:12px">
+    <em>{{ t.get('est_pert_formula',
+        'Formulae: μ = (O + 4M + P) / 6 · σ = (P − O) / 6 · '
+        'bands follow the 68-95-99.7 rule for a normal approximation '
+        'of the Beta-PERT distribution.') }}</em>
+  </p>
+  <div class="dashboard-stats" style="margin-top:.5rem">
+    <div class="stat-card">
+      <div class="stat-number">{{ result.pert_expected | round(1) }} h</div>
+      <div class="stat-label">{{ t.get('est_pert_expected', 'PERT expected (μ)') }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">± {{ result.pert_sigma | round(1) }} h</div>
+      <div class="stat-label">{{ t.get('est_pert_sigma', 'Std. deviation (σ)') }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">{{ result.band_68_low | round(1) }}–{{ result.band_68_high | round(1) }} h</div>
+      <div class="stat-label">{{ t.get('est_pert_68', '68% band (μ ± σ)') }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">{{ result.band_95_low | round(1) }}–{{ result.band_95_high | round(1) }} h</div>
+      <div class="stat-label">{{ t.get('est_pert_95', '95% band (μ ± 2σ)') }}</div>
+    </div>
+  </div>
+</details>
+{% endif %}
 {% endif %}
 
 <div class="card">
