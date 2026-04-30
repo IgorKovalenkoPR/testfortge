@@ -193,4 +193,110 @@ def register(app: Flask) -> None:
         return redirect(url_for("index"))
 
 
+    @app.route("/projects/db/rename/<project_id>", methods=["POST"])
+    def db_rename_project(project_id):
+        """Rename / re-tag a project. Useful for the auto-created
+        'Untitled project YYYY-MM-DD HH:MM' rows."""
+        if not _is_valid_project_id(project_id):
+            abort(400)
+        new_name = (request.form.get("project_name") or "").strip()
+        if not new_name:
+            flash("Project name cannot be empty.", "error")
+            return redirect(url_for("index"))
+        new_url = request.form.get("base_url")
+        new_desc = request.form.get("description")
+        try:
+            touched = _db.update_project(
+                project_id,
+                name=new_name,
+                base_url=new_url if new_url is not None else None,
+                description=new_desc if new_desc is not None else None,
+            )
+        except Exception as exc:  # pragma: no cover
+            log.warning("rename project failed: %s", exc)
+            flash("Could not rename project — see server logs.", "error")
+            return redirect(url_for("index"))
+        if not touched:
+            flash("Nothing changed.", "info")
+            return redirect(url_for("index"))
+        # Mirror into session if this happens to be the active project.
+        if session.get("project_id") == project_id:
+            setup = session.get("project_setup") or {}
+            setup["project_name"] = new_name
+            if new_url is not None:
+                setup["base_url"] = new_url.strip() or None
+            session["project_setup"] = setup
+        flash(f"Project renamed to '{new_name}'.", "success")
+        return redirect(url_for("index"))
+
+    @app.route("/projects/db/move-artifacts", methods=["POST"])
+    def db_move_artifacts():
+        """Move every artefact from a source project to a target project.
+
+        Source defaults to the currently-active project; target is either
+        an existing project_id (``target_project_id``) or a new project
+        whose name is provided in ``target_project_name`` (we create it
+        on the fly).
+        """
+        source_pid = (request.form.get("source_project_id")
+                      or session.get("project_id") or "").strip()
+        if not source_pid or not _is_valid_project_id(source_pid):
+            flash("No valid source project selected.", "error")
+            return redirect(url_for("index"))
+
+        target_pid = (request.form.get("target_project_id") or "").strip()
+        new_name = (request.form.get("target_project_name") or "").strip()
+
+        if target_pid and not _is_valid_project_id(target_pid):
+            flash("Invalid target project.", "error")
+            return redirect(url_for("index"))
+
+        if not target_pid:
+            if not new_name:
+                flash("Pick an existing project or name a new one.", "error")
+                return redirect(url_for("index"))
+            try:
+                target_pid = _db.upsert_project(
+                    name=new_name, owner_sid=get_session_id(),
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("index"))
+
+        if target_pid == source_pid:
+            flash("Source and target are the same project — nothing to do.",
+                  "info")
+            return redirect(url_for("index"))
+
+        try:
+            moved = _db.move_artifacts(source_pid, target_pid)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index"))
+        except Exception as exc:  # pragma: no cover
+            log.warning("move_artifacts failed: %s", exc)
+            flash("Move failed — see server logs.", "error")
+            return redirect(url_for("index"))
+
+        total = sum(moved.values())
+        if total == 0:
+            flash("Source project had no artefacts to move.", "info")
+        else:
+            # Build a per-kind summary, omitting zeros.
+            parts = [f"{n} {k.replace('_', ' ')}"
+                     for k, n in moved.items() if n]
+            target_meta = _db.get_project(target_pid)
+            target_label = (target_meta or {}).get("name", "target")
+            flash(f"Moved to '{target_label}': " + ", ".join(parts) + ".",
+                  "success")
+            # If we moved off the active project, refresh in-session lists
+            # so the dashboard shows zero counts for the newly-emptied one.
+            if session.get("project_id") == source_pid:
+                for k in ("test_cases_data", "checklist_data",
+                          "bug_reports_data", "test_runs",
+                          "estimation_result"):
+                    session.pop(k, None)
+        return redirect(url_for("index"))
+
+
 __all__ = ["register"]

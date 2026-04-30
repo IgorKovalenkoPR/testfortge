@@ -66,6 +66,44 @@
     </form>
 </div>
 
+{% if active_project_id %}
+{# ── Move artefacts to another project ─────────────────────── #}
+<div class="card project-picker">
+  <h2>{{ t.get('move_artefacts_title', 'Move artefacts to another project') }}</h2>
+  <p class="hint">{{ t.get('move_artefacts_hint',
+      'Reassign every artefact (test cases, checklists, bug reports, runs, estimations) currently in the active project to a different one. Useful when you generated work in the wrong project (or in an auto-created Untitled one).') }}</p>
+  <form method="POST" action="{{ url_for('db_move_artifacts') }}" class="picker-create-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="source_project_id" value="{{ active_project_id }}">
+    <div class="form-row form-row-2">
+      <div class="form-group">
+        <label for="move-target">{{ t.get('move_target_existing', 'Move to existing project') }}</label>
+        <select id="move-target" name="target_project_id">
+          <option value="">— {{ t.get('move_target_pick', 'pick a project') }} —</option>
+          {% for p in projects %}
+            {% if p.folder != active_project_id %}
+            <option value="{{ p.folder }}">{{ p.project_name }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="move-target-new">{{ t.get('move_target_new', 'Or create a new one') }}</label>
+        <input type="text" id="move-target-new" name="target_project_name"
+               placeholder="{{ t.get('move_target_new_placeholder', 'New project name') }}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-secondary btn-sm"
+              onclick="return confirm('{{ t.get('move_confirm', 'Move all artefacts of the active project? This rewrites their project_id.') }}')">
+        <i data-lucide="move" class="icon-sm"></i>
+        {{ t.get('move_btn', 'Move artefacts') }}
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
 {% if session.get('test_cases_data') or session.get('checklist_data') %}
 <div class="card card-highlight">
     <h2>{{ t.current_project }}{% if session.get('project_setup', {}).get('project_name') %}: {{ session['project_setup'].get('project_name', '') }}{% endif %}</h2>
@@ -375,10 +413,30 @@
             {% for p in projects %}
             <tr {% if p.folder == active_project_id %}class="row-active"{% endif %}>
                 <td>
-                    <strong>{{ p.project_name }}</strong>
+                    <strong class="project-name-display" data-pid="{{ p.folder }}">{{ p.project_name }}</strong>
                     {% if p.folder == active_project_id %}
                     <span class="pill pill-active">{{ t.get('active_project_label', 'Active') }}</span>
                     {% endif %}
+                    <button type="button" class="btn btn-xs btn-ghost rename-toggle"
+                            data-target="rename-{{ p.folder }}"
+                            aria-label="{{ t.get('rename', 'Rename') }}"
+                            title="{{ t.get('rename', 'Rename') }}">
+                        <i data-lucide="pencil" class="icon-sm"></i>
+                    </button>
+                    <form id="rename-{{ p.folder }}" class="rename-form" method="POST"
+                          action="{{ url_for('db_rename_project', project_id=p.folder) }}"
+                          hidden>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="text" name="project_name" required
+                               value="{{ p.project_name }}"
+                               placeholder="{{ t.get('project_name', 'Project name') }}">
+                        <input type="text" name="base_url"
+                               value="{{ p.get('base_url') or '' }}"
+                               placeholder="{{ t.get('base_url_label', 'Base URL') }}">
+                        <button type="submit" class="btn btn-xs btn-primary">{{ t.get('save', 'Save') }}</button>
+                        <button type="button" class="btn btn-xs btn-ghost rename-cancel"
+                                data-target="rename-{{ p.folder }}">{{ t.get('cancel', 'Cancel') }}</button>
+                    </form>
                 </td>
                 <td>{{ p.get('test_cases_count', 0) }}</td>
                 <td>{{ p.get('checklist_count', 0) }}</td>
@@ -456,5 +514,23 @@
         activate(btn.dataset.metric, btn);
     });
 })();
+
+/* Inline rename in 'Saved Projects' — pencil button toggles the row's form. */
+document.addEventListener('click', function (ev) {
+  var t = ev.target.closest('.rename-toggle, .rename-cancel');
+  if (!t) return;
+  ev.preventDefault();
+  var formId = t.dataset.target;
+  var form = document.getElementById(formId);
+  if (!form) return;
+  if (form.hidden) {
+    form.hidden = false;
+    var input = form.querySelector('input[name="project_name"]');
+    if (input) { input.focus(); input.select(); }
+  } else {
+    form.hidden = true;
+  }
+});
 </script>
 {% endblock %}
+    

@@ -481,6 +481,97 @@ def get_project(project_id: str) -> dict | None:
         return _row_to_dict(p) if p else None
 
 
+def update_project(project_id: str, *,
+                   name: str | None = None,
+                   base_url: str | None = None,
+                   description: str | None = None) -> bool:
+    """Partial-update a project's metadata. Skips empty / None fields so
+    callers only need to pass what changes. Returns ``True`` when a row
+    was actually touched, ``False`` if the id was bogus.
+
+    The ``slug`` column is intentionally NOT regenerated when ``name``
+    changes — slug is a stable identifier (used to deduplicate uploads
+    in :func:`upsert_project`). If a future caller needs a slug-rename,
+    add it explicitly there.
+    """
+    with session_scope() as sess:
+        p = sess.get(Project, project_id)
+        if not p:
+            return False
+        touched = False
+        if name is not None:
+            n = name.strip()
+            if n and n != p.name:
+                p.name = n
+                touched = True
+        if base_url is not None:
+            bu = base_url.strip()
+            if bu != (p.base_url or ""):
+                p.base_url = bu or None
+                touched = True
+        if description is not None:
+            d = description.strip()
+            if d != (p.description or ""):
+                p.description = d or None
+                touched = True
+        return touched
+
+
+# Mapping: artefact-kind -> ORM model, so move_artifacts can enumerate
+# everything without hard-coding the table list in two places.
+_MOVABLE_KINDS: dict[str, type] = {
+    "test_cases":         TestCase,
+    "checklist_items":    ChecklistItem,
+    "bug_reports":        BugReport,
+    "estimations":        Estimation,
+    "execution_runs":     ExecutionRun,
+    "metric_snapshots":   DashboardMetricSnapshot,
+    "tedgie_submissions": TedgieSubmission,
+}
+
+
+def move_artifacts(source_project_id: str,
+                   target_project_id: str,
+                   kinds: list[str] | None = None) -> dict[str, int]:
+    """Bulk-move artefacts from *source* to *target*. UPDATE-only — no
+    rows are duplicated, no rows are deleted. Returns ``{kind: rows_moved}``
+    so callers can build a flash message.
+
+    Both project ids must exist; ``ValueError`` on either invalid id or
+    when source and target are the same.
+
+    ``kinds`` defaults to every movable artefact kind. Pass a subset
+    (``["test_cases", "checklist_items"]``) when the caller only wants
+    to move those.
+    """
+    if not source_project_id or not target_project_id:
+        raise ValueError("both source_project_id and target_project_id are required")
+    if source_project_id == target_project_id:
+        raise ValueError("source and target must differ")
+
+    selected = kinds or list(_MOVABLE_KINDS.keys())
+    moved: dict[str, int] = {}
+
+    with session_scope() as sess:
+        # Confirm both projects exist before touching artefact tables.
+        if sess.get(Project, source_project_id) is None:
+            raise ValueError(f"source project {source_project_id!r} not found")
+        if sess.get(Project, target_project_id) is None:
+            raise ValueError(f"target project {target_project_id!r} not found")
+
+        for kind in selected:
+            model = _MOVABLE_KINDS.get(kind)
+            if model is None:
+                continue
+            n = (sess.query(model)
+                 .filter(model.project_id == source_project_id)
+                 .update({model.project_id: target_project_id},
+                         synchronize_session=False))
+            moved[kind] = int(n or 0)
+
+    return moved
+
+
 def delete_project(project_id: str) -> None:
     with session_scope() as sess:
         p = sess.get(Project, project_id)
@@ -841,7 +932,8 @@ __all__ = [
     "Estimation", "ExecutionRun", "ExecutionCaseResult",
     "DashboardMetricSnapshot", "TedgieSubmission",
     # projects
-    "upsert_project", "list_projects", "get_project", "delete_project",
+    "upsert_project", "update_project", "list_projects", "get_project",
+    "delete_project", "move_artifacts",
     # test cases
     "save_test_cases", "load_test_cases",
     # checklist
