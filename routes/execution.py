@@ -207,8 +207,30 @@ def register(app: Flask) -> None:
               base_url = (request.form.get("base_url") or "").strip()
               scope = (request.form.get("scope") or "all").strip().lower()
               headless = request.form.get("headless", "1") == "1"
-              record_video = request.form.get("record_video", "1") == "1"
+              # Video defaults OFF — recording a .webm per case adds 5–15s
+              # of context-shutdown work and was the dominant cost in the
+              # 35s/case observed on Render. Operator can re-enable per run.
+              record_video = request.form.get("record_video", "0") == "1"
+              # Speed preset:
+              #   fast      — viewport-only screenshots, only "after" each
+              #               step, default_timeout 3000, no video. 2–4×
+              #               faster than standard; skip the
+              #               "before-each-step" frame because the previous
+              #               step's "after" frame is the same picture.
+              #   standard  — viewport screenshots, before+after each step,
+              #               default_timeout 3000.
+              #   thorough  — full_page screenshots, before+after each
+              #               step, default_timeout 5000. Closest to the
+              #               legacy behaviour; use when you need maximum
+              #               diagnostic coverage and don't mind waiting.
+              speed_mode = (request.form.get("speed_mode") or "fast").strip().lower()
+              if speed_mode not in ("fast", "standard", "thorough"):
+                  speed_mode = "fast"
+              speed_full_page = (speed_mode == "thorough")
+              speed_before_steps = (speed_mode in ("standard", "thorough"))
+              speed_timeout_ms = 5000 if speed_mode == "thorough" else 3000
               session["automation_base_url"] = base_url
+              session["automation_speed_mode"] = speed_mode
 
               # Pick the URL used by the deterministic site-tester. Prefer
               # the explicit Base URL the user just typed; fall back to
@@ -260,20 +282,34 @@ def register(app: Flask) -> None:
                           base_url=base_url,
                           headless=headless,
                           record_video=record_video,
+                          default_timeout_ms=speed_timeout_ms,
+                          screenshot_full_page=speed_full_page,
+                          screenshot_before_steps=speed_before_steps,
                           credentials=credentials if credentials.is_active() else None,
                       )
                       auto_report = runner.run(scripts)
                       # Index by case ID so the per-env loop below can pull
                       # screenshots / videos / status into the right run row.
-                      for r in (auto_report.results or []):
-                          cid = getattr(r, "case_id", None) or getattr(r, "id", None)
-                          if cid:
-                              automation_assets[cid] = {
-                                  "status": getattr(r, "status", ""),
-                                  "video": getattr(r, "video_path", "") or "",
-                                  "screenshots": list(getattr(r, "screenshots", []) or []),
-                                  "duration_ms": getattr(r, "duration_ms", 0),
-                              }
+                      # NOTE: RunReport.scripts (NOT .results) holds the
+                      # per-case ScriptResult objects, and screenshots are
+                      # nested in each ScriptResult.steps[*].screenshot_after
+                      # — extracting them here is what feeds the post-run
+                      # gallery in templates/test_execution.html.
+                      for r in (getattr(auto_report, "scripts", []) or []):
+                          cid = getattr(r, "tc_id", None) or getattr(r, "case_id", None)
+                          if not cid:
+                              continue
+                          shots = []
+                          for step in (getattr(r, "steps", []) or []):
+                              after = getattr(step, "screenshot_after", "") or ""
+                              if after:
+                                  shots.append(after)
+                          automation_assets[cid] = {
+                              "status": getattr(r, "status", ""),
+                              "video": getattr(r, "video_path", "") or "",
+                              "screenshots": shots,
+                              "duration_ms": getattr(r, "duration_ms", 0),
+                          }
                       session["automation_report"] = {
                           "passed": auto_report.passed,
                           "failed": auto_report.failed,
@@ -411,7 +447,9 @@ def register(app: Flask) -> None:
                   results_summary = [
                       {"item_id": r.get("item_id"),
                        "status":  r.get("status"),
+                       "source":  r.get("source", "auto"),
                        "bug_id":  r.get("bug_id"),
+                       "comment": r.get("comment", ""),
                        "duration_ms": r.get("duration_ms"),
                        "video": r.get("video", ""),
                        "screenshots": (r.get("screenshots") or [])[:6]}

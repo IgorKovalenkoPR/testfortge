@@ -128,9 +128,12 @@ def _locator(page, target: str):
 class AutomationRunner:
     def __init__(self, storage_root: str, base_url: str,
                  headless: bool = True, viewport: tuple[int, int] = (1280, 800),
-                 record_video: bool = True, default_timeout_ms: int = 5000,
+                 record_video: bool = False, default_timeout_ms: int = 3000,
                  slow_mo_ms: int | None = None, step_pause_ms: int | None = None,
-                 credentials: TestCredentials | None = None):
+                 credentials: TestCredentials | None = None,
+                 # Speed knobs:
+                 screenshot_full_page: bool = False,
+                 screenshot_before_steps: bool = False):
         self.storage_root = storage_root
         self.base_url = base_url
         self.headless = headless
@@ -138,15 +141,20 @@ class AutomationRunner:
         self.record_video = record_video
         self.default_timeout_ms = default_timeout_ms
         # In headed mode we visibly slow the browser so the user can see
-        # clicks / fills / navigations happen. In headless mode we don't
-        # need the extra delay.
-        # In headed mode we visibly slow the browser so the user can see
         # clicks / fills / navigations happen. 500ms slow_mo + 700ms step
         # pause is the smallest pair that makes activity legible without
-        # making the run feel sluggish.
+        # making the run feel sluggish. In headless mode all delays are
+        # zero — the bot has no audience.
         self.slow_mo_ms = slow_mo_ms if slow_mo_ms is not None else (500 if not headless else 0)
         self.step_pause_ms = step_pause_ms if step_pause_ms is not None else (700 if not headless else 0)
         self.credentials = credentials
+        # Speed flags: viewport-only screenshots are 5–10× faster on long
+        # pages than full_page=True (which forces a full layout pass and
+        # can produce 8000-px-tall PNGs). Skipping "before" shots halves
+        # IO without losing diagnostic value because the previous step's
+        # "after" frame *is* the next step's "before".
+        self.screenshot_full_page = screenshot_full_page
+        self.screenshot_before_steps = screenshot_before_steps
         # Set to True once we've successfully authenticated inside a
         # browser context; the login sequence only needs to run once per
         # context, not once per test case.
@@ -190,6 +198,9 @@ class AutomationRunner:
         self._live_total = max(1, len(scripts))
         self._live_done = 0
         self._live_current_tc = ""
+        # Pace tracking — start time used to derive elapsed_ms,
+        # avg_ms_per_case, cases_per_minute for the live page header.
+        self._live_started_ts = time.time()
         self._write_live_info(status="starting")
 
         report = RunReport(
@@ -259,6 +270,10 @@ class AutomationRunner:
                     time.sleep(1.0)
                 for script in scripts:
                     self._live_current_tc = (script.tc_id or "TC")
+                    # Step counter is per-test-case so the live page shows
+                    # "step #3" inside the current TC, not a cumulative
+                    # number across the whole run.
+                    self._live_step = 0
                     self._write_live_info(status="running")
                     sr = self._run_script(browser, script, run_dir)
                     report.scripts.append(sr)
@@ -354,8 +369,13 @@ class AutomationRunner:
         after_path = os.path.join(tc_dir, f"step_{idx:02d}_after.png")
 
         try:
-            self._screenshot(page, before_path)
-            sr.screenshot_before = _rel_url(before_path, self.storage_root)
+            # "Before" screenshots are optional: in fast mode we skip them
+            # and rely on the previous step's "after" image to provide the
+            # before-state context. Halves IO per step and shaves seconds
+            # off long runs.
+            if self.screenshot_before_steps:
+                self._screenshot(page, before_path)
+                sr.screenshot_before = _rel_url(before_path, self.storage_root)
 
             if step.action == "goto":
                 # Make sure the window is in front before each navigation so
@@ -442,24 +462,29 @@ class AutomationRunner:
 
     def _screenshot(self, page, path: str) -> None:
         try:
-            page.screenshot(path=path, full_page=True)
+            page.screenshot(path=path, full_page=self.screenshot_full_page)
         except Exception:
             return
         # Mirror the freshly-written file as the global "latest" frame so
         # the /test-execution/live page can show real-time progress on
         # cloud deployments where the browser itself is invisible to the
-        # operator. Best-effort: any IO failure here must never abort the
-        # run.
+        # operator. Atomic via tmp + os.replace so the polling reader
+        # never sees a half-written file (which would surface as a broken
+        # image in the browser). Best-effort: any IO failure here must
+        # never abort the run.
         live_dir = getattr(self, "_live_dir", "")
         if not live_dir:
             return
         try:
+            os.makedirs(live_dir, exist_ok=True)
             self._live_step += 1
             dst = os.path.join(live_dir, "latest.png")
-            shutil.copyfile(path, dst)
+            tmp = dst + ".tmp"
+            shutil.copyfile(path, tmp)
+            os.replace(tmp, dst)
             self._write_live_info(status="running")
         except Exception as exc:  # pragma: no cover — IO best-effort
-            _logger.debug("live: cannot mirror frame: %s", exc)
+            _logger.warning("live: cannot mirror frame: %s", exc)
 
     def _write_live_info(self, status: str) -> None:
         """Atomically write the live status JSON consumed by the
@@ -472,15 +497,23 @@ class AutomationRunner:
             import json
             tmp = os.path.join(live_dir, "info.json.tmp")
             dst = os.path.join(live_dir, "info.json")
+            started_ts = getattr(self, "_live_started_ts", time.time())
+            done = getattr(self, "_live_done", 0)
+            elapsed_ms = int((time.time() - started_ts) * 1000)
+            avg_ms_per_case = int(elapsed_ms / done) if done > 0 else 0
+            cases_per_min = round((done / (elapsed_ms / 60000.0)), 2) if elapsed_ms > 0 and done > 0 else 0
             payload = {
                 "run_id": getattr(self, "_live_run_id", ""),
                 "status": status,
                 "step": getattr(self, "_live_step", 0),
-                "cases_done": getattr(self, "_live_done", 0),
+                "cases_done": done,
                 "cases_total": getattr(self, "_live_total", 1),
                 "current_tc": getattr(self, "_live_current_tc", ""),
                 "base_url": self.base_url or "",
                 "headless": self.headless,
+                "elapsed_ms": elapsed_ms,
+                "avg_ms_per_case": avg_ms_per_case,
+                "cases_per_minute": cases_per_min,
                 "ts": int(time.time() * 1000),
             }
             with open(tmp, "w", encoding="utf-8") as f:
@@ -536,8 +569,9 @@ class AutomationRunner:
         after_path = os.path.join(tc_dir, "login_after.png")
 
         try:
-            self._screenshot(page, before_path)
-            sr.screenshot_before = _rel_url(before_path, self.storage_root)
+            if self.screenshot_before_steps:
+                self._screenshot(page, before_path)
+                sr.screenshot_before = _rel_url(before_path, self.storage_root)
 
             # Step 1 — registration (only for generated accounts with URL)
             if cred.mode == "generated" and cred.register_url:

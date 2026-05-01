@@ -32,7 +32,15 @@
     <div class="run-header" onclick="toggleRunDetails('run-{{ run.run_id }}')">
         <div class="run-title">
             <strong>Run {{ run.run_id }}</strong>
-            <span class="run-meta">{{ run.tester_name }} &middot; {{ run.environment }} &middot; {{ run.testing_types }}</span>
+            <span class="run-meta">
+                {{ run.tester_name }} &middot; {{ run.environment }} &middot; {{ run.testing_types }}
+                {% set total_ms = run.results | map(attribute='duration_ms') | map('default', 0, true) | sum %}
+                {% set count = run.results | length %}
+                {% if total_ms %}
+                    &middot; ⏱ {{ (total_ms / 1000) | round(1) }}s total
+                    {% if count %}&middot; {{ ((total_ms / count) / 1000) | round(2) }}s/case{% endif %}
+                {% endif %}
+            </span>
         </div>
         <div class="run-stats-inline">
             <span class="run-stat stat-passed">{{ run.stats.passed }} P</span>
@@ -282,9 +290,21 @@
         <div class="form-group">
             <label>{{ t.get('te_record_video', 'Record video') }}</label>
             <select name="record_video">
-                <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm per case') }}</option>
-                <option value="0">{{ t.get('te_record_no', 'No') }}</option>
+                <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
+                <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm per case (slower)') }}</option>
             </select>
+        </div>
+        <div class="form-group">
+            <label>{{ t.get('te_speed_mode', 'Speed mode') }}</label>
+            <select name="speed_mode">
+                <option value="fast" selected>{{ t.get('te_speed_fast', 'Fast — viewport screenshots, only after-each-step (default)') }}</option>
+                <option value="standard">{{ t.get('te_speed_std', 'Standard — viewport, before + after each step') }}</option>
+                <option value="thorough">{{ t.get('te_speed_thorough', 'Thorough — full-page screenshots, before + after, longer timeouts') }}</option>
+            </select>
+            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--color-text-muted,#888);">
+                {{ t.get('te_speed_hint',
+                   'Fast mode is 2–4× faster than Thorough on long runs because each step writes one viewport screenshot instead of two full-page captures.') }}
+            </p>
         </div>
     </div>
 </div>
@@ -506,13 +526,27 @@
 {# ── Run progress overlay (shown while POST is in flight) ── #}
 <div id="te-run-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
   <div class="te-run-card">
-    <h3>{{ t.get('te_overlay_title', 'Test execution in progress…') }}</h3>
-    <p>
+    <h3>{{ t.get('te_overlay_title', 'Live automation view — run in progress') }}</h3>
+    <p style="margin-bottom:10px;">
       {{ t.get('te_overlay_body',
-          'TestForTge is running your selected items across every chosen environment. The page will reload automatically once the run completes — please don\'t close the tab.') }}
+          'TestForTge is running your selected items across every chosen environment. This tab will reload automatically once the run completes — please don\'t close it.') }}
+    </p>
+    <div id="te-overlay-live" style="display:none;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:10px;margin-bottom:10px;font-size:0.88em;color:#0f172a;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <span><strong id="te-overlay-tc">—</strong></span>
+        <span id="te-overlay-progress" style="color:#475569;">starting…</span>
+      </div>
+    </div>
+    <p style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;">
       <span class="te-eta" id="te-overlay-eta"></span>
+      <span id="te-overlay-elapsed" style="margin-left:6px;"></span>
     </p>
     <div class="te-run-bar" aria-hidden="true"></div>
+    <p style="margin-top:14px;font-size:0.88em;">
+      <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" style="font-weight:600;">
+        🎬 {{ t.get('te_overlay_live_link', 'Open live frame-by-frame view in a new tab ↗') }}
+      </a>
+    </p>
   </div>
 </div>
 
@@ -698,24 +732,75 @@ toggleItemList();
 
 // ── Run progress overlay ─────────────────────────────────────
 (function teRunOverlay(){
-  var form = document.getElementById('exec-config-form');
-  var overlay = document.getElementById('te-run-overlay');
-  var etaEl = document.getElementById('te-overlay-eta');
+  var form     = document.getElementById('exec-config-form');
+  var overlay  = document.getElementById('te-run-overlay');
+  var etaEl    = document.getElementById('te-overlay-eta');
+  var elapsedEl= document.getElementById('te-overlay-elapsed');
+  var liveBox  = document.getElementById('te-overlay-live');
+  var liveTc   = document.getElementById('te-overlay-tc');
+  var liveProg = document.getElementById('te-overlay-progress');
   if (!form || !overlay) return;
 
+  function fmtSec(s) {
+    s = Math.max(0, Math.round(s));
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return (m > 0 ? m + 'm ' : '') + r + 's';
+  }
+
   function computeEta() {
-    // Per-case ~1.6s manual / ~3.5s with Playwright, multiplied by env count.
-    var sel = teActiveItemSelector ? teActiveItemSelector() : '.item-cb-tc';
+    // Initial estimate only — once exceeded, the modal switches to the
+    // open-ended "still running" message instead of pretending to know.
+    var sel = (typeof teActiveItemSelector === 'function') ? teActiveItemSelector() : '.item-cb-tc';
     var nodes = document.querySelectorAll(sel);
     var n = 0;
     nodes.forEach(function(c) { if (c.checked && !c.disabled) n++; });
     var envs = document.querySelectorAll('input[name="env_type"]:checked').length || 1;
     var baseUrl = (document.querySelector('input[name="base_url"]') || {}).value || '';
     var perCase = baseUrl ? 3.5 : 1.6;
-    var totalSec = Math.max(2, Math.round(n * envs * perCase));
-    var mins = Math.floor(totalSec / 60);
-    var secs = totalSec % 60;
-    return (mins > 0 ? mins + 'm ' : '') + secs + 's';
+    return Math.max(2, Math.round(n * envs * perCase));
+  }
+
+  var runStart = 0;
+  var etaSec = 0;
+  var tickHandle = null;
+  var pollHandle = null;
+
+  function tick() {
+    var elapsedSec = Math.round((Date.now() - runStart) / 1000);
+    if (etaEl) {
+      if (elapsedSec < etaSec) {
+        etaEl.textContent = 'Estimated remaining: ' + fmtSec(etaSec - elapsedSec) + '.';
+      } else {
+        etaEl.textContent = 'Still running — original estimate exceeded, run is taking longer than usual.';
+      }
+    }
+    if (elapsedEl) elapsedEl.textContent = '(elapsed: ' + fmtSec(elapsedSec) + ')';
+  }
+
+  function pollLive() {
+    fetch("{{ url_for('test_execution_live_info') }}", { cache: 'no-store' })
+      .then(function(r) { return r.json(); })
+      .then(function(info) {
+        if (!info || info.status === 'idle') return;
+        if (liveBox) liveBox.style.display = 'block';
+        if (liveTc) {
+          liveTc.textContent = info.current_tc
+            ? ('Test case: ' + info.current_tc)
+            : (info.status === 'starting' ? 'Browser launching…' : 'Run finished');
+        }
+        if (liveProg) {
+          if (info.status === 'done') {
+            liveProg.textContent = (info.cases_total || 0) + ' / '
+                                 + (info.cases_total || 0) + ' cases · finished';
+          } else {
+            liveProg.textContent = (info.cases_done || 0) + ' / '
+                                 + (info.cases_total || 0) + ' cases · step #'
+                                 + (info.step || 0);
+          }
+        }
+      })
+      .catch(function() { /* keep polling on error */ });
   }
 
   form.addEventListener('submit', function(ev) {
@@ -724,12 +809,23 @@ toggleItemList();
     // a long progress bar.
     var submitter = ev.submitter || document.activeElement;
     if (submitter && submitter.id !== 'te-run-button') return;
-    if (etaEl) etaEl.textContent = '~ ' + computeEta();
+    runStart = Date.now();
+    etaSec = computeEta();
+    tick();
+    if (tickHandle) clearInterval(tickHandle);
+    tickHandle = setInterval(tick, 1000);
+    if (pollHandle) clearInterval(pollHandle);
+    pollHandle = setInterval(pollLive, 1500);
+    pollLive();
     overlay.hidden = false;
   });
   // If the user hits browser-back from a page that triggered the overlay,
   // bfcache may restore the page with overlay still visible — hide it.
-  window.addEventListener('pageshow', function() { overlay.hidden = true; });
+  window.addEventListener('pageshow', function() {
+    overlay.hidden = true;
+    if (tickHandle) clearInterval(tickHandle);
+    if (pollHandle) clearInterval(pollHandle);
+  });
 })();
 </script>
 
