@@ -251,6 +251,11 @@ class AutomationRunner:
             stale = os.path.join(self._live_dir, "latest.png")
             if os.path.exists(stale):
                 os.remove(stale)
+            # Write a "warming up" splash so the live tab doesn't sit on a
+            # 1×1 transparent placeholder (which renders as a black panel
+            # against our dark card background) for the first ~10 s while
+            # Playwright launches Chromium.
+            self._write_warmup_frame(self._live_dir, len(scripts))
         except OSError as exc:
             _logger.debug("live: cannot reset _live dir: %s", exc)
             self._live_dir = ""
@@ -388,6 +393,41 @@ class AutomationRunner:
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         page.on("pageerror", lambda exc: console_errors.append(str(exc)))
 
+        # Inject a custom CSS cursor on every page so the recorded video
+        # AND screenshots have a visible pointer. Headless Chromium does
+        # NOT render the OS cursor in either video or screenshots, which
+        # is why the user said the recordings "look like screenshots".
+        # We attach to every navigation via init script so the cursor
+        # survives goto / SPA route changes.
+        if self.record_video or not self.headless:
+            cursor_script = (
+                "(() => {"
+                "  if (window.__tfCursorInjected) return;"
+                "  window.__tfCursorInjected = true;"
+                "  const c = document.createElement('div');"
+                "  c.id = '__tf_cursor';"
+                "  c.style.cssText = 'position:fixed;left:0;top:0;width:28px;"
+                "height:28px;pointer-events:none;z-index:2147483647;"
+                "transition:transform 350ms ease;transform:translate(0,0);'"
+                "+ \"background:url(\\\"data:image/svg+xml;utf8,\""
+                "+ encodeURIComponent('<svg xmlns=\\\"http://www.w3.org/2000/svg\\\""
+                " width=\\\"28\\\" height=\\\"28\\\" viewBox=\\\"0 0 28 28\\\">"
+                "<path d=\\\"M2 2 L2 22 L7 18 L11 27 L15 25 L11 16 L19 16 Z\\\""
+                " fill=\\\"%23dc2626\\\" stroke=\\\"white\\\" stroke-width=\\\"1.5\\\""
+                "/></svg>') + \"\\\") no-repeat;\";"
+                "  document.body && document.body.appendChild(c);"
+                "  window.__tfMoveCursor = (x, y) => {"
+                "    const el = document.getElementById('__tf_cursor');"
+                "    if (el) el.style.transform = 'translate(' + x + 'px,' + y + 'px)';"
+                "  };"
+                "})();"
+            )
+            try:
+                context.add_init_script(cursor_script)
+                page.evaluate(cursor_script)
+            except Exception as exc:
+                _logger.debug("cursor inject: %s", exc)
+
         # Authenticate (and auto-register when requested) before running
         # test-case steps. Any failure here is recorded as a synthetic
         # step so the engineer sees what went wrong.
@@ -477,13 +517,13 @@ class AutomationRunner:
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
-                self._live_pump(page, tc_dir, idx, "pre_click")
+                self._move_cursor_to(page, target_bbox)
                 loc.click()
-                self._live_pump(page, tc_dir, idx, "post_click")
             elif step.action == "fill":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._move_cursor_to(page, target_bbox)
                 # Clear then fill — Playwright's fill() is instant; use type() in
                 # headed mode so the user sees keystrokes.
                 loc.fill("")
@@ -491,19 +531,18 @@ class AutomationRunner:
                     loc.fill(step.value)
                 else:
                     loc.type(step.value, delay=40)
-                self._live_pump(page, tc_dir, idx, "post_fill")
             elif step.action == "select":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._move_cursor_to(page, target_bbox)
                 loc.select_option(step.value)
-                self._live_pump(page, tc_dir, idx, "post_select")
             elif step.action == "check":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._move_cursor_to(page, target_bbox)
                 loc.check()
-                self._live_pump(page, tc_dir, idx, "post_check")
             elif step.action == "expect_text":
                 page.wait_for_timeout(150)
                 if step.value:
@@ -565,7 +604,7 @@ class AutomationRunner:
             return
         now = time.time()
         last = getattr(self, "_live_last_pump", 0)
-        if now - last < 0.7:
+        if now - last < 0.4:
             return
         self._live_last_pump = now
         try:
@@ -583,6 +622,27 @@ class AutomationRunner:
             self._write_live_info(status="running")
         except Exception as exc:  # pragma: no cover — best-effort
             _logger.debug("live pump: %s", exc)
+
+    def _move_cursor_to(self, page, bbox: dict | None) -> None:
+        """Animate the injected fake cursor to the centre of bbox so the
+        recorded video and screenshots show a pointer travelling to the
+        target. No-op when neither video recording nor headed mode are
+        active (no audience). No-op when bbox is unknown."""
+        if self.headless and not self.record_video:
+            return
+        if not bbox:
+            return
+        try:
+            cx = int(bbox["x"] + bbox.get("width", 0) / 2)
+            cy = int(bbox["y"] + bbox.get("height", 0) / 2)
+            page.evaluate(
+                "(args) => window.__tfMoveCursor && window.__tfMoveCursor(args.x, args.y)",
+                {"x": cx, "y": cy},
+            )
+            # Allow CSS transition to play out so video catches the move.
+            page.wait_for_timeout(380)
+        except Exception as exc:
+            _logger.debug("cursor move: %s", exc)
 
     @staticmethod
     def _safe_bbox(loc):
@@ -703,6 +763,40 @@ class AutomationRunner:
             self._write_live_info(status="running")
         except Exception as exc:  # pragma: no cover — IO best-effort
             _logger.warning("live: cannot mirror frame: %s", exc)
+
+    @staticmethod
+    def _write_warmup_frame(live_dir: str, total_cases: int) -> None:
+        """Drop an initial PNG into <live>/latest.png so the live page
+        has something legible to show within a second of the run
+        starting. Without this the operator stares at a black card for
+        the 5–10 s it takes to launch Chromium and finish the first
+        navigation. Best-effort: no PIL → silent no-op.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except Exception:
+            return
+        try:
+            img = Image.new("RGB", (1280, 800), (15, 23, 42))
+            draw = ImageDraw.Draw(img)
+            try:
+                font_lg = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
+                font_md = ImageFont.truetype("DejaVuSans.ttf", 18)
+            except Exception:
+                font_lg = ImageFont.load_default()
+                font_md = font_lg
+            draw.text((40, 360), "Warming up Chromium…",
+                      fill=(248, 250, 252), font=font_lg)
+            draw.text((40, 410),
+                      f"Preparing {total_cases} test case(s). The first frame "
+                      f"will appear once the browser opens the first page.",
+                      fill=(148, 163, 184), font=font_md)
+            tmp = os.path.join(live_dir, "latest.png.tmp")
+            dst = os.path.join(live_dir, "latest.png")
+            img.save(tmp, "PNG", optimize=True)
+            os.replace(tmp, dst)
+        except Exception as exc:  # pragma: no cover — best-effort
+            _logger.debug("warmup frame: %s", exc)
 
     def _write_live_info(self, status: str) -> None:
         """Atomically write the live status JSON consumed by the

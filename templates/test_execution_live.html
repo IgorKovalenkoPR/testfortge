@@ -84,8 +84,8 @@
             sprog.textContent = '';
         } else if (status === 'running') {
             stext.textContent = 'Test case: ' + (info.current_tc || '—');
-            sprog.textContent = (info.cases_done || 0) + ' / ' + (info.cases_total || 0)
-                              + ' cases · step #' + (info.step || 0);
+            sprog.textContent = (info.cases_done || 0) + ' / '
+                              + (info.cases_total || 0) + ' cases';
         } else if (status === 'done') {
             stext.textContent = 'Run finished';
             sprog.textContent = (info.cases_total || 0) + ' / ' + (info.cases_total || 0) + ' cases';

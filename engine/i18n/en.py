@@ -120,7 +120,7 @@ TRANSLATIONS = {
     "generate_btn": "Generate",
     "insert_example": "Insert Example",
     "custom_prompt": "Additional Instructions (optional)",
-    "custom_prompt_hint": "Add any specific instructions or preferences for generation",
+    "custom_prompt_hint": "e.g. 'focus on security and edge cases', 'cover only smoke tests', 'add negative scenarios for the login flow', 'check WCAG accessibility'. Plain English or Ukrainian. The generator detects testing types, narrowing keywords ('only', 'just', 'тільки'), and area focus.",
     "input_placeholder": "Paste requirements, user stories, test data, or any relevant information...",
 
     # Shared input block titles

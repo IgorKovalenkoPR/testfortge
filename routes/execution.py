@@ -230,7 +230,11 @@ def register(app: Flask) -> None:
               # doesn't blow up the whole run at goto.
               speed_full_page = False
               speed_before_steps = False
-              speed_timeout_ms = 3000
+              # 2 s is enough for any element already in the DOM. Slow
+              # selectors that need 3 s are usually a bug in the test
+              # case itself, not a real load delay — those should fail
+              # fast so the operator sees the issue.
+              speed_timeout_ms = 2000
               speed_nav_timeout_ms = 15000
               session["automation_base_url"] = base_url
 

@@ -746,14 +746,12 @@ toggleItemList();
 
   function tick() {
     var elapsedSec = Math.round((Date.now() - runStart) / 1000);
-    if (etaEl) {
-      if (elapsedSec < etaSec) {
-        etaEl.textContent = 'Estimated remaining: ' + fmtSec(etaSec - elapsedSec) + '.';
-      } else {
-        etaEl.textContent = 'Still running — original estimate exceeded, run is taking longer than usual.';
-      }
-    }
-    if (elapsedEl) elapsedEl.textContent = '(elapsed: ' + fmtSec(elapsedSec) + ')';
+    // Static ETA was based on a guess that drifted within seconds and
+    // mis-informed operators on long runs. Show only the actual elapsed
+    // time — the inline live status row below shows real cases-done /
+    // cases-total which is the only reliable progress signal.
+    if (etaEl) etaEl.textContent = '';
+    if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsedSec);
   }
 
   function pollLive() {

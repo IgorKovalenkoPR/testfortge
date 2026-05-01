@@ -133,6 +133,19 @@ def parse_page_input(file_field: str = "input_files",
         raw_lines.extend([l.strip() for l in text_input.splitlines() if l.strip()])
 
     custom_prompt = request.form.get("custom_prompt", "").strip()
+    # Light "learning across requests": when the operator leaves the
+    # textarea empty, fall back to the last non-empty instruction they
+    # used in this session. Persist freshly-typed instructions so the
+    # next page (or next generation) sees them. Cap to 1 KB to keep
+    # the session pickle small.
+    try:
+        from flask import session as _session
+        if custom_prompt:
+            _session["last_custom_prompt"] = custom_prompt[:1024]
+        elif _session.get("last_custom_prompt"):
+            custom_prompt = _session["last_custom_prompt"]
+    except Exception:
+        pass
 
     # Move instruction-like lines from raw_lines into custom_prompt.
     # If an instruction line contains a URL, preserve the URL as a separate
