@@ -205,32 +205,34 @@ def register(app: Flask) -> None:
               # ``headless=No`` is chosen. iOS / Android native fall back
               # to the deterministic simulator.
               base_url = (request.form.get("base_url") or "").strip()
+              # The "Re-run failed only" path used to live as a Scope
+              # dropdown — UI was confusing, so it's now an implicit
+              # default of "all selected" for new runs and a per-row
+              # button on completed runs (added separately). Backend
+              # still accepts scope=failed for backward-compat callers.
               scope = (request.form.get("scope") or "all").strip().lower()
-              headless = request.form.get("headless", "1") == "1"
+              # Headless is auto-detected: true on every cloud deployment
+              # (no DISPLAY) so we never try to launch a visible window
+              # on Render and time out. The legacy form flag is honoured
+              # only when the operator forces it from a local POST.
+              import os as _os
+              has_display = bool(_os.environ.get("DISPLAY")) and _os.name != "nt"
+              headless = (request.form.get("headless", "1") == "1") if "headless" in request.form else (not has_display)
               # Video defaults OFF — recording a .webm per case adds 5–15s
               # of context-shutdown work and was the dominant cost in the
               # 35s/case observed on Render. Operator can re-enable per run.
               record_video = request.form.get("record_video", "0") == "1"
-              # Speed preset:
-              #   fast      — viewport-only screenshots, only "after" each
-              #               step, default_timeout 3000, no video. 2–4×
-              #               faster than standard; skip the
-              #               "before-each-step" frame because the previous
-              #               step's "after" frame is the same picture.
-              #   standard  — viewport screenshots, before+after each step,
-              #               default_timeout 3000.
-              #   thorough  — full_page screenshots, before+after each
-              #               step, default_timeout 5000. Closest to the
-              #               legacy behaviour; use when you need maximum
-              #               diagnostic coverage and don't mind waiting.
-              speed_mode = (request.form.get("speed_mode") or "fast").strip().lower()
-              if speed_mode not in ("fast", "standard", "thorough"):
-                  speed_mode = "fast"
-              speed_full_page = (speed_mode == "thorough")
-              speed_before_steps = (speed_mode in ("standard", "thorough"))
-              speed_timeout_ms = 5000 if speed_mode == "thorough" else 3000
+              # Hard-coded "fast" speed preset — the dropdown was removed
+              # because all three options shipped with subtle bugs and
+              # operators just want it to be fast and clear. Element
+              # actions still get a 3 s ceiling, but page navigation
+              # gets a separate 15 s budget so a real cold-start website
+              # doesn't blow up the whole run at goto.
+              speed_full_page = False
+              speed_before_steps = False
+              speed_timeout_ms = 3000
+              speed_nav_timeout_ms = 15000
               session["automation_base_url"] = base_url
-              session["automation_speed_mode"] = speed_mode
 
               # Pick the URL used by the deterministic site-tester. Prefer
               # the explicit Base URL the user just typed; fall back to
@@ -290,6 +292,7 @@ def register(app: Flask) -> None:
                           headless=headless,
                           record_video=record_video,
                           default_timeout_ms=speed_timeout_ms,
+                          navigation_timeout_ms=speed_nav_timeout_ms,
                           screenshot_full_page=speed_full_page,
                           screenshot_before_steps=speed_before_steps,
                           credentials=credentials if credentials.is_active() else None,

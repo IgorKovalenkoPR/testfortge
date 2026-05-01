@@ -163,7 +163,9 @@ def _locator(page, target: str):
 class AutomationRunner:
     def __init__(self, storage_root: str, base_url: str,
                  headless: bool = True, viewport: tuple[int, int] = (1280, 800),
-                 record_video: bool = False, default_timeout_ms: int = 3000,
+                 record_video: bool = False,
+                 default_timeout_ms: int = 3000,
+                 navigation_timeout_ms: int = 15000,
                  slow_mo_ms: int | None = None, step_pause_ms: int | None = None,
                  credentials: TestCredentials | None = None,
                  # Speed knobs:
@@ -174,14 +176,36 @@ class AutomationRunner:
         self.headless = headless
         self.viewport = viewport
         self.record_video = record_video
+        # Element actions (click, fill, expect_text) get the short
+        # default_timeout (3 s is enough for any element that's already
+        # in the DOM). Page navigations need a separate, longer budget —
+        # firing domcontentloaded on a real cold-start website routinely
+        # takes 5–10 s, and using 3 s here was the root cause of every
+        # test case being marked failed at goto.
         self.default_timeout_ms = default_timeout_ms
-        # In headed mode we visibly slow the browser so the user can see
-        # clicks / fills / navigations happen. 500ms slow_mo + 700ms step
-        # pause is the smallest pair that makes activity legible without
-        # making the run feel sluggish. In headless mode all delays are
-        # zero — the bot has no audience.
-        self.slow_mo_ms = slow_mo_ms if slow_mo_ms is not None else (500 if not headless else 0)
-        self.step_pause_ms = step_pause_ms if step_pause_ms is not None else (700 if not headless else 0)
+        self.navigation_timeout_ms = navigation_timeout_ms
+        # When recording video, run actions slowly enough that the .webm
+        # actually shows what happened — clicks, fills, scrolls, redirects.
+        # 350 ms slow_mo + 500 ms step pause turns a typical TC video from
+        # an unwatchable blur into a legible demo, while still being faster
+        # than a human tester. Without record_video, headless stays at full
+        # speed (no audience to slow down for).
+        if slow_mo_ms is not None:
+            self.slow_mo_ms = slow_mo_ms
+        elif not headless:
+            self.slow_mo_ms = 500
+        elif record_video:
+            self.slow_mo_ms = 350
+        else:
+            self.slow_mo_ms = 0
+        if step_pause_ms is not None:
+            self.step_pause_ms = step_pause_ms
+        elif not headless:
+            self.step_pause_ms = 700
+        elif record_video:
+            self.step_pause_ms = 500
+        else:
+            self.step_pause_ms = 0
         self.credentials = credentials
         # Speed flags: viewport-only screenshots are 5–10× faster on long
         # pages than full_page=True (which forces a full layout pass and
@@ -360,6 +384,7 @@ class AutomationRunner:
             except Exception:
                 pass
         page.set_default_timeout(self.default_timeout_ms)
+        page.set_default_navigation_timeout(self.navigation_timeout_ms)
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         page.on("pageerror", lambda exc: console_errors.append(str(exc)))
 
@@ -575,15 +600,14 @@ class AutomationRunner:
 
     def _annotate_failure(self, image_path: str, bbox: dict | None, comment: str) -> None:
         """Overlay a red bounding box + arrow + caption onto a failure
-        screenshot so the operator can see *where* the bug is at a
-        glance. No-op when Pillow isn't available or bbox is unknown.
-        Best-effort — never raises.
-
-        Note: Playwright's bbox is in CSS pixels, but a viewport
-        screenshot is in device pixels. We honour the page's device
-        scale factor when computing the on-image rectangle, falling
-        back to 1.0 when the value isn't available.
+        screenshot — but ONLY when we actually know which element the
+        bug involves (bbox != None). Without a bbox we have nothing
+        meaningful to point at, so we leave the screenshot untouched
+        rather than slap a confusing full-width red banner on every
+        innocent nav-timeout. Best-effort — never raises.
         """
+        if not bbox:
+            return  # nothing actionable to mark — leave the raw shot
         try:
             from PIL import Image, ImageDraw, ImageFont
         except Exception:
@@ -594,51 +618,61 @@ class AutomationRunner:
                 draw = ImageDraw.Draw(img)
                 width_px, height_px = img.size
 
-                # Red rectangle around the offending element
-                if bbox:
-                    # Most viewports render at scale 1, but high-DPI screens
-                    # report a 2× framebuffer. We don't have the page object
-                    # here so just compare bbox to image dims and pick the
-                    # plausible scale (1 or 2).
-                    scale = 1.0
-                    if bbox.get("x", 0) + bbox.get("width", 0) > width_px:
-                        scale = width_px / max(1, bbox.get("x", 0) + bbox.get("width", 0))
-                    x1 = max(0, int(bbox["x"] * scale) - 4)
-                    y1 = max(0, int(bbox["y"] * scale) - 4)
-                    x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
-                    y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
-                    # Heavy red border (4 px)
-                    for offset in range(4):
-                        draw.rectangle(
-                            (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
-                            outline=(220, 38, 38, 255),
-                        )
-                    # Red arrow from upper-left margin pointing at the box
-                    arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
-                    arrow_head = (x1, y1)
-                    draw.line([arrow_tail, arrow_head], fill=(220, 38, 38, 255), width=4)
-                    # Arrow head as filled triangle
-                    import math
-                    angle = math.atan2(arrow_head[1] - arrow_tail[1],
-                                        arrow_head[0] - arrow_tail[0])
-                    head_len = 16
-                    head_angle = math.radians(28)
-                    p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
-                          arrow_head[1] - head_len * math.sin(angle - head_angle))
-                    p2 = (arrow_head[0] - head_len * math.cos(angle + head_angle),
-                          arrow_head[1] - head_len * math.sin(angle + head_angle))
-                    draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
+                # Most viewports render at scale 1, but high-DPI screens
+                # report a 2× framebuffer. Compare bbox to image dims and
+                # pick the plausible scale (1 or 2).
+                scale = 1.0
+                if bbox.get("x", 0) + bbox.get("width", 0) > width_px:
+                    scale = width_px / max(1, bbox.get("x", 0) + bbox.get("width", 0))
+                x1 = max(0, int(bbox["x"] * scale) - 4)
+                y1 = max(0, int(bbox["y"] * scale) - 4)
+                x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
+                y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
+                # Heavy red border (4 px) around the element
+                for offset in range(4):
+                    draw.rectangle(
+                        (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
+                        outline=(220, 38, 38, 255),
+                    )
+                # Red arrow from upper-left margin pointing AT the box
+                arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
+                arrow_head = (x1, y1)
+                draw.line([arrow_tail, arrow_head], fill=(220, 38, 38, 255), width=4)
+                import math
+                angle = math.atan2(arrow_head[1] - arrow_tail[1],
+                                    arrow_head[0] - arrow_tail[0])
+                head_len = 18
+                head_angle = math.radians(26)
+                p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
+                      arrow_head[1] - head_len * math.sin(angle - head_angle))
+                p2 = (arrow_head[0] - head_len * math.cos(angle + head_angle),
+                      arrow_head[1] - head_len * math.sin(angle + head_angle))
+                draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
 
-                # Caption banner across the top with the failure reason
-                caption = (comment or "Bug detected here").splitlines()[0][:160]
+                # Compact caption sticker NEAR the element (not a full
+                # banner across the whole page) so the screenshot stays
+                # readable as a screenshot of the actual UI.
+                caption = (comment or "Bug here").splitlines()[0][:140]
                 try:
-                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
                 except Exception:
                     font = ImageFont.load_default()
-                # Banner: full-width red bar, white text
-                banner_h = 32
-                draw.rectangle((0, 0, width_px, banner_h), fill=(220, 38, 38, 230))
-                draw.text((10, 6), "🐞 " + caption, fill=(255, 255, 255, 255), font=font)
+                # Measure caption to size the sticker
+                try:
+                    bb = draw.textbbox((0, 0), caption, font=font)
+                    cap_w, cap_h = bb[2] - bb[0], bb[3] - bb[1]
+                except Exception:
+                    cap_w, cap_h = len(caption) * 8, 16
+                pad = 8
+                sticker_w = cap_w + pad * 2
+                sticker_h = cap_h + pad * 2
+                # Place sticker just above the arrow tail; clamp to image
+                sx = max(8, min(width_px - sticker_w - 8, arrow_tail[0] - sticker_w // 2))
+                sy = max(8, arrow_tail[1] - sticker_h - 6)
+                draw.rectangle((sx, sy, sx + sticker_w, sy + sticker_h),
+                               fill=(220, 38, 38, 240))
+                draw.text((sx + pad, sy + pad), caption,
+                          fill=(255, 255, 255, 255), font=font)
 
                 img.convert("RGB").save(image_path, "PNG", optimize=True)
         except Exception as exc:  # pragma: no cover — annotation is best-effort
@@ -707,30 +741,36 @@ class AutomationRunner:
             _logger.debug("live: cannot write info.json: %s", exc)
 
     def _scroll_and_highlight(self, page, loc) -> None:
-        """Bring the target into view and flash a red outline so the user can
-        see which element the automation is about to interact with. No-op in
-        headless mode (where nobody is watching)."""
+        """Bring the target into view and flash a red outline. Active in
+        headed mode (so the operator sees what's being interacted with)
+        AND in headless mode when video recording is on (so the .webm is
+        legible). When neither is true, this is a quick scroll-only no-op.
+        """
         try:
             loc.scroll_into_view_if_needed(timeout=2000)
         except Exception:
             pass
-        if self.headless:
+        # Skip the highlight + delay only when there's nothing to capture
+        # — pure headless without video recording. That's the case where
+        # a flashing outline would just slow the run down with no benefit.
+        if self.headless and not self.record_video:
             return
-        # Raise the window in headed mode so the highlight is visible
-        # even if the IDE / Flask console grabbed focus.
+        if not self.headless:
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
         try:
-            page.bring_to_front()
-        except Exception:
-            pass
-        try:
-            # Highlight via inline style; revert shortly after.
+            # Brief red outline on the target element. Stays visible long
+            # enough for the camera (be it a real screen or Playwright's
+            # video recorder) to catch it before reverting.
             loc.evaluate(
                 "el => { const prev = el.style.outline; "
                 "el.style.outline = '3px solid #ff4d4f'; "
                 "el.style.outlineOffset = '2px'; "
-                "setTimeout(() => { el.style.outline = prev; }, 600); }"
+                "setTimeout(() => { el.style.outline = prev; }, 700); }"
             )
-            page.wait_for_timeout(120)
+            page.wait_for_timeout(180)
         except Exception:
             pass
 

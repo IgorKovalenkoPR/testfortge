@@ -268,42 +268,20 @@
             <label>{{ t.get('te_base_url', 'Base URL') }}</label>
             <input type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
                    placeholder="https://example.com">
-        </div>
-        <div class="form-group">
-            <label>{{ t.get('te_scope', 'Scope') }}</label>
-            <select name="scope">
-                <option value="all">{{ t.get('te_scope_all', 'All selected items') }}</option>
-                <option value="failed">{{ t.get('te_scope_failed', 'Re-run failed only') }}</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>{{ t.get('te_headless', 'Browser visibility') }}</label>
-            <select name="headless">
-                <option value="1">{{ t.get('te_headless_yes', 'Headless (no window)') }}</option>
-                <option value="0">{{ t.get('te_headless_no', 'Visible window (watch live)') }}</option>
-            </select>
             <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--color-text-muted,#888);">
-                {{ t.get('te_headless_hint',
-                   'Visible window requires a local deployment — on cloud servers the browser runs headless automatically and results are captured as screenshots / video.') }}
+                {{ t.get('te_base_url_hint',
+                   'Leave empty for a fast simulated run. Paste a URL to drive a real headless browser, capture screenshots, and auto-link any failures to bug reports.') }}
             </p>
         </div>
         <div class="form-group">
             <label>{{ t.get('te_record_video', 'Record video') }}</label>
             <select name="record_video">
                 <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
-                <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm per case (slower)') }}</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>{{ t.get('te_speed_mode', 'Speed mode') }}</label>
-            <select name="speed_mode">
-                <option value="fast" selected>{{ t.get('te_speed_fast', 'Fast — viewport screenshots, only after-each-step (default)') }}</option>
-                <option value="standard">{{ t.get('te_speed_std', 'Standard — viewport, before + after each step') }}</option>
-                <option value="thorough">{{ t.get('te_speed_thorough', 'Thorough — full-page screenshots, before + after, longer timeouts') }}</option>
+                <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm with visible click / scroll / redirect') }}</option>
             </select>
             <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--color-text-muted,#888);">
-                {{ t.get('te_speed_hint',
-                   'Fast mode is 2–4× faster than Thorough on long runs because each step writes one viewport screenshot instead of two full-page captures.') }}
+                {{ t.get('te_record_video_hint',
+                   'When on, every action is slowed and elements flash a red outline before being clicked so the .webm is legible.') }}
             </p>
         </div>
     </div>
