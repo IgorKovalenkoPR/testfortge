@@ -276,7 +276,14 @@ def register(app: Flask) -> None:
                       from engine.automation_qa import scripts_from_session
                       from engine.automation_runner import AutomationRunner
                       from routes.automation import STORAGE_ROOT
-                      scripts = scripts_from_session(items_data, base_url)
+                      # Honour the per-item selection. Without this filter
+                      # Playwright drives EVERY test case in the project,
+                      # ignoring whatever the operator unchecked in the UI.
+                      automation_items = (
+                          [it for it in items_data if it.get("id") in selected_ids]
+                          if selected_ids else items_data
+                      )
+                      scripts = scripts_from_session(automation_items, base_url)
                       runner = AutomationRunner(
                           storage_root=STORAGE_ROOT,
                           base_url=base_url,
@@ -295,18 +302,41 @@ def register(app: Flask) -> None:
                       # nested in each ScriptResult.steps[*].screenshot_after
                       # — extracting them here is what feeds the post-run
                       # gallery in templates/test_execution.html.
+                      import os as _os
                       for r in (getattr(auto_report, "scripts", []) or []):
                           cid = getattr(r, "tc_id", None) or getattr(r, "case_id", None)
                           if not cid:
                               continue
+                          # Only include screenshots that actually exist on
+                          # disk and are non-zero size — otherwise the post-
+                          # run gallery shows a broken-image icon. Empty
+                          # screenshots can happen when page.screenshot
+                          # raised mid-run (e.g. navigation interrupted).
                           shots = []
                           for step in (getattr(r, "steps", []) or []):
                               after = getattr(step, "screenshot_after", "") or ""
-                              if after:
-                                  shots.append(after)
+                              if not after:
+                                  continue
+                              abs_p = _os.path.join(STORAGE_ROOT, after.replace("/", _os.sep))
+                              try:
+                                  if _os.path.isfile(abs_p) and _os.path.getsize(abs_p) > 0:
+                                      shots.append(after)
+                              except OSError:
+                                  pass
+                          # Validate video too — Playwright finalises the
+                          # webm only on context close, so partial / failed
+                          # contexts can leave a 0-byte file.
+                          video = getattr(r, "video_path", "") or ""
+                          if video:
+                              abs_v = _os.path.join(STORAGE_ROOT, video.replace("/", _os.sep))
+                              try:
+                                  if not (_os.path.isfile(abs_v) and _os.path.getsize(abs_v) > 0):
+                                      video = ""
+                              except OSError:
+                                  video = ""
                           automation_assets[cid] = {
                               "status": getattr(r, "status", ""),
-                              "video": getattr(r, "video_path", "") or "",
+                              "video": video,
                               "screenshots": shots,
                               "duration_ms": getattr(r, "duration_ms", 0),
                           }
@@ -383,6 +413,23 @@ def register(app: Flask) -> None:
                           bug_dict["affects_version"] = affects_version
                       bug_dict["environment"] = environment
                       bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                      # Pull screenshots + video from the automation
+                      # evidence we collected for this exact case so the
+                      # bug carries reproduction artefacts. Each entry is
+                      # a path under STORAGE_ROOT served by
+                      # /automation/asset/<path>; templates resolve them
+                      # via url_for('automation_asset', path=p).
+                      linked = bug_dict.get("linked_item_id", "")
+                      ev = automation_assets.get(linked) if linked else None
+                      if ev:
+                          existing_atts = list(bug_dict.get("attachments") or [])
+                          for shot in (ev.get("screenshots") or []):
+                              if shot and shot not in existing_atts:
+                                  existing_atts.append(shot)
+                          v = ev.get("video")
+                          if v and v not in existing_atts:
+                              existing_atts.append(v)
+                          bug_dict["attachments"] = existing_atts
                       # Mirror to Postgres with execution context attached.
                       _persist_bug(bug_dict, source="execution",
                                    run_id=db_run_id)

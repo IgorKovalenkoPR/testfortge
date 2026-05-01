@@ -22,34 +22,69 @@ _logger = get_logger(__name__)
 # Retain automation run artefacts for this many days; older runs are
 # purged after each new run to keep /storage/automation_runs from growing
 # unbounded (each run can be many MB of screenshots + video).
-AUTOMATION_RUN_RETENTION_DAYS = int(os.environ.get("AUTOMATION_RUN_RETENTION_DAYS", "14"))
+# Render free tier has 512 MB RAM and ephemeral disk that fills fast on a
+# single TestForTge instance — the previous 14-day default surfaced as
+# 502 Bad Gateway after a handful of runs because gunicorn workers OOM'd
+# trying to evict cached assets. Default is now 1 day plus a hard cap on
+# the retained run count.
+AUTOMATION_RUN_RETENTION_DAYS = int(os.environ.get("AUTOMATION_RUN_RETENTION_DAYS", "1"))
+AUTOMATION_RUN_MAX_KEPT = int(os.environ.get("AUTOMATION_RUN_MAX_KEPT", "5"))
 
 
-def _purge_old_automation_runs(runs_root: str, max_age_days: int) -> int:
-    """Delete per-run directories under ``runs_root`` older than ``max_age_days``.
-
-    Returns the number of runs removed. Best-effort: failures are logged
+def _purge_old_automation_runs(runs_root: str, max_age_days: int,
+                                max_kept: int = 0) -> int:
+    """Delete per-run directories under ``runs_root`` that are either
+    older than ``max_age_days`` OR beyond the most-recent ``max_kept``
+    by mtime. Returns total removed. Best-effort: failures are logged
     but never raised, since retention cleanup should not block new runs.
+
+    The combined age + count cap is what keeps Render free-tier disk
+    from filling: a single full run with screenshots + video can land
+    at 50–200 MB, and free-tier ephemeral storage caps around 1 GB.
     """
-    if max_age_days <= 0 or not os.path.isdir(runs_root):
+    if not os.path.isdir(runs_root):
         return 0
-    cutoff = time.time() - (max_age_days * 86400)
     removed = 0
     try:
         entries = os.listdir(runs_root)
     except OSError as exc:
         _logger.warning("purge: cannot list %s: %s", runs_root, exc)
         return 0
+
+    # Score each run-dir by mtime so we can apply both retention rules.
+    runs = []
     for name in entries:
+        # The "_live" directory holds the polling mirror for the live
+        # view; never purge it as part of run-history cleanup.
+        if name == "_live":
+            continue
         path = os.path.join(runs_root, name)
         if not os.path.isdir(path):
             continue
         try:
-            if os.path.getmtime(path) < cutoff:
+            runs.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+
+    # 1) Age-based purge.
+    if max_age_days > 0:
+        cutoff = time.time() - (max_age_days * 86400)
+        keep = []
+        for mtime, path in runs:
+            if mtime < cutoff:
                 shutil.rmtree(path, ignore_errors=True)
                 removed += 1
-        except OSError as exc:
-            _logger.debug("purge: skip %s: %s", path, exc)
+            else:
+                keep.append((mtime, path))
+        runs = keep
+
+    # 2) Count-based purge — keep only the N most-recent.
+    if max_kept > 0 and len(runs) > max_kept:
+        runs.sort(key=lambda t: t[0], reverse=True)  # newest first
+        for _mtime, path in runs[max_kept:]:
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+
     if removed:
         _logger.info("purge: removed %d old automation run(s) from %s", removed, runs_root)
     return removed
@@ -170,7 +205,11 @@ class AutomationRunner:
 
         # Retention cleanup (fire-and-forget; never blocks the run on error).
         try:
-            _purge_old_automation_runs(runs_root, AUTOMATION_RUN_RETENTION_DAYS)
+            _purge_old_automation_runs(
+                runs_root,
+                AUTOMATION_RUN_RETENTION_DAYS,
+                AUTOMATION_RUN_MAX_KEPT,
+            )
         except Exception as exc:
             _logger.debug("retention purge skipped: %s", exc)
 
@@ -367,6 +406,11 @@ class AutomationRunner:
         t0 = time.time()
         before_path = os.path.join(tc_dir, f"step_{idx:02d}_before.png")
         after_path = os.path.join(tc_dir, f"step_{idx:02d}_after.png")
+        # Bounding box of the target element — captured early so we can
+        # annotate the after-screenshot with a red rectangle + arrow if
+        # the step fails. None for steps that don't address an element
+        # (goto, expect_text, wait, ...).
+        target_bbox = None
 
         try:
             # "Before" screenshots are optional: in fast mode we skip them
@@ -399,15 +443,22 @@ class AutomationRunner:
                         f"{target_url!r}"
                     )
                 page.goto(target_url, wait_until="domcontentloaded")
+                # Intermediate live frame so the operator sees the page
+                # arrive on the live tab, not just after the whole step.
+                self._live_pump(page, tc_dir, idx, "nav")
                 # In headed mode perform a visible scroll so the user sees page activity
                 self._visible_scroll(page)
             elif step.action == "click":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_click")
                 loc.click()
+                self._live_pump(page, tc_dir, idx, "post_click")
             elif step.action == "fill":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
                 # Clear then fill — Playwright's fill() is instant; use type() in
                 # headed mode so the user sees keystrokes.
                 loc.fill("")
@@ -415,14 +466,19 @@ class AutomationRunner:
                     loc.fill(step.value)
                 else:
                     loc.type(step.value, delay=40)
+                self._live_pump(page, tc_dir, idx, "post_fill")
             elif step.action == "select":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
                 loc.select_option(step.value)
+                self._live_pump(page, tc_dir, idx, "post_select")
             elif step.action == "check":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
                 loc.check()
+                self._live_pump(page, tc_dir, idx, "post_check")
             elif step.action == "expect_text":
                 page.wait_for_timeout(150)
                 if step.value:
@@ -430,7 +486,16 @@ class AutomationRunner:
                     if step.value.lower() not in content.lower():
                         raise AssertionError(f"Expected text not found: {step.value!r}")
             elif step.action == "wait":
-                page.wait_for_timeout(int(float(step.value or "2")) * 1000)
+                # Long waits get periodic live frames so the operator
+                # doesn't think the bot is frozen.
+                wait_ms = int(float(step.value or "2")) * 1000
+                pumped = 0
+                while pumped + 1000 < wait_ms:
+                    page.wait_for_timeout(1000)
+                    self._live_pump(page, tc_dir, idx, f"wait_{pumped // 1000}s")
+                    pumped += 1000
+                if wait_ms > pumped:
+                    page.wait_for_timeout(wait_ms - pumped)
 
             self._screenshot(page, after_path)
             sr.screenshot_after = _rel_url(after_path, self.storage_root)
@@ -442,6 +507,7 @@ class AutomationRunner:
             sr.status = "failed"
             sr.comment = str(e)
             self._screenshot(page, after_path)
+            self._annotate_failure(after_path, target_bbox, sr.comment)
             sr.screenshot_after = _rel_url(after_path, self.storage_root)
         except Exception as e:
             msg = str(e)
@@ -453,12 +519,130 @@ class AutomationRunner:
                 sr.comment = f"{type(e).__name__}: {msg.splitlines()[0][:200]}"
             try:
                 self._screenshot(page, after_path)
+                self._annotate_failure(after_path, target_bbox, sr.comment)
                 sr.screenshot_after = _rel_url(after_path, self.storage_root)
             except Exception:
                 pass
 
         sr.duration_ms = int((time.time() - t0) * 1000)
         return sr
+
+    def _live_pump(self, page, tc_dir: str, idx: int, label: str) -> None:
+        """Cheap viewport screenshot pushed only to the live mirror so
+        the /test-execution/live page updates between Playwright actions.
+        Doesn't get added to the per-step gallery — each call writes to
+        a single rolling temp path that's atomically renamed onto
+        latest.png. Throttled to one frame per 700 ms so a fast step
+        loop doesn't drown the disk.
+        """
+        live_dir = getattr(self, "_live_dir", "")
+        if not live_dir:
+            return
+        now = time.time()
+        last = getattr(self, "_live_last_pump", 0)
+        if now - last < 0.7:
+            return
+        self._live_last_pump = now
+        try:
+            tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.png")
+            page.screenshot(path=tmp_shot, full_page=False, timeout=1500)
+            os.makedirs(live_dir, exist_ok=True)
+            dst = os.path.join(live_dir, "latest.png")
+            tmp = dst + ".tmp"
+            shutil.copyfile(tmp_shot, tmp)
+            os.replace(tmp, dst)
+            try:
+                os.remove(tmp_shot)
+            except OSError:
+                pass
+            self._write_live_info(status="running")
+        except Exception as exc:  # pragma: no cover — best-effort
+            _logger.debug("live pump: %s", exc)
+
+    @staticmethod
+    def _safe_bbox(loc):
+        """Read locator.bounding_box() defensively. Returns dict
+        {x, y, width, height} in CSS pixels, or None if not measurable
+        (off-screen, detached, action raised before Playwright resolved
+        the selector)."""
+        try:
+            bbox = loc.bounding_box(timeout=500)
+            if bbox and bbox.get("width", 0) > 0 and bbox.get("height", 0) > 0:
+                return bbox
+        except Exception:
+            pass
+        return None
+
+    def _annotate_failure(self, image_path: str, bbox: dict | None, comment: str) -> None:
+        """Overlay a red bounding box + arrow + caption onto a failure
+        screenshot so the operator can see *where* the bug is at a
+        glance. No-op when Pillow isn't available or bbox is unknown.
+        Best-effort — never raises.
+
+        Note: Playwright's bbox is in CSS pixels, but a viewport
+        screenshot is in device pixels. We honour the page's device
+        scale factor when computing the on-image rectangle, falling
+        back to 1.0 when the value isn't available.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except Exception:
+            return
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert("RGBA")
+                draw = ImageDraw.Draw(img)
+                width_px, height_px = img.size
+
+                # Red rectangle around the offending element
+                if bbox:
+                    # Most viewports render at scale 1, but high-DPI screens
+                    # report a 2× framebuffer. We don't have the page object
+                    # here so just compare bbox to image dims and pick the
+                    # plausible scale (1 or 2).
+                    scale = 1.0
+                    if bbox.get("x", 0) + bbox.get("width", 0) > width_px:
+                        scale = width_px / max(1, bbox.get("x", 0) + bbox.get("width", 0))
+                    x1 = max(0, int(bbox["x"] * scale) - 4)
+                    y1 = max(0, int(bbox["y"] * scale) - 4)
+                    x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
+                    y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
+                    # Heavy red border (4 px)
+                    for offset in range(4):
+                        draw.rectangle(
+                            (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
+                            outline=(220, 38, 38, 255),
+                        )
+                    # Red arrow from upper-left margin pointing at the box
+                    arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
+                    arrow_head = (x1, y1)
+                    draw.line([arrow_tail, arrow_head], fill=(220, 38, 38, 255), width=4)
+                    # Arrow head as filled triangle
+                    import math
+                    angle = math.atan2(arrow_head[1] - arrow_tail[1],
+                                        arrow_head[0] - arrow_tail[0])
+                    head_len = 16
+                    head_angle = math.radians(28)
+                    p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
+                          arrow_head[1] - head_len * math.sin(angle - head_angle))
+                    p2 = (arrow_head[0] - head_len * math.cos(angle + head_angle),
+                          arrow_head[1] - head_len * math.sin(angle + head_angle))
+                    draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
+
+                # Caption banner across the top with the failure reason
+                caption = (comment or "Bug detected here").splitlines()[0][:160]
+                try:
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
+                except Exception:
+                    font = ImageFont.load_default()
+                # Banner: full-width red bar, white text
+                banner_h = 32
+                draw.rectangle((0, 0, width_px, banner_h), fill=(220, 38, 38, 230))
+                draw.text((10, 6), "🐞 " + caption, fill=(255, 255, 255, 255), font=font)
+
+                img.convert("RGB").save(image_path, "PNG", optimize=True)
+        except Exception as exc:  # pragma: no cover — annotation is best-effort
+            _logger.debug("annotate failure: %s", exc)
 
     def _screenshot(self, page, path: str) -> None:
         try:
