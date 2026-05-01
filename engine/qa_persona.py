@@ -1536,15 +1536,105 @@ def _path_label(url: str) -> str:
 
 
 def _form_label(form: dict) -> str:
-    """Describe a form by its action or fields when no other anchor exists."""
-    action = form.get("action") or ""
+    """Describe a form using human-readable signals: nearby heading,
+    submit-button text, field placeholders, and a sanitised action.
+    Falls back to a generic 'form (field, field, field)' descriptor
+    when nothing better is available.
+
+    History note: we used to embed the raw URL action straight into
+    the label, which surfaced as cryptic TC names like
+    'Verify that the form @ /#wpcf7-f14405-o1 on qarea.com…'. That
+    fragment is the WordPress Contact Form 7 instance ID — useful
+    for selecting the element, useless as a human description. The
+    rewrite below strips those, looks for a real heading or submit
+    button text first, and only uses the URL as a last resort
+    (still sanitised, no instance IDs / query strings / dashes).
+    """
+    # 1) Heading captured by the parser (most semantic).
+    heading = (form.get("heading") or "").strip()
+    if heading:
+        return _humanise(heading) + " form"
+
+    # 2) Submit-button text — usually the form's purpose ("Subscribe",
+    #    "Get a quote", "Sign up").
+    submit = (form.get("submit_text") or "").strip()
+    if submit and not _looks_generic_submit(submit):
+        return _humanise(submit) + " form"
+
+    # 3) Field placeholders — describe the form by what it asks for.
+    placeholders = []
+    for f in (form.get("fields") or []):
+        if f.get("type") in ("hidden", "submit", "button"):
+            continue
+        for key in ("placeholder", "label", "name"):
+            val = (f.get(key) or "").strip()
+            if val and not _looks_like_id(val):
+                placeholders.append(_humanise(val))
+                break
+    placeholders = [p for p in placeholders if p][:3]
+    if placeholders:
+        return f"form ({', '.join(placeholders)})"
+
+    # 4) Sanitised action as last resort.
+    action = (form.get("action") or "").strip()
     if action:
-        a = re.sub(r"^https?://[^/]+", "", action).strip("/") or "root"
-        return f"form @ /{a}"
-    names = [(f.get("name") or f.get("placeholder") or "").strip()
-             for f in (form.get("fields") or [])]
-    names = [n for n in names if n][:3]
-    return f"form ({', '.join(names) or '?'})"
+        cleaned = _sanitise_action(action)
+        if cleaned:
+            return f"{cleaned} form"
+
+    return "form"
+
+
+# ── Helpers used by _form_label ───────────────────────────────────
+
+# Patterns that look like CSS-generated instance IDs we never want
+# to surface as part of a human-readable form name.
+_INSTANCE_ID_RE = re.compile(
+    r"#?(wpcf7-f\d+-o\d+|gform_\d+|elementor-\w+|"
+    r"[A-Fa-f0-9]{8,}|"           # hex blobs
+    r"\w*-?id-?\d+\w*)",
+    re.IGNORECASE,
+)
+
+
+def _sanitise_action(action: str) -> str:
+    """Turn '/contact#wpcf7-f14405-o1?foo=bar' into 'contact'.
+    Strips host, query string, fragment, and instance-id suffixes.
+    Returns '' when nothing meaningful survives."""
+    s = re.sub(r"^https?://[^/]+", "", action).strip()
+    s = s.split("?", 1)[0]                   # drop query
+    s = s.split("#", 1)[0]                   # drop fragment
+    s = _INSTANCE_ID_RE.sub("", s)           # drop CF7-style IDs
+    s = s.strip(" /")
+    if not s or s == "root":
+        return ""
+    # Take the last meaningful path segment ("/about/contact" → "contact")
+    last = s.split("/")[-1]
+    return _humanise(last)
+
+
+def _looks_like_id(s: str) -> bool:
+    """Heuristic: 'wpcf7-f14405-o1', 'gform_1', UUID-like blobs."""
+    return bool(_INSTANCE_ID_RE.search(s)) or len(s) > 60
+
+
+_GENERIC_SUBMIT_TEXTS = {
+    "submit", "send", "go", "ok", "next", "continue", "click here",
+    "відправити", "надіслати", "далі",
+}
+
+
+def _looks_generic_submit(text: str) -> bool:
+    return text.strip().lower() in _GENERIC_SUBMIT_TEXTS
+
+
+def _humanise(s: str) -> str:
+    """'wpcf7-f14405' → 'wpcf7 f14405'; 'first_name' → 'first name'.
+    Caps first letter, strips trailing punctuation."""
+    s = re.sub(r"[-_]+", " ", s).strip()
+    s = re.sub(r"\s+", " ", s)
+    s = s.strip(":;,.!? ")
+    return s
 
 
 def _seo_test_cases() -> list[TCTemplate]:

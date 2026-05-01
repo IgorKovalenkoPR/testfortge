@@ -200,6 +200,8 @@ class _PageParser(HTMLParser):
                 val = attr_dict.get("value", "")
                 if val:
                     self.buttons.append(val)
+                    if self._current_form is not None and not self._current_form.get("submit_text"):
+                        self._current_form["submit_text"] = val
             if self._current_form is not None:
                 self._current_form["fields"].append({
                     "name": attr_dict.get("name", ""),
@@ -221,10 +223,16 @@ class _PageParser(HTMLParser):
                     "placeholder": "",
                 })
         elif tag_lower == "form":
+            # Capture human context the form sits inside so qa_persona
+            # can build readable TC names instead of falling back to
+            # the URL action (which on WordPress / Contact Form 7 is
+            # cryptic — '/contact#wpcf7-f14405-o1').
             self._current_form = {
                 "action": attr_dict.get("action", ""),
                 "method": attr_dict.get("method", "GET").upper(),
                 "fields": [],
+                "heading": (self.h1 or (self.headings[-1] if self.headings else "") or self.title),
+                "submit_text": "",
             }
         elif tag_lower == "img":
             self.images_count += 1
@@ -255,8 +263,14 @@ class _PageParser(HTMLParser):
                 self.nav_links.append(self._current_text.strip())
             self._in_a = False
         elif tag_lower == "button":
-            if self._current_text.strip():
-                self.buttons.append(self._current_text.strip())
+            txt = self._current_text.strip()
+            if txt:
+                self.buttons.append(txt)
+                # Attach as submit_text for the form we're currently
+                # inside, if any — the parser feeds qa_persona's
+                # _form_label which prefers this over the URL action.
+                if self._current_form is not None and not self._current_form.get("submit_text"):
+                    self._current_form["submit_text"] = txt
             self._in_button = False
         elif tag_lower == "form":
             if self._current_form is not None:

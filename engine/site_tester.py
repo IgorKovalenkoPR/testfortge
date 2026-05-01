@@ -144,11 +144,23 @@ class _TestPageParser(HTMLParser):
                     "parent_link": self._a_href if self._in_a else "",
                 })
         elif t == "form":
+            # Capture nearby heading + carry submit-button text so
+            # qa_persona._form_label can produce readable TC names
+            # instead of cryptic '/contact#wpcf7-f14405-o1' fragments.
+            recent_heading = ""
+            try:
+                heads = getattr(self, "headings", []) or []
+                if heads:
+                    recent_heading = heads[-1][1] if isinstance(heads[-1], tuple) else heads[-1]
+            except Exception:
+                pass
             self._current_form = {
                 "action": a.get("action", ""),
                 "method": a.get("method", "GET").upper(),
                 "fields": [],
                 "has_password": False,
+                "heading": (getattr(self, "h1", "") or recent_heading or getattr(self, "title", "")),
+                "submit_text": "",
             }
         elif t == "input":
             itype = a.get("type", "text").lower()
@@ -158,6 +170,10 @@ class _TestPageParser(HTMLParser):
                 self.has_search_input = True
             if itype == "password" and self._current_form is not None:
                 self._current_form["has_password"] = True
+            if itype in ("submit", "button") and self._current_form is not None:
+                val = a.get("value", "").strip()
+                if val and not self._current_form.get("submit_text"):
+                    self._current_form["submit_text"] = val
             if self._current_form is not None and itype not in ("hidden",):
                 self._current_form["fields"].append({
                     "name": a.get("name", ""),
@@ -291,7 +307,12 @@ class _TestPageParser(HTMLParser):
             self._in_a = False
         elif t == "button":
             if self._in_button and self._btn_text.strip():
-                self.buttons.append({"text": self._btn_text.strip(), "type": "button"})
+                txt = self._btn_text.strip()
+                self.buttons.append({"text": txt, "type": "button"})
+                # If we're inside a form, this button is its submit
+                # control — feeds qa_persona._form_label.
+                if self._current_form is not None and not self._current_form.get("submit_text"):
+                    self._current_form["submit_text"] = txt
             self._in_button = False
         elif t == "form":
             if self._current_form is not None:
