@@ -316,10 +316,21 @@
     <div class="te-env-panel" data-env="web">
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_platform', 'Platform') }}</label>
-                <select name="web_platform">
-                    {% for p in web_platforms %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                <label>{{ t.get('te_os_version_label', 'OS / Version') }}</label>
+                {# Versioned selector — Feature #5. Each <optgroup> is an
+                   OS family; selecting "Windows 11" / "macOS Sonoma (14)"
+                   drives the engine matrix on the backend so the run uses
+                   the matching Playwright engine + UA + viewport. The
+                   legacy web_platform field is still posted (hidden) so
+                   older code paths keep working. #}
+                <select name="web_os_version" id="web_os_version">
+                    {% for family, versions in web_platforms_versioned.items() %}
+                    <optgroup label="{{ family }}">
+                        {% for v in versions %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+                    </optgroup>
+                    {% endfor %}
                 </select>
+                <input type="hidden" name="web_platform" id="web_platform_hidden" value="Windows">
             </div>
             <div class="form-group">
                 <label>{{ t.get('te_browser', 'Browser') }}</label>
@@ -338,10 +349,15 @@
     <div class="te-env-panel" data-env="mobile_web" hidden>
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_device_os', 'Device OS') }}</label>
-                <select name="mw_os">
-                    {% for o in mobile_web_oses %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+                <label>{{ t.get('te_mw_os_version', 'OS / Version') }}</label>
+                <select name="mw_os_version" id="mw_os_version">
+                    {% for family, versions in mobile_os_versions.items() %}
+                    <optgroup label="{{ family }}">
+                        {% for v in versions %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+                    </optgroup>
+                    {% endfor %}
                 </select>
+                <input type="hidden" name="mw_os" id="mw_os_hidden" value="iOS">
             </div>
             <div class="form-group">
                 <label>{{ t.get('te_browser', 'Browser') }}</label>
@@ -410,6 +426,32 @@
         </div>
     </div>
 </div>
+
+
+<script>
+/* Mirror the selected optgroup label (OS family) into the hidden
+   web_platform / mw_os fields so backward-compat callers — env-desc
+   builders, exports, history rows — keep seeing the coarse family
+   even though the user picked a specific OS version. Runs once on
+   load and on every change. */
+(function () {
+    function mirror(selectId, hiddenId) {
+        var sel = document.getElementById(selectId);
+        var hid = document.getElementById(hiddenId);
+        if (!sel || !hid) return;
+        function sync() {
+            var opt = sel.options[sel.selectedIndex];
+            if (opt && opt.parentNode && opt.parentNode.tagName === 'OPTGROUP') {
+                hid.value = opt.parentNode.label || hid.value;
+            }
+        }
+        sync();
+        sel.addEventListener('change', sync);
+    }
+    mirror('web_os_version', 'web_platform_hidden');
+    mirror('mw_os_version',  'mw_os_hidden');
+})();
+</script>
 
 {# ── Test Account / Credentials ────────────────────────────────
    Reinstated as part of the merger with Automation QA. When test
@@ -887,3 +929,4 @@ toggleItemList();
 @media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
 </style>
 {% endblock %}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             

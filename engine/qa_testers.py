@@ -182,6 +182,299 @@ ANDROID_DEVICES: list[str] = [
 ]
 
 
+# ─────────────────────────────────────────────────────────────────
+# Versioned platform map (Bug-fix #5)
+# ─────────────────────────────────────────────────────────────────
+# WEB_PLATFORMS above is the flat list shipped before; many call-sites
+# (history, exports, backfilled DB rows) still expect it. The dict
+# below adds release-level granularity used by the new OS-version
+# selector on the Test Execution form. Order matters — it determines
+# the order that options appear inside each optgroup.
+WEB_PLATFORMS_VERSIONED: dict[str, list[str]] = {
+    "Windows": ["Windows 11", "Windows 10"],
+    "macOS":   ["macOS Sequoia (15)", "macOS Sonoma (14)",
+                "macOS Ventura (13)", "macOS Monterey (12)"],
+    "Linux":   ["Ubuntu 24.04", "Ubuntu 22.04", "Fedora 40", "Debian 12"],
+    "ChromeOS":["ChromeOS"],
+}
+
+MOBILE_OS_VERSIONS: dict[str, list[str]] = {
+    "iOS":     ["iOS 18", "iOS 17", "iOS 16"],
+    "Android": ["Android 15", "Android 14", "Android 13", "Android 12"],
+}
+
+# Flat list of "OS — version" strings the form selector renders. We
+# emit the optgroup label inside the option so the route can resolve
+# both the family and the exact version from the single posted value.
+WEB_OS_VERSIONS_FLAT: list[tuple[str, str]] = [
+    (family, version)
+    for family, versions in WEB_PLATFORMS_VERSIONED.items()
+    for version in versions
+]
+
+
+# ─────────────────────────────────────────────────────────────────
+# Engine × Platform × Browser matrix (Feature #6)
+# ─────────────────────────────────────────────────────────────────
+# Render free tier runs Linux only — we cannot summon a real macOS
+# host. What we CAN do reproducibly is drive the right Playwright
+# engine (Chromium / Firefox / WebKit) and pin a real-world UA +
+# viewport for the chosen (OS version, browser) pair, so any rendering
+# differences that surface in WebKit-only or Firefox-only bugs DO get
+# caught, and the produced screenshots/videos honour the OS look the
+# tester picked. Matrix below is consulted by AutomationRunner.
+#
+# Fields:
+#   engine    — Playwright engine name; valid: "chromium" | "firefox" | "webkit"
+#   ua        — User-Agent string sent on every request, matches the
+#               browser+OS the tester said they wanted
+#   viewport  — (width, height) in CSS pixels. Picked to match the
+#               typical default for that OS+browser combo.
+#
+# Lookup precedence (most → least specific):
+#   1. exact (os_version, browser) match
+#   2. (os_family, browser)   match — e.g. ("Windows", "Chrome") falls
+#      back from ("Windows 10", "Chrome")
+#   3. ("*", browser)         — engine-only fallback by browser
+#   4. PLATFORM_BROWSER_DEFAULT — chromium / generic UA / 1280x800
+#
+# UAs are 2025-era release strings. Where Edge/Brave share the
+# Chromium engine, we still ship distinct UAs so any UA-sniffing the
+# site under test does behaves correctly.
+
+PLATFORM_BROWSER_DEFAULT: dict = {
+    "engine": "chromium",
+    "ua": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+    "viewport": (1280, 800),
+}
+
+PLATFORM_BROWSER_MATRIX: dict[tuple[str, str], dict] = {
+    # ── Windows ──────────────────────────────────────────────
+    ("Windows 11", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 11", "Microsoft Edge"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 11", "Firefox"): {
+        "engine": "firefox",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) "
+               "Gecko/20100101 Firefox/130.0"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 11", "Opera"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 OPR/123.0.0.0"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 11", "Brave"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Brave/138"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 10", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 10", "Microsoft Edge"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"),
+        "viewport": (1920, 1080),
+    },
+    ("Windows 10", "Firefox"): {
+        "engine": "firefox",
+        "ua": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) "
+               "Gecko/20100101 Firefox/130.0"),
+        "viewport": (1920, 1080),
+    },
+    # ── macOS ────────────────────────────────────────────────
+    ("macOS Sequoia (15)", "Safari"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Sonoma (14)", "Safari"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Ventura (13)", "Safari"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Monterey (12)", "Safari"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Safari/605.1.15"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Sequoia (15)", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Sonoma (14)", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1680, 1050),
+    },
+    ("macOS Sonoma (14)", "Firefox"): {
+        "engine": "firefox",
+        "ua": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:130.0) "
+               "Gecko/20100101 Firefox/130.0"),
+        "viewport": (1680, 1050),
+    },
+    # ── Linux ────────────────────────────────────────────────
+    ("Ubuntu 24.04", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1366, 768),
+    },
+    ("Ubuntu 24.04", "Firefox"): {
+        "engine": "firefox",
+        "ua": ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:130.0) "
+               "Gecko/20100101 Firefox/130.0"),
+        "viewport": (1366, 768),
+    },
+    ("Ubuntu 22.04", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1366, 768),
+    },
+    ("Ubuntu 22.04", "Firefox"): {
+        "engine": "firefox",
+        "ua": ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:130.0) "
+               "Gecko/20100101 Firefox/130.0"),
+        "viewport": (1366, 768),
+    },
+    # ── ChromeOS ─────────────────────────────────────────────
+    ("ChromeOS", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+        "viewport": (1366, 768),
+    },
+    # ── Mobile (Mobile Web env) ──────────────────────────────
+    ("iOS 18", "Safari (iOS)"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+               "Version/18.0 Mobile/15E148 Safari/604.1"),
+        "viewport": (390, 844),
+    },
+    ("iOS 17", "Safari (iOS)"): {
+        "engine": "webkit",
+        "ua": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
+               "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+               "Version/17.4 Mobile/15E148 Safari/604.1"),
+        "viewport": (390, 844),
+    },
+    ("Android 15", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36"),
+        "viewport": (412, 915),
+    },
+    ("Android 14", "Chrome"): {
+        "engine": "chromium",
+        "ua": ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36"),
+        "viewport": (412, 915),
+    },
+}
+
+# Family-level fallbacks (used when an exact (version, browser) row is
+# missing, so newly-added OS versions still resolve to a sensible UA).
+PLATFORM_BROWSER_FAMILY: dict[tuple[str, str], dict] = {
+    ("Windows", "Chrome"):           PLATFORM_BROWSER_MATRIX[("Windows 11", "Chrome")],
+    ("Windows", "Microsoft Edge"):   PLATFORM_BROWSER_MATRIX[("Windows 11", "Microsoft Edge")],
+    ("Windows", "Firefox"):          PLATFORM_BROWSER_MATRIX[("Windows 11", "Firefox")],
+    ("Windows", "Opera"):            PLATFORM_BROWSER_MATRIX[("Windows 11", "Opera")],
+    ("Windows", "Brave"):            PLATFORM_BROWSER_MATRIX[("Windows 11", "Brave")],
+    ("Windows", "Safari"):           PLATFORM_BROWSER_MATRIX[("Windows 11", "Chrome")],
+    ("macOS",   "Safari"):           PLATFORM_BROWSER_MATRIX[("macOS Sonoma (14)", "Safari")],
+    ("macOS",   "Chrome"):           PLATFORM_BROWSER_MATRIX[("macOS Sonoma (14)", "Chrome")],
+    ("macOS",   "Firefox"):          PLATFORM_BROWSER_MATRIX[("macOS Sonoma (14)", "Firefox")],
+    ("macOS",   "Microsoft Edge"):   PLATFORM_BROWSER_MATRIX[("macOS Sonoma (14)", "Chrome")],
+    ("Linux",   "Chrome"):           PLATFORM_BROWSER_MATRIX[("Ubuntu 24.04", "Chrome")],
+    ("Linux",   "Firefox"):          PLATFORM_BROWSER_MATRIX[("Ubuntu 24.04", "Firefox")],
+    ("ChromeOS", "Chrome"):          PLATFORM_BROWSER_MATRIX[("ChromeOS", "Chrome")],
+    ("iOS",     "Safari (iOS)"):     PLATFORM_BROWSER_MATRIX[("iOS 18", "Safari (iOS)")],
+    ("iOS",     "Chrome"):           PLATFORM_BROWSER_MATRIX[("iOS 18", "Safari (iOS)")],
+    ("Android", "Chrome"):           PLATFORM_BROWSER_MATRIX[("Android 15", "Chrome")],
+    ("Android", "Microsoft Edge"):   PLATFORM_BROWSER_MATRIX[("Android 15", "Chrome")],
+}
+
+
+def resolve_platform_browser(os_version: str, browser: str) -> dict:
+    """Look up engine / UA / viewport for the chosen (os_version, browser).
+
+    Falls back from the exact match to the OS family, then to the
+    chromium default. Always returns a dict — never raises.
+    """
+    if not os_version and not browser:
+        return dict(PLATFORM_BROWSER_DEFAULT)
+    os_version = (os_version or "").strip()
+    browser = (browser or "").strip() or "Chrome"
+
+    # 1) exact
+    exact = PLATFORM_BROWSER_MATRIX.get((os_version, browser))
+    if exact:
+        return dict(exact)
+
+    # 2) family
+    family = ""
+    for fam, versions in WEB_PLATFORMS_VERSIONED.items():
+        if os_version in versions:
+            family = fam
+            break
+    if not family:
+        for fam, versions in MOBILE_OS_VERSIONS.items():
+            if os_version in versions:
+                family = fam
+                break
+    if family:
+        fam_hit = PLATFORM_BROWSER_FAMILY.get((family, browser))
+        if fam_hit:
+            return dict(fam_hit)
+
+    # 2b) Prefix family — handles brand-new OS versions that aren't yet
+    # in WEB_PLATFORMS_VERSIONED but still announce a known family in
+    # their string ("Windows 99" -> "Windows", "macOS Tahoe" -> "macOS").
+    # Without this, every fresh OS release looked like a Linux Chrome
+    # session because it landed in PLATFORM_BROWSER_DEFAULT.
+    lowered = os_version.lower()
+    for fam in list(WEB_PLATFORMS_VERSIONED) + list(MOBILE_OS_VERSIONS):
+        if lowered.startswith(fam.lower()):
+            fam_hit = PLATFORM_BROWSER_FAMILY.get((fam, browser))
+            if fam_hit:
+                return dict(fam_hit)
+            break
+
+    # 3) plain default
+    return dict(PLATFORM_BROWSER_DEFAULT)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 5. Test Execution Status Constants
 # ═══════════════════════════════════════════════════════════════════

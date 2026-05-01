@@ -170,12 +170,33 @@ class AutomationRunner:
                  credentials: TestCredentials | None = None,
                  # Speed knobs:
                  screenshot_full_page: bool = False,
-                 screenshot_before_steps: bool = False):
+                 screenshot_before_steps: bool = False,
+                 # Feature #6 — Engine × Platform × Browser matrix.
+                 # When a row from PLATFORM_BROWSER_MATRIX is supplied,
+                 # the runner picks the matching Playwright engine
+                 # (chromium / firefox / webkit), sets a real-world UA
+                 # for the chosen OS+browser combo, and pins the
+                 # viewport so screenshots/videos honour what the
+                 # tester picked. All three default to None so existing
+                 # call-sites that don't care about the matrix keep
+                 # working unchanged.
+                 engine_kind: str | None = None,
+                 user_agent: str | None = None,
+                 viewport_override: tuple[int, int] | None = None):
         self.storage_root = storage_root
         self.base_url = base_url
         self.headless = headless
-        self.viewport = viewport
+        # When the engine matrix supplies a viewport, it wins over the
+        # generic 1280x800 default (Win 11 desktop -> 1920x1080,
+        # mobile -> 390x844, etc.).
+        self.viewport = viewport_override or viewport
         self.record_video = record_video
+        # Engine matrix — None means "use chromium with no UA override",
+        # which preserves pre-#6 behaviour.
+        self.engine_kind = (engine_kind or "chromium").strip().lower()
+        if self.engine_kind not in ("chromium", "firefox", "webkit"):
+            self.engine_kind = "chromium"
+        self.user_agent = user_agent or ""
         # Element actions (click, fill, expect_text) get the short
         # default_timeout (3 s is enough for any element that's already
         # in the DOM). Page navigations need a separate, longer budget —
@@ -297,25 +318,25 @@ class AutomationRunner:
             ]
 
         _logger.info(
-            "automation: launching chromium (headless=%s, slow_mo=%dms, "
-            "step_pause=%dms, scripts=%d, base_url=%s)",
-            self.headless, self.slow_mo_ms, self.step_pause_ms,
+            "automation: launching %s (headless=%s, slow_mo=%dms, "
+            "step_pause=%dms, viewport=%dx%d, scripts=%d, base_url=%s, ua=%s)",
+            self.engine_kind, self.headless, self.slow_mo_ms,
+            self.step_pause_ms, self.viewport[0], self.viewport[1],
             len(scripts), self.base_url or "<none>",
+            (self.user_agent[:60] + "...") if len(self.user_agent) > 60 else (self.user_agent or "<default>"),
         )
 
         with sync_playwright() as p:
-            # Headed mode (headless=False) requires a real display server.
-            # On cloud / CI environments (Render, GitHub Actions, Docker
-            # without Xvfb) there is no display, so the launch raises an
-            # error like "cannot open display" or "Failed to launch".
-            # We catch that specific failure and fall back to headless so
-            # automation still produces screenshots / video — the only
-            # thing missing is the live window on the operator's screen.
+            # Pick the engine the matrix asked for. Firefox / WebKit
+            # don't accept Chrome's --start-maximized / --disable-blink
+            # flags, so we only pass them when launching chromium.
+            engine_obj = getattr(p, self.engine_kind, p.chromium)
+            engine_args = launch_args if self.engine_kind == "chromium" else []
             try:
-                browser = p.chromium.launch(
+                browser = engine_obj.launch(
                     headless=self.headless,
                     slow_mo=self.slow_mo_ms,
-                    args=launch_args,
+                    args=engine_args,
                 )
             except Exception as launch_exc:
                 if not self.headless:
@@ -328,10 +349,14 @@ class AutomationRunner:
                     self.slow_mo_ms = 0
                     self.step_pause_ms = 0
                     report.headless = True
-                    browser = p.chromium.launch(
+                    # Headless retry stays on the chosen engine so a
+                    # WebKit-only / Firefox-only bug still surfaces.
+                    extra_args = (["--no-sandbox", "--disable-dev-shm-usage"]
+                                  if self.engine_kind == "chromium" else [])
+                    browser = engine_obj.launch(
                         headless=True,
                         slow_mo=0,
-                        args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        args=extra_args,
                     )
                 else:
                     raise
@@ -382,6 +407,12 @@ class AutomationRunner:
             if self.record_video:
                 ctx_kwargs["record_video_dir"] = tc_dir
                 ctx_kwargs["record_video_size"] = {"width": 1280, "height": 800}
+        # Pin the matrix-supplied UA so the site under test sees the
+        # browser+OS the tester actually picked. Without this, every
+        # run on Render's Linux host advertised a Linux-Chrome UA even
+        # if the operator selected macOS Safari.
+        if self.user_agent:
+            ctx_kwargs["user_agent"] = self.user_agent
 
         context = browser.new_context(**ctx_kwargs)
         page = context.new_page()

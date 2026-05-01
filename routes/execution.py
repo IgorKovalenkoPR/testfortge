@@ -20,6 +20,9 @@ from engine.qa_testers import (
     SCREEN_SIZES, TESTING_TYPES,
     WEB_PLATFORMS, WEB_BROWSERS, MOBILE_WEB_OSES, MOBILE_WEB_BROWSERS,
     MOBILE_RESOLUTIONS, IOS_DEVICES, ANDROID_DEVICES,
+    # Feature #5 + #6: versioned OS list + engine-matrix resolver
+    WEB_PLATFORMS_VERSIONED, MOBILE_OS_VERSIONS,
+    resolve_platform_browser,
     get_tester, execute_items,
 )
 from engine.bug_report import (
@@ -186,11 +189,22 @@ def register(app: Flask) -> None:
                       if build:
                           bits.append(f"build {build}")
                       return " / ".join(bits)
-                  # Web (default)
-                  platform = request.form.get("web_platform", "Windows").strip() or "Windows"
+                  # Web (default). Feature #5 introduces a versioned OS
+                  # selector ("Windows 11", "macOS Sonoma (14)", ...).
+                  # We honour it when present and fall back to the
+                  # coarse "web_platform" value posted by older clients.
+                  os_version = (request.form.get("web_os_version", "") or "").strip()
+                  platform = (request.form.get("web_platform", "") or "").strip()
+                  if not platform:
+                      # Reverse-look the coarse family from the version.
+                      for fam, versions in WEB_PLATFORMS_VERSIONED.items():
+                          if os_version in versions:
+                              platform = fam; break
+                      platform = platform or "Windows"
                   browser = request.form.get("web_browser", "Chrome").strip() or "Chrome"
                   version = (request.form.get("web_version", "") or "").strip()
-                  bits = [f"Web · {platform}", browser]
+                  display_os = os_version or platform
+                  bits = [f"Web · {display_os}", browser]
                   if version:
                       bits.append(version)
                   return " / ".join(bits)
@@ -291,6 +305,33 @@ def register(app: Flask) -> None:
                           if selected_ids else items_data
                       )
                       scripts = scripts_from_session(automation_items, base_url)
+
+                      # Feature #6 — pick the Playwright engine + UA +
+                      # viewport that match the OS/browser the tester
+                      # selected. For the Mobile Web env we use the
+                      # mobile-OS version + mobile browser instead of
+                      # the desktop pair.
+                      mw_active = "mobile_web" in env_types and "web" not in env_types
+                      sel_os_ver = (
+                          (request.form.get("mw_os_version", "")
+                           or request.form.get("mw_os", "")).strip()
+                          if mw_active else
+                          (request.form.get("web_os_version", "")
+                           or request.form.get("web_platform", "")).strip()
+                      )
+                      sel_browser = (
+                          request.form.get("mw_browser", "Chrome").strip()
+                          if mw_active else
+                          request.form.get("web_browser", "Chrome").strip()
+                      )
+                      pb = resolve_platform_browser(sel_os_ver, sel_browser)
+                      _log.info(
+                          "automation: engine=%s ua_short=%s viewport=%dx%d "
+                          "(os_version=%r browser=%r)",
+                          pb["engine"], pb["ua"][:40] + "...",
+                          pb["viewport"][0], pb["viewport"][1],
+                          sel_os_ver, sel_browser,
+                      )
                       runner = AutomationRunner(
                           storage_root=STORAGE_ROOT,
                           base_url=base_url,
@@ -301,6 +342,9 @@ def register(app: Flask) -> None:
                           screenshot_full_page=speed_full_page,
                           screenshot_before_steps=speed_before_steps,
                           credentials=credentials if credentials.is_active() else None,
+                          engine_kind=pb["engine"],
+                          user_agent=pb["ua"],
+                          viewport_override=pb["viewport"],
                       )
                       auto_report = runner.run(scripts)
                       # Index by case ID so the per-env loop below can pull
@@ -607,6 +651,8 @@ def register(app: Flask) -> None:
                                # Per-env-kind option pools for the new
                                # 4-tab Test Environment selector.
                                web_platforms=WEB_PLATFORMS,
+                               web_platforms_versioned=WEB_PLATFORMS_VERSIONED,
+                               mobile_os_versions=MOBILE_OS_VERSIONS,
                                web_browsers=WEB_BROWSERS,
                                mobile_web_oses=MOBILE_WEB_OSES,
                                mobile_web_browsers=MOBILE_WEB_BROWSERS,
