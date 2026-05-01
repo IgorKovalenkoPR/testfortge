@@ -83,6 +83,34 @@
                     </td>
                     <td class="comment-cell">{{ r.comment or '—' }}</td>
                 </tr>
+                {% if (r.screenshots and r.screenshots|length) or r.video %}
+                <tr class="evidence-row result-{{ r.status | lower | replace(' ', '-') }}">
+                    <td colspan="5" style="padding:8px 12px;background:#fafafa;border-top:0;">
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;">
+                            {% if r.video %}
+                            <div style="flex:0 0 auto;">
+                                <video src="{{ url_for('automation_asset', path=r.video) }}"
+                                       controls preload="metadata" muted
+                                       style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
+                                <div style="font-size:0.72em;color:#64748b;margin-top:2px;">
+                                    🎥 {{ t.get('te_evidence_video', 'recorded video') }}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% for shot in r.screenshots %}
+                            <a href="{{ url_for('automation_asset', path=shot) }}"
+                               target="_blank" rel="noopener"
+                               style="flex:0 0 auto;display:block;">
+                                <img src="{{ url_for('automation_asset', path=shot) }}"
+                                     alt="step screenshot"
+                                     style="width:140px;height:90px;object-fit:cover;
+                                            border:1px solid #cbd5e1;border-radius:4px;background:#fff;" />
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </td>
+                </tr>
+                {% endif %}
             {% endfor %}
             </tbody>
         </table>
@@ -216,6 +244,17 @@
     <h3 class="card-title">{{ t.get('te_auto_config', 'Automation Configuration') }}</h3>
     <p class="hint">{{ t.get('te_auto_hint',
         'Optional. When you supply a Base URL the Web / Mobile-Web environments drive a real headless browser, capture screenshots, optionally record video, and auto-link any failures to bug reports.') }}</p>
+    <div style="margin:0 0 14px 0;padding:10px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;">
+        <strong style="color:#075985;">🎬 {{ t.get('te_live_callout_title', 'Watch the run live') }}</strong>
+        <p style="margin:4px 0 8px 0;font-size:0.88em;color:#0c4a6e;">
+            {{ t.get('te_live_callout_body',
+               'On cloud servers you cannot see the browser window directly, but you can stream a frame-by-frame view of every screenshot Playwright takes. Open the live view in a new tab BEFORE clicking Run below.') }}
+        </p>
+        <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener"
+           class="btn btn-secondary" style="font-size:0.88em;">
+            {{ t.get('te_live_open', 'Open live view in new tab ↗') }}
+        </a>
+    </div>
     <div class="form-grid">
         <div class="form-group">
             <label>{{ t.get('te_base_url', 'Base URL') }}</label>

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ t.get('te_live_title', 'Live automation view') }}{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom:6px;">{{ t.get('te_live_title', 'Live automation view') }}</h1>
+<p class="subtitle">
+    {{ t.get('te_live_subtitle',
+       'Real-time filmstrip of the headless browser. Open this page BEFORE clicking Run on Test Execution — frames will start streaming once Playwright takes its first screenshot.') }}
+</p>
+
+<div class="card" id="live-status" style="margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <span class="status-pill" id="status-pill"
+              style="display:inline-block;padding:4px 12px;border-radius:999px;
+                     font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569;">
+            ● idle
+        </span>
+        <span id="status-text" style="font-size:0.92em;color:#475569;">
+            Waiting for an automation run to start…
+        </span>
+        <span id="status-progress" style="font-size:0.92em;color:#0f172a;font-weight:600;margin-left:auto;"></span>
+    </div>
+    <div id="status-meta" style="margin-top:8px;font-size:0.82em;color:#64748b;"></div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;background:#0f172a;">
+    <img id="live-frame"
+         src="{{ url_for('test_execution_live_frame') }}"
+         alt="Live automation frame"
+         style="display:block;width:100%;max-height:80vh;object-fit:contain;background:#0f172a;" />
+</div>
+
+<p class="hint" style="margin-top:10px;color:#64748b;font-size:0.85em;">
+    {{ t.get('te_live_hint',
+       'Frames refresh once per second. After the run completes you can review per-case screenshots and recorded video on the Test Execution results page.') }}
+</p>
+
+<div style="margin-top:16px;">
+    <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary">
+        ← {{ t.get('te_live_back', 'Back to Test Execution') }}
+    </a>
+</div>
+
+<script>
+(function () {
+    var img    = document.getElementById('live-frame');
+    var pill   = document.getElementById('status-pill');
+    var stext  = document.getElementById('status-text');
+    var sprog  = document.getElementById('status-progress');
+    var smeta  = document.getElementById('status-meta');
+    var frameUrl = "{{ url_for('test_execution_live_frame') }}";
+    var infoUrl  = "{{ url_for('test_execution_live_info') }}";
+    var lastTs = 0;
+
+    function paintStatus(info) {
+        var status = (info && info.status) || 'idle';
+        var colours = {
+            idle:     ['#f1f5f9', '#475569', '● idle'],
+            starting: ['#fef9c3', '#854d0e', '● starting'],
+            running:  ['#dcfce7', '#166534', '● running'],
+            done:     ['#e0e7ff', '#3730a3', '✓ done']
+        };
+        var c = colours[status] || colours.idle;
+        pill.style.background = c[0];
+        pill.style.color = c[1];
+        pill.textContent = c[2];
+
+        if (status === 'idle') {
+            stext.textContent = 'Waiting for an automation run to start…';
+            sprog.textContent = '';
+        } else if (status === 'starting') {
+            stext.textContent = 'Browser is launching…';
+            sprog.textContent = '';
+        } else if (status === 'running') {
+            stext.textContent = 'Test case: ' + (info.current_tc || '—');
+            sprog.textContent = (info.cases_done || 0) + ' / ' + (info.cases_total || 0)
+                              + ' cases · step #' + (info.step || 0);
+        } else if (status === 'done') {
+            stext.textContent = 'Run finished';
+            sprog.textContent = (info.cases_total || 0) + ' / ' + (info.cases_total || 0) + ' cases';
+        }
+
+        if (info && (info.base_url || info.run_id)) {
+            smeta.textContent = (info.run_id ? 'run ' + info.run_id + ' · ' : '')
+                              + (info.base_url || '');
+        } else {
+            smeta.textContent = '';
+        }
+    }
+
+    function pollInfo() {
+        fetch(infoUrl, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (info) {
+                paintStatus(info);
+                // Refresh frame only when timestamp moved on, to avoid
+                // pointless re-decodes on a still image.
+                if (info && info.ts && info.ts !== lastTs) {
+                    lastTs = info.ts;
+                    img.src = frameUrl + '?t=' + info.ts;
+                }
+            })
+            .catch(function () { /* keep polling on error */ });
+    }
+
+    pollInfo();
+    setInterval(pollInfo, 1000);
+})();
+</script>
+{% endblock %}

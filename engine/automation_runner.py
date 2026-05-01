@@ -166,6 +166,32 @@ class AutomationRunner:
         except Exception as exc:
             _logger.debug("retention purge skipped: %s", exc)
 
+        # ── Live-view bookkeeping ─────────────────────────────────────
+        # The /test-execution/live endpoint serves the most recent frame
+        # from <storage>/automation_runs/_live/latest.png and progress
+        # JSON from _live/info.json. Reset this directory at run start so
+        # the operator's "Watch live" tab transitions cleanly from a
+        # previous run's last frame to "running" state for this run.
+        self._live_dir = os.path.join(runs_root, "_live")
+        try:
+            os.makedirs(self._live_dir, exist_ok=True)
+            # Wipe stale frame so the live page shows a "starting" placeholder
+            # until the first real screenshot lands.
+            stale = os.path.join(self._live_dir, "latest.png")
+            if os.path.exists(stale):
+                os.remove(stale)
+        except OSError as exc:
+            _logger.debug("live: cannot reset _live dir: %s", exc)
+            self._live_dir = ""
+
+        # Step counter for live-info JSON. Bumped on every screenshot.
+        self._live_step = 0
+        self._live_run_id = run_id
+        self._live_total = max(1, len(scripts))
+        self._live_done = 0
+        self._live_current_tc = ""
+        self._write_live_info(status="starting")
+
         report = RunReport(
             run_id=run_id,
             started_at=datetime.now().isoformat(timespec="seconds"),
@@ -232,16 +258,21 @@ class AutomationRunner:
                 if not self.headless:
                     time.sleep(1.0)
                 for script in scripts:
+                    self._live_current_tc = (script.tc_id or "TC")
+                    self._write_live_info(status="running")
                     sr = self._run_script(browser, script, run_dir)
                     report.scripts.append(sr)
                     if sr.status == "passed": report.passed += 1
                     elif sr.status == "failed": report.failed += 1
                     else: report.blocked += 1
+                    self._live_done += 1
+                    self._write_live_info(status="running")
             finally:
                 browser.close()
 
         report.duration_ms = int((time.time() - t0) * 1000)
         report.finished_at = datetime.now().isoformat(timespec="seconds")
+        self._write_live_info(status="done")
         return report
 
     def _run_script(self, browser, script: AutomationScript, run_dir: str) -> ScriptResult:
@@ -409,12 +440,54 @@ class AutomationRunner:
         sr.duration_ms = int((time.time() - t0) * 1000)
         return sr
 
-    @staticmethod
-    def _screenshot(page, path: str) -> None:
+    def _screenshot(self, page, path: str) -> None:
         try:
             page.screenshot(path=path, full_page=True)
         except Exception:
-            pass
+            return
+        # Mirror the freshly-written file as the global "latest" frame so
+        # the /test-execution/live page can show real-time progress on
+        # cloud deployments where the browser itself is invisible to the
+        # operator. Best-effort: any IO failure here must never abort the
+        # run.
+        live_dir = getattr(self, "_live_dir", "")
+        if not live_dir:
+            return
+        try:
+            self._live_step += 1
+            dst = os.path.join(live_dir, "latest.png")
+            shutil.copyfile(path, dst)
+            self._write_live_info(status="running")
+        except Exception as exc:  # pragma: no cover — IO best-effort
+            _logger.debug("live: cannot mirror frame: %s", exc)
+
+    def _write_live_info(self, status: str) -> None:
+        """Atomically write the live status JSON consumed by the
+        /test-execution/live polling endpoint. Best-effort: never raises.
+        """
+        live_dir = getattr(self, "_live_dir", "")
+        if not live_dir:
+            return
+        try:
+            import json
+            tmp = os.path.join(live_dir, "info.json.tmp")
+            dst = os.path.join(live_dir, "info.json")
+            payload = {
+                "run_id": getattr(self, "_live_run_id", ""),
+                "status": status,
+                "step": getattr(self, "_live_step", 0),
+                "cases_done": getattr(self, "_live_done", 0),
+                "cases_total": getattr(self, "_live_total", 1),
+                "current_tc": getattr(self, "_live_current_tc", ""),
+                "base_url": self.base_url or "",
+                "headless": self.headless,
+                "ts": int(time.time() * 1000),
+            }
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            os.replace(tmp, dst)
+        except Exception as exc:  # pragma: no cover — IO best-effort
+            _logger.debug("live: cannot write info.json: %s", exc)
 
     def _scroll_and_highlight(self, page, loc) -> None:
         """Bring the target into view and flash a red outline so the user can

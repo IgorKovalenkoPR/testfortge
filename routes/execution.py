@@ -403,11 +403,18 @@ def register(app: Flask) -> None:
                   # execution_case_result + bug_report tables, so duplicating
                   # them here would only bloat the session pickle (the source
                   # of the 500s we saw on 100+ items).
+                  # Carry through evidence (screenshots + recorded video) so
+                  # the post-run gallery in the UI can render thumbnails and
+                  # an embedded video player. We cap screenshots at 6 per
+                  # case to keep the session pickle bounded — the full set
+                  # is still on disk under storage/automation_runs/<run_id>/.
                   results_summary = [
                       {"item_id": r.get("item_id"),
                        "status":  r.get("status"),
                        "bug_id":  r.get("bug_id"),
-                       "duration_ms": r.get("duration_ms")}
+                       "duration_ms": r.get("duration_ms"),
+                       "video": r.get("video", ""),
+                       "screenshots": (r.get("screenshots") or [])[:6]}
                       for r in (execution.get("results") or [])
                   ]
                   run_record = {
@@ -540,6 +547,61 @@ def register(app: Flask) -> None:
         session["test_execution_credentials"] = credentials_to_session(cred)
         flash(f"Generated test account: {cred.username}", "success")
         return redirect(url_for("test_execution_page"))
+
+    # ── Live-view of an in-progress automation run ──────────────────
+    # On cloud deployments (Render, etc.) the operator cannot see the
+    # browser window because there is no display server attached to the
+    # container. Instead we mirror every Playwright screenshot to a
+    # well-known location and the page below polls it once per second so
+    # the operator gets a "live filmstrip" of what the bot is seeing.
+    @app.route("/test-execution/live", methods=["GET"])
+    def test_execution_live():
+        return render_template("test_execution_live.html")
+
+    @app.route("/test-execution/live/frame")
+    def test_execution_live_frame():
+        """Serve the most recent frame from automation_runs/_live/latest.png
+        with strict no-cache headers so the browser always re-fetches."""
+        import os
+        from flask import send_file, abort
+        from routes.automation import STORAGE_ROOT
+        live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
+        path = os.path.join(live_dir, "latest.png")
+        if not os.path.isfile(path):
+            # Serve a tiny built-in placeholder so the <img> tag never 404s
+            # mid-poll. The placeholder is a 1x1 transparent PNG.
+            from io import BytesIO
+            tiny = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+                    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe"
+                    b"\x02\xfe\xa75\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82")
+            resp = Response(tiny, mimetype="image/png")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            return resp
+        resp = send_file(path, mimetype="image/png", max_age=0)
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
+
+    @app.route("/test-execution/live/info")
+    def test_execution_live_info():
+        """Serve the live progress JSON consumed by the polling page."""
+        import json
+        import os
+        from routes.automation import STORAGE_ROOT
+        live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
+        path = os.path.join(live_dir, "info.json")
+        if not os.path.isfile(path):
+            payload = {"status": "idle", "step": 0, "cases_done": 0,
+                       "cases_total": 0, "current_tc": "", "ts": 0}
+        else:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                payload = {"status": "idle"}
+        resp = Response(json.dumps(payload), mimetype="application/json")
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
 
     @app.route("/create-bug-report", methods=["POST"])
     def create_bug_report():
