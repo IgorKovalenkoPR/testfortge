@@ -195,11 +195,37 @@ class AutomationRunner:
         )
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=self.headless,
-                slow_mo=self.slow_mo_ms,
-                args=launch_args,
-            )
+            # Headed mode (headless=False) requires a real display server.
+            # On cloud / CI environments (Render, GitHub Actions, Docker
+            # without Xvfb) there is no display, so the launch raises an
+            # error like "cannot open display" or "Failed to launch".
+            # We catch that specific failure and fall back to headless so
+            # automation still produces screenshots / video — the only
+            # thing missing is the live window on the operator's screen.
+            try:
+                browser = p.chromium.launch(
+                    headless=self.headless,
+                    slow_mo=self.slow_mo_ms,
+                    args=launch_args,
+                )
+            except Exception as launch_exc:
+                if not self.headless:
+                    _logger.warning(
+                        "automation: headed launch failed (%s) — no display "
+                        "available on this server; retrying in headless mode.",
+                        launch_exc,
+                    )
+                    self.headless = True
+                    self.slow_mo_ms = 0
+                    self.step_pause_ms = 0
+                    report.headless = True
+                    browser = p.chromium.launch(
+                        headless=True,
+                        slow_mo=0,
+                        args=["--no-sandbox", "--disable-dev-shm-usage"],
+                    )
+                else:
+                    raise
             try:
                 # In headed mode give the user ~1 second to notice the
                 # window appearing before we start firing test cases at it.

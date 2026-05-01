@@ -282,6 +282,13 @@ def register(app: Flask) -> None:
                       }
                   except Exception as exc:
                       log.warning("Automation pass failed (non-fatal): %s", exc)
+                      flash(
+                          "⚠ Automation pass failed and was skipped: "
+                          f"{type(exc).__name__} — {str(exc)[:200]}. "
+                          "Results shown are deterministic simulations. "
+                          "Check that Base URL is reachable and try Headless mode.",
+                          "warning",
+                      )
 
               # ── Per-environment runs ──
               run_summaries = []
