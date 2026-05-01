@@ -7,16 +7,109 @@
     <p class="subtitle">{{ t.cl_subtitle }}</p>
 </div>
 
-<!-- Input form -->
-<form method="POST" enctype="multipart/form-data">
+<!-- Input form. Same async pattern as /test-cases — submit posts to
+     /checklist/run-async and a progress modal polls /checklist/status. -->
+<form method="POST" enctype="multipart/form-data" id="cl-gen-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% set input_title = t.input_title_default %}
     {% include '_input_block.html' %}
 
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
+        <button type="submit" id="cl-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
     </div>
 </form>
+
+{# ── Generation progress modal ── #}
+<div id="cl-gen-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
+    <div class="te-run-card">
+        <h3>{{ t.get('cl_gen_title', 'Generating checklist…') }}</h3>
+        <p id="cl-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
+            {{ t.get('cl_gen_stage_init', 'Analyzing input…') }}
+        </p>
+        <p id="cl-gen-elapsed" style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;"></p>
+        <div class="te-run-bar" aria-hidden="true"></div>
+        <p id="cl-gen-error" style="margin-top:14px;color:#dc2626;font-size:0.88em;display:none;"></p>
+    </div>
+</div>
+
+<script>
+(function () {
+    var form    = document.getElementById('cl-gen-form');
+    var overlay = document.getElementById('cl-gen-overlay');
+    var stageEl = document.getElementById('cl-gen-stage');
+    var elapsedEl = document.getElementById('cl-gen-elapsed');
+    var errorEl   = document.getElementById('cl-gen-error');
+    if (!form || !overlay || !window.fetch) return;
+
+    var STAGES = [
+        { ms: 0,     text: "{{ t.get('cl_gen_stage_init', 'Analyzing input…') }}" },
+        { ms: 4000,  text: "{{ t.get('cl_gen_stage_stories', 'Drafting user stories…') }}" },
+        { ms: 10000, text: "{{ t.get('cl_gen_stage_items', 'Generating checklist items…') }}" },
+        { ms: 30000, text: "{{ t.get('cl_gen_stage_almost', 'Almost done — finalising…') }}" }
+    ];
+    function fmtSec(s) { s = Math.max(0, Math.round(s));
+        var m = Math.floor(s/60), r = s%60;
+        return (m>0 ? m+'m ':'') + r + 's'; }
+    function pickStage(elapsedMs) {
+        var st = STAGES[0];
+        for (var i = 0; i < STAGES.length; i++) {
+            if (elapsedMs >= STAGES[i].ms) st = STAGES[i];
+        }
+        return st.text;
+    }
+
+    var startedAt = 0, tickHandle = null, pollHandle = null;
+    function tick() {
+        var elapsed = Date.now() - startedAt;
+        if (stageEl) stageEl.textContent = pickStage(elapsed);
+        if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsed/1000);
+    }
+    function showError(msg) {
+        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        if (tickHandle) clearInterval(tickHandle);
+        if (pollHandle) clearInterval(pollHandle);
+    }
+    function poll(jobId) {
+        fetch('/checklist/status/' + jobId, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(j) {
+                if (!j) return;
+                if (j.status === 'done') {
+                    if (tickHandle) clearInterval(tickHandle);
+                    if (pollHandle) clearInterval(pollHandle);
+                    if (stageEl) stageEl.textContent = "{{ t.get('cl_gen_stage_done', 'Done — loading checklist…') }}";
+                    window.location.href = "{{ url_for('checklist_page') }}";
+                } else if (j.status === 'failed') {
+                    showError("{{ t.get('cl_gen_failed', 'Generation failed') }}: " + (j.error || 'unknown'));
+                }
+            })
+            .catch(function() { /* keep polling */ });
+    }
+
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        var fd = new FormData(form);
+        startedAt = Date.now();
+        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        tick();
+        if (tickHandle) clearInterval(tickHandle);
+        tickHandle = setInterval(tick, 1000);
+        overlay.hidden = false;
+        fetch('/checklist/run-async', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
+            .then(function(res) {
+                if (!res.ok) { showError(res.body.message || 'Could not start generation.'); return; }
+                if (pollHandle) clearInterval(pollHandle);
+                pollHandle = setInterval(function() { poll(res.body.job_id); }, 1500);
+                poll(res.body.job_id);
+            })
+            .catch(function(err) {
+                showError('Network error — retrying as a regular request…');
+                setTimeout(function() { form.submit(); }, 800);
+            });
+    });
+})();
+</script>
 
 {# ── Upload existing checklist ───────────────────────────────────── #}
 <form method="POST" action="{{ url_for('checklist_upload') }}"

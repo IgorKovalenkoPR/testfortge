@@ -7,16 +7,113 @@
     <p class="subtitle">{{ t.tc_subtitle }}</p>
 </div>
 
-<!-- Input form: files + text + prompt -->
-<form method="POST" enctype="multipart/form-data">
+<!-- Input form: files + text + prompt. The submit handler intercepts
+     and routes to /test-cases/run-async so a slow LLM doesn't freeze the
+     page; a progress modal polls /test-cases/status/<id> until done.
+     If JS is disabled the form still POSTs synchronously to /test-cases. -->
+<form method="POST" enctype="multipart/form-data" id="tc-gen-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% set input_title = t.input_title_default %}
     {% include '_input_block.html' %}
 
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
+        <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
     </div>
 </form>
+
+{# ── Generation progress modal ── #}
+<div id="tc-gen-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
+    <div class="te-run-card">
+        <h3>{{ t.get('tc_gen_title', 'Generating test cases…') }}</h3>
+        <p id="tc-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
+            {{ t.get('tc_gen_stage_init', 'Analyzing input…') }}
+        </p>
+        <p id="tc-gen-elapsed" style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;"></p>
+        <div class="te-run-bar" aria-hidden="true"></div>
+        <p id="tc-gen-error" style="margin-top:14px;color:#dc2626;font-size:0.88em;display:none;"></p>
+    </div>
+</div>
+
+<script>
+(function () {
+    var form    = document.getElementById('tc-gen-form');
+    var overlay = document.getElementById('tc-gen-overlay');
+    var stageEl = document.getElementById('tc-gen-stage');
+    var elapsedEl = document.getElementById('tc-gen-elapsed');
+    var errorEl   = document.getElementById('tc-gen-error');
+    if (!form || !overlay || !window.fetch) return;
+
+    var STAGES = [
+        { ms: 0,      text: "{{ t.get('tc_gen_stage_init', 'Analyzing input…') }}" },
+        { ms: 4000,   text: "{{ t.get('tc_gen_stage_stories', 'Drafting user stories…') }}" },
+        { ms: 12000,  text: "{{ t.get('tc_gen_stage_cases', 'Generating test cases…') }}" },
+        { ms: 30000,  text: "{{ t.get('tc_gen_stage_trace', 'Computing traceability matrix…') }}" },
+        { ms: 60000,  text: "{{ t.get('tc_gen_stage_almost', 'Almost done — finalising…') }}" }
+    ];
+    function fmtSec(s) { s = Math.max(0, Math.round(s));
+        var m = Math.floor(s/60), r = s%60;
+        return (m>0 ? m+'m ':'') + r + 's'; }
+    function pickStage(elapsedMs) {
+        var st = STAGES[0];
+        for (var i = 0; i < STAGES.length; i++) {
+            if (elapsedMs >= STAGES[i].ms) st = STAGES[i];
+        }
+        return st.text;
+    }
+
+    var startedAt = 0, tickHandle = null, pollHandle = null;
+    function tick() {
+        var elapsed = Date.now() - startedAt;
+        if (stageEl) stageEl.textContent = pickStage(elapsed);
+        if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsed/1000);
+    }
+    function showError(msg) {
+        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        if (tickHandle) clearInterval(tickHandle);
+        if (pollHandle) clearInterval(pollHandle);
+    }
+    function poll(jobId) {
+        fetch('/test-cases/status/' + jobId, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(j) {
+                if (!j) return;
+                if (j.status === 'done') {
+                    if (tickHandle) clearInterval(tickHandle);
+                    if (pollHandle) clearInterval(pollHandle);
+                    if (stageEl) stageEl.textContent = "{{ t.get('tc_gen_stage_done', 'Done — loading test cases…') }}";
+                    window.location.href = "{{ url_for('test_cases_page') }}";
+                } else if (j.status === 'failed') {
+                    showError("{{ t.get('tc_gen_failed', 'Generation failed') }}: " + (j.error || 'unknown'));
+                }
+            })
+            .catch(function() { /* keep polling */ });
+    }
+
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        var fd = new FormData(form);
+        startedAt = Date.now();
+        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        tick();
+        if (tickHandle) clearInterval(tickHandle);
+        tickHandle = setInterval(tick, 1000);
+        overlay.hidden = false;
+        fetch('/test-cases/run-async', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
+            .then(function(res) {
+                if (!res.ok) { showError(res.body.message || 'Could not start generation.'); return; }
+                if (pollHandle) clearInterval(pollHandle);
+                pollHandle = setInterval(function() { poll(res.body.job_id); }, 1500);
+                poll(res.body.job_id);
+            })
+            .catch(function(err) {
+                // Network error → fall back to plain form post.
+                showError('Network error — retrying as a regular request…');
+                setTimeout(function() { form.submit(); }, 800);
+            });
+    });
+})();
+</script>
 
 {# ── Upload existing test cases ────────────────────────────────────
    Lets the team replace / append to the in-session test pack with

@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 import tempfile
 
-from flask import Flask, Response, flash, g, redirect, render_template, request, session, url_for
+from flask import (Flask, Response, flash, g, jsonify, redirect, render_template,
+                   request, session, url_for)
 from werkzeug.utils import secure_filename
 
 from engine.file_parser import split_into_requirements
@@ -26,15 +27,21 @@ from engine.exporter import (
 )
 from engine.imports import parse_test_cases as import_parse_test_cases
 from engine.imports import parse_checklist as import_parse_checklist
+from engine.job_queue import get_queue, DONE, FAILED
 
 from engine import db as _db
 from engine.log import get_logger
 
 from ._shared import (
     reconstruct_stories, reconstruct_test_cases, reconstruct_checklist,
-    tc_to_dict, cl_to_dict, story_to_dict,
+    tc_to_dict, cl_to_dict, story_to_dict, get_session_id,
     parse_page_input, extract_resource_urls, ensure_active_project,
 )
+
+# Hard cap on concurrent generation jobs per session — same threshold
+# as automation/estimation. Prevents a runaway tab from monopolising
+# the worker pool on Render free tier.
+MAX_CONCURRENT_GEN_JOBS = 2
 
 _log = get_logger(__name__)
 
@@ -261,6 +268,151 @@ def register(app: Flask) -> None:
             "success",
         )
         return redirect(url_for("test_cases_page"))
+
+    # ── Async generation pipeline ────────────────────────────────
+    # The sync /test-cases and /checklist POST handlers can block for
+    # 30–90 s on a busy LLM, which surfaces in the UI as a frozen page.
+    # The pair below splits that into:
+    #   POST /test-cases/run-async    — submits the job, returns
+    #                                   {"job_id": ..., "status": "pending"}
+    #   GET  /test-cases/status/<id>  — polled by the modal; reports
+    #                                   pending / running / done / failed,
+    #                                   and on done writes the result back
+    #                                   into session so a redirect to
+    #                                   /test-cases renders normally.
+    # Same pair exists for /checklist further below.
+    @app.route("/test-cases/run-async", methods=["POST"])
+    def test_cases_run_async():
+        raw_lines, errors, custom_prompt = parse_page_input()
+        if not raw_lines:
+            return jsonify({"error": "no_input",
+                            "message": g.t.get("mvp_no_input",
+                                "Please enter requirements or upload files.")}), 400
+
+        sid = get_session_id(session)
+        active = get_queue().count_active_by_meta(
+            "tc_gen", "session_id", sid)
+        if active >= MAX_CONCURRENT_GEN_JOBS:
+            resp = jsonify({
+                "error": "rate_limited",
+                "message": (f"You already have {active} active generation "
+                            f"jobs. Wait for them to finish before starting "
+                            f"another."),
+                "active": active,
+                "limit": MAX_CONCURRENT_GEN_JOBS,
+            })
+            resp.status_code = 429
+            resp.headers["Retry-After"] = "20"
+            return resp
+
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt):
+            parsed_reqs = split_into_requirements(raw_lines)
+            parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
+            raw_reqs_for_persona = (
+                [{"id": r.id, "text": r.text} for r in parsed_reqs]
+                if parsed_reqs else
+                [{"id": f"RAW-{i+1}", "text": line}
+                 for i, line in enumerate(raw_lines) if line.strip()]
+            )
+            new_stories = (generate_user_stories(parsed_reqs, custom_prompt)
+                           if parsed_reqs else [])
+            tc_list = generate_test_cases(new_stories, custom_prompt,
+                                          raw_requirements=raw_reqs_for_persona)
+            trace = generate_traceability(new_stories, tc_list) if tc_list else []
+            return {
+                "tc_dicts": [tc_to_dict(tc) for tc in tc_list],
+                "stories": [story_to_dict(s) for s in new_stories],
+                "raw_requirements": raw_reqs_for_persona,
+                "trace": trace,
+            }
+
+        job_id = get_queue().submit(
+            "tc_gen", _worker, meta={"session_id": sid})
+        session["tc_gen_job_id"] = job_id
+        return jsonify({"job_id": job_id, "status": "pending"})
+
+    @app.route("/test-cases/status/<job_id>", methods=["GET"])
+    def test_cases_status(job_id):
+        job = get_queue().get(job_id)
+        if job is None or job.kind != "tc_gen":
+            return jsonify({"error": "not_found"}), 404
+        payload = job.to_public_dict()
+        if job.status == DONE and job.result:
+            r = job.result
+            session["test_cases_data"] = r.get("tc_dicts", [])
+            session["user_stories"] = r.get("stories", [])
+            session["raw_requirements"] = r.get("raw_requirements", [])
+            session["traceability_data"] = r.get("trace", [])
+            try:
+                _persist_test_cases(session["test_cases_data"])
+            except Exception as exc:
+                _log.warning("tc_gen async persist: %s", exc)
+        return jsonify(payload)
+
+    @app.route("/checklist/run-async", methods=["POST"])
+    def checklist_run_async():
+        raw_lines, errors, custom_prompt = parse_page_input()
+        if not raw_lines:
+            return jsonify({"error": "no_input",
+                            "message": g.t.get("mvp_no_input",
+                                "Please enter requirements or upload files.")}), 400
+
+        sid = get_session_id(session)
+        active = get_queue().count_active_by_meta(
+            "cl_gen", "session_id", sid)
+        if active >= MAX_CONCURRENT_GEN_JOBS:
+            resp = jsonify({
+                "error": "rate_limited",
+                "message": (f"You already have {active} active generation "
+                            f"jobs. Wait for them to finish before starting "
+                            f"another."),
+                "active": active,
+                "limit": MAX_CONCURRENT_GEN_JOBS,
+            })
+            resp.status_code = 429
+            resp.headers["Retry-After"] = "20"
+            return resp
+
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt):
+            parsed_reqs = split_into_requirements(raw_lines)
+            parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
+            raw_reqs_for_persona = (
+                [{"id": r.id, "text": r.text} for r in parsed_reqs]
+                if parsed_reqs else
+                [{"id": f"RAW-{i+1}", "text": line}
+                 for i, line in enumerate(raw_lines) if line.strip()]
+            )
+            new_stories = (generate_user_stories(parsed_reqs, custom_prompt)
+                           if parsed_reqs else [])
+            cl_list = generate_checklist(new_stories, custom_prompt,
+                                         raw_requirements=raw_reqs_for_persona)
+            return {
+                "cl_dicts": [cl_to_dict(c) for c in cl_list],
+                "stories": [story_to_dict(s) for s in new_stories],
+                "raw_requirements": raw_reqs_for_persona,
+            }
+
+        job_id = get_queue().submit(
+            "cl_gen", _worker, meta={"session_id": sid})
+        session["cl_gen_job_id"] = job_id
+        return jsonify({"job_id": job_id, "status": "pending"})
+
+    @app.route("/checklist/status/<job_id>", methods=["GET"])
+    def checklist_status(job_id):
+        job = get_queue().get(job_id)
+        if job is None or job.kind != "cl_gen":
+            return jsonify({"error": "not_found"}), 404
+        payload = job.to_public_dict()
+        if job.status == DONE and job.result:
+            r = job.result
+            session["checklist_data"] = r.get("cl_dicts", [])
+            session["user_stories"] = r.get("stories", [])
+            session["raw_requirements"] = r.get("raw_requirements", [])
+            try:
+                _persist_checklist(session["checklist_data"])
+            except Exception as exc:
+                _log.warning("cl_gen async persist: %s", exc)
+        return jsonify(payload)
 
     @app.route("/checklist/upload", methods=["POST"])
     def checklist_upload():
