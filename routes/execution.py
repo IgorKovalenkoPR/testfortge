@@ -230,12 +230,14 @@ def register(app: Flask) -> None:
               # doesn't blow up the whole run at goto.
               speed_full_page = False
               speed_before_steps = False
-              # 2 s is enough for any element already in the DOM. Slow
-              # selectors that need 3 s are usually a bug in the test
-              # case itself, not a real load delay — those should fail
-              # fast so the operator sees the issue.
-              speed_timeout_ms = 2000
-              speed_nav_timeout_ms = 15000
+              # Tightened defaults after operator complained about
+              # 80 s/case on prod. 1.5 s for elements already in the DOM
+              # (slow selectors are TC bugs that should fail fast),
+              # 10 s for navigation (any real cold-start site loads
+              # within that — beyond it we mark the case Blocked rather
+              # than wait further).
+              speed_timeout_ms = 1500
+              speed_nav_timeout_ms = 10000
               session["automation_base_url"] = base_url
 
               # Pick the URL used by the deterministic site-tester. Prefer

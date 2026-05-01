@@ -29,6 +29,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Skip the upload form on /test-cases or /checklist — it's fast.
         if (form.action && /\/upload$/.test(url.pathname)) return false;
         if (form.classList && form.classList.contains('upload-existing')) return false;
+        // Skip forms that have their own async-progress modal — the
+        // tc-gen-form / cl-gen-form pair show their own dedicated
+        // overlay backed by the JobQueue and would otherwise fire two
+        // overlays at once (the legacy "30-90 seconds" one + the new
+        // stage-by-stage one).
+        if (form.id === 'tc-gen-form' || form.id === 'cl-gen-form') return false;
         return SLOW_PATHS.some(p => url.pathname === p);
     };
 

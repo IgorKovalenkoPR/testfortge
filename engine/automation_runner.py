@@ -624,10 +624,16 @@ class AutomationRunner:
             _logger.debug("live pump: %s", exc)
 
     def _move_cursor_to(self, page, bbox: dict | None) -> None:
-        """Animate the injected fake cursor to the centre of bbox so the
-        recorded video and screenshots show a pointer travelling to the
-        target. No-op when neither video recording nor headed mode are
-        active (no audience). No-op when bbox is unknown."""
+        """Move the cursor toward the target so the recorded video shows
+        a pointer travelling between actions. Two parallel mechanisms,
+        because Playwright's headless video records ONE of them
+        depending on the underlying compositor:
+          1) page.mouse.move(x, y, steps=12) — the real CDP mouse, which
+             Playwright's video recorder captures.
+          2) window.__tfMoveCursor — the injected DOM cursor as fallback
+             when CDP cursor isn't rendered.
+        No-op when neither video recording nor headed mode are active
+        (no audience). No-op when bbox is unknown."""
         if self.headless and not self.record_video:
             return
         if not bbox:
@@ -635,12 +641,22 @@ class AutomationRunner:
         try:
             cx = int(bbox["x"] + bbox.get("width", 0) / 2)
             cy = int(bbox["y"] + bbox.get("height", 0) / 2)
-            page.evaluate(
-                "(args) => window.__tfMoveCursor && window.__tfMoveCursor(args.x, args.y)",
-                {"x": cx, "y": cy},
-            )
-            # Allow CSS transition to play out so video catches the move.
-            page.wait_for_timeout(380)
+            # Real Playwright mouse — recorded by Playwright video.
+            try:
+                page.mouse.move(cx, cy, steps=12)
+            except Exception as exc:
+                _logger.debug("playwright mouse move: %s", exc)
+            # DOM cursor fallback for live screenshots / cases where the
+            # video recorder loses the CDP cursor sprite.
+            try:
+                page.evaluate(
+                    "(args) => window.__tfMoveCursor && window.__tfMoveCursor(args.x, args.y)",
+                    {"x": cx, "y": cy},
+                )
+            except Exception:
+                pass
+            # Brief pause so the video has time to capture the moved pointer.
+            page.wait_for_timeout(250)
         except Exception as exc:
             _logger.debug("cursor move: %s", exc)
 
@@ -659,18 +675,23 @@ class AutomationRunner:
         return None
 
     def _annotate_failure(self, image_path: str, bbox: dict | None, comment: str) -> None:
-        """Overlay a red bounding box + arrow + caption onto a failure
-        screenshot — but ONLY when we actually know which element the
-        bug involves (bbox != None). Without a bbox we have nothing
-        meaningful to point at, so we leave the screenshot untouched
-        rather than slap a confusing full-width red banner on every
-        innocent nav-timeout. Best-effort — never raises.
+        """Mark a failure screenshot so the bug location is unmistakable.
+        When bbox is known: red rectangle around the element, red arrow
+        from the upper-left corner pointing at it, compact red sticker
+        with the failure reason near the arrow tail. When bbox is None
+        (nav timeout, expect_text, etc): no element to box, but we still
+        drop a small red sticker in the top-left corner with the reason
+        so reviewers don't have to guess what failed. Best-effort — never
+        raises. Logs at WARNING when something goes wrong so we can see
+        annotation issues in Render logs.
         """
-        if not bbox:
-            return  # nothing actionable to mark — leave the raw shot
         try:
             from PIL import Image, ImageDraw, ImageFont
-        except Exception:
+        except Exception as exc:
+            _logger.warning("annotate: Pillow not available: %s", exc)
+            return
+        if not os.path.isfile(image_path):
+            _logger.warning("annotate: source image missing: %s", image_path)
             return
         try:
             with Image.open(image_path) as img:
@@ -678,46 +699,52 @@ class AutomationRunner:
                 draw = ImageDraw.Draw(img)
                 width_px, height_px = img.size
 
-                # Most viewports render at scale 1, but high-DPI screens
-                # report a 2× framebuffer. Compare bbox to image dims and
-                # pick the plausible scale (1 or 2).
-                scale = 1.0
-                if bbox.get("x", 0) + bbox.get("width", 0) > width_px:
-                    scale = width_px / max(1, bbox.get("x", 0) + bbox.get("width", 0))
-                x1 = max(0, int(bbox["x"] * scale) - 4)
-                y1 = max(0, int(bbox["y"] * scale) - 4)
-                x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
-                y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
-                # Heavy red border (4 px) around the element
-                for offset in range(4):
-                    draw.rectangle(
-                        (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
-                        outline=(220, 38, 38, 255),
-                    )
-                # Red arrow from upper-left margin pointing AT the box
-                arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
-                arrow_head = (x1, y1)
-                draw.line([arrow_tail, arrow_head], fill=(220, 38, 38, 255), width=4)
-                import math
-                angle = math.atan2(arrow_head[1] - arrow_tail[1],
-                                    arrow_head[0] - arrow_tail[0])
-                head_len = 18
-                head_angle = math.radians(26)
-                p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
-                      arrow_head[1] - head_len * math.sin(angle - head_angle))
-                p2 = (arrow_head[0] - head_len * math.cos(angle + head_angle),
-                      arrow_head[1] - head_len * math.sin(angle + head_angle))
-                draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
-
-                # Compact caption sticker NEAR the element (not a full
-                # banner across the whole page) so the screenshot stays
-                # readable as a screenshot of the actual UI.
-                caption = (comment or "Bug here").splitlines()[0][:140]
+                # Pick the right font once for both branches.
                 try:
                     font = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
                 except Exception:
                     font = ImageFont.load_default()
-                # Measure caption to size the sticker
+                caption = (comment or "Bug here").splitlines()[0][:140]
+
+                if bbox:
+                    # Most viewports render at scale 1, but high-DPI
+                    # screens report a 2× framebuffer. Compare bbox to
+                    # image dims and pick the plausible scale.
+                    scale = 1.0
+                    if bbox.get("x", 0) + bbox.get("width", 0) > width_px:
+                        scale = width_px / max(1, bbox.get("x", 0) + bbox.get("width", 0))
+                    x1 = max(0, int(bbox["x"] * scale) - 4)
+                    y1 = max(0, int(bbox["y"] * scale) - 4)
+                    x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
+                    y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
+                    # Heavy red border (4 px) around the element
+                    for offset in range(4):
+                        draw.rectangle(
+                            (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
+                            outline=(220, 38, 38, 255),
+                        )
+                    # Red arrow from upper-left margin pointing AT the box
+                    arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
+                    arrow_head = (x1, y1)
+                    draw.line([arrow_tail, arrow_head],
+                              fill=(220, 38, 38, 255), width=4)
+                    import math
+                    angle = math.atan2(arrow_head[1] - arrow_tail[1],
+                                       arrow_head[0] - arrow_tail[0])
+                    head_len = 18
+                    head_angle = math.radians(26)
+                    p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
+                          arrow_head[1] - head_len * math.sin(angle - head_angle))
+                    p2 = (arrow_head[0] - head_len * math.cos(angle + head_angle),
+                          arrow_head[1] - head_len * math.sin(angle + head_angle))
+                    draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
+                    sticker_anchor = arrow_tail
+                else:
+                    # No element to box — drop the sticker in the top-
+                    # left so reviewers still see the failure reason.
+                    sticker_anchor = (16, 16)
+
+                # Sticker (red rounded-ish rect with white caption).
                 try:
                     bb = draw.textbbox((0, 0), caption, font=font)
                     cap_w, cap_h = bb[2] - bb[0], bb[3] - bb[1]
@@ -726,43 +753,59 @@ class AutomationRunner:
                 pad = 8
                 sticker_w = cap_w + pad * 2
                 sticker_h = cap_h + pad * 2
-                # Place sticker just above the arrow tail; clamp to image
-                sx = max(8, min(width_px - sticker_w - 8, arrow_tail[0] - sticker_w // 2))
-                sy = max(8, arrow_tail[1] - sticker_h - 6)
+                sx = max(8, min(width_px - sticker_w - 8,
+                                sticker_anchor[0] - sticker_w // 2))
+                sy = max(8, sticker_anchor[1] - sticker_h - 6) if bbox \
+                     else max(8, sticker_anchor[1])
                 draw.rectangle((sx, sy, sx + sticker_w, sy + sticker_h),
                                fill=(220, 38, 38, 240))
                 draw.text((sx + pad, sy + pad), caption,
                           fill=(255, 255, 255, 255), font=font)
 
                 img.convert("RGB").save(image_path, "PNG", optimize=True)
-        except Exception as exc:  # pragma: no cover — annotation is best-effort
-            _logger.debug("annotate failure: %s", exc)
+                _logger.info("annotated bug screenshot: %s (bbox=%s)",
+                             image_path, bool(bbox))
+        except Exception as exc:
+            _logger.warning("annotate failure: %s", exc)
 
     def _screenshot(self, page, path: str) -> None:
-        try:
-            page.screenshot(path=path, full_page=self.screenshot_full_page)
-        except Exception:
-            return
-        # Mirror the freshly-written file as the global "latest" frame so
-        # the /test-execution/live page can show real-time progress on
-        # cloud deployments where the browser itself is invisible to the
-        # operator. Atomic via tmp + os.replace so the polling reader
-        # never sees a half-written file (which would surface as a broken
-        # image in the browser). Best-effort: any IO failure here must
-        # never abort the run.
+        """Take a screenshot to ``path`` AND mirror it to <live>/latest.png
+        so the live page updates. Strategy: snap directly to the live
+        path first (small viewport image, hard 3-second timeout), then
+        copy that file to the per-step path so the gallery sees it too.
+        Snapping straight to the live target sidesteps the silent
+        ``shutil.copyfile`` failures we were getting on Render — the
+        atomic ``os.replace`` on a Playwright-written PNG is the only IO
+        primitive we trust here. If the live mirror is disabled we fall
+        back to the legacy path-only screenshot.
+        """
         live_dir = getattr(self, "_live_dir", "")
-        if not live_dir:
-            return
+        if live_dir:
+            try:
+                os.makedirs(live_dir, exist_ok=True)
+                live_path = os.path.join(live_dir, "latest.png")
+                tmp = live_path + ".tmp"
+                # 3-second timeout so a hung page can't stall the run.
+                page.screenshot(path=tmp,
+                                full_page=self.screenshot_full_page,
+                                timeout=3000)
+                os.replace(tmp, live_path)
+                self._live_step += 1
+                self._write_live_info(status="running")
+                # Copy to per-step path for the post-run gallery.
+                try:
+                    shutil.copyfile(live_path, path)
+                except Exception as exc:  # pragma: no cover
+                    _logger.debug("per-step copy: %s", exc)
+                return
+            except Exception as exc:
+                _logger.warning("live capture failed (%s) — falling back to path-only", exc)
+        # Fallback: live mirror disabled or live capture raised.
         try:
-            os.makedirs(live_dir, exist_ok=True)
-            self._live_step += 1
-            dst = os.path.join(live_dir, "latest.png")
-            tmp = dst + ".tmp"
-            shutil.copyfile(path, tmp)
-            os.replace(tmp, dst)
-            self._write_live_info(status="running")
-        except Exception as exc:  # pragma: no cover — IO best-effort
-            _logger.warning("live: cannot mirror frame: %s", exc)
+            page.screenshot(path=path, full_page=self.screenshot_full_page,
+                            timeout=3000)
+        except Exception as exc:
+            _logger.debug("screenshot fallback: %s", exc)
 
     @staticmethod
     def _write_warmup_frame(live_dir: str, total_cases: int) -> None:
