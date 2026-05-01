@@ -603,11 +603,24 @@ class AutomationRunner:
                 self._move_cursor_to(page, target_bbox)
                 loc.check()
             elif step.action == "expect_text":
-                page.wait_for_timeout(150)
+                # Slow visual scan so the video shows the bot actually
+                # looking for something — without this the .webm sits on
+                # a static frame for the whole step. No-op when not
+                # recording video / not headed.
+                if (self.record_video or not self.headless) and step.value:
+                    self._live_pump(page, tc_dir, idx, "scan_start")
+                    self._visible_scan(page, step.value)
+                else:
+                    page.wait_for_timeout(150)
                 if step.value:
                     content = page.content()
                     if step.value.lower() not in content.lower():
                         raise AssertionError(f"Expected text not found: {step.value!r}")
+                    # Found — flash a green highlight ring on the first
+                    # match so the video shows WHERE the assertion landed.
+                    if self.record_video or not self.headless:
+                        self._highlight_text(page, step.value)
+                        self._live_pump(page, tc_dir, idx, "scan_done")
             elif step.action == "wait":
                 # Long waits get periodic live frames so the operator
                 # doesn't think the bot is frozen.
@@ -676,7 +689,11 @@ class AutomationRunner:
         self._live_last_pump = now
         try:
             tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.png")
-            page.screenshot(path=tmp_shot, full_page=False, timeout=1500)
+            # Bumped 1.5 s → 4 s. Pre-action pumps usually fire in the
+            # middle of cursor travel where Chromium's compositor is
+            # busy; the 1.5 s budget consistently dropped frames on
+            # Render free-tier.
+            page.screenshot(path=tmp_shot, full_page=False, timeout=4000)
             os.makedirs(live_dir, exist_ok=True)
             dst = os.path.join(live_dir, "latest.png")
             tmp = dst + ".tmp"
@@ -687,8 +704,10 @@ class AutomationRunner:
             except OSError:
                 pass
             self._write_live_info(status="running")
-        except Exception as exc:  # pragma: no cover — best-effort
-            _logger.debug("live pump: %s", exc)
+        except Exception as exc:
+            # Surface at debug — pumps are best-effort and noisy
+            # failures here would drown the log on a normal run.
+            _logger.debug("live pump (%s) failed: %s", label, exc)
 
     def _move_cursor_to(self, page, bbox: dict | None) -> None:
         """Move the cursor toward the target so the recorded video shows
@@ -879,43 +898,52 @@ class AutomationRunner:
             _logger.warning("annotate failure: %s", exc)
 
     def _screenshot(self, page, path: str) -> None:
-        """Take a screenshot to ``path`` AND mirror it to <live>/latest.png
-        so the live page updates. Strategy: snap directly to the live
-        path first (small viewport image, hard 3-second timeout), then
-        copy that file to the per-step path so the gallery sees it too.
-        Snapping straight to the live target sidesteps the silent
-        ``shutil.copyfile`` failures we were getting on Render — the
-        atomic ``os.replace`` on a Playwright-written PNG is the only IO
-        primitive we trust here. If the live mirror is disabled we fall
-        back to the legacy path-only screenshot.
+        """Take a step screenshot and mirror it to <live>/latest.png.
+
+        Order of operations matters — the previous version snapped
+        DIRECTLY to the live path first, and when that single
+        Playwright call timed out (WebKit / Firefox under Render's
+        0.1 CPU consistently miss a 3 s budget) the live tab stayed
+        on the "Warming up Chromium…" splash forever even though the
+        run itself was happily progressing through cases. The fix:
+        take the per-step PNG first (the gallery artefact must
+        always exist), then mirror to the live path as a cheap
+        file copy. Live update degrades gracefully — the operator
+        sees real frames even if a single Playwright call hiccups.
         """
-        live_dir = getattr(self, "_live_dir", "")
-        if live_dir:
-            try:
-                os.makedirs(live_dir, exist_ok=True)
-                live_path = os.path.join(live_dir, "latest.png")
-                tmp = live_path + ".tmp"
-                # 3-second timeout so a hung page can't stall the run.
-                page.screenshot(path=tmp,
-                                full_page=self.screenshot_full_page,
-                                timeout=3000)
-                os.replace(tmp, live_path)
-                self._live_step += 1
-                self._write_live_info(status="running")
-                # Copy to per-step path for the post-run gallery.
-                try:
-                    shutil.copyfile(live_path, path)
-                except Exception as exc:  # pragma: no cover
-                    _logger.debug("per-step copy: %s", exc)
-                return
-            except Exception as exc:
-                _logger.warning("live capture failed (%s) — falling back to path-only", exc)
-        # Fallback: live mirror disabled or live capture raised.
+        # 1) Per-step screenshot — the gallery + bug-screenshot
+        # pipeline both depend on this file. 8 s timeout (was 3 s)
+        # so non-Chromium engines under CPU pressure on Render
+        # free-tier still land a frame.
         try:
-            page.screenshot(path=path, full_page=self.screenshot_full_page,
-                            timeout=3000)
+            page.screenshot(path=path,
+                            full_page=self.screenshot_full_page,
+                            timeout=8000)
         except Exception as exc:
-            _logger.debug("screenshot fallback: %s", exc)
+            # Loud — operator needs to see this in Render INFO logs
+            # if every step is missing a screenshot.
+            _logger.error("step screenshot failed (%s): %s",
+                          type(exc).__name__, exc)
+            return
+
+        # 2) Mirror to <live>/latest.png — pure filesystem copy, no
+        # Playwright API surface, so this almost never fails. The
+        # write is atomic (.tmp + os.replace) so the live route never
+        # serves a half-written PNG.
+        live_dir = getattr(self, "_live_dir", "")
+        if not live_dir:
+            return
+        try:
+            os.makedirs(live_dir, exist_ok=True)
+            live_path = os.path.join(live_dir, "latest.png")
+            tmp = live_path + ".tmp"
+            shutil.copyfile(path, tmp)
+            os.replace(tmp, live_path)
+            self._live_step += 1
+            self._write_live_info(status="running")
+        except Exception as exc:  # pragma: no cover — IO best-effort
+            _logger.error("live mirror failed (%s): %s",
+                          type(exc).__name__, exc)
 
     @staticmethod
     def _write_warmup_frame(live_dir: str, total_cases: int) -> None:
@@ -1177,10 +1205,74 @@ class AutomationRunner:
             return page.locator("input[type='password']").first
         return page.locator("input[type='text'], input[type='email']").first
 
+    def _visible_scan(self, page, needle: str) -> None:
+        """Scroll the page top-to-bottom slowly so the recorded video
+        shows the bot actually scanning the document for the expected
+        text. Each step is ~250 ms with a 200 px delta — slow enough to
+        register on a 25 fps webm. Best-effort; never raises."""
+        try:
+            page.evaluate(
+                "async (q) => {"
+                "  const total = Math.max(document.documentElement.scrollHeight, 1);"
+                "  const steps = Math.min(8, Math.max(3, Math.ceil(total / 600)));"
+                "  for (let i = 1; i <= steps; i++) {"
+                "    window.scrollTo({top: (total * i)/steps, behavior:'smooth'});"
+                "    await new Promise(r => setTimeout(r, 280));"
+                "  }"
+                "  window.scrollTo({top: 0, behavior:'smooth'});"
+                "  await new Promise(r => setTimeout(r, 220));"
+                "}",
+                needle,
+            )
+        except Exception as exc:
+            _logger.debug("visible scan: %s", exc)
+
+    def _highlight_text(self, page, needle: str) -> None:
+        """Outline the first DOM node whose text contains the expected
+        string with a green dashed ring, scroll it into view, and pause
+        ~600 ms so the video clearly shows where the assertion succeeded.
+        Best-effort; never raises."""
+        try:
+            page.evaluate(
+                "(q) => {"
+                "  const target = q && q.toString().toLowerCase();"
+                "  if (!target) return;"
+                "  const walker = document.createTreeWalker("
+                "    document.body, NodeFilter.SHOW_TEXT);"
+                "  let node;"
+                "  while ((node = walker.nextNode())) {"
+                "    if (node.nodeValue && node.nodeValue.toLowerCase().includes(target)) {"
+                "      const el = node.parentElement;"
+                "      if (!el) continue;"
+                "      el.scrollIntoView({block:'center', behavior:'smooth'});"
+                "      const prevOutline = el.style.outline;"
+                "      const prevBox = el.style.boxShadow;"
+                "      el.style.outline = '3px dashed #16a34a';"
+                "      el.style.boxShadow = '0 0 0 6px rgba(22,163,74,0.25)';"
+                "      setTimeout(() => {"
+                "        el.style.outline = prevOutline;"
+                "        el.style.boxShadow = prevBox;"
+                "      }, 1200);"
+                "      break;"
+                "    }"
+                "  }"
+                "}",
+                needle,
+            )
+            page.wait_for_timeout(600)
+        except Exception as exc:
+            _logger.debug("highlight text: %s", exc)
+
     def _visible_scroll(self, page) -> None:
         """After a navigation, do a short visible scroll so the user sees
-        the page was actually opened and rendered. No-op in headless mode."""
-        if self.headless:
+        the page was actually opened and rendered.
+
+        Fires in headed mode (real audience) AND in headless+record_video
+        mode (the .webm needs activity or it looks frozen). Stays a no-op
+        in plain headless without recording — saves 1 s per case for
+        ad-hoc CI runs that don't produce a video.
+        """
+        if self.headless and not self.record_video:
             return
         try:
             page.evaluate(
