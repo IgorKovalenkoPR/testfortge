@@ -186,16 +186,20 @@ class AutomationRunner:
         self.navigation_timeout_ms = navigation_timeout_ms
         # When recording video, run actions slowly enough that the .webm
         # actually shows what happened — clicks, fills, scrolls, redirects.
-        # 350 ms slow_mo + 500 ms step pause turns a typical TC video from
-        # an unwatchable blur into a legible demo, while still being faster
-        # than a human tester. Without record_video, headless stays at full
+        # The previous 350 ms slow_mo was barely perceptible in a 25-fps
+        # webm and operators reported videos that looked like static page
+        # screenshots. 600 ms slow_mo + 250 ms step pause hits a sweet
+        # spot: the cursor's CSS transition (350 ms) finishes inside the
+        # slow_mo window so the video actually shows the pointer travel,
+        # but we don't bloat per-case duration the way the old 500 ms
+        # step_pause did. Without record_video, headless stays at full
         # speed (no audience to slow down for).
         if slow_mo_ms is not None:
             self.slow_mo_ms = slow_mo_ms
         elif not headless:
             self.slow_mo_ms = 500
         elif record_video:
-            self.slow_mo_ms = 350
+            self.slow_mo_ms = 600
         else:
             self.slow_mo_ms = 0
         if step_pause_ms is not None:
@@ -203,7 +207,7 @@ class AutomationRunner:
         elif not headless:
             self.step_pause_ms = 700
         elif record_video:
-            self.step_pause_ms = 500
+            self.step_pause_ms = 250
         else:
             self.step_pause_ms = 0
         self.credentials = credentials
@@ -507,27 +511,49 @@ class AutomationRunner:
                         f"Invalid URL (must start with http:// or https://): "
                         f"{target_url!r}"
                     )
-                page.goto(target_url, wait_until="domcontentloaded")
-                # Intermediate live frame so the operator sees the page
-                # arrive on the live tab, not just after the whole step.
-                self._live_pump(page, tc_dir, idx, "nav")
+                # If we're already sitting on the target URL (or its
+                # trailing-slash variant), skip the goto round-trip —
+                # this halves the budget on multi-case runs that all
+                # exercise the same page. We still pump a live frame so
+                # the operator sees progression.
+                cur = ""
+                try:
+                    cur = (page.url or "").rstrip("/")
+                except Exception:
+                    cur = ""
+                want = (target_url or "").rstrip("/")
+                if cur and want and cur == want:
+                    self._live_pump(page, tc_dir, idx, "nav_skip")
+                else:
+                    page.goto(target_url, wait_until="domcontentloaded")
+                    # Intermediate live frame so the operator sees the page
+                    # arrive on the live tab, not just after the whole step.
+                    self._live_pump(page, tc_dir, idx, "nav")
                 # In headed mode perform a visible scroll so the user sees page activity
                 self._visible_scroll(page)
             elif step.action == "click":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                # Pump a frame BEFORE the cursor moves so the live tab
+                # actually shows progression on fast click-heavy steps
+                # (operator complaint: "I only see one screenshot").
+                self._live_pump(page, tc_dir, idx, "pre_click")
                 self._move_cursor_to(page, target_bbox)
                 loc.click()
             elif step.action == "fill":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_fill")
                 self._move_cursor_to(page, target_bbox)
                 # Clear then fill — Playwright's fill() is instant; use type() in
-                # headed mode so the user sees keystrokes.
+                # headed mode so the user sees keystrokes. When recording
+                # video, also use type() with a small per-key delay so the
+                # webm shows characters actually appearing in the field
+                # instead of the value materialising in one frame.
                 loc.fill("")
-                if self.headless:
+                if self.headless and not self.record_video:
                     loc.fill(step.value)
                 else:
                     loc.type(step.value, delay=40)
@@ -535,12 +561,14 @@ class AutomationRunner:
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_select")
                 self._move_cursor_to(page, target_bbox)
                 loc.select_option(step.value)
             elif step.action == "check":
                 loc = _locator(page, step.target).first
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_check")
                 self._move_cursor_to(page, target_bbox)
                 loc.check()
             elif step.action == "expect_text":
@@ -571,7 +599,9 @@ class AutomationRunner:
             sr.status = "failed"
             sr.comment = str(e)
             self._screenshot(page, after_path)
-            self._annotate_failure(after_path, target_bbox, sr.comment)
+            self._annotate_failure(
+                after_path, target_bbox, sr.comment,
+                header=f"Step {idx} ({step.action})")
             sr.screenshot_after = _rel_url(after_path, self.storage_root)
         except Exception as e:
             msg = str(e)
@@ -583,7 +613,9 @@ class AutomationRunner:
                 sr.comment = f"{type(e).__name__}: {msg.splitlines()[0][:200]}"
             try:
                 self._screenshot(page, after_path)
-                self._annotate_failure(after_path, target_bbox, sr.comment)
+                self._annotate_failure(
+                    after_path, target_bbox, sr.comment,
+                    header=f"Step {idx} ({step.action})")
                 sr.screenshot_after = _rel_url(after_path, self.storage_root)
             except Exception:
                 pass
@@ -604,7 +636,11 @@ class AutomationRunner:
             return
         now = time.time()
         last = getattr(self, "_live_last_pump", 0)
-        if now - last < 0.4:
+        # Throttle was 400 ms; dropped to 200 ms after the operator
+        # complained that fast click-only steps showed only one frame
+        # in the live tab. With single-flight polling on the client
+        # (1 s interval) the disk IO cost is negligible.
+        if now - last < 0.2:
             return
         self._live_last_pump = now
         try:
@@ -674,16 +710,23 @@ class AutomationRunner:
             pass
         return None
 
-    def _annotate_failure(self, image_path: str, bbox: dict | None, comment: str) -> None:
+    def _annotate_failure(self, image_path: str, bbox: dict | None, comment: str,
+                          header: str = "") -> None:
         """Mark a failure screenshot so the bug location is unmistakable.
+
         When bbox is known: red rectangle around the element, red arrow
         from the upper-left corner pointing at it, compact red sticker
-        with the failure reason near the arrow tail. When bbox is None
-        (nav timeout, expect_text, etc): no element to box, but we still
-        drop a small red sticker in the top-left corner with the reason
-        so reviewers don't have to guess what failed. Best-effort — never
-        raises. Logs at WARNING when something goes wrong so we can see
-        annotation issues in Render logs.
+        with the failure reason next to the arrow tail.
+
+        When bbox is None (nav timeout, expect_text, etc): instead of a
+        small corner sticker, draw a full-width red banner across the
+        top of the screenshot with the failure header + reason. The old
+        16×16 sticker was the root of "screenshot doesn't show where
+        the bug is" — reviewers literally couldn't see it on thumbnails.
+
+        ``header`` is an optional one-line caption like
+        ``"Step 3 (expect_text)"`` shown in bold above the comment.
+        Best-effort — never raises.
         """
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -706,6 +749,19 @@ class AutomationRunner:
                     font = ImageFont.load_default()
                 caption = (comment or "Bug here").splitlines()[0][:140]
 
+                # Bigger fonts than before — operators reported the old
+                # 14-px sticker was illegible on thumbnail-size galleries.
+                try:
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
+                except Exception:
+                    font = ImageFont.load_default()
+                try:
+                    font_small = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
+                except Exception:
+                    font_small = font
+
+                hdr = (header or "").splitlines()[0][:80] if header else ""
+
                 if bbox:
                     # Most viewports render at scale 1, but high-DPI
                     # screens report a 2× framebuffer. Compare bbox to
@@ -717,21 +773,22 @@ class AutomationRunner:
                     y1 = max(0, int(bbox["y"] * scale) - 4)
                     x2 = min(width_px - 1, int((bbox["x"] + bbox["width"]) * scale) + 4)
                     y2 = min(height_px - 1, int((bbox["y"] + bbox["height"]) * scale) + 4)
-                    # Heavy red border (4 px) around the element
-                    for offset in range(4):
+                    # Heavy red border (5 px) around the element so it
+                    # stays visible on thumbnail-sized previews.
+                    for offset in range(5):
                         draw.rectangle(
                             (x1 - offset, y1 - offset, x2 + offset, y2 + offset),
                             outline=(220, 38, 38, 255),
                         )
                     # Red arrow from upper-left margin pointing AT the box
-                    arrow_tail = (max(20, x1 - 80), max(20, y1 - 60))
+                    arrow_tail = (max(20, x1 - 90), max(60, y1 - 60))
                     arrow_head = (x1, y1)
                     draw.line([arrow_tail, arrow_head],
-                              fill=(220, 38, 38, 255), width=4)
+                              fill=(220, 38, 38, 255), width=5)
                     import math
                     angle = math.atan2(arrow_head[1] - arrow_tail[1],
                                        arrow_head[0] - arrow_tail[0])
-                    head_len = 18
+                    head_len = 22
                     head_angle = math.radians(26)
                     p1 = (arrow_head[0] - head_len * math.cos(angle - head_angle),
                           arrow_head[1] - head_len * math.sin(angle - head_angle))
@@ -739,28 +796,50 @@ class AutomationRunner:
                           arrow_head[1] - head_len * math.sin(angle + head_angle))
                     draw.polygon([arrow_head, p1, p2], fill=(220, 38, 38, 255))
                     sticker_anchor = arrow_tail
-                else:
-                    # No element to box — drop the sticker in the top-
-                    # left so reviewers still see the failure reason.
-                    sticker_anchor = (16, 16)
 
-                # Sticker (red rounded-ish rect with white caption).
-                try:
-                    bb = draw.textbbox((0, 0), caption, font=font)
-                    cap_w, cap_h = bb[2] - bb[0], bb[3] - bb[1]
-                except Exception:
-                    cap_w, cap_h = len(caption) * 8, 16
-                pad = 8
-                sticker_w = cap_w + pad * 2
-                sticker_h = cap_h + pad * 2
-                sx = max(8, min(width_px - sticker_w - 8,
-                                sticker_anchor[0] - sticker_w // 2))
-                sy = max(8, sticker_anchor[1] - sticker_h - 6) if bbox \
-                     else max(8, sticker_anchor[1])
-                draw.rectangle((sx, sy, sx + sticker_w, sy + sticker_h),
-                               fill=(220, 38, 38, 240))
-                draw.text((sx + pad, sy + pad), caption,
-                          fill=(255, 255, 255, 255), font=font)
+                    # Sticker near the arrow tail (bbox path).
+                    try:
+                        bb_h = draw.textbbox((0, 0), hdr, font=font) if hdr else (0, 0, 0, 0)
+                        bb_c = draw.textbbox((0, 0), caption, font=font)
+                        cap_w = max(bb_h[2] - bb_h[0], bb_c[2] - bb_c[0])
+                        cap_h = (bb_h[3] - bb_h[1]) + (bb_c[3] - bb_c[1]) + (4 if hdr else 0)
+                    except Exception:
+                        cap_w = len(caption) * 11
+                        cap_h = 24 + (18 if hdr else 0)
+                    pad = 10
+                    sticker_w = cap_w + pad * 2
+                    sticker_h = cap_h + pad * 2
+                    sx = max(8, min(width_px - sticker_w - 8,
+                                    sticker_anchor[0] - sticker_w // 2))
+                    sy = max(8, sticker_anchor[1] - sticker_h - 6)
+                    draw.rectangle((sx, sy, sx + sticker_w, sy + sticker_h),
+                                   fill=(220, 38, 38, 240))
+                    text_y = sy + pad
+                    if hdr:
+                        draw.text((sx + pad, text_y), hdr,
+                                  fill=(255, 255, 255, 255), font=font)
+                        try:
+                            text_y += (draw.textbbox((0, 0), hdr, font=font)[3]
+                                       - draw.textbbox((0, 0), hdr, font=font)[1]) + 4
+                        except Exception:
+                            text_y += 22
+                    draw.text((sx + pad, text_y), caption,
+                              fill=(255, 255, 255, 255), font=font)
+                else:
+                    # No element to box — paint a full-width banner across
+                    # the top so the failure reason is impossible to miss
+                    # even on a thumbnail. This was the original "tiny
+                    # 16×16 sticker in the corner" complaint.
+                    banner_h = 64 if hdr else 44
+                    draw.rectangle((0, 0, width_px, banner_h),
+                                   fill=(220, 38, 38, 240))
+                    text_y = 8
+                    if hdr:
+                        draw.text((16, text_y), hdr,
+                                  fill=(255, 255, 255, 255), font=font)
+                        text_y += 26
+                    draw.text((16, text_y), caption,
+                              fill=(255, 255, 255, 255), font=font_small)
 
                 img.convert("RGB").save(image_path, "PNG", optimize=True)
                 _logger.info("annotated bug screenshot: %s (bbox=%s)",
@@ -1064,7 +1143,6 @@ class AutomationRunner:
                 except Exception:
                     continue
         # Last resort: first password-or-text input that matches type
-        if "password" in fallbacks:
             return page.locator("input[type='password']").first
         return page.locator("input[type='text'], input[type='email']").first
 
@@ -1076,7 +1154,6 @@ class AutomationRunner:
         try:
             page.evaluate(
                 "async () => {"
-                "  const step = () => window.scrollBy({top: 300, behavior:'smooth'});"
                 "  for (let i = 0; i < 3; i++) { step(); "
                 "    await new Promise(r => setTimeout(r, 250)); }"
                 "  window.scrollTo({top: 0, behavior:'smooth'});"
