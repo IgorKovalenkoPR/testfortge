@@ -33,13 +33,22 @@
 </div>
 
 <script>
+/* Async checklist generation — same hardened polling loop as
+ * /test-cases. See templates/test_cases.html for the full rationale. */
 (function () {
-    var form    = document.getElementById('cl-gen-form');
-    var overlay = document.getElementById('cl-gen-overlay');
-    var stageEl = document.getElementById('cl-gen-stage');
+    var form     = document.getElementById('cl-gen-form');
+    var overlay  = document.getElementById('cl-gen-overlay');
+    var stageEl  = document.getElementById('cl-gen-stage');
     var elapsedEl = document.getElementById('cl-gen-elapsed');
-    var errorEl   = document.getElementById('cl-gen-error');
+    var errorEl  = document.getElementById('cl-gen-error');
     if (!form || !overlay || !window.fetch) return;
+
+    var POLL_MS_FAST   = 1200;
+    var POLL_MS_SLOW   = 3000;
+    var POLL_MS_BACKOFF_AT = 30000;
+    var POLL_TIMEOUT_MS = 4500;
+    var MAX_CONSEC_ERRORS = 5;
+    var WATCHDOG_MS    = 120000;
 
     var STAGES = [
         { ms: 0,     text: "{{ t.get('cl_gen_stage_init', 'Analyzing input…') }}" },
@@ -58,56 +67,152 @@
         return st.text;
     }
 
-    var startedAt = 0, tickHandle = null, pollHandle = null;
+    var startedAt = 0;
+    var tickHandle = null, pollTimerHandle = null, watchdogHandle = null;
+    var inFlight = null;
+    var consecErrors = 0;
+    var stopped = false;
+    var fallbackTriggered = false;
+
     function tick() {
         var elapsed = Date.now() - startedAt;
         if (stageEl) stageEl.textContent = pickStage(elapsed);
         if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsed/1000);
     }
-    function showError(msg) {
-        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
-        if (tickHandle) clearInterval(tickHandle);
-        if (pollHandle) clearInterval(pollHandle);
-    }
-    function poll(jobId) {
-        fetch('/checklist/status/' + jobId, { cache: 'no-store' })
-            .then(function(r) { return r.json(); })
-            .then(function(j) {
-                if (!j) return;
-                if (j.status === 'done') {
-                    if (tickHandle) clearInterval(tickHandle);
-                    if (pollHandle) clearInterval(pollHandle);
-                    if (stageEl) stageEl.textContent = "{{ t.get('cl_gen_stage_done', 'Done — loading checklist…') }}";
-                    window.location.href = "{{ url_for('checklist_page') }}";
-                } else if (j.status === 'failed') {
-                    showError("{{ t.get('cl_gen_failed', 'Generation failed') }}: " + (j.error || 'unknown'));
-                }
-            })
-            .catch(function() { /* keep polling */ });
+
+    function stopAll() {
+        stopped = true;
+        if (tickHandle)  { clearInterval(tickHandle);  tickHandle = null; }
+        if (pollTimerHandle) { clearTimeout(pollTimerHandle); pollTimerHandle = null; }
+        if (watchdogHandle)  { clearTimeout(watchdogHandle);  watchdogHandle = null; }
+        if (inFlight) { try { inFlight.abort(); } catch (_) {} inFlight = null; }
     }
 
-    form.addEventListener('submit', function(ev) {
+    function showError(msg) {
+        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        stopAll();
+    }
+
+    function fallbackToSync(reason) {
+        if (fallbackTriggered) return;
+        fallbackTriggered = true;
+        stopAll();
+        if (stageEl) stageEl.textContent =
+            "{{ t.get('cl_gen_stage_fallback', 'Slow response — finishing the request directly…') }}";
+        if (errorEl && reason) {
+            errorEl.textContent = reason;
+            errorEl.style.display = 'block';
+        }
+        form.removeEventListener('submit', onSubmit, false);
+        try { form.submit(); }
+        catch (_) { window.location.reload(); }
+    }
+
+    function scheduleNextPoll(jobId) {
+        if (stopped) return;
+        var elapsed = Date.now() - startedAt;
+        var delay = elapsed > POLL_MS_BACKOFF_AT ? POLL_MS_SLOW : POLL_MS_FAST;
+        pollTimerHandle = setTimeout(function () { poll(jobId); }, delay);
+    }
+
+    function poll(jobId) {
+        if (stopped || inFlight) return;
+        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        inFlight = ctl;
+        var killTimer = ctl ? setTimeout(function () {
+            try { ctl.abort(); } catch (_) {}
+        }, POLL_TIMEOUT_MS) : null;
+
+        var opts = { cache: 'no-store', credentials: 'same-origin' };
+        if (ctl) opts.signal = ctl.signal;
+
+        fetch('/checklist/status/' + jobId, opts)
+            .then(function (r) {
+                return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
+            })
+            .then(function (res) {
+                if (killTimer) clearTimeout(killTimer);
+                inFlight = null;
+                if (stopped) return;
+
+                if (res.status === 404 || (res.body && res.body.error === 'not_found')) {
+                    return fallbackToSync(
+                        "{{ t.get('cl_gen_lost', 'The generation job was lost — retrying directly.') }}");
+                }
+                if (!res.ok) {
+                    consecErrors += 1;
+                    if (consecErrors >= MAX_CONSEC_ERRORS) {
+                        return fallbackToSync(
+                            "{{ t.get('cl_gen_unstable', 'Server returned errors — retrying directly.') }}");
+                    }
+                    return scheduleNextPoll(jobId);
+                }
+                consecErrors = 0;
+                var j = res.body || {};
+                if (j.status === 'done') {
+                    stopAll();
+                    if (stageEl) stageEl.textContent =
+                        "{{ t.get('cl_gen_stage_done', 'Done — loading checklist…') }}";
+                    var url = j.redirect_url || "{{ url_for('checklist_page') }}";
+                    window.location.assign(url);
+                    return;
+                }
+                if (j.status === 'failed') {
+                    return showError(
+                        "{{ t.get('cl_gen_failed', 'Generation failed') }}: "
+                        + (j.error || 'unknown'));
+                }
+                scheduleNextPoll(jobId);
+            })
+            .catch(function () {
+                if (killTimer) clearTimeout(killTimer);
+                inFlight = null;
+                if (stopped) return;
+                consecErrors += 1;
+                if (consecErrors >= MAX_CONSEC_ERRORS) {
+                    return fallbackToSync(
+                        "{{ t.get('cl_gen_offline', 'Network errors while polling — retrying directly.') }}");
+                }
+                scheduleNextPoll(jobId);
+            });
+    }
+
+    function onSubmit(ev) {
         ev.preventDefault();
-        var fd = new FormData(form);
+        stopped = false; fallbackTriggered = false; consecErrors = 0;
         startedAt = Date.now();
         if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
         tick();
         if (tickHandle) clearInterval(tickHandle);
         tickHandle = setInterval(tick, 1000);
         overlay.hidden = false;
-        fetch('/checklist/run-async', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
-            .then(function(res) {
-                if (!res.ok) { showError(res.body.message || 'Could not start generation.'); return; }
-                if (pollHandle) clearInterval(pollHandle);
-                pollHandle = setInterval(function() { poll(res.body.job_id); }, 1500);
-                poll(res.body.job_id);
-            })
-            .catch(function(err) {
-                showError('Network error — retrying as a regular request…');
-                setTimeout(function() { form.submit(); }, 800);
-            });
-    });
+
+        if (watchdogHandle) clearTimeout(watchdogHandle);
+        watchdogHandle = setTimeout(function () {
+            fallbackToSync(
+                "{{ t.get('cl_gen_watchdog', 'Generation is taking longer than expected — finishing directly.') }}");
+        }, WATCHDOG_MS);
+
+        var fd = new FormData(form);
+        fetch('/checklist/run-async', {
+            method: 'POST', body: fd, credentials: 'same-origin'
+        })
+        .then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
+        })
+        .then(function (res) {
+            if (!res.ok) {
+                return showError((res.body && res.body.message)
+                    || 'Could not start generation.');
+            }
+            poll(res.body.job_id);
+        })
+        .catch(function () {
+            fallbackToSync(
+                "{{ t.get('cl_gen_offline_submit', 'Could not reach the server — retrying directly.') }}");
+        });
+    }
+    form.addEventListener('submit', onSubmit, false);
 })();
 </script>
 
@@ -158,7 +263,6 @@
     </div>
 </div>
 {% endif %}
-
 {% if has_data and checklist %}
 <div class="filter-bar">
     <label>{{ t.filter }}:</label>

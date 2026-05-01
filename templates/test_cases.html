@@ -35,13 +35,31 @@
 </div>
 
 <script>
+/* Async test-case generation with a hardened polling loop.
+ *
+ * The original implementation used a fixed setInterval(1500ms) and a
+ * fire-and-forget fetch(). On free-tier Render the LLM run can
+ * monopolise threads briefly; once a single /status fetch stalled, the
+ * 1.5-s timer kept opening new connections until the browser's 6-per-
+ * origin cap was hit, at which point the modal silently froze. The
+ * loop below is single-flight (one in-flight poll at a time), aborts
+ * stalled requests, treats 404 as fatal, fails over to a synchronous
+ * form submit if the modal stalls past WATCHDOG_MS, and uses the
+ * server-supplied redirect_url instead of a hard-coded one. */
 (function () {
-    var form    = document.getElementById('tc-gen-form');
-    var overlay = document.getElementById('tc-gen-overlay');
-    var stageEl = document.getElementById('tc-gen-stage');
+    var form     = document.getElementById('tc-gen-form');
+    var overlay  = document.getElementById('tc-gen-overlay');
+    var stageEl  = document.getElementById('tc-gen-stage');
     var elapsedEl = document.getElementById('tc-gen-elapsed');
-    var errorEl   = document.getElementById('tc-gen-error');
+    var errorEl  = document.getElementById('tc-gen-error');
     if (!form || !overlay || !window.fetch) return;
+
+    var POLL_MS_FAST   = 1200;          // start fast so a quick run feels instant
+    var POLL_MS_SLOW   = 3000;          // back off after the first stages
+    var POLL_MS_BACKOFF_AT = 30000;     // elapsed threshold for backoff
+    var POLL_TIMEOUT_MS = 4500;         // abort a single poll after this
+    var MAX_CONSEC_ERRORS = 5;          // abandon polling after this many in a row
+    var WATCHDOG_MS    = 120000;        // fall back to sync POST if no DONE by then
 
     var STAGES = [
         { ms: 0,      text: "{{ t.get('tc_gen_stage_init', 'Analyzing input…') }}" },
@@ -61,57 +79,161 @@
         return st.text;
     }
 
-    var startedAt = 0, tickHandle = null, pollHandle = null;
+    var startedAt = 0;
+    var tickHandle = null, pollTimerHandle = null, watchdogHandle = null;
+    var inFlight = null;            // AbortController of the current poll, or null
+    var consecErrors = 0;
+    var stopped = false;
+    var fallbackTriggered = false;
+
     function tick() {
         var elapsed = Date.now() - startedAt;
         if (stageEl) stageEl.textContent = pickStage(elapsed);
         if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsed/1000);
     }
-    function showError(msg) {
-        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
-        if (tickHandle) clearInterval(tickHandle);
-        if (pollHandle) clearInterval(pollHandle);
-    }
-    function poll(jobId) {
-        fetch('/test-cases/status/' + jobId, { cache: 'no-store' })
-            .then(function(r) { return r.json(); })
-            .then(function(j) {
-                if (!j) return;
-                if (j.status === 'done') {
-                    if (tickHandle) clearInterval(tickHandle);
-                    if (pollHandle) clearInterval(pollHandle);
-                    if (stageEl) stageEl.textContent = "{{ t.get('tc_gen_stage_done', 'Done — loading test cases…') }}";
-                    window.location.href = "{{ url_for('test_cases_page') }}";
-                } else if (j.status === 'failed') {
-                    showError("{{ t.get('tc_gen_failed', 'Generation failed') }}: " + (j.error || 'unknown'));
-                }
-            })
-            .catch(function() { /* keep polling */ });
+
+    function stopAll() {
+        stopped = true;
+        if (tickHandle)  { clearInterval(tickHandle);  tickHandle = null; }
+        if (pollTimerHandle) { clearTimeout(pollTimerHandle); pollTimerHandle = null; }
+        if (watchdogHandle)  { clearTimeout(watchdogHandle);  watchdogHandle = null; }
+        if (inFlight) { try { inFlight.abort(); } catch (_) {} inFlight = null; }
     }
 
-    form.addEventListener('submit', function(ev) {
+    function showError(msg) {
+        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        stopAll();
+    }
+
+    /* Last-resort fallback. Tear down the async UI and let the legacy
+     * sync POST handler (still alive on /test-cases) render the page —
+     * the user waits longer but always gets a result. */
+    function fallbackToSync(reason) {
+        if (fallbackTriggered) return;
+        fallbackTriggered = true;
+        stopAll();
+        if (stageEl) stageEl.textContent =
+            "{{ t.get('tc_gen_stage_fallback', 'Slow response — finishing the request directly…') }}";
+        if (errorEl && reason) {
+            errorEl.textContent = reason;
+            errorEl.style.display = 'block';
+        }
+        // Remove the submit listener and re-submit the form synchronously.
+        form.removeEventListener('submit', onSubmit, false);
+        try { form.submit(); }
+        catch (_) { window.location.reload(); }
+    }
+
+    function scheduleNextPoll(jobId) {
+        if (stopped) return;
+        var elapsed = Date.now() - startedAt;
+        var delay = elapsed > POLL_MS_BACKOFF_AT ? POLL_MS_SLOW : POLL_MS_FAST;
+        pollTimerHandle = setTimeout(function () { poll(jobId); }, delay);
+    }
+
+    function poll(jobId) {
+        if (stopped || inFlight) return;       // single-flight — never pile up
+        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        inFlight = ctl;
+        var killTimer = ctl ? setTimeout(function () {
+            try { ctl.abort(); } catch (_) {}
+        }, POLL_TIMEOUT_MS) : null;
+
+        var opts = { cache: 'no-store', credentials: 'same-origin' };
+        if (ctl) opts.signal = ctl.signal;
+
+        fetch('/test-cases/status/' + jobId, opts)
+            .then(function (r) {
+                return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
+            })
+            .then(function (res) {
+                if (killTimer) clearTimeout(killTimer);
+                inFlight = null;
+                if (stopped) return;
+
+                if (res.status === 404 || (res.body && res.body.error === 'not_found')) {
+                    return fallbackToSync(
+                        "{{ t.get('tc_gen_lost', 'The generation job was lost — retrying directly.') }}");
+                }
+                if (!res.ok) {
+                    consecErrors += 1;
+                    if (consecErrors >= MAX_CONSEC_ERRORS) {
+                        return fallbackToSync(
+                            "{{ t.get('tc_gen_unstable', 'Server returned errors — retrying directly.') }}");
+                    }
+                    return scheduleNextPoll(jobId);
+                }
+                consecErrors = 0;
+                var j = res.body || {};
+                if (j.status === 'done') {
+                    stopAll();
+                    if (stageEl) stageEl.textContent =
+                        "{{ t.get('tc_gen_stage_done', 'Done — loading test cases…') }}";
+                    var url = j.redirect_url || "{{ url_for('test_cases_page') }}";
+                    window.location.assign(url);
+                    return;
+                }
+                if (j.status === 'failed') {
+                    return showError(
+                        "{{ t.get('tc_gen_failed', 'Generation failed') }}: "
+                        + (j.error || 'unknown'));
+                }
+                scheduleNextPoll(jobId);
+            })
+            .catch(function () {
+                if (killTimer) clearTimeout(killTimer);
+                inFlight = null;
+                if (stopped) return;
+                consecErrors += 1;
+                if (consecErrors >= MAX_CONSEC_ERRORS) {
+                    return fallbackToSync(
+                        "{{ t.get('tc_gen_offline', 'Network errors while polling — retrying directly.') }}");
+                }
+                scheduleNextPoll(jobId);
+            });
+    }
+
+    function onSubmit(ev) {
         ev.preventDefault();
-        var fd = new FormData(form);
+        // Reset internal state so a second submit on the same page works.
+        stopped = false; fallbackTriggered = false; consecErrors = 0;
         startedAt = Date.now();
         if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
         tick();
         if (tickHandle) clearInterval(tickHandle);
         tickHandle = setInterval(tick, 1000);
         overlay.hidden = false;
-        fetch('/test-cases/run-async', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
-            .then(function(res) {
-                if (!res.ok) { showError(res.body.message || 'Could not start generation.'); return; }
-                if (pollHandle) clearInterval(pollHandle);
-                pollHandle = setInterval(function() { poll(res.body.job_id); }, 1500);
-                poll(res.body.job_id);
-            })
-            .catch(function(err) {
-                // Network error → fall back to plain form post.
-                showError('Network error — retrying as a regular request…');
-                setTimeout(function() { form.submit(); }, 800);
-            });
-    });
+
+        // Watchdog — if we never see a DONE, escape to a sync POST so
+        // the user always gets an answer, just slower.
+        if (watchdogHandle) clearTimeout(watchdogHandle);
+        watchdogHandle = setTimeout(function () {
+            fallbackToSync(
+                "{{ t.get('tc_gen_watchdog', 'Generation is taking longer than expected — finishing directly.') }}");
+        }, WATCHDOG_MS);
+
+        var fd = new FormData(form);
+        fetch('/test-cases/run-async', {
+            method: 'POST', body: fd, credentials: 'same-origin'
+        })
+        .then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
+        })
+        .then(function (res) {
+            if (!res.ok) {
+                return showError((res.body && res.body.message)
+                    || 'Could not start generation.');
+            }
+            poll(res.body.job_id);          // first poll fires immediately,
+                                            // setTimeout chain handles the rest
+        })
+        .catch(function () {
+            // Couldn't even submit the job — fall straight back to sync.
+            fallbackToSync(
+                "{{ t.get('tc_gen_offline_submit', 'Could not reach the server — retrying directly.') }}");
+        });
+    }
+    form.addEventListener('submit', onSubmit, false);
 })();
 </script>
 

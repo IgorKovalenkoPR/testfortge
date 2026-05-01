@@ -305,7 +305,15 @@ def register(app: Flask) -> None:
             resp.headers["Retry-After"] = "20"
             return resp
 
-        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt):
+        # Resolve the active project id NOW, while we still hold a request
+        # context (and therefore a real session). The worker thread runs
+        # without any request context and cannot touch ``session`` to
+        # auto-create a project — so persistence has to be done with the
+        # pid we resolve here. Falsy result is fine: persistence becomes a
+        # no-op and the in-session result still lights up the page.
+        pid = ensure_active_project()
+
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid):
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
             raw_reqs_for_persona = (
@@ -319,8 +327,20 @@ def register(app: Flask) -> None:
             tc_list = generate_test_cases(new_stories, custom_prompt,
                                           raw_requirements=raw_reqs_for_persona)
             trace = generate_traceability(new_stories, tc_list) if tc_list else []
+            tc_dicts = [tc_to_dict(tc) for tc in tc_list]
+            # Persist INSIDE the worker so the polling /status endpoint
+            # never has to do a DB round-trip. On free-tier Postgres a
+            # cold connection can take 1–2 s and was visibly stalling the
+            # poll (browser caps at 6 concurrent requests per origin —
+            # one slow /status hangs the modal forever once the cap is
+            # hit). Best-effort: a DB outage must not hide the result.
+            if pid and tc_dicts:
+                try:
+                    _db.save_test_cases(pid, tc_dicts)
+                except Exception as exc:  # pragma: no cover
+                    _log.warning("tc_gen worker persist: %s", exc)
             return {
-                "tc_dicts": [tc_to_dict(tc) for tc in tc_list],
+                "tc_dicts": tc_dicts,
                 "stories": [story_to_dict(s) for s in new_stories],
                 "raw_requirements": raw_reqs_for_persona,
                 "trace": trace,
@@ -333,6 +353,11 @@ def register(app: Flask) -> None:
 
     @app.route("/test-cases/status/<job_id>", methods=["GET"])
     def test_cases_status(job_id):
+        # Polling endpoint — must stay cheap and never block. The browser
+        # caps concurrent connections to 6 per origin, so a single slow
+        # /status response can stall the entire modal. The worker has
+        # already persisted to Postgres before reaching DONE; here we
+        # only mirror its result into the session.
         job = get_queue().get(job_id)
         if job is None or job.kind != "tc_gen":
             return jsonify({"error": "not_found"}), 404
@@ -343,10 +368,12 @@ def register(app: Flask) -> None:
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             session["traceability_data"] = r.get("trace", [])
-            try:
-                _persist_test_cases(session["test_cases_data"])
-            except Exception as exc:
-                _log.warning("tc_gen async persist: %s", exc)
+            # Tell the client where to send the user once it sees DONE.
+            # Surfacing the URL in the payload (instead of hard-coding it
+            # in the template) means the same /status JSON is enough to
+            # drive a redirect even when the page is reopened in another
+            # tab and the original template hash is gone.
+            payload["redirect_url"] = url_for("test_cases_page")
         return jsonify(payload)
 
     @app.route("/checklist/run-async", methods=["POST"])
@@ -373,7 +400,12 @@ def register(app: Flask) -> None:
             resp.headers["Retry-After"] = "20"
             return resp
 
-        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt):
+        # Same rationale as /test-cases/run-async: resolve pid here so the
+        # worker can persist without needing a request context, and the
+        # /status endpoint never has to make a DB round-trip.
+        pid = ensure_active_project()
+
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid):
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
             raw_reqs_for_persona = (
@@ -386,8 +418,14 @@ def register(app: Flask) -> None:
                            if parsed_reqs else [])
             cl_list = generate_checklist(new_stories, custom_prompt,
                                          raw_requirements=raw_reqs_for_persona)
+            cl_dicts = [cl_to_dict(c) for c in cl_list]
+            if pid and cl_dicts:
+                try:
+                    _db.save_checklist(pid, cl_dicts)
+                except Exception as exc:  # pragma: no cover
+                    _log.warning("cl_gen worker persist: %s", exc)
             return {
-                "cl_dicts": [cl_to_dict(c) for c in cl_list],
+                "cl_dicts": cl_dicts,
                 "stories": [story_to_dict(s) for s in new_stories],
                 "raw_requirements": raw_reqs_for_persona,
             }
@@ -399,6 +437,7 @@ def register(app: Flask) -> None:
 
     @app.route("/checklist/status/<job_id>", methods=["GET"])
     def checklist_status(job_id):
+        # Polling endpoint — see /test-cases/status for rationale.
         job = get_queue().get(job_id)
         if job is None or job.kind != "cl_gen":
             return jsonify({"error": "not_found"}), 404
@@ -408,10 +447,7 @@ def register(app: Flask) -> None:
             session["checklist_data"] = r.get("cl_dicts", [])
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
-            try:
-                _persist_checklist(session["checklist_data"])
-            except Exception as exc:
-                _log.warning("cl_gen async persist: %s", exc)
+            payload["redirect_url"] = url_for("checklist_page")
         return jsonify(payload)
 
     @app.route("/checklist/upload", methods=["POST"])
@@ -453,6 +489,7 @@ def register(app: Flask) -> None:
         )
         return redirect(url_for("checklist_page"))
 
+    @app.route("/export/<fmt>")
     @app.route("/export/<fmt>")
     def export(fmt):
         stories = reconstruct_stories(session.get("user_stories", []))
@@ -502,3 +539,4 @@ def register(app: Flask) -> None:
 
 
 __all__ = ["register"]
+
