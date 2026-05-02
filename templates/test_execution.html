@@ -4,14 +4,213 @@
 {% block content %}
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
 <p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
-
-{% if not has_tc_data and not has_cl_data %}
-<div class="card">
-    <p>{{ t.get('te_no_data', 'No test cases or checklists generated yet.') }}</p>
-    <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary">{{ t.nav_test_cases }}</a>
-    <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary">{{ t.nav_checklist }}</a>
+{# ── Pack status badge — Feature #15. Shows at-a-glance how many
+   items the current session pack holds, so the tester knows what
+   they're about to Run before scrolling. Hidden until at least one
+   collection has data. #}
+{% if has_tc_data or has_cl_data %}
+<div class="card pack-status-badge"
+     style="display:flex;align-items:center;gap:14px;padding:10px 16px;
+            background:linear-gradient(90deg,#ecfdf5 0%,#f0f9ff 100%);
+            border:1px solid #bbf7d0;margin-bottom:14px;">
+    <i data-lucide="package-check" class="icon-md" style="color:#16a34a;"></i>
+    <div style="flex:1;">
+        <div style="font-weight:700;color:#0f172a;font-size:0.95em;">
+            {{ t.get('te_pack_loaded', 'Pack loaded') }}
+        </div>
+        <div style="color:#475569;font-size:0.85em;">
+            {% if has_tc_data %}<strong>{{ tc_count }}</strong>
+                {{ t.get('te_pack_tc', 'test case(s)') }}{% endif %}
+            {% if has_tc_data and has_cl_data %} · {% endif %}
+            {% if has_cl_data %}<strong>{{ cl_count }}</strong>
+                {{ t.get('te_pack_cl', 'checklist item(s)') }}{% endif %}
+        </div>
+    </div>
+    <a href="{{ url_for('new_session') }}" class="btn btn-secondary"
+       style="font-size:0.8em;padding:6px 12px;"
+       onclick='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
+        <i data-lucide="trash-2" class="icon-sm"></i>
+        {{ t.get('te_pack_clear', 'Clear pack') }}
+    </a>
 </div>
+{% endif %}
+
+
+{# ── Empty state — no data yet ───────────────────────────────────
+   The user lands here either fresh (nothing in the session) or after
+   a "New session" reset. Two paths forward: generate from scratch on
+   /test-cases — /checklist, or upload an existing pack right here so
+   they can run it immediately without round-tripping to another page.
+   The upload card is the same one already living on /test-cases and
+   /checklist; it goes through the existing /test-cases/upload and
+   /checklist/upload endpoints so the parser pipeline is shared. #}
+{% if not has_tc_data and not has_cl_data %}
+<div class="card te-empty-state">
+    <h2 class="card-title"><i data-lucide="play-circle" class="icon-sm"></i>
+        {{ t.get('te_empty_title', 'Nothing to run yet') }}</h2>
+    <p class="hint">
+        {{ t.get('te_empty_hint',
+                 'Generate a test pack from requirements, or upload one you already have. The uploaded pack lands in the same session so you can run it on this page right away.') }}
+    </p>
+    <div class="empty-state-actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+        <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary">
+            <i data-lucide="sparkles" class="icon-sm"></i>
+            {{ t.get('te_empty_generate_tc', 'Generate test cases') }}
+        </a>
+        <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary">
+            <i data-lucide="list-checks" class="icon-sm"></i>
+            {{ t.get('te_empty_generate_cl', 'Generate checklist') }}
+        </a>
+    </div>
+</div>
+
+{# ── Upload existing test cases — runs straight from /test-execution ── #}
+<form method="POST" action="{{ url_for('test_cases_upload') }}"
+      enctype="multipart/form-data" class="card upload-existing"
+      data-te-upload="tc">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3 class="card-title">
+        <i data-lucide="upload-cloud" class="icon-sm"></i>
+        {{ t.get('te_upload_tc_title', 'Upload existing tc pack') }}
+    </h3>
+    <p class="hint">
+        {{ t.get('te_upload_tc_hint',
+                 'Drop an XLSX / CSV / MD / JSON pack — TestForTge maps the columns to its fields and stores items in the session for execution on this page.') }}
+    </p>
+    {# Drop-zone: clicking opens the picker, dragging+dropping over
+       it assigns the dropped files to the hidden input. Mirrors the
+       pattern from _input_block.html. #}
+    <div class="file-upload-area te-drop-zone"
+         data-target="te-tc-file"
+         tabindex="0" role="button">
+        <div class="upload-icon icon-coral">
+            <i data-lucide="cloud-upload" class="icon-lg"></i>
+        </div>
+        <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
+        <p class="meta-text">XLSX, CSV, MD, JSON</p>
+        <input type="file" name="upload_file" required
+               id="te-tc-file"
+               class="file-input-hidden"
+               accept=".xlsx,.csv,.md,.markdown,.json">
+        <div class="file-list te-drop-summary" data-summary-for="te-tc-file"></div>
+    </div>
+    <div class="form-row" style="align-items:center;gap:14px;margin-top:10px;">
+        <label class="form-group" style="margin:0;">
+            <input type="radio" name="upload_mode" value="replace" checked>
+            {{ t.get('te_upload_replace', 'Replace current pack') }}
+        </label>
+        <label class="form-group" style="margin:0;">
+            <input type="radio" name="upload_mode" value="append">
+            {{ t.get('te_upload_append', 'Append to current pack') }}
+        </label>
+        <label class="form-group" style="margin:0;">
+            <input type="checkbox" name="auto_run" value="1" checked>
+            <strong>{{ t.get('te_upload_auto_run', 'Run immediately after upload') }}</strong>
+        </label>
+        <div class="form-group" style="margin:0;margin-left:auto;">
+            <button type="submit" class="btn btn-success">
+                <i data-lucide="upload" class="icon-sm"></i>
+                {{ t.get('te_upload_btn', 'Upload & start running') }}
+            </button>
+        </div>
+    </div>
+</form>
+
+{# ── Upload existing checklist ── #}
+<form method="POST" action="{{ url_for('checklist_upload') }}"
+      enctype="multipart/form-data" class="card upload-existing"
+      data-te-upload="cl">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3 class="card-title">
+        <i data-lucide="upload-cloud" class="icon-sm"></i>
+        {{ t.get('te_upload_cl_title', 'Upload existing cl pack') }}
+    </h3>
+    <p class="hint">
+        {{ t.get('te_upload_cl_hint',
+                 'Drop an XLSX / CSV / MD / JSON pack — TestForTge maps the columns to its fields and stores items in the session for execution on this page.') }}
+    </p>
+    {# Drop-zone: clicking opens the picker, dragging+dropping over
+       it assigns the dropped files to the hidden input. Mirrors the
+       pattern from _input_block.html. #}
+    <div class="file-upload-area te-drop-zone"
+         data-target="te-cl-file"
+         tabindex="0" role="button">
+        <div class="upload-icon icon-coral">
+            <i data-lucide="cloud-upload" class="icon-lg"></i>
+        </div>
+        <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
+        <p class="meta-text">XLSX, CSV, MD, JSON</p>
+        <input type="file" name="upload_file" required
+               id="te-cl-file"
+               class="file-input-hidden"
+               accept=".xlsx,.csv,.md,.markdown,.json">
+        <div class="file-list te-drop-summary" data-summary-for="te-cl-file"></div>
+    </div>
+    <div class="form-row" style="align-items:center;gap:14px;margin-top:10px;">
+        <label class="form-group" style="margin:0;">
+            <input type="radio" name="upload_mode" value="replace" checked>
+            {{ t.get('te_upload_replace', 'Replace current pack') }}
+        </label>
+        <label class="form-group" style="margin:0;">
+            <input type="radio" name="upload_mode" value="append">
+            {{ t.get('te_upload_append', 'Append to current pack') }}
+        </label>
+        <label class="form-group" style="margin:0;">
+            <input type="checkbox" name="auto_run" value="1" checked>
+            <strong>{{ t.get('te_upload_auto_run', 'Run immediately after upload') }}</strong>
+        </label>
+        <div class="form-group" style="margin:0;margin-left:auto;">
+            <button type="submit" class="btn btn-secondary">
+                <i data-lucide="upload" class="icon-sm"></i>
+                {{ t.get('te_upload_btn', 'Upload & start running') }}
+            </button>
+        </div>
+    </div>
+</form>
 {% else %}
+
+{# ── Persistent upload card (also visible WITH data, lets the tester
+   swap or extend the pack without going to /test-cases) ── #}
+<details class="card upload-existing" style="padding:14px 18px;">
+    <summary style="cursor:pointer;font-weight:600;color:#0f172a;">
+        <i data-lucide="upload-cloud" class="icon-sm"></i>
+        {{ t.get('te_upload_more', 'Upload another pack (replace or append)') }}
+    </summary>
+    <div style="margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;">
+        <form method="POST" action="{{ url_for('test_cases_upload') }}"
+              enctype="multipart/form-data" style="flex:1;min-width:280px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <strong>{{ t.get('te_upload_tc_title', 'Test cases') }}</strong>
+            <input type="file" name="upload_file" required style="margin-top:6px;width:100%;"
+                   accept=".xlsx,.csv,.md,.markdown,.json">
+            <label style="display:block;margin-top:6px;font-size:0.85em;">
+                <input type="radio" name="upload_mode" value="replace" checked>
+                {{ t.get('te_upload_replace', 'Replace') }}
+                <input type="radio" name="upload_mode" value="append" style="margin-left:10px;">
+                {{ t.get('te_upload_append', 'Append') }}
+            </label>
+            <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
+                {{ t.get('te_upload_btn', 'Upload & start running') }}
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('checklist_upload') }}"
+              enctype="multipart/form-data" style="flex:1;min-width:280px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <strong>{{ t.get('te_upload_cl_title', 'Checklist') }}</strong>
+            <input type="file" name="upload_file" required style="margin-top:6px;width:100%;"
+                   accept=".xlsx,.csv,.md,.markdown,.json">
+            <label style="display:block;margin-top:6px;font-size:0.85em;">
+                <input type="radio" name="upload_mode" value="replace" checked>
+                {{ t.get('te_upload_replace', 'Replace') }}
+                <input type="radio" name="upload_mode" value="append" style="margin-left:10px;">
+                {{ t.get('te_upload_append', 'Append') }}
+            </label>
+            <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
+                {{ t.get('te_upload_btn', 'Upload & start running') }}
+            </button>
+        </form>
+    </div>
+</details>
 
 {# ── Resource URLs Panel ── #}
 {% if resource_urls %}
@@ -540,7 +739,7 @@
     </p>
 </div>
 
-<button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
+<a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" class="btn btn-secondary btn-lg" id="watch-live-link" style="margin-right:10px;"><i data-lucide="monitor-play" class="icon-sm"></i> {{ t.get('te_watch_live', 'Watch live (opens in new tab)') }}</a><button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
 </form>
 
 {# ── Run progress overlay (shown while POST is in flight) ── #}
@@ -928,5 +1127,128 @@ toggleItemList();
 .hint { color: #666; font-size: 0.85em; margin-bottom: 8px; }
 @media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
 </style>
+
+<script>
+/* TestExecution upload helpers — Feature #15.
+ *  - Drag-and-drop on the upload cards (mirrors _input_block.html).
+ *  - "Run immediately after upload" checkbox: append `auto_run=1` to
+ *    the upload action URL so the upload route knows to redirect to
+ *    /test-execution?auto_run=1; we then auto-click Run on arrival.
+ *  - On /test-execution?auto_run=1 the run-form's submit button is
+ *    clicked once after a short delay so the operator sees the page
+ *    paint before the Run modal opens. */
+(function () {
+    /* DnD wiring — for every form data-te-upload="..." block. */
+    document.querySelectorAll('form[data-te-upload]').forEach(function (form) {
+        var zone   = form.querySelector('.te-drop-zone');
+        var input  = zone && zone.querySelector('input[type="file"]');
+        var summary = zone && zone.querySelector('.te-drop-summary');
+        if (!zone || !input) return;
+
+        function humanSize(bytes) {
+            return bytes < 1024 * 1024
+                ? (bytes / 1024).toFixed(1) + ' KB'
+                : (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        function render() {
+            if (!summary) return;
+            summary.innerHTML = '';
+            Array.from(input.files).forEach(function (f) {
+                var row = document.createElement('div');
+                row.className = 'file-item';
+                row.style.cssText = 'display:flex;justify-content:space-between;'
+                                  + 'padding:4px 8px;background:#f1f5f9;'
+                                  + 'border-radius:4px;margin-top:4px;'
+                                  + 'font-size:0.85em;';
+                row.innerHTML = '<span></span><span></span>';
+                row.children[0].textContent = f.name;
+                row.children[1].textContent = humanSize(f.size);
+                summary.appendChild(row);
+            });
+        }
+        zone.addEventListener('click', function (ev) {
+            if (ev.target === input) return;
+            ev.preventDefault();
+            input.click();
+        });
+        zone.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                input.click();
+            }
+        });
+        ['dragenter', 'dragover'].forEach(function (n) {
+            zone.addEventListener(n, function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+                zone.classList.add('drag-over');
+            });
+        });
+        zone.addEventListener('dragleave', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            zone.classList.remove('drag-over');
+        });
+        zone.addEventListener('drop', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            zone.classList.remove('drag-over');
+            var dt = ev.dataTransfer;
+            if (!dt || !dt.files || !dt.files.length) return;
+            try { input.files = dt.files; }
+            catch (_) {
+                var t = new DataTransfer();
+                Array.from(dt.files).forEach(function (f) { t.items.add(f); });
+                input.files = t.files;
+            }
+            render();
+        });
+        input.addEventListener('change', render);
+
+        /* Append auto_run flag to the action URL on submit so the
+           server-side upload route can redirect with ?auto_run=1
+           preserved across the redirect.  */
+        form.addEventListener('submit', function () {
+            var ar = form.querySelector('input[name="auto_run"]');
+            if (ar && ar.checked) {
+                try {
+                    var u = new URL(form.action, window.location.origin);
+                    u.searchParams.set('auto_run', '1');
+                    form.action = u.pathname + u.search;
+                } catch (_) {
+                    form.action = form.action
+                        + (form.action.indexOf('?') === -1 ? '?' : '&')
+                        + 'auto_run=1';
+                }
+            }
+        });
+    });
+
+    /* If we landed on /test-execution?auto_run=1 (because the upload
+       route redirected with that flag) — auto-click the Run button
+       after a short visible delay so the user sees the pack badge
+       and pack list before the Run modal pops. */
+    try {
+        var qp = new URLSearchParams(window.location.search);
+        if (qp.get('auto_run') === '1') {
+            var btn = document.getElementById('te-run-button');
+            if (btn) {
+                /* Strip auto_run from the URL so a refresh doesn't
+                   trigger another run. */
+                qp.delete('auto_run');
+                var nu = window.location.pathname
+                       + (qp.toString() ? '?' + qp.toString() : '');
+                window.history.replaceState({}, '', nu);
+                setTimeout(function () {
+                    try { btn.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+                    catch (_) {}
+                    setTimeout(function () { btn.click(); }, 600);
+                }, 400);
+            }
+        }
+    } catch (_) {}
+})();
+</script>
+
 {% endblock %}
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             

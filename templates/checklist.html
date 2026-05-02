@@ -47,8 +47,8 @@
     var POLL_MS_SLOW   = 3000;
     var POLL_MS_BACKOFF_AT = 30000;
     var POLL_TIMEOUT_MS = 4500;
-    var MAX_CONSEC_ERRORS = 5;
-    var WATCHDOG_MS    = 120000;
+    var MAX_CONSEC_ERRORS = 10;
+    var WATCHDOG_MS    = 240000;
 
     var STAGES = [
         { ms: 0,     text: "{{ t.get('cl_gen_stage_init', 'Analyzing input…') }}" },
@@ -91,21 +91,43 @@
     function showError(msg) {
         if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
         stopAll();
+        // Return focus to the Generate button so a keyboard
+        // user can immediately retry without tab-fishing.
+        var btn = document.getElementById('cl-gen-button');
+        if (btn) { try { btn.focus(); } catch (_) {} }
     }
 
+    /* Surface a manual Retry button instead of auto-submitting the
+     * form synchronously. Synchronous fallback used to tie up the
+     * single gunicorn worker for the entire LLM run and reliably
+     * produced 502 on slow days. The async path is well-tested; if
+     * it didn't deliver, the user clicks Retry and we start a fresh
+     * job — no risk to the worker pool, no 502. */
     function fallbackToSync(reason) {
         if (fallbackTriggered) return;
         fallbackTriggered = true;
         stopAll();
         if (stageEl) stageEl.textContent =
-            "{{ t.get('cl_gen_stage_fallback', 'Slow response — finishing the request directly…') }}";
-        if (errorEl && reason) {
-            errorEl.textContent = reason;
+            "{{ t.get('cl_gen_stage_fallback', 'Generation could not finish — try again.') }}";
+        if (errorEl) {
+            errorEl.innerHTML = "";
             errorEl.style.display = 'block';
+            var msg = document.createElement('div');
+            msg.textContent = reason || "{{ t.get('cl_gen_offline', 'Generation could not finish — try again.') }}";
+            errorEl.appendChild(msg);
+            var retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'btn btn-primary';
+            retry.style.marginTop = '10px';
+            retry.textContent = "{{ t.get('cl_gen_retry', 'Retry generation') }}";
+            retry.addEventListener('click', function () {
+                errorEl.style.display = 'none';
+                overlay.hidden = true;
+                fallbackTriggered = false;
+                onSubmit(new Event('submit'));
+            });
+            errorEl.appendChild(retry);
         }
-        form.removeEventListener('submit', onSubmit, false);
-        try { form.submit(); }
-        catch (_) { window.location.reload(); }
     }
 
     function scheduleNextPoll(jobId) {
@@ -213,6 +235,20 @@
         });
     }
     form.addEventListener('submit', onSubmit, false);
+
+    // ESC dismisses the modal (treats it as a soft cancel —
+    // the background job keeps running but the operator gets
+    // their UI back). Tab-key behaviour stays default.
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape') return;
+        if (overlay.hidden) return;
+        ev.preventDefault();
+        stopAll();
+        overlay.hidden = true;
+        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        var btn = document.getElementById('cl-gen-button');
+        if (btn) { try { btn.focus(); } catch (_) {} }
+    });
 })();
 </script>
 

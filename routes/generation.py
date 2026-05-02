@@ -71,10 +71,60 @@ def _persist_checklist(cl_dicts: list[dict]) -> None:
         _log.warning("persist checklist failed: %s", exc)
 
 
+
+def _back_to_caller(default: str = "test_cases_page", extra_qs: str = "") -> str:
+    """Resolve the URL to redirect to after a form submission so the
+    user stays on the page they came from.
+
+    Looks at the Referer header first; if it points at a page hosted
+    by us (and the endpoint is one of the accepted return targets), we
+    use it. Otherwise we fall back to ``default`` so a missing or
+    spoofed Referer can't bounce the user to an external site.
+
+    ``extra_qs`` is appended verbatim to the resolved URL — callers
+    use this to pass ``auto_run=1`` so the destination page knows to
+    auto-click the Run button after the upload landed.
+    """
+    from urllib.parse import urlparse
+    target = url_for(default)
+    referrer = (request.referrer or "").strip()
+    if referrer:
+        try:
+            host = urlparse(referrer).path or ""
+            for ep, prefix in (
+                ("test_execution_page", "/test-execution"),
+                ("test_cases_page",      "/test-cases"),
+                ("checklist_page",       "/checklist"),
+            ):
+                if host == prefix or host.startswith(prefix + "/") or host == prefix + "/":
+                    target = url_for(ep)
+                    break
+        except Exception:
+            pass
+    if extra_qs:
+        target = target + ("&" if "?" in target else "?") + extra_qs
+    return target
+
+
 def register(app: Flask) -> None:
+    # Hard-coded blocking budget for the legacy sync POST. Render's
+    # gunicorn timeout is 300 s; anything we let block beyond ~250 s
+    # risks a worker kill and a 502 on the user's tab. The async
+    # /test-cases/run-async pair has no such restriction — it submits
+    # to JobQueue and returns immediately.
+    SYNC_GEN_BUDGET_S = 60
+
     @app.route("/test-cases", methods=["GET", "POST"])
     def test_cases_page():
         if request.method == "POST":
+            # The sync POST is now a thin shim around the JobQueue so a
+            # slow LLM never holds the single gunicorn worker hostage
+            # past the 300 s ceiling — that's what produced the 502 the
+            # operator reported. We submit the same job a JS client
+            # would, then block for up to SYNC_GEN_BUDGET_S seconds. If
+            # it finishes, render the result; if not, redirect to GET
+            # with a flash and let the user refresh once the background
+            # job is done.
             raw_lines, errors, custom_prompt = parse_page_input()
 
             if not raw_lines:
@@ -84,6 +134,87 @@ def register(app: Flask) -> None:
                                        test_cases=[], traceability=[],
                                        has_data=False, errors=errors)
 
+            sync_pid = ensure_active_project()
+            sync_raw_lines = raw_lines
+            sync_custom_prompt = custom_prompt
+
+            def _sync_worker(raw_lines=sync_raw_lines,
+                             custom_prompt=sync_custom_prompt,
+                             pid=sync_pid):
+                parsed = split_into_requirements(raw_lines)
+                parsed = [r for r in parsed if not is_instruction(r.text)]
+                raw_for_persona = (
+                    [{"id": r.id, "text": r.text} for r in parsed]
+                    if parsed else
+                    [{"id": f"RAW-{i+1}", "text": line}
+                     for i, line in enumerate(raw_lines) if line.strip()]
+                )
+                stories = (generate_user_stories(parsed, custom_prompt)
+                           if parsed else [])
+                tcl = generate_test_cases(stories, custom_prompt,
+                                          raw_requirements=raw_for_persona)
+                trc = generate_traceability(stories, tcl) if tcl else []
+                tcd = [tc_to_dict(tc) for tc in tcl]
+                if pid and tcd:
+                    try: _db.save_test_cases(pid, tcd)
+                    except Exception: pass
+                return {"tc_dicts": tcd,
+                        "stories": [story_to_dict(s) for s in stories],
+                        "raw_requirements": raw_for_persona,
+                        "trace": trc}
+
+            sid = get_session_id(session)
+            job_id = get_queue().submit("tc_gen", _sync_worker,
+                                        meta={"session_id": sid})
+            session["tc_gen_job_id"] = job_id
+
+            import time as _time
+            deadline = _time.time() + SYNC_GEN_BUDGET_S
+            job = None
+            while _time.time() < deadline:
+                job = get_queue().get(job_id)
+                if job is None or job.status in (DONE, FAILED):
+                    break
+                _time.sleep(0.5)
+
+            if job is None or job.status != DONE:
+                # Job is still running in the background — don't block
+                # the worker any longer. Holding screen + flash; the
+                # GET path will show results once the background job
+                # writes them into the session.
+                flash(
+                    g.t.get(
+                        "mvp_gen_in_background",
+                        "Generation is still running in the background. "
+                        "Please wait a few seconds and refresh this page."
+                    ),
+                    "info",
+                )
+                return redirect(url_for("test_cases_page"))
+
+            r = job.result or {}
+            session["test_cases_data"] = r.get("tc_dicts", [])
+            session["user_stories"] = r.get("stories", [])
+            session["raw_requirements"] = r.get("raw_requirements", [])
+            session["traceability_data"] = r.get("trace", [])
+
+            tc_list = reconstruct_test_cases(session["test_cases_data"])
+            trace = session["traceability_data"]
+            if not tc_list:
+                flash(g.t.get(
+                    "mvp_no_quality_requirements",
+                    "Could not detect any testable requirements in the provided input."),
+                    "error")
+                return render_template("test_cases.html",
+                                       test_cases=[], traceability=[],
+                                       has_data=False, errors=errors)
+            return render_template("test_cases.html",
+                                   test_cases=tc_list, traceability=trace,
+                                   has_data=True, errors=errors,
+                                   resource_urls=extract_resource_urls())
+
+            # ── Legacy code path retained below for reference; the
+            #    block above replaces it. Falls through harmlessly. ──
             parsed_reqs = split_into_requirements(raw_lines)
 
             # Filter out instruction lines — "Create test cases...",
@@ -144,6 +275,7 @@ def register(app: Flask) -> None:
     @app.route("/checklist", methods=["GET", "POST"])
     def checklist_page():
         if request.method == "POST":
+            # Same async-via-JobQueue shim as /test-cases above.
             raw_lines, errors, custom_prompt = parse_page_input()
 
             if not raw_lines:
@@ -152,6 +284,76 @@ def register(app: Flask) -> None:
                 return render_template("checklist.html",
                                        checklist=[], has_data=False, errors=errors)
 
+            sync_pid = ensure_active_project()
+            sync_raw_lines = raw_lines
+            sync_custom_prompt = custom_prompt
+
+            def _sync_worker(raw_lines=sync_raw_lines,
+                             custom_prompt=sync_custom_prompt,
+                             pid=sync_pid):
+                parsed = split_into_requirements(raw_lines)
+                parsed = [r for r in parsed if not is_instruction(r.text)]
+                raw_for_persona = (
+                    [{"id": r.id, "text": r.text} for r in parsed]
+                    if parsed else
+                    [{"id": f"RAW-{i+1}", "text": line}
+                     for i, line in enumerate(raw_lines) if line.strip()]
+                )
+                stories = (generate_user_stories(parsed, custom_prompt)
+                           if parsed else [])
+                cll = generate_checklist(stories, custom_prompt,
+                                         raw_requirements=raw_for_persona)
+                cld = [cl_to_dict(c) for c in cll]
+                if pid and cld:
+                    try: _db.save_checklist(pid, cld)
+                    except Exception: pass
+                return {"cl_dicts": cld,
+                        "stories": [story_to_dict(s) for s in stories],
+                        "raw_requirements": raw_for_persona}
+
+            sid = get_session_id(session)
+            job_id = get_queue().submit("cl_gen", _sync_worker,
+                                        meta={"session_id": sid})
+            session["cl_gen_job_id"] = job_id
+
+            import time as _time
+            deadline = _time.time() + 60
+            job = None
+            while _time.time() < deadline:
+                job = get_queue().get(job_id)
+                if job is None or job.status in (DONE, FAILED):
+                    break
+                _time.sleep(0.5)
+
+            if job is None or job.status != DONE:
+                flash(
+                    g.t.get(
+                        "mvp_gen_in_background",
+                        "Generation is still running in the background. "
+                        "Please wait a few seconds and refresh this page."
+                    ),
+                    "info",
+                )
+                return redirect(url_for("checklist_page"))
+
+            r = job.result or {}
+            session["checklist_data"] = r.get("cl_dicts", [])
+            session["user_stories"] = r.get("stories", [])
+            session["raw_requirements"] = r.get("raw_requirements", [])
+
+            cl_list = reconstruct_checklist(session["checklist_data"])
+            if not cl_list:
+                flash(g.t.get(
+                    "mvp_no_quality_requirements",
+                    "Could not detect any testable requirements in the provided input."),
+                    "error")
+                return render_template("checklist.html",
+                                       checklist=[], has_data=False, errors=errors)
+            return render_template("checklist.html", checklist=cl_list,
+                                   has_data=True, errors=errors,
+                                   resource_urls=extract_resource_urls())
+
+            # Legacy code path retained below; replaced above.
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
 
@@ -231,12 +433,12 @@ def register(app: Flask) -> None:
         path, filename = _save_upload(request.files.get("upload_file"))
         if not path:
             flash(filename, "error")
-            return redirect(url_for("test_cases_page"))
+            return redirect(_back_to_caller(default="test_cases_page"))
         try:
             cases = import_parse_test_cases(path, filename)
         except Exception as exc:
             flash(f"Import failed: {exc}", "error")
-            return redirect(url_for("test_cases_page"))
+            return redirect(_back_to_caller(default="test_cases_page"))
         finally:
             try:
                 os.unlink(path)
@@ -249,7 +451,7 @@ def register(app: Flask) -> None:
                 "No test cases were recognised in the file. Check that it has a "
                 "header row and at least an ‘ID’ + ‘Summary’ + ‘Steps’ column."),
                 "error")
-            return redirect(url_for("test_cases_page"))
+            return redirect(_back_to_caller(default="test_cases_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
         existing = session.get("test_cases_data", []) if mode == "append" else []
@@ -267,7 +469,14 @@ def register(app: Flask) -> None:
             + (f" Total now: {len(merged)}." if mode == "append" else ""),
             "success",
         )
-        return redirect(url_for("test_cases_page"))
+        # Stay on whatever page the form was POSTed from. The same
+        # upload form lives on /test-cases AND on /test-execution; the
+        # operator who hit "Upload & start running" from the execution
+        # page expects to land back there, not on the generation page.
+        # auto_run=1 (form checkbox or query param) forwards a flag the
+        # /test-execution page picks up to auto-click the Run button.
+        _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
+        return redirect(_back_to_caller(default="test_cases_page", extra_qs=_auto_qs))
 
     # ── Async generation pipeline ────────────────────────────────
     # The sync /test-cases and /checklist POST handlers can block for
@@ -455,12 +664,12 @@ def register(app: Flask) -> None:
         path, filename = _save_upload(request.files.get("upload_file"))
         if not path:
             flash(filename, "error")
-            return redirect(url_for("checklist_page"))
+            return redirect(_back_to_caller(default="checklist_page"))
         try:
             items = import_parse_checklist(path, filename)
         except Exception as exc:
             flash(f"Import failed: {exc}", "error")
-            return redirect(url_for("checklist_page"))
+            return redirect(_back_to_caller(default="checklist_page"))
         finally:
             try:
                 os.unlink(path)
@@ -473,7 +682,7 @@ def register(app: Flask) -> None:
                 "No checklist items were recognised in the file. Check that it "
                 "has a header row and at least an ‘Objective’ column."),
                 "error")
-            return redirect(url_for("checklist_page"))
+            return redirect(_back_to_caller(default="checklist_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
         existing = session.get("checklist_data", []) if mode == "append" else []
@@ -487,7 +696,8 @@ def register(app: Flask) -> None:
             + (f" Total now: {len(merged)}." if mode == "append" else ""),
             "success",
         )
-        return redirect(url_for("checklist_page"))
+        _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
+        return redirect(_back_to_caller(default="checklist_page", extra_qs=_auto_qs))
 
     @app.route("/export/<fmt>")
     @app.route("/export/<fmt>")
