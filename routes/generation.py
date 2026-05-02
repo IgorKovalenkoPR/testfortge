@@ -175,7 +175,7 @@ def register(app: Flask) -> None:
     # risks a worker kill and a 502 on the user's tab. The async
     # /test-cases/run-async pair has no such restriction — it submits
     # to JobQueue and returns immediately.
-    SYNC_GEN_BUDGET_S = 60
+    SYNC_GEN_BUDGET_S = 90
 
     @app.route("/test-cases", methods=["GET", "POST"])
     def test_cases_page():
@@ -543,17 +543,11 @@ def register(app: Flask) -> None:
         )
         # Stay on whatever page the form was POSTed from. The same
         # upload form lives on /test-cases AND on /test-execution; the
-        # operator who hit "Upload & start running" from the execution
-        # page expects to land back there, not on the generation page.
-        # When auto_run=1 — and the form was POSTed from /test-execution
-        # — redirect to the server-side auto-run endpoint instead so a
-        # JS-disabled tester still gets the run kicked off.
-        if request.values.get("auto_run") == "1":
-            referrer = (request.referrer or "")
-            if "/test-execution" in referrer:
-                return redirect(url_for("test_execution_auto_run"))
-        _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
-        return redirect(_back_to_caller(default="test_cases_page", extra_qs=_auto_qs))
+        # operator who hit Upload from the execution page expects to
+        # land back there, not on the generation page. Run is then
+        # triggered by the user clicking the Run button — uniform
+        # behaviour with the generation flow.
+        return redirect(_back_to_caller(default="test_cases_page"))
 
     # ── Async generation pipeline ────────────────────────────────
     # The sync /test-cases and /checklist POST handlers can block for
@@ -773,12 +767,7 @@ def register(app: Flask) -> None:
             + (f" Total now: {len(merged)}." if mode == "append" else ""),
             "success",
         )
-        if request.values.get("auto_run") == "1":
-            referrer = (request.referrer or "")
-            if "/test-execution" in referrer:
-                return redirect(url_for("test_execution_auto_run"))
-        _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
-        return redirect(_back_to_caller(default="checklist_page", extra_qs=_auto_qs))
+        return redirect(_back_to_caller(default="checklist_page"))
 
     @app.route("/export/<fmt>")
     @app.route("/export/<fmt>")

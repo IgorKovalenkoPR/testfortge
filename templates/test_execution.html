@@ -26,12 +26,19 @@
                 {{ t.get('te_pack_cl', 'checklist item(s)') }}{% endif %}
         </div>
     </div>
-    <a href="{{ url_for('new_session') }}" class="btn btn-secondary"
-       style="font-size:0.8em;padding:6px 12px;"
-       onclick='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
-        <i data-lucide="trash-2" class="icon-sm"></i>
-        {{ t.get('te_pack_clear', 'Clear pack') }}
-    </a>
+    {# Clear pack must go through POST because /new-session is a
+       state-changing endpoint and the route only accepts POST (a GET
+       on it returned 405 Method Not Allowed in the operator video). #}
+    <form method="POST" action="{{ url_for('new_session') }}"
+          style="display:inline;margin:0;"
+          onsubmit='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-secondary"
+                style="font-size:0.8em;padding:6px 12px;">
+            <i data-lucide="trash-2" class="icon-sm"></i>
+            {{ t.get('te_pack_clear', 'Clear pack') }}
+        </button>
+    </form>
 </div>
 {% endif %}
 
@@ -103,14 +110,10 @@
             <input type="radio" name="upload_mode" value="append">
             {{ t.get('te_upload_append', 'Append to current pack') }}
         </label>
-        <label class="form-group" style="margin:0;">
-            <input type="checkbox" name="auto_run" value="1" checked>
-            <strong>{{ t.get('te_upload_auto_run', 'Run immediately after upload') }}</strong>
-        </label>
         <div class="form-group" style="margin:0;margin-left:auto;">
             <button type="submit" class="btn btn-success">
                 <i data-lucide="upload" class="icon-sm"></i>
-                {{ t.get('te_upload_btn', 'Upload & start running') }}
+                {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </div>
     </div>
@@ -155,14 +158,10 @@
             <input type="radio" name="upload_mode" value="append">
             {{ t.get('te_upload_append', 'Append to current pack') }}
         </label>
-        <label class="form-group" style="margin:0;">
-            <input type="checkbox" name="auto_run" value="1" checked>
-            <strong>{{ t.get('te_upload_auto_run', 'Run immediately after upload') }}</strong>
-        </label>
         <div class="form-group" style="margin:0;margin-left:auto;">
             <button type="submit" class="btn btn-secondary">
                 <i data-lucide="upload" class="icon-sm"></i>
-                {{ t.get('te_upload_btn', 'Upload & start running') }}
+                {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </div>
     </div>
@@ -190,7 +189,7 @@
                 {{ t.get('te_upload_append', 'Append') }}
             </label>
             <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
-                {{ t.get('te_upload_btn', 'Upload & start running') }}
+                {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </form>
         <form method="POST" action="{{ url_for('checklist_upload') }}"
@@ -206,7 +205,7 @@
                 {{ t.get('te_upload_append', 'Append') }}
             </label>
             <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
-                {{ t.get('te_upload_btn', 'Upload & start running') }}
+                {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </form>
     </div>
@@ -1206,48 +1205,8 @@ toggleItemList();
         });
         input.addEventListener('change', render);
 
-        /* Append auto_run flag to the action URL on submit so the
-           server-side upload route can redirect with ?auto_run=1
-           preserved across the redirect.  */
-        form.addEventListener('submit', function () {
-            var ar = form.querySelector('input[name="auto_run"]');
-            if (ar && ar.checked) {
-                try {
-                    var u = new URL(form.action, window.location.origin);
-                    u.searchParams.set('auto_run', '1');
-                    form.action = u.pathname + u.search;
-                } catch (_) {
-                    form.action = form.action
-                        + (form.action.indexOf('?') === -1 ? '?' : '&')
-                        + 'auto_run=1';
-                }
-            }
-        });
     });
 
-    /* If we landed on /test-execution?auto_run=1 (because the upload
-       route redirected with that flag) — auto-click the Run button
-       after a short visible delay so the user sees the pack badge
-       and pack list before the Run modal pops. */
-    try {
-        var qp = new URLSearchParams(window.location.search);
-        if (qp.get('auto_run') === '1') {
-            var btn = document.getElementById('te-run-button');
-            if (btn) {
-                /* Strip auto_run from the URL so a refresh doesn't
-                   trigger another run. */
-                qp.delete('auto_run');
-                var nu = window.location.pathname
-                       + (qp.toString() ? '?' + qp.toString() : '');
-                window.history.replaceState({}, '', nu);
-                setTimeout(function () {
-                    try { btn.scrollIntoView({block: 'center', behavior: 'smooth'}); }
-                    catch (_) {}
-                    setTimeout(function () { btn.click(); }, 600);
-                }, 400);
-            }
-        }
-    } catch (_) {}
 })();
 </script>
 

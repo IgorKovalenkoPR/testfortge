@@ -52,10 +52,12 @@ class TestAutoRunEndpoint:
         with client.session_transaction() as s:
             assert not s.get("test_runs")
 
-    def test_upload_with_auto_run_lands_at_auto_run_endpoint(self, client):
-        """End-to-end without JS: upload from /test-execution Referer
-        with auto_run=1 → upload route 302 to /test-execution/auto-run
-        → that endpoint runs and 302 to /test-execution."""
+    def test_upload_no_longer_chains_into_auto_run(self, client):
+        """Operator-requested revert: upload must not trigger auto-run
+        even when the (legacy) auto_run flag is sent. Same as the
+        upload-extras suite but kept here for symmetry with the
+        auto-run endpoint."""
+        import io
         csv = b"ID,Section,Summary,Steps,Expected\nTC-1,A,Empty,1.x,Err\n"
         r = client.post(
             "/test-cases/upload",
@@ -65,14 +67,9 @@ class TestAutoRunEndpoint:
             follow_redirects=False,
         )
         assert r.status_code == 302
-        assert r.headers["Location"].endswith("/test-execution/auto-run")
-
-        # Follow once — auto-run route does the work, then 302s home.
-        r2 = client.get(r.headers["Location"], follow_redirects=False)
-        assert r2.status_code == 302
-        assert r2.headers["Location"].endswith("/test-execution")
+        assert r.headers["Location"] == "/test-execution"
         with client.session_transaction() as s:
-            assert s.get("test_runs"), "auto-run produced no test_runs"
+            assert not s.get("test_runs")
 
 
 class TestPackRehydrate:
