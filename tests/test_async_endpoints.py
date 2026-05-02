@@ -146,3 +146,92 @@ class TestGenerationAsyncEndToEnd:
             assert "redirect_url" not in payload
         finally:
             gate.set()
+
+
+class TestPostSyncBudgetDrain:
+    """Regression for the operator complaint: 'I added a URL + file,
+    spinner finished, page is empty'.
+
+    Reproduction: a sync POST hits the SYNC_GEN_BUDGET_S deadline,
+    redirects with a flash, but the worker finishes a moment later.
+    Without the GET drain, the result sits in the queue forever and
+    every refresh shows the empty form."""
+
+    def test_get_drains_finished_tc_job_into_session(self, client):
+        from engine.job_queue import get_queue
+        # Stash a real job that returns instantly.
+        result = {
+            "tc_dicts": [{
+                "id": "TC-DRAIN", "section": "X", "section_num": 1,
+                "summary": "drained", "preconditions": "", "test_steps": "",
+                "test_data": "", "expected_result": "", "issues": "",
+                "comment": "", "user_story_id": "",
+                "category": "Positive", "priority": "High",
+                "status": "Unchecked", "testing_type": "Functional",
+            }],
+            "stories": [], "raw_requirements": [], "trace": [],
+        }
+        jid = get_queue().submit("tc_gen", lambda: result)
+        # Wait for it to land.
+        import time
+        for _ in range(30):
+            j = get_queue().get(jid)
+            if j and j.status == "done":
+                break
+            time.sleep(0.05)
+        with client.session_transaction() as s:
+            s["tc_gen_job_id"] = jid
+            s["_session_active_since"] = 9_999_999_999
+        r = client.get("/test-cases")
+        body = r.get_data(as_text=True)
+        assert "TC-DRAIN" in body, "drain never copied result into session"
+        with client.session_transaction() as s:
+            assert s.get("test_cases_data"), "session was not populated"
+            assert "tc_gen_job_id" not in s, "job_id should be cleared after drain"
+
+    def test_get_drains_finished_cl_job_into_session(self, client):
+        from engine.job_queue import get_queue
+        result = {
+            "cl_dicts": [{
+                "id": "CL-DRAIN", "section": "X", "objective": "drained",
+                "comments": "", "user_story_id": "", "category": "Positive",
+                "priority": "High", "status": "Unchecked",
+                "testing_type": "Functional",
+            }],
+            "stories": [], "raw_requirements": [],
+        }
+        jid = get_queue().submit("cl_gen", lambda: result)
+        import time
+        for _ in range(30):
+            j = get_queue().get(jid)
+            if j and j.status == "done":
+                break
+            time.sleep(0.05)
+        with client.session_transaction() as s:
+            s["cl_gen_job_id"] = jid
+            s["_session_active_since"] = 9_999_999_999
+        r = client.get("/checklist")
+        body = r.get_data(as_text=True)
+        assert "CL-DRAIN" in body, "drain never copied checklist into session"
+        with client.session_transaction() as s:
+            assert s.get("checklist_data"), "session was not populated"
+            assert "cl_gen_job_id" not in s
+
+    def test_get_ignores_pending_job(self, client):
+        """A still-running job must not corrupt the GET render."""
+        from engine.job_queue import get_queue
+        import threading
+        gate = threading.Event()
+        jid = get_queue().submit("tc_gen", lambda: gate.wait(timeout=10) or {"tc_dicts": []})
+        try:
+            with client.session_transaction() as s:
+                s["tc_gen_job_id"] = jid
+                s["_session_active_since"] = 9_999_999_999
+            r = client.get("/test-cases")
+            assert r.status_code == 200
+            with client.session_transaction() as s:
+                # Job is still pending, so the id stays in session.
+                assert s.get("tc_gen_job_id") == jid
+                assert not s.get("test_cases_data")
+        finally:
+            gate.set()

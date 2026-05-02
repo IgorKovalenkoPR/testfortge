@@ -106,6 +106,69 @@ def _back_to_caller(default: str = "test_cases_page", extra_qs: str = "") -> str
     return target
 
 
+def _drain_tc_job_into_session() -> None:
+    """If a previous POST left a tc_gen job_id in the session and that
+    job is now finished, copy the result into the session keys the
+    GET render reads. No-op when no job_id is stored or the job is
+    still pending. Best-effort: never raises.
+    """
+    job_id = session.get("tc_gen_job_id")
+    if not job_id:
+        return
+    try:
+        job = get_queue().get(job_id)
+    except Exception:
+        return
+    if not job or job.kind != "tc_gen":
+        return
+    if job.status == DONE and job.result:
+        r = job.result
+        session["test_cases_data"]   = r.get("tc_dicts", [])
+        session["user_stories"]      = r.get("stories", [])
+        session["raw_requirements"]  = r.get("raw_requirements", [])
+        session["traceability_data"] = r.get("trace", [])
+        session.pop("tc_gen_job_id", None)
+    elif job.status == FAILED:
+        # Surface the worker error once and stop polling for this id.
+        from flask import flash as _flash, g as _g
+        _flash(
+            (_g.t.get("mvp_gen_failed", "Generation failed") if hasattr(_g, "t")
+             else "Generation failed")
+            + ": " + (job.error or "unknown"),
+            "error",
+        )
+        session.pop("tc_gen_job_id", None)
+
+
+def _drain_cl_job_into_session() -> None:
+    """Same as :func:`_drain_tc_job_into_session` but for the
+    checklist queue. Handles the matching cl_gen_job_id key."""
+    job_id = session.get("cl_gen_job_id")
+    if not job_id:
+        return
+    try:
+        job = get_queue().get(job_id)
+    except Exception:
+        return
+    if not job or job.kind != "cl_gen":
+        return
+    if job.status == DONE and job.result:
+        r = job.result
+        session["checklist_data"]    = r.get("cl_dicts", [])
+        session["user_stories"]      = r.get("stories", [])
+        session["raw_requirements"]  = r.get("raw_requirements", [])
+        session.pop("cl_gen_job_id", None)
+    elif job.status == FAILED:
+        from flask import flash as _flash, g as _g
+        _flash(
+            (_g.t.get("mvp_gen_failed", "Generation failed") if hasattr(_g, "t")
+             else "Generation failed")
+            + ": " + (job.error or "unknown"),
+            "error",
+        )
+        session.pop("cl_gen_job_id", None)
+
+
 def register(app: Flask) -> None:
     # Hard-coded blocking budget for the legacy sync POST. Render's
     # gunicorn timeout is 300 s; anything we let block beyond ~250 s
@@ -258,7 +321,13 @@ def register(app: Flask) -> None:
                                    has_data=True, errors=errors,
                                    resource_urls=extract_resource_urls())
 
-        # GET: show session data if it exists.
+        # GET — first drain any background job whose result
+        # arrived after the previous sync POST already returned. This
+        # is the bug operators reported as "I added a URL + file, the
+        # spinner finished, but the page is empty": the job was still
+        # running when the 60 s sync budget expired, redirected with a
+        # flash, and nothing else moved the result into the session.
+        _drain_tc_job_into_session()
         tc_data = session.get("test_cases_data", [])
         trace_data = session.get("traceability_data", [])
         if tc_data:
@@ -388,6 +457,9 @@ def register(app: Flask) -> None:
                                    has_data=True, errors=errors,
                                    resource_urls=extract_resource_urls())
 
+        # GET — drain any background checklist job that finished
+        # after the sync POST returned. Same bug as the TC path.
+        _drain_cl_job_into_session()
         cl_data = session.get("checklist_data", [])
         if cl_data:
             cl_list = reconstruct_checklist(cl_data)
@@ -473,8 +545,13 @@ def register(app: Flask) -> None:
         # upload form lives on /test-cases AND on /test-execution; the
         # operator who hit "Upload & start running" from the execution
         # page expects to land back there, not on the generation page.
-        # auto_run=1 (form checkbox or query param) forwards a flag the
-        # /test-execution page picks up to auto-click the Run button.
+        # When auto_run=1 — and the form was POSTed from /test-execution
+        # — redirect to the server-side auto-run endpoint instead so a
+        # JS-disabled tester still gets the run kicked off.
+        if request.values.get("auto_run") == "1":
+            referrer = (request.referrer or "")
+            if "/test-execution" in referrer:
+                return redirect(url_for("test_execution_auto_run"))
         _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
         return redirect(_back_to_caller(default="test_cases_page", extra_qs=_auto_qs))
 
@@ -696,6 +773,10 @@ def register(app: Flask) -> None:
             + (f" Total now: {len(merged)}." if mode == "append" else ""),
             "success",
         )
+        if request.values.get("auto_run") == "1":
+            referrer = (request.referrer or "")
+            if "/test-execution" in referrer:
+                return redirect(url_for("test_execution_auto_run"))
         _auto_qs = "auto_run=1" if (request.values.get("auto_run") == "1") else ""
         return redirect(_back_to_caller(default="checklist_page", extra_qs=_auto_qs))
 

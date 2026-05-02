@@ -49,7 +49,7 @@ class TestAutoRunPassthrough:
             follow_redirects=False,
         )
         assert r.status_code == 302
-        assert r.headers["Location"].endswith("/test-execution?auto_run=1")
+        assert r.headers["Location"].endswith("/test-execution/auto-run")
 
     def test_upload_without_auto_run_redirects_clean(self, client):
         r = client.post(
@@ -73,4 +73,4 @@ class TestAutoRunPassthrough:
             follow_redirects=False,
         )
         assert r.status_code == 302
-        assert r.headers["Location"].endswith("/test-execution?auto_run=1")
+        assert r.headers["Location"].endswith("/test-execution/auto-run")

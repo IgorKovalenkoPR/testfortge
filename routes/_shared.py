@@ -44,6 +44,10 @@ GENERATED_KEYS = (
     "project_setup", "raw_requirements", "user_stories",
     "test_cases_data", "checklist_data", "traceability_data", "custom_prompt",
     "execution_results", "bug_reports_data", "test_runs",
+    # Pending JobQueue ids — without these in the wipe list, /new-session
+    # leaves a finished tc_gen / cl_gen job behind and the next GET
+    # /test-cases drains it back into the freshly-cleared session.
+    "tc_gen_job_id", "cl_gen_job_id",
 )
 
 # Server-start timestamp — sessions persisted from previous boots get wiped.

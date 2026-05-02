@@ -780,6 +780,48 @@ def list_estimations(project_id: str, limit: int = 50) -> list[dict]:
         return [_row_to_dict(r) for r in rows]
 
 
+def list_estimations_by_owner(owner_sid: str, *,
+                              similar_features: int | None = None,
+                              tolerance: float = 0.4,
+                              limit: int = 25) -> list[dict]:
+    """Return past estimations across every project owned by *owner_sid*,
+    optionally filtered to peers whose feature_count is within
+    ``similar_features * (1 ± tolerance)``.
+
+    Used by the historical-calibration helper so a new estimate gets
+    compared only to projects of comparable size.
+    """
+    if not owner_sid:
+        return []
+    with session_scope() as sess:
+        # Estimations join Project on project_id; filter by owner_sid.
+        stmt = (select(Estimation)
+                .join(Project, Estimation.project_id == Project.id)
+                .where(Project.owner_sid == owner_sid)
+                .order_by(Estimation.created_at.desc())
+                .limit(limit * 4))  # over-fetch, we'll size-filter below
+        rows = sess.execute(stmt).scalars().all()
+        out = []
+        for r in rows:
+            d = _row_to_dict(r)
+            if similar_features and similar_features > 0:
+                try:
+                    fc = int(((d.get("input_payload") or {})
+                              .get("features_count")) or 0)
+                except (TypeError, ValueError):
+                    fc = 0
+                if fc <= 0:
+                    continue
+                lo = similar_features * (1 - tolerance)
+                hi = similar_features * (1 + tolerance)
+                if not (lo <= fc <= hi):
+                    continue
+            out.append(d)
+            if len(out) >= limit:
+                break
+        return out
+
+
 def latest_estimation(project_id: str) -> dict | None:
     if not project_id:
         return None
@@ -941,7 +983,8 @@ __all__ = [
     # bugs
     "save_bug", "list_bugs", "VALID_BUG_SOURCES",
     # estimation
-    "save_estimation", "list_estimations", "latest_estimation",
+    "save_estimation", "list_estimations", "list_estimations_by_owner",
+    "latest_estimation",
     # execution
     "start_execution_run", "finish_execution_run", "save_case_result",
     "list_execution_runs",

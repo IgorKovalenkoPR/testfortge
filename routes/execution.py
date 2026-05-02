@@ -92,9 +92,54 @@ def _persist_bug(bug_dict: dict, source: str = "manual",
         return None
 
 
+
+def _maybe_restore_pack_from_db() -> None:
+    """If the session has no TC / CL pack but the active project does,
+    rehydrate the session keys from the DB so the run page shows what
+    the user uploaded earlier (Phase 2 persistence).
+
+    No-op when:
+      * session already carries a pack (avoid clobbering);
+      * project_id is missing (fresh visitor);
+      * DB read raises or returns empty.
+
+    Best-effort — never raises. Failures are debug-logged.
+    """
+    pid = session.get("project_id")
+    if not pid:
+        return
+    if session.get("test_cases_data") or session.get("checklist_data"):
+        return
+    try:
+        from engine import db as _db
+        # The DB layer exposes `load_test_cases` / `load_checklist` for
+        # this rehydration path; both return empty lists on miss.
+        tc = _db.load_test_cases(pid) if hasattr(_db, "load_test_cases") else []
+        cl = _db.load_checklist(pid) if hasattr(_db, "load_checklist") else []
+    except Exception as exc:  # pragma: no cover
+        log.debug("restore: db read failed: %s", exc)
+        return
+    if tc:
+        session["test_cases_data"] = tc
+    if cl:
+        session["checklist_data"] = cl
+
+
 def register(app: Flask) -> None:
     @app.route("/test-execution", methods=["GET", "POST"])
     def test_execution_page():
+        # Restore pack from Postgres when the session is empty but the
+        # active project saved one earlier. The previous upload route
+        # writes the parsed pack to DB via _persist_test_cases /
+        # _persist_checklist, but the session is request-scoped — a
+        # fresh tab or post-restart visit would otherwise show the
+        # empty form even though the DB still has the cases.
+        if request.method == "GET":
+            try:
+                _maybe_restore_pack_from_db()
+            except Exception as exc:  # pragma: no cover
+                log.debug("pack restore skipped: %s", exc)
+
         tc_data = session.get("test_cases_data", [])
         cl_data = session.get("checklist_data", [])
         has_tc = bool(tc_data)
@@ -685,6 +730,126 @@ def register(app: Flask) -> None:
                                      login_url=login_url)
         session["test_execution_credentials"] = credentials_to_session(cred)
         flash(f"Generated test account: {cred.username}", "success")
+        return redirect(url_for("test_execution_page"))
+
+    @app.route("/test-execution/auto-run", methods=["GET", "POST"])
+    def test_execution_auto_run():
+        """Server-side auto-run path for JS-disabled testers.
+
+        Triggered by the upload route's ?auto_run=1 redirect when JS
+        isn't available to click the Run button on /test-execution. We
+        dispatch a default execute_items() run with sensible defaults:
+        first tester, generic Web environment, deterministic simulator
+        (no Playwright / no Base URL), all selected items.
+        """
+        _maybe_restore_pack_from_db()
+        tc_data = session.get("test_cases_data", []) or []
+        cl_data = session.get("checklist_data", []) or []
+
+        if not tc_data and not cl_data:
+            flash(g.t.get(
+                "te_no_pack_for_autorun",
+                "Nothing to run yet — upload or generate a pack first."),
+                "error",
+            )
+            return redirect(url_for("test_execution_page"))
+
+        # Pick source: TC > CL when both exist (matches the form's
+        # default radio button).
+        if tc_data:
+            items_data = tc_data
+            item_type = "test_case"
+            source = "test_cases"
+        else:
+            items_data = cl_data
+            item_type = "checklist"
+            source = "checklist"
+
+        # Default execution context. Operator can rerun with different
+        # settings via the regular form — auto-run's job is just to
+        # show that the pack works end-to-end.
+        tester_id = (TESTERS[0].id if TESTERS else "tester_1")
+        tester = get_tester(tester_id)
+        tester_name = tester.name if tester else tester_id
+        environment = "Web · Auto · " + tester_name
+        testing_types = ["Functional"]
+
+        try:
+            execution = execute_items(
+                items=items_data,
+                item_type=item_type,
+                tester_id=tester_id,
+                environment=environment,
+                testing_types=testing_types,
+                selected_ids=None,
+            )
+        except Exception as exc:  # pragma: no cover — surfaces on UI
+            log.exception("auto-run failed: %s", exc)
+            flash(
+                g.t.get("te_auto_run_failed",
+                        "Auto-run failed: ") + f"{type(exc).__name__}",
+                "error",
+            )
+            return redirect(url_for("test_execution_page"))
+
+        # Build a run record matching the shape produced by the regular
+        # POST handler so the existing UI list renders it correctly.
+        results_summary = [
+            {"item_id": r.get("item_id"),
+             "status":  r.get("status"),
+             "source":  r.get("source", "auto"),
+             "bug_id":  r.get("bug_id"),
+             "comment": r.get("comment", ""),
+             "duration_ms": r.get("duration_ms"),
+             "video": r.get("video", ""),
+             "screenshots": (r.get("screenshots") or [])[:6]}
+            for r in (execution.get("results") or [])
+        ]
+        test_runs = session.get("test_runs", [])
+        run_record = {
+            "run_id": len(test_runs) + 1,
+            "db_run_id": None,
+            "source": source,
+            "tester_id": tester_id,
+            "tester_name": tester_name,
+            "environment": environment,
+            "env_type": "web",
+            "testing_types": ", ".join(testing_types),
+            "results": results_summary,
+            "stats": execution.get("stats") or {},
+            "bug_count": len(execution.get("bugs") or []),
+            "site_url": "",
+            "base_url": "",
+            "headless": True,
+            "record_video": False,
+            "automation_used": False,
+            "created_at": datetime.now().isoformat(),
+        }
+        test_runs.append(run_record)
+        session["test_runs"] = test_runs
+
+        # Bug reports also flow into the session so the Bug Reports
+        # page picks them up. Mirrors the normal POST handler's
+        # treatment without the per-bug ISTQB stamping (auto-run is a
+        # quick smoke, not a release-grade run).
+        bugs_session = session.get("bug_reports_data", [])
+        for bug_dict in execution.get("bugs", []) or []:
+            new_id = generate_bug_id([dict_to_bug(b) for b in bugs_session])
+            bug_dict["id"] = new_id
+            bug_dict.setdefault("environment", environment)
+            bugs_session.append(bug_dict)
+        session["bug_reports_data"] = bugs_session
+
+        stats = run_record["stats"] or {}
+        passed = stats.get("passed", 0)
+        failed = stats.get("failed", 0)
+        blocked = stats.get("blocked", 0)
+        flash(
+            g.t.get("te_auto_run_done",
+                    f"Auto-run finished: {passed} passed, {failed} failed, "
+                    f"{blocked} blocked."),
+            "success",
+        )
         return redirect(url_for("test_execution_page"))
 
     # ── Live-view of an in-progress automation run ──────────────────
