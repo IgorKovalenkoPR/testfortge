@@ -631,6 +631,48 @@ def _parse_tc_prompt(custom_prompt: str) -> dict:
     if is_narrowed and types:
         directives["testing_types"] = types
 
+    # Free-form focus markers — "focus on forms", "тільки на формах",
+    # "сфокусуйся на login flow", "лише авторизація". When matched, we
+    # extract the focus phrase as a list of keyword tokens; the
+    # generator drops every TC whose summary/section/steps contain
+    # none of them. Operator-driven feature: previous version only
+    # honoured a fixed allow-list of keywords (auth/payment/search) so
+    # "forms" — even though `_AREA_KEYWORDS` knows about it — never
+    # narrowed the output.
+    import re as _re
+    _FOCUS_RE = _re.compile(
+        r"(?:focus(?:\s+(?:on|только|лише|тільки))?|"
+        r"тільки\s+на|лише\s+на|сфокусуйся\s+на|сосредоточь(?:ся)?\s+на|"
+        r"only\s+on|just\s+on)\s+(.+?)(?:[\.\!\?\n]|$)",
+        _re.IGNORECASE,
+    )
+    focus_tokens: list[str] = []
+    # Drop any URL fragment from the focus phrase before tokenisation;
+    # otherwise a host like "testfort.com" leaks "testfort" into the
+    # keyword list and over-narrows the kept TCs.
+    _URL_STRIP_RE = _re.compile(r"https?://\S+|\b\w+\.[a-z]{2,}\b",
+                                _re.IGNORECASE)
+    for m in _FOCUS_RE.finditer(custom_prompt):
+        phrase = (m.group(1) or "").strip()
+        phrase = _URL_STRIP_RE.sub(" ", phrase)
+        # Split on common joiners so "forms, login" → ["form","login"].
+        for tok in _re.split(r"[,/\s]+", phrase):
+            tok = tok.strip().lower()
+            if not tok or tok in {"the", "a", "an", "and", "or", "i", "to", "in",
+                                   "on", "for", "of", "the", "to", "and"}:
+                continue
+            if len(tok) < 3:
+                continue
+            # Drop bare URLs — the URL itself is fed elsewhere as a
+            # requirement; carrying it through as a keyword filter
+            # would discard every TC that doesn't literally name the
+            # domain.
+            if tok.startswith("http") or "." in tok:
+                continue
+            focus_tokens.append(tok)
+    if focus_tokens:
+        directives["focus_tokens"] = list(dict.fromkeys(focus_tokens))[:6]
+
     return directives
 
 
@@ -715,6 +757,28 @@ def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
     if directives.get("testing_types"):
         wanted = set(directives["testing_types"])
         all_cases = [tc for tc in all_cases if getattr(tc, "testing_type", "Functional") in wanted]
+
+    # Free-form focus filter — "focus on forms / login flow / тільки
+    # на формах" keeps only TCs whose summary, section, steps, or
+    # expected_result mention any focus token. Saves a round-trip
+    # back to the generator for the operator who wants targeted runs
+    # without re-typing requirements.
+    if directives.get("focus_tokens"):
+        toks = [t for t in directives["focus_tokens"] if t]
+        if toks:
+            def _hit(tc):
+                blob = " ".join((
+                    tc.summary or "", tc.section or "",
+                    tc.test_steps or "", tc.expected_result or "",
+                    tc.preconditions or "", tc.test_data or "",
+                )).lower()
+                return any(tok in blob for tok in toks)
+            kept = [tc for tc in all_cases if _hit(tc)]
+            # Don't empty the list out completely — if nothing matched,
+            # fall back to the full set so the operator still sees
+            # something. We log this implicitly by flag-only behaviour.
+            if kept:
+                all_cases = kept
 
     # QA Team Lead review — validate and auto-fix documentation quality
     from .qa_team_lead import review_test_cases

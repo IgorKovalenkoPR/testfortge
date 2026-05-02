@@ -67,8 +67,13 @@
             {% if bug.linked_item_id %}
             <tr><td class="label">{{ t.get('bug_linked_item', 'Linked Item') }}</td><td>{{ bug.linked_item_id }} ({{ bug.linked_item_type }})</td></tr>
             {% endif %}
-            {% if bug.attachments %}
+            {# Attachment row is now ALWAYS rendered. When the run
+               was simulator-only (no Base URL set) the gallery is
+               replaced with a short note that explains how to enable
+               screenshot+video capture next time — operator video
+               showed confusion when the row silently disappeared. #}
             <tr><td class="label">{{ t.get('bug_attachments', 'Attachment(s)') }}</td><td>
+                {% if bug.attachments %}
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;">
                 {% for att in bug.attachments %}
                     {% set lower = att | lower %}
@@ -92,8 +97,20 @@
                     {% endif %}
                 {% endfor %}
                 </div>
+                {% else %}
+                <div style="padding:10px 14px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;color:#92400e;font-size:0.85em;">
+                    <strong>{{ t.get('bug_no_attachments_title', 'No attachments captured') }}</strong>
+                    <p style="margin:4px 0 0 0;">
+                        {{ t.get('bug_no_attachments_body',
+                            'This bug was filed by a run that did not have a Base URL set, so Playwright was not invoked and no screenshots or video could be recorded. To attach evidence next time, set the Base URL on the Test Execution form before clicking Run.') }}
+                    </p>
+                    <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary"
+                       style="margin-top:8px;font-size:0.78em;padding:4px 10px;">
+                        {{ t.get('bug_no_attachments_link', 'Open Test Execution') }}
+                    </a>
+                </div>
+                {% endif %}
             </td></tr>
-            {% endif %}
             {% if bug.reporter %}
             <tr><td class="label">{{ t.get('bug_reporter', 'Reporter') }}</td><td>{{ bug.reporter }}</td></tr>
             {% endif %}

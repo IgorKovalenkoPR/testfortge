@@ -239,8 +239,21 @@
         })
         .then(function (res) {
             if (!res.ok) {
-                return showError((res.body && res.body.message)
-                    || 'Could not start generation.');
+                // 400 = validation (no input / rate-limited). Don't
+                // retry — surface the server's explanation and stop.
+                // Operator video showed an empty Text Input + only
+                // Additional Instructions: route correctly returned 400,
+                // but the old code looped through fallbackToSync 5×.
+                stopAll();
+                if (overlay) overlay.hidden = true;
+                var msg = (res.body && (res.body.message || res.body.error))
+                    || 'Please add requirements (text, file, or URL) before generating.';
+                if (errorEl) {
+                    errorEl.textContent = msg;
+                    errorEl.style.display = 'block';
+                }
+                if (window.alert) { try { window.alert(msg); } catch (_) {} }
+                return;
             }
             poll(res.body.job_id);          // first poll fires immediately,
                                             // setTimeout chain handles the rest

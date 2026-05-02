@@ -463,12 +463,18 @@
     </div>
     <div class="form-grid">
         <div class="form-group">
-            <label>{{ t.get('te_base_url', 'Base URL') }}</label>
+            <label style="display:flex;align-items:center;gap:8px;">
+                {{ t.get('te_base_url', 'Base URL') }}
+                <span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:0.72em;font-weight:700;">
+                    {{ t.get('te_base_url_badge', 'required for live + screenshots + video') }}
+                </span>
+            </label>
             <input type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
-                   placeholder="https://example.com">
-            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--color-text-muted,#888);">
-                {{ t.get('te_base_url_hint',
-                   'Leave empty for a fast simulated run. Paste a URL to drive a real headless browser, capture screenshots, and auto-link any failures to bug reports.') }}
+                   placeholder="https://example.com"
+                   style="border:2px solid #fbbf24;">
+            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:#92400e;">
+                {{ t.get('te_base_url_hint_v2',
+                   'Without Base URL the run uses the deterministic simulator only — no live preview, no recorded video, no screenshots, no bug-report attachments. Paste a target URL to enable real Playwright execution.') }}
             </p>
         </div>
         <div class="form-group">

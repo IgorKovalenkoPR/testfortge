@@ -337,6 +337,24 @@ def register(app: Flask) -> None:
               wants_automation = bool(base_url) and source == "test_cases" and any(
                   et in ("web", "mobile_web") for et in env_types
               )
+              # Operator-visibility — when a Web / Mobile-Web env was
+              # picked but no base_url was supplied, the run silently
+              # falls back to the deterministic simulator (no live
+              # preview, no webm, no screenshots in bug reports). Flash
+              # explains the trade-off so the next run can be configured
+              # correctly without operator surprise.
+              if (not base_url
+                  and source == "test_cases"
+                  and any(et in ("web", "mobile_web") for et in env_types)):
+                  flash(
+                      g.t.get(
+                          "te_no_base_url_warning",
+                          "Run started without Base URL — Live preview, video, "
+                          "and bug-report screenshots are disabled. Set Base URL "
+                          "on the Test Execution form to enable real Playwright."
+                      ),
+                      "warning",
+                  )
               if wants_automation:
                   try:
                       from engine.automation_qa import scripts_from_session
