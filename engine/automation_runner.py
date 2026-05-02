@@ -276,6 +276,16 @@ class AutomationRunner:
             stale = os.path.join(self._live_dir, "latest.png")
             if os.path.exists(stale):
                 os.remove(stale)
+            # Wipe the filmstrip ring so we don't mix frames from the
+            # previous run.
+            strip_dir = os.path.join(self._live_dir, "strip")
+            if os.path.isdir(strip_dir):
+                for fn in os.listdir(strip_dir):
+                    try:
+                        os.remove(os.path.join(strip_dir, fn))
+                    except OSError:
+                        pass
+            self._strip_slot = 0
             # Write a "warming up" splash so the live tab doesn't sit on a
             # 1×1 transparent placeholder (which renders as a black panel
             # against our dark card background) for the first ~10 s while
@@ -699,6 +709,21 @@ class AutomationRunner:
             tmp = dst + ".tmp"
             shutil.copyfile(tmp_shot, tmp)
             os.replace(tmp, dst)
+            # Filmstrip ring buffer — write the same image into one of
+            # _live/strip/00..11.png so the live page can render the
+            # last 12 frames as a thumbnail strip. Late-joining
+            # operators see what the bot actually did, not just the
+            # current frozen frame.
+            try:
+                strip_dir = os.path.join(live_dir, "strip")
+                os.makedirs(strip_dir, exist_ok=True)
+                slot = getattr(self, "_strip_slot", 0) % 12
+                self._strip_slot = slot + 1
+                strip_path = os.path.join(strip_dir, f"{slot:02d}.png")
+                shutil.copyfile(dst, strip_path + ".tmp")
+                os.replace(strip_path + ".tmp", strip_path)
+            except Exception:
+                pass
             try:
                 os.remove(tmp_shot)
             except OSError:

@@ -264,6 +264,21 @@ def register(app: Flask) -> None:
               # ``headless=No`` is chosen. iOS / Android native fall back
               # to the deterministic simulator.
               base_url = (request.form.get("base_url") or "").strip()
+              # Operator-feedback fix: when the form's Base URL is empty
+              # but the session has any resource_urls (extracted from
+              # the original generation prompt or attached files), use
+              # the first one as Base URL so Playwright always runs
+              # against a real target. Without this every run that
+              # didn't explicitly retype the URL fell back to the
+              # deterministic simulator — no live preview, no video,
+              # no bug-report attachments.
+              if not base_url and resource_urls:
+                  for cand in resource_urls:
+                      if cand.startswith(("http://", "https://")):
+                          base_url = cand
+                          log.info(
+                              "auto-base_url: using %s from resource_urls", cand)
+                          break
               # The "Re-run failed only" path used to live as a Scope
               # dropdown — UI was confusing, so it's now an implicit
               # default of "all selected" for new runs and a per-row
@@ -277,10 +292,18 @@ def register(app: Flask) -> None:
               import os as _os
               has_display = bool(_os.environ.get("DISPLAY")) and _os.name != "nt"
               headless = (request.form.get("headless", "1") == "1") if "headless" in request.form else (not has_display)
-              # Video defaults OFF — recording a .webm per case adds 5–15s
-              # of context-shutdown work and was the dominant cost in the
-              # 35s/case observed on Render. Operator can re-enable per run.
-              record_video = request.form.get("record_video", "0") == "1"
+              # Video defaults ON when there's a target URL — operator
+              # video was clearly puzzled by the "no video" outcome
+              # because the form's default for record_video was "0
+              # (faster)". With a URL, Playwright runs and recording
+              # adds 5–15 s of context-shutdown but the visual proof
+              # is what testers came here for. The user can still
+              # explicitly opt out via the form's "Record video" radio.
+              _vid_form = request.form.get("record_video")
+              if _vid_form is None:
+                  record_video = bool(base_url)
+              else:
+                  record_video = (_vid_form == "1")
               # Hard-coded "fast" speed preset — the dropdown was removed
               # because all three options shipped with subtle bugs and
               # operators just want it to be fast and clear. Element
@@ -346,12 +369,15 @@ def register(app: Flask) -> None:
               if (not base_url
                   and source == "test_cases"
                   and any(et in ("web", "mobile_web") for et in env_types)):
+                  # Reaches here only when no resource_urls existed
+                  # either — completely URL-less run, simulator only.
                   flash(
                       g.t.get(
                           "te_no_base_url_warning",
-                          "Run started without Base URL — Live preview, video, "
-                          "and bug-report screenshots are disabled. Set Base URL "
-                          "on the Test Execution form to enable real Playwright."
+                          "Run started without any URL — Live preview, video, "
+                          "and bug-report screenshots are disabled. Add a URL "
+                          "to the requirements (or set Base URL) to enable "
+                          "real Playwright execution."
                       ),
                       "warning",
                   )
@@ -903,6 +929,39 @@ def register(app: Flask) -> None:
         resp = send_file(path, mimetype="image/png", max_age=0)
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return resp
+
+
+    @app.route("/test-execution/live/strip/<int:slot>")
+    def test_execution_live_strip(slot):
+        """Serve the filmstrip ring-buffer slot 00..11. Each call is
+        cheap because the runner pre-writes the PNG via os.replace —
+        we just stream the file with no-cache headers."""
+        import os
+        from flask import send_file
+        from routes.automation import STORAGE_ROOT
+        if slot < 0 or slot >= 12:
+            from io import BytesIO
+            tiny = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+                    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe"
+                    b"\x02\xfe\xa75\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82")
+            r = Response(tiny, mimetype="image/png")
+            r.headers["Cache-Control"] = "no-store"
+            return r
+        path = os.path.join(STORAGE_ROOT, "automation_runs", "_live",
+                            "strip", f"{slot:02d}.png")
+        if not os.path.isfile(path):
+            from io import BytesIO
+            tiny = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+                    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe"
+                    b"\x02\xfe\xa75\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82")
+            r = Response(tiny, mimetype="image/png")
+            r.headers["Cache-Control"] = "no-store"
+            return r
+        r = send_file(path, mimetype="image/png", max_age=0)
+        r.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return r
 
     @app.route("/test-execution/live/info")
     def test_execution_live_info():

@@ -48,6 +48,17 @@
          style="display:block;width:100%;max-height:80vh;object-fit:contain;background:#0f172a;" />
 </div>
 
+{# ── Filmstrip — last 12 frames as thumbnails ─────────────────── #}
+<div id="live-strip" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+    {% for i in range(12) %}
+    <img class="live-strip-thumb"
+         data-slot="{{ '%02d' % i }}"
+         src="{{ url_for('test_execution_live_strip', slot=i) }}?t=0"
+         alt="frame {{ i }}"
+         style="width:96px;height:60px;object-fit:cover;background:#0f172a;border:1px solid #334155;border-radius:3px;cursor:pointer;" />
+    {% endfor %}
+</div>
+
 <div id="te-live-help" hidden
      style="margin:14px 0;padding:12px 16px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;color:#92400e;">
     <strong>{{ t.get('te_live_help_title', 'Nothing is streaming yet.') }}</strong>
@@ -149,6 +160,11 @@
                 if (info && info.ts && info.ts !== lastTs) {
                     lastTs = info.ts;
                     img.src = frameUrl + '?t=' + info.ts;
+                    // Bust thumbnail cache too so the strip animates.
+                    document.querySelectorAll('.live-strip-thumb').forEach(function(t){
+                        var slot = t.dataset.slot;
+                        t.src = "{{ url_for('test_execution_live_strip', slot=0) }}".replace('/0','/' + parseInt(slot,10)) + '?t=' + info.ts;
+                    });
                 }
             })
             .catch(function () { /* keep polling on error */ });
@@ -200,6 +216,15 @@
         origPaint(info);
         maybeShowIdleHelp(info);
     };
+
+    document.querySelectorAll('.live-strip-thumb').forEach(function(t){
+        t.addEventListener('click', function(){
+            img.src = t.src;
+            paused = true;
+            if (pauseLabel) pauseLabel.textContent =
+                "{{ t.get('te_live_resume', 'Resume') }}";
+        });
+    });
 
     pollInfo();
     setInterval(pollInfoMaybe, 1000);

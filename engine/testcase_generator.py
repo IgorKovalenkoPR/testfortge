@@ -477,7 +477,7 @@ _GENERATORS = {
 # request that type explicitly.
 _TESTING_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Functional":      ("functional", "функціональн", "функционал"),
-    "Smoke":           ("smoke", "смок", "smoke test"),
+    "Smoke":           ("smoke", "смок", "смоук", "smoke test"),
     "Sanity":          ("sanity", "саніті"),
     "Regression":      ("regression", "регрес", "регрешн"),
     "Performance":     ("performance", "speed", "load time", "продуктивн", "перформанс"),
@@ -516,9 +516,26 @@ def _parse_testing_types(custom_prompt: str) -> tuple[list[str], bool]:
             found.append(canonical)
 
     # Narrowing markers — same word in any of the supported languages.
+    # Operator video prompted "smoke (тільки основний функціонал)" and
+    # "e2e (критичний функціонал)" — the parenthetical hints carry the
+    # narrowing intent, so we also recognise "критичн", "core",
+    # "essential", "main", "основн" as narrowing flags.
     NARROW_TOKENS = ("only", "лише", "тільки", "только", "focus on",
                      "фокус на", "перевір лише", "проверь только",
-                     "just ", "exclusively")
+                     "just ", "exclusively",
+                     "critical", "критичн", "критический",
+                     "core ", "essential", "main functionality",
+                     "основн функціонал", "основной функционал",
+                     "основн functionality", "(core)", "(critical)",
+                     "(critical functionality)")
+    # Anti-narrowing markers — when present they explicitly request the
+    # FULL set even though a testing-type keyword is in the prompt
+    # (e.g. "regression — full coverage" mentions Regression but should
+    # NOT collapse the output).
+    BROADEN_TOKENS = ("full coverage", "повне покриття", "полное покрытие",
+                      "comprehensive", "all-encompassing")
+    if any(tok in lower for tok in BROADEN_TOKENS):
+        return (found, False)
     is_narrowed = bool(found) and any(tok in lower for tok in NARROW_TOKENS)
     return (found, is_narrowed)
 
@@ -632,34 +649,68 @@ def _parse_tc_prompt(custom_prompt: str) -> dict:
         directives["testing_types"] = types
 
     # Free-form focus markers — "focus on forms", "тільки на формах",
-    # "сфокусуйся на login flow", "лише авторизація". When matched, we
-    # extract the focus phrase as a list of keyword tokens; the
-    # generator drops every TC whose summary/section/steps contain
-    # none of them. Operator-driven feature: previous version only
-    # honoured a fixed allow-list of keywords (auth/payment/search) so
-    # "forms" — even though `_AREA_KEYWORDS` knows about it — never
-    # narrowed the output.
+    # "сфокусуйся на login flow", "тест-кейси для форм", "tests for
+    # the login flow". When matched, we extract the focus phrase as
+    # a list of keyword tokens; the generator drops every TC whose
+    # summary/section/steps contain none of them.
     import re as _re
     _FOCUS_RE = _re.compile(
         r"(?:focus(?:\s+(?:on|только|лише|тільки))?|"
         r"тільки\s+на|лише\s+на|сфокусуйся\s+на|сосредоточь(?:ся)?\s+на|"
-        r"only\s+on|just\s+on)\s+(.+?)(?:[\.\!\?\n]|$)",
+        r"only\s+on|just\s+on|"
+        # Operator natural-language patterns (added 2026-05-02): the
+        # prompt video literally said "написати тест-кейси для форм"
+        # and "tests for the login flow". Recognise both.
+        r"(?:test\s*cases?|tests|тест[-\s]?кейс[ии]?|чек[-\s]?лист[ии]?)\s+(?:for|для|про)|"
+        r"написати\s+(?:тест[-\s]?кейс[ии]?|чек[-\s]?лист[ии]?)\s+(?:для|про)|"
+        r"generate\s+(?:test\s*cases?|tests|checklist[s]?)\s+for"
+        r")\s+(.+?)(?:[\.\!\?\n]|$)",
         _re.IGNORECASE,
     )
+
+    # Per-field fan-out trigger: "all fields", "every field", "усі
+    # поля", "кожне поле", "with all fields", "з усіма полями" — when
+    # present alongside a forms-focus, the generator emits one TC per
+    # detected form field instead of a single "submit form" case.
+    _ALL_FIELDS_RE = _re.compile(
+        r"(?:all\s+fields|every\s+field|each\s+field|"
+        r"all\s+inputs|each\s+input|"
+        r"усі\s+поля|кожне\s+поле|кожне\s+з\s+полів|"
+        r"all\s+form\s+fields|all\s+the\s+fields|"
+        r"з\s+усіма\s+полями|з\s+кожним\s+полем|"
+        r"per[-\s]?field|по\s+кожному\s+полю|"
+        r"with\s+all\s+fields)",
+        _re.IGNORECASE,
+    )
+    if _ALL_FIELDS_RE.search(custom_prompt):
+        directives["expand_fields"] = True
+    # Strip the matched phrase so the focus tokenizer sees a clean
+    # noun phrase ("login flow" instead of "login flow with all
+    # fields").
+    custom_prompt_clean = _ALL_FIELDS_RE.sub(" ", custom_prompt)
     focus_tokens: list[str] = []
     # Drop any URL fragment from the focus phrase before tokenisation;
     # otherwise a host like "testfort.com" leaks "testfort" into the
     # keyword list and over-narrows the kept TCs.
     _URL_STRIP_RE = _re.compile(r"https?://\S+|\b\w+\.[a-z]{2,}\b",
                                 _re.IGNORECASE)
-    for m in _FOCUS_RE.finditer(custom_prompt):
+    for m in _FOCUS_RE.finditer(custom_prompt_clean):
         phrase = (m.group(1) or "").strip()
         phrase = _URL_STRIP_RE.sub(" ", phrase)
         # Split on common joiners so "forms, login" → ["form","login"].
         for tok in _re.split(r"[,/\s]+", phrase):
             tok = tok.strip().lower()
-            if not tok or tok in {"the", "a", "an", "and", "or", "i", "to", "in",
-                                   "on", "for", "of", "the", "to", "and"}:
+            if not tok or tok in {
+                # English fillers
+                "the", "a", "an", "and", "or", "i", "to", "in", "on",
+                "for", "of", "with", "all", "any", "every", "each",
+                "fields", "field", "input", "inputs",
+                # Ukrainian / Russian fillers
+                "усіма", "усі", "усе", "кожне", "кожен", "кожним",
+                "полями", "поля", "поле", "полів",
+                "та", "і", "й", "у", "в", "на", "до", "по", "з",
+                "и", "или", "все", "каждый", "каждое", "поле",
+            }:
                 continue
             if len(tok) < 3:
                 continue
@@ -677,6 +728,144 @@ def _parse_tc_prompt(custom_prompt: str) -> dict:
 
 
 # ── Public API ───────────────────────────────────────────────────
+
+
+
+def _generate_per_field_cases(analysis, *, next_section: int,
+                              section_map: dict, section_counters: dict
+                              ) -> list:
+    """Fan-out form coverage by emitting one TC per detected input.
+
+    For every (page, form, field) tuple that the crawler captured we
+    produce three cases: required-validation, valid-input,
+    boundary-overflow. The result is appended to the existing pack;
+    section "Forms — Fields" gets its own section number so the
+    output is grouped predictably in the UI.
+    """
+    out: list = []
+    pages = getattr(analysis, "site_pages", None) or []
+    if not pages:
+        return out
+
+    section = "Forms — Fields"
+    if section not in section_map:
+        section_map[section] = next_section
+        section_counters[next_section] = 1
+        next_section += 1
+
+    sn = section_map[section]
+
+    def _new_id() -> str:
+        idx = section_counters[sn]
+        tc_id = f"SC{sn}_{idx:03d}"
+        section_counters[sn] = idx + 1
+        return tc_id
+
+    for page in pages:
+        forms = page.get("forms") or []
+        page_url = page.get("url") or ""
+        for f_ix, form in enumerate(forms, start=1):
+            fields = form.get("fields") or form.get("inputs") or []
+            for field in fields:
+                if isinstance(field, dict):
+                    name = (field.get("name") or field.get("placeholder")
+                            or field.get("label") or field.get("id")
+                            or f"field-{f_ix}")
+                    ftype = (field.get("type") or "text").lower()
+                else:
+                    name = str(field) or f"field-{f_ix}"
+                    ftype = "text"
+                base = {
+                    "preconditions": (
+                        f"User on {page_url}; form #{f_ix} is visible"
+                        if page_url else f"Form #{f_ix} is visible"
+                    ),
+                    "test_data": f"Field: '{name}' (type={ftype})",
+                    "category": "Negative",
+                    "priority": "High",
+                }
+                # 1) required-validation: leave field empty, fill rest.
+                out.append(TestCase(
+                    id=_new_id(), section=section, section_num=sn,
+                    summary=f"Verify '{name}' field rejects empty input "
+                            f"and shows validation error",
+                    preconditions=base["preconditions"],
+                    test_steps=(
+                        f"1. Open the page with form\n"
+                        f"2. Fill every field except '{name}'\n"
+                        f"3. Submit the form\n"
+                        f"4. Inspect the response and the field"),
+                    test_data=base["test_data"],
+                    expected_result=(
+                        f"The form does not submit. An inline validation "
+                        f"error is displayed next to '{name}' or summarised "
+                        f"at the top. Focus is moved to the offending "
+                        f"field."),
+                    category="Negative", priority="High",
+                ))
+                # 2) valid input — type-aware.
+                if ftype in ("email",):
+                    valid = "tester@example.com"
+                    bad = "tester@"
+                elif ftype in ("tel", "phone"):
+                    valid = "+380501234567"
+                    bad = "+38050"
+                elif ftype in ("url", "website"):
+                    valid = "https://example.com"
+                    bad = "ht!ps://"
+                elif ftype in ("number"):
+                    valid = "42"
+                    bad = "abc"
+                elif ftype in ("password",):
+                    valid = "Str0ngP@ss!2026"
+                    bad = "1"
+                else:
+                    valid = "Sample input value 123"
+                    bad = ""
+                out.append(TestCase(
+                    id=_new_id(), section=section, section_num=sn,
+                    summary=f"Verify '{name}' field accepts a valid value "
+                            f"and clears errors",
+                    preconditions=base["preconditions"],
+                    test_steps=(
+                        f"1. Open the page with form\n"
+                        f"2. Type a valid value into '{name}': {valid}\n"
+                        f"3. Tab away from the field"),
+                    test_data=f"{base['test_data']}; valid={valid!r}",
+                    expected_result=(
+                        f"Any prior validation error on '{name}' clears. "
+                        f"The submit button becomes enabled when all "
+                        f"required fields are filled."),
+                    category="Positive", priority="High",
+                ))
+                # 3) Boundary overflow — type-aware.
+                if ftype in ("email",):
+                    overflow = "a" * 250 + "@x.com"
+                elif ftype == "number":
+                    overflow = "9" * 12
+                else:
+                    overflow = "X" * 1024
+                out.append(TestCase(
+                    id=_new_id(), section=section, section_num=sn,
+                    summary=f"Verify '{name}' enforces a sensible max "
+                            f"length / value",
+                    preconditions=base["preconditions"],
+                    test_steps=(
+                        f"1. Open the page with form\n"
+                        f"2. Paste an oversized value into '{name}': "
+                        f"{len(overflow)} chars\n"
+                        f"3. Submit the form"),
+                    test_data=f"{base['test_data']}; overflow_len="
+                             f"{len(overflow)}",
+                    expected_result=(
+                        f"The field either rejects the input client-side "
+                        f"(maxlength enforced, error shown) or the server "
+                        f"rejects with a 4xx and a clear message. No "
+                        f"silent truncation, no 500."),
+                    category="Negative", priority="High",
+                ))
+    return out
+
 
 def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
                         raw_requirements: list[dict] | None = None) -> list[TestCase]:
@@ -779,6 +968,26 @@ def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
             # something. We log this implicitly by flag-only behaviour.
             if kept:
                 all_cases = kept
+
+    # Per-field fan-out (Feature: "test cases for forms with all
+    # fields"). When the prompt asked for it AND the persona's site
+    # crawler captured form structures, emit one TC per detected
+    # field — empty value, valid value, boundary value — so the
+    # output covers each input rather than the single "submit form"
+    # case that comes out of the canned templates.
+    if directives.get("expand_fields"):
+        from .qa_persona import analyze_input as _re_analyze
+        try:
+            extra_cases = _generate_per_field_cases(
+                analysis,
+                next_section=next_section,
+                section_map=section_map,
+                section_counters=section_counters,
+            )
+        except Exception as exc:
+            extra_cases = []
+        if extra_cases:
+            all_cases.extend(extra_cases)
 
     # QA Team Lead review — validate and auto-fix documentation quality
     from .qa_team_lead import review_test_cases

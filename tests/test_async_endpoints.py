@@ -67,6 +67,7 @@ class TestURLMapIntact:
             "automation_run_async", "automation_status",
             "estimation_run_async", "estimation_status",
             "healthz", "metrics",
+            "test_execution_live_strip",
         }
         missing = expected - endpoints
         assert not missing, f"missing endpoints: {missing}"
