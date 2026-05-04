@@ -92,13 +92,37 @@ class TestRunnerHonoursMatrix:
 
     def test_matrix_args_applied(self, tmp_path):
         from engine.automation_runner import AutomationRunner
+        # Headless mode (default) caps viewport at 1280x800 — see
+        # the operator-diag investigation: 1920x1080 + 0.1 CPU on
+        # Render hit page.screenshot() timeouts every step. Engine
+        # matrix UA is preserved so SUT-side OS detection still works.
         r = AutomationRunner(storage_root=str(tmp_path), base_url="https://x",
                              engine_kind="webkit",
                              user_agent="Mozilla/5.0 (mac) Safari/605",
                              viewport_override=(1680, 1050))
         assert r.engine_kind == "webkit"
         assert r.user_agent == "Mozilla/5.0 (mac) Safari/605"
-        assert r.viewport == (1680, 1050)
+        # Capped from 1680x1050 → 1280x800 in headless mode.
+        assert r.viewport == (1280, 800)
+        assert r._viewport_capped_from == (1680, 1050)
+
+    def test_matrix_viewport_kept_in_headed_mode(self, tmp_path):
+        """In headed mode (real screen) we trust the matrix viewport
+        because the operator can see / resize the window themselves."""
+        from engine.automation_runner import AutomationRunner
+        r = AutomationRunner(storage_root=str(tmp_path), base_url="https://x",
+                             headless=False,
+                             engine_kind="chromium",
+                             viewport_override=(1920, 1080))
+        assert r.viewport == (1920, 1080)
+        assert r._viewport_capped_from is None
+
+    def test_mobile_viewport_not_capped(self, tmp_path):
+        """Mobile-emulation viewports stay as-is in either mode."""
+        from engine.automation_runner import AutomationRunner
+        r = AutomationRunner(storage_root=str(tmp_path), base_url="https://x",
+                             viewport_override=(390, 844))
+        assert r.viewport == (390, 844)
 
     def test_invalid_engine_falls_back_to_chromium(self, tmp_path):
         from engine.automation_runner import AutomationRunner

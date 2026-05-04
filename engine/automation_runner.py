@@ -186,10 +186,25 @@ class AutomationRunner:
         self.storage_root = storage_root
         self.base_url = base_url
         self.headless = headless
-        # When the engine matrix supplies a viewport, it wins over the
-        # generic 1280x800 default (Win 11 desktop -> 1920x1080,
-        # mobile -> 390x844, etc.).
-        self.viewport = viewport_override or viewport
+        # When the engine matrix supplies a viewport, it normally
+        # wins over the generic 1280x800 default (Win 11 desktop ->
+        # 1920x1080, mobile -> 390x844, etc.). However, on Render
+        # free-tier (0.1 CPU, 512 MB RAM) Chromium cannot render a
+        # 1920x1080 viewport inside our 8-second page.screenshot()
+        # ceiling — the operator's diag dump showed step=0 and
+        # strip_frame_count=0 after a 62-case run because every
+        # screenshot timed out. We cap headless viewport to 1280x800
+        # so every screenshot fits within budget. The matrix UA
+        # still goes out untouched, so SUT-side OS detection works.
+        # Mobile-emulation viewports (width <= 480) stay as-is —
+        # those are tiny and rendering is cheap.
+        chosen = viewport_override or viewport
+        if headless and chosen[0] > 1280 and chosen[1] > 800:
+            self.viewport = (1280, 800)
+            self._viewport_capped_from = chosen
+        else:
+            self.viewport = chosen
+            self._viewport_capped_from = None
         self.record_video = record_video
         # Engine matrix — None means "use chromium with no UA override",
         # which preserves pre-#6 behaviour.
@@ -370,9 +385,11 @@ class AutomationRunner:
 
         _logger.info(
             "automation: launching %s (headless=%s, slow_mo=%dms, "
-            "step_pause=%dms, viewport=%dx%d, scripts=%d, base_url=%s, ua=%s)",
+            "step_pause=%dms, viewport=%dx%d%s, scripts=%d, base_url=%s, ua=%s)",
             self.engine_kind, self.headless, self.slow_mo_ms,
             self.step_pause_ms, self.viewport[0], self.viewport[1],
+            (f" CAPPED from {self._viewport_capped_from[0]}x{self._viewport_capped_from[1]}"
+             if getattr(self, "_viewport_capped_from", None) else ""),
             len(scripts), self.base_url or "<none>",
             (self.user_agent[:60] + "...") if len(self.user_agent) > 60 else (self.user_agent or "<default>"),
         )
@@ -766,7 +783,9 @@ class AutomationRunner:
             # middle of cursor travel where Chromium's compositor is
             # busy; the 1.5 s budget consistently dropped frames on
             # Render free-tier.
-            page.screenshot(path=tmp_shot, full_page=False, timeout=4000)
+            # Cold-start budget bumped 4s → 7s; was timing out
+            # consistently on 62-case runs against qarea.com.
+            page.screenshot(path=tmp_shot, full_page=False, timeout=7000)
             os.makedirs(live_dir, exist_ok=True)
             dst = os.path.join(live_dir, "latest.png")
             tmp = dst + ".tmp"
@@ -1004,9 +1023,11 @@ class AutomationRunner:
         # so non-Chromium engines under CPU pressure on Render
         # free-tier still land a frame.
         try:
+            # 15-second timeout — Render free-tier (0.1 CPU)
+            # consistently breached the previous 8-second ceiling.
             page.screenshot(path=path,
                             full_page=self.screenshot_full_page,
-                            timeout=8000)
+                            timeout=15000)
         except Exception as exc:
             # Loud — operator needs to see this in Render INFO logs
             # if every step is missing a screenshot.
