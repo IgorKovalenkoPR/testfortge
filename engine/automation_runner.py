@@ -342,12 +342,15 @@ class AutomationRunner:
             # flags, so we only pass them when launching chromium.
             engine_obj = getattr(p, self.engine_kind, p.chromium)
             engine_args = launch_args if self.engine_kind == "chromium" else []
+            _logger.info("automation: about to launch %s (headless=%s, slow_mo=%dms)",
+                         self.engine_kind, self.headless, self.slow_mo_ms)
             try:
                 browser = engine_obj.launch(
                     headless=self.headless,
                     slow_mo=self.slow_mo_ms,
                     args=engine_args,
                 )
+                _logger.info("automation: %s launched OK", self.engine_kind)
             except Exception as launch_exc:
                 if not self.headless:
                     _logger.warning(
@@ -375,7 +378,9 @@ class AutomationRunner:
                 # window appearing before we start firing test cases at it.
                 if not self.headless:
                     time.sleep(1.0)
-                for script in scripts:
+                for _idx_script, script in enumerate(scripts, start=1):
+                    _logger.info("automation: case %d/%d starting tc_id=%s",
+                                 _idx_script, len(scripts), script.tc_id)
                     self._live_current_tc = (script.tc_id or "TC")
                     # Step counter is per-test-case so the live page shows
                     # "step #3" inside the current TC, not a cumulative
@@ -395,6 +400,13 @@ class AutomationRunner:
         report.duration_ms = int((time.time() - t0) * 1000)
         report.finished_at = datetime.now().isoformat(timespec="seconds")
         self._write_live_info(status="done")
+        _logger.info(
+            "automation: run finished cases=%d passed=%d failed=%d blocked=%d "
+            "duration_ms=%d videos_attached=%d",
+            report.total, report.passed, report.failed, report.blocked,
+            report.duration_ms,
+            sum(1 for sr in report.scripts if sr.video_path),
+        )
         return report
 
     def _run_script(self, browser, script: AutomationScript, run_dir: str) -> ScriptResult:
@@ -965,6 +977,13 @@ class AutomationRunner:
             shutil.copyfile(path, tmp)
             os.replace(tmp, live_path)
             self._live_step += 1
+            if self._live_step == 1:
+                try:
+                    sz = os.path.getsize(live_path)
+                except OSError:
+                    sz = -1
+                _logger.info("live mirror: first frame written to %s (%d bytes)",
+                             live_path, sz)
             self._write_live_info(status="running")
         except Exception as exc:  # pragma: no cover — IO best-effort
             _logger.error("live mirror failed (%s): %s",
@@ -980,7 +999,9 @@ class AutomationRunner:
         """
         try:
             from PIL import Image, ImageDraw, ImageFont
-        except Exception:
+        except Exception as exc:
+            _logger.error("warmup frame: PIL not available — live splash "
+                          "will be the 1px placeholder (%s)", exc)
             return
         try:
             img = Image.new("RGB", (1280, 800), (15, 23, 42))
@@ -1001,8 +1022,13 @@ class AutomationRunner:
             dst = os.path.join(live_dir, "latest.png")
             img.save(tmp, "PNG", optimize=True)
             os.replace(tmp, dst)
-        except Exception as exc:  # pragma: no cover — best-effort
-            _logger.debug("warmup frame: %s", exc)
+            try:
+                _logger.info("warmup frame: wrote %s (%d bytes)",
+                             dst, os.path.getsize(dst))
+            except OSError:
+                pass
+        except Exception as exc:
+            _logger.error("warmup frame failed: %s", exc)
 
     def _write_live_info(self, status: str) -> None:
         """Atomically write the live status JSON consumed by the
