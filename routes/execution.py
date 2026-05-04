@@ -551,13 +551,39 @@ def register(app: Flask) -> None:
                       )
                   except Exception as exc:
                       log.exception("Automation pass failed (non-fatal): %s", exc)
+                      # Stamp the phase + reason into info.json so the
+                      # /test-execution/diag endpoint shows the operator
+                      # exactly what blew up — without forcing them to
+                      # dig through Render logs.
+                      try:
+                          import json as _j
+                          import time as _time
+                          from routes.automation import STORAGE_ROOT as _SR
+                          info_path = os.path.join(
+                              _SR, "automation_runs", "_live", "info.json")
+                          payload = {}
+                          try:
+                              with open(info_path, "r", encoding="utf-8") as _f:
+                                  payload = _j.load(_f) or {}
+                          except Exception:
+                              pass
+                          payload["status"] = "failed"
+                          payload["phase"] = payload.get("phase", "route-catch")
+                          payload["phase_error"] = (
+                              f"{type(exc).__name__}: {str(exc)[:280]}")
+                          payload["ts"] = int(_time.time() * 1000)
+                          tmp = info_path + ".tmp"
+                          with open(tmp, "w", encoding="utf-8") as _f:
+                              _j.dump(payload, _f)
+                          os.replace(tmp, info_path)
+                      except Exception:
+                          pass
                       flash(
                           "⚠ Automation pass failed: "
                           f"{type(exc).__name__} — {str(exc)[:300]}. "
                           "Results shown are deterministic simulations only — "
                           "no live preview, no video, no bug-report screenshots. "
-                          "Check that Base URL is reachable, try Headless mode, "
-                          "and review Render logs for the full traceback.",
+                          "Open /test-execution/diag for the exact phase the runner stopped at.",
                           "warning",
                       )
 

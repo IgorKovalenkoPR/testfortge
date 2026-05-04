@@ -244,8 +244,47 @@ class AutomationRunner:
         # context, not once per test case.
         self._logged_in_once = False
 
+
+
+    def _write_phase(self, phase: str, error: str = "") -> None:
+        """Stamp the current pipeline phase into info.json so the
+        /test-execution/diag endpoint can show the operator exactly
+        where the runner stopped on prod. Best-effort; never raises."""
+        live_dir = getattr(self, "_live_dir", "") or os.path.join(
+            self.storage_root, "automation_runs", "_live")
+        try:
+            os.makedirs(live_dir, exist_ok=True)
+            info_path = os.path.join(live_dir, "info.json")
+            try:
+                with open(info_path, "r", encoding="utf-8") as f:
+                    import json as _j
+                    payload = _j.load(f)
+            except Exception:
+                payload = {}
+            payload["phase"] = phase
+            if error:
+                payload["phase_error"] = error[:300]
+            else:
+                payload.pop("phase_error", None)
+            payload["ts"] = int(time.time() * 1000)
+            tmp = info_path + ".tmp"
+            import json as _j
+            with open(tmp, "w", encoding="utf-8") as f:
+                _j.dump(payload, f)
+            os.replace(tmp, info_path)
+        except Exception as exc:  # pragma: no cover
+            _logger.debug("phase write failed: %s", exc)
+
     def run(self, scripts: list[AutomationScript]) -> RunReport:
-        from playwright.sync_api import sync_playwright
+        # First thing — pin our storage root so _write_phase can fall
+        # back to it before _live_dir is set up.
+        self._write_phase("runner-init")
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            self._write_phase("failed", f"playwright-import: {type(exc).__name__}: {exc}")
+            raise
+        self._write_phase("playwright-imported")
 
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
         runs_root = os.path.join(self.storage_root, "automation_runs")
@@ -291,9 +330,11 @@ class AutomationRunner:
             # against our dark card background) for the first ~10 s while
             # Playwright launches Chromium.
             self._write_warmup_frame(self._live_dir, len(scripts))
+            self._write_phase("live-setup")
         except OSError as exc:
             _logger.debug("live: cannot reset _live dir: %s", exc)
             self._live_dir = ""
+            self._write_phase("failed", f"live-setup: {exc}")
 
         # Step counter for live-info JSON. Bumped on every screenshot.
         self._live_step = 0
@@ -344,6 +385,7 @@ class AutomationRunner:
             engine_args = launch_args if self.engine_kind == "chromium" else []
             _logger.info("automation: about to launch %s (headless=%s, slow_mo=%dms)",
                          self.engine_kind, self.headless, self.slow_mo_ms)
+            self._write_phase(f"engine-launch:{self.engine_kind}")
             try:
                 browser = engine_obj.launch(
                     headless=self.headless,
@@ -351,7 +393,13 @@ class AutomationRunner:
                     args=engine_args,
                 )
                 _logger.info("automation: %s launched OK", self.engine_kind)
+                self._write_phase(f"engine-launched:{self.engine_kind}")
             except Exception as launch_exc:
+                self._write_phase(
+                    "failed",
+                    f"engine-launch:{self.engine_kind}: "
+                    f"{type(launch_exc).__name__}: {launch_exc}",
+                )
                 if not self.headless:
                     _logger.warning(
                         "automation: headed launch failed (%s) — no display "
@@ -381,6 +429,8 @@ class AutomationRunner:
                 for _idx_script, script in enumerate(scripts, start=1):
                     _logger.info("automation: case %d/%d starting tc_id=%s",
                                  _idx_script, len(scripts), script.tc_id)
+                    self._write_phase(
+                        f"case-running:{_idx_script}/{len(scripts)}:{script.tc_id}")
                     self._live_current_tc = (script.tc_id or "TC")
                     # Step counter is per-test-case so the live page shows
                     # "step #3" inside the current TC, not a cumulative
@@ -400,6 +450,7 @@ class AutomationRunner:
         report.duration_ms = int((time.time() - t0) * 1000)
         report.finished_at = datetime.now().isoformat(timespec="seconds")
         self._write_live_info(status="done")
+        self._write_phase("done")
         _logger.info(
             "automation: run finished cases=%d passed=%d failed=%d blocked=%d "
             "duration_ms=%d videos_attached=%d",
