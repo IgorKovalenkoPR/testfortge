@@ -356,9 +356,23 @@ def register(app: Flask) -> None:
               # ── Optional Playwright run (Web / Mobile Web only, when
               #    base_url provided). One automation pass is shared across
               #    web-style envs because Playwright drives the same URL.
+              # Operator complaint 2026-05-02: 'Live shows nothing even
+              # though Base URL was set'. The earlier check only fired
+              # for source=='test_cases', so a checklist run silently
+              # fell back to the simulator. Both branches now invoke
+              # Playwright + a single decision log makes server-side
+              # debugging much easier.
               automation_assets: dict[str, dict] = {}
-              wants_automation = bool(base_url) and source == "test_cases" and any(
-                  et in ("web", "mobile_web") for et in env_types
+              wants_automation = (
+                  bool(base_url)
+                  and source in ("test_cases", "checklist")
+                  and any(et in ("web", "mobile_web") for et in env_types)
+              )
+              log.info(
+                  "automation-decision: wants=%s base_url=%r source=%r "
+                  "env_types=%r selected=%d",
+                  wants_automation, base_url, source, env_types,
+                  len(selected_ids or []),
               )
               # Operator-visibility — when a Web / Mobile-Web env was
               # picked but no base_url was supplied, the run silently
@@ -487,13 +501,31 @@ def register(app: Flask) -> None:
                           "blocked": auto_report.blocked,
                           "run_id": auto_report.run_id,
                       }
-                  except Exception as exc:
-                      log.warning("Automation pass failed (non-fatal): %s", exc)
+                      log.info(
+                          "automation-done: cases=%d passed=%d failed=%d "
+                          "blocked=%d duration_ms=%d run_id=%s",
+                          auto_report.total, auto_report.passed,
+                          auto_report.failed, auto_report.blocked,
+                          auto_report.duration_ms, auto_report.run_id,
+                      )
                       flash(
-                          "⚠ Automation pass failed and was skipped: "
-                          f"{type(exc).__name__} — {str(exc)[:200]}. "
-                          "Results shown are deterministic simulations. "
-                          "Check that Base URL is reachable and try Headless mode.",
+                          f"✓ Playwright executed {auto_report.total} case(s) "
+                          f"on {base_url} ({auto_report.passed} passed, "
+                          f"{auto_report.failed} failed, "
+                          f"{auto_report.blocked} blocked). "
+                          "Live view shows the recorded frames; bug reports "
+                          "carry annotated screenshots and video.",
+                          "success",
+                      )
+                  except Exception as exc:
+                      log.exception("Automation pass failed (non-fatal): %s", exc)
+                      flash(
+                          "⚠ Automation pass failed: "
+                          f"{type(exc).__name__} — {str(exc)[:300]}. "
+                          "Results shown are deterministic simulations only — "
+                          "no live preview, no video, no bug-report screenshots. "
+                          "Check that Base URL is reachable, try Headless mode, "
+                          "and review Render logs for the full traceback.",
                           "warning",
                       )
 
