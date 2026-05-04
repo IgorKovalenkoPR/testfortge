@@ -93,6 +93,145 @@ def _persist_bug(bug_dict: dict, source: str = "manual",
 
 
 
+def _reconstruct_partial_payload(run_id: str, config_path: str,
+                                  storage_root: str,
+                                  live: dict) -> dict | None:
+    """Best-effort partial-results reconstructor.
+
+    Used when the worker died before writing result.json (typically an
+    OOM-kill on Render free tier). Walks the run's on-disk artifacts:
+
+      * ``<storage>/automation_runs/<run_id>/<TC>/step_NN_after.png``
+      * ``<storage>/automation_runs/<run_id>/<TC>/step_NN_failure.png``
+
+    and reconstructs an ``automation_assets`` dict in the same shape
+    the worker would have produced. Returns ``None`` when the config
+    file is missing too (no signal at all to work with).
+
+    Status heuristic: a TC directory containing ANY ``*_failure.png``
+    is treated as ``failed``; otherwise — if the directory has
+    screenshots — ``passed``. Cases that never produced a directory
+    are simply absent from the returned assets dict, which the
+    per-env loop interprets as "no automation evidence available".
+    """
+    import os, json, glob
+    if not os.path.isfile(config_path):
+        return None
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+    except Exception:
+        return None
+    runs_root = os.path.join(storage_root, "automation_runs")
+    # Find the actual run directory the worker created. The runner
+    # stamps its own timestamp+uuid run_id distinct from the config_id
+    # we use for dispatch tracking, so we look for the most recent
+    # directory whose mtime is >= the config file's.
+    run_dirs = []
+    try:
+        cfg_mtime = os.path.getmtime(config_path)
+        for entry in os.listdir(runs_root):
+            if entry in ("_live", "_pending"):
+                continue
+            p = os.path.join(runs_root, entry)
+            if os.path.isdir(p) and os.path.getmtime(p) >= cfg_mtime - 60:
+                run_dirs.append((p, entry))
+    except OSError:
+        pass
+    if not run_dirs:
+        return None
+    # Pick the most recent directory (the worker's actual run).
+    run_dirs.sort(key=lambda t: os.path.getmtime(t[0]), reverse=True)
+    run_dir, runner_run_id = run_dirs[0]
+    automation_assets: dict = {}
+    passed = failed = blocked = 0
+    try:
+        for tc_id in sorted(os.listdir(run_dir)):
+            tc_dir = os.path.join(run_dir, tc_id)
+            if not os.path.isdir(tc_dir):
+                continue
+            shots: list[str] = []
+            fail_shots: list[str] = []
+            failure_step: dict | None = None
+            prev_after = ""
+            for fname in sorted(os.listdir(tc_dir)):
+                if fname.startswith("step_") and fname.endswith("_after.png"):
+                    rel = os.path.relpath(
+                        os.path.join(tc_dir, fname), storage_root
+                    ).replace(os.sep, "/")
+                    if os.path.getsize(os.path.join(tc_dir, fname)) > 0:
+                        shots.append(rel)
+                        prev_after = rel
+                elif fname.startswith("step_") and fname.endswith("_failure.png"):
+                    rel = os.path.relpath(
+                        os.path.join(tc_dir, fname), storage_root
+                    ).replace(os.sep, "/")
+                    if os.path.getsize(os.path.join(tc_dir, fname)) > 0:
+                        fail_shots.append(rel)
+                        if failure_step is None:
+                            # Step index encoded as step_NN_*
+                            try:
+                                idx = int(fname.split("_")[1])
+                            except (ValueError, IndexError):
+                                idx = 0
+                            failure_step = {
+                                "index": idx,
+                                "action": "",
+                                "comment": "Worker died before this step "
+                                            "could be reported. "
+                                            "Failure screenshot exists "
+                                            "on disk; details unavailable.",
+                                "screenshot": rel,
+                                "context_screenshot": prev_after,
+                                "console_errors": [],
+                            }
+            if not shots and not fail_shots:
+                continue
+            status = "failed" if fail_shots else "passed"
+            if status == "passed":
+                passed += 1
+            else:
+                failed += 1
+            automation_assets[tc_id] = {
+                "status": status,
+                "video": "",
+                "screenshots": shots,
+                "failure_screenshots": fail_shots,
+                "failure_step": failure_step,
+                "final_url": "",
+                "duration_ms": 0,
+            }
+    except OSError:
+        return None
+    if not automation_assets:
+        return None
+    report = {
+        "run_id": runner_run_id,
+        "started_at": "",
+        "finished_at": "",
+        "base_url": cfg.get("base_url", ""),
+        "headless": bool(cfg.get("headless", True)),
+        "total": passed + failed + blocked,
+        "passed": passed,
+        "failed": failed,
+        "blocked": blocked,
+        "duration_ms": 0,
+        "scripts": [],
+    }
+    return {
+        "status": "partial",
+        "config_id": run_id,
+        "report": report,
+        "automation_assets": automation_assets,
+        "config_echo": cfg,
+        "finished_at": "",
+        "_partial_reason": (
+            f"Worker died after {len(automation_assets)} case(s); "
+            f"reconstructed from on-disk artifacts at {run_dir}."
+        ),
+    }
+
+
 def _maybe_restore_pack_from_db() -> None:
     """If the session has no TC / CL pack but the active project does,
     rehydrate the session keys from the DB so the run page shows what
@@ -115,40 +254,81 @@ def _maybe_restore_pack_from_db() -> None:
     if session.get("test_cases_data") or session.get("checklist_data"):
         return
     pid = session.get("project_id")
-    if not pid:
-        # Trigger the owner_sid-based recovery in ensure_active_project.
-        # Don't auto-create here — if the user has no prior project at
-        # all, leave the session empty so the page renders the
-        # "no pack yet" state instead of inventing data.
-        try:
-            from engine import db as _db
-            from routes._shared import get_session_id, ensure_active_project
-            sid = get_session_id(session)
-            if hasattr(_db, "list_projects"):
-                existing = _db.list_projects(owner_sid=sid) or []
-                if existing:
-                    pid = ensure_active_project()
-        except Exception as exc:
-            log.debug("restore: owner_sid project lookup failed: %s", exc)
-        if not pid:
-            return
+    candidate_pids: list[str] = []
+    if pid:
+        candidate_pids.append(pid)
+    # Owner_sid-wide search ALWAYS runs (even when session.project_id
+    # exists) — operator-reported case 2026-05-04: their session pinned
+    # a freshly-created "Untitled project" that had no TCs while the
+    # actual generated pack lived under a different project for the
+    # same owner_sid. We try the active one first, then fall back to
+    # other owned projects (most-recent first, with non-zero counts
+    # preferred) until we find one with content.
     try:
         from engine import db as _db
-        # The DB layer exposes `load_test_cases` / `load_checklist` for
-        # this rehydration path; both return empty lists on miss.
-        tc = _db.load_test_cases(pid) if hasattr(_db, "load_test_cases") else []
-        cl = _db.load_checklist(pid) if hasattr(_db, "load_checklist") else []
+        from routes._shared import get_session_id
+        sid = get_session_id(session)
+        if hasattr(_db, "list_projects"):
+            existing = _db.list_projects(owner_sid=sid) or []
+            # Sort by has-content first, then by recency. list_projects
+            # already returns updated_at desc, so a stable sort that
+            # ranks projects with TCs above empty ones gives us the
+            # right order.
+            ranked = sorted(
+                existing,
+                key=lambda p: (
+                    -(int(p.get("test_cases_count", 0) or 0)
+                       + int(p.get("checklist_count", 0) or 0)),
+                ),
+            )
+            for p in ranked:
+                p_id = p.get("id") if isinstance(p, dict) else None
+                if p_id and p_id not in candidate_pids:
+                    candidate_pids.append(p_id)
+    except Exception as exc:
+        log.debug("restore: owner_sid project lookup failed: %s", exc)
+    if not candidate_pids:
+        return
+    chosen_pid = ""
+    chosen_tc: list = []
+    chosen_cl: list = []
+    try:
+        from engine import db as _db
+        for cand in candidate_pids:
+            try:
+                tc = (_db.load_test_cases(cand)
+                      if hasattr(_db, "load_test_cases") else [])
+                cl = (_db.load_checklist(cand)
+                      if hasattr(_db, "load_checklist") else [])
+            except Exception as exc:
+                log.debug("restore: load failed for %s: %s", cand, exc)
+                continue
+            if tc or cl:
+                chosen_pid = cand
+                chosen_tc = tc
+                chosen_cl = cl
+                break
     except Exception as exc:  # pragma: no cover
         log.debug("restore: db read failed: %s", exc)
         return
-    if tc:
-        session["test_cases_data"] = tc
+    if not chosen_pid:
+        return
+    if chosen_pid != session.get("project_id"):
+        # Re-pin the active project to the one with content. Without
+        # this, the next request would see project_id pointing at the
+        # empty project again and recovery would loop indefinitely.
+        session["project_id"] = chosen_pid
+        log.info("restore: re-pinned active project to %s "
+                 "(had %d TC + %d CL)",
+                 chosen_pid, len(chosen_tc), len(chosen_cl))
+    if chosen_tc:
+        session["test_cases_data"] = chosen_tc
         log.info("restore: rehydrated %d test cases from project %s",
-                 len(tc), pid)
-    if cl:
-        session["checklist_data"] = cl
+                 len(chosen_tc), chosen_pid)
+    if chosen_cl:
+        session["checklist_data"] = chosen_cl
         log.info("restore: rehydrated %d checklist items from project %s",
-                 len(cl), pid)
+                 len(chosen_cl), chosen_pid)
 
 
 def register(app: Flask) -> None:
@@ -1188,9 +1368,19 @@ def register(app: Flask) -> None:
         # left off — especially the case where the worker subprocess
         # is still chewing through cases but the browser tab lost the
         # query string.
-        import os, glob, time
+        import os, glob, time, json
         from routes.automation import STORAGE_ROOT
         pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
+        live_info_path = os.path.join(STORAGE_ROOT, "automation_runs",
+                                       "_live", "info.json")
+        # Read live info.json once so per-run stall checks share its ts.
+        live_ts = 0
+        try:
+            if os.path.isfile(live_info_path):
+                with open(live_info_path, "r", encoding="utf-8") as f:
+                    live_ts = int((json.load(f) or {}).get("ts", 0))
+        except Exception:
+            pass
         recent_runs: list[dict] = []
         try:
             if os.path.isdir(pending_dir):
@@ -1213,7 +1403,14 @@ def register(app: Flask) -> None:
                     if done and has_result:
                         rstatus = "done"
                     elif started:
-                        rstatus = "running"
+                        # Stall check — the worker pings _live/info.json
+                        # constantly while running. >120 s with no ping
+                        # almost always means OOM-kill on free tier.
+                        # Without this the table claimed "running" for
+                        # a 9-min-dead worker (operator-reported).
+                        live_age = (time.time() - live_ts / 1000.0
+                                     if live_ts else 9999)
+                        rstatus = "stalled" if live_age > 120 else "running"
                     else:
                         rstatus = "queued"
                     recent_runs.append({
@@ -1384,26 +1581,69 @@ def register(app: Flask) -> None:
         the merge but doesn't double-bug because we delete the result
         file after a successful merge.
         """
-        import os, json
+        import os, json, glob, time
         from routes.automation import STORAGE_ROOT
         if not run_id.replace("_", "").replace("-", "").isalnum():
             flash("Invalid run id.", "error")
             return redirect(url_for("test_execution_page"))
         pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
         result_path = os.path.join(pending_dir, f"{run_id}.result.json")
+        config_path = os.path.join(pending_dir, f"{run_id}.json")
+        # ── Stalled-run handling ──────────────────────────────────
+        # If result.json never landed but the worker DID write some
+        # screenshots before being OOM-killed, salvage what we can. The
+        # config file persists alongside started.flag so we still know
+        # what TC pack the user dispatched. Without this branch the
+        # operator's only option after a crash is "your run is gone";
+        # with it they at least see status for the cases that finished.
         if not os.path.isfile(result_path):
+            live_info_path = os.path.join(STORAGE_ROOT, "automation_runs",
+                                           "_live", "info.json")
+            live = {}
+            try:
+                if os.path.isfile(live_info_path):
+                    with open(live_info_path, "r", encoding="utf-8") as f:
+                        live = json.load(f) or {}
+            except Exception:
+                live = {}
+            live_age_s = (time.time() - (int(live.get("ts", 0)) / 1000.0)
+                           if live.get("ts") else 9999)
+            if live_age_s < 120 and os.path.isfile(
+                    os.path.join(pending_dir, f"{run_id}.started.flag")):
+                # Worker is still alive — bounce to live view.
+                flash(
+                    "Results not ready yet — the worker is still running. "
+                    "Watch /test-execution/live and try again in a minute.",
+                    "warning",
+                )
+                return redirect(
+                    url_for("test_execution_live") + f"?run_id={run_id}")
+            # Worker died. Try to reconstruct from on-disk artifacts.
+            payload = _reconstruct_partial_payload(
+                run_id, config_path, STORAGE_ROOT, live)
+            if payload is None:
+                flash(
+                    "Run is missing a result file and no on-disk "
+                    "artifacts could be salvaged. Open /test-execution/"
+                    f"diag and check the worker log "
+                    f"({run_id}.log) for the failure cause.",
+                    "error",
+                )
+                return redirect(url_for("test_execution_page"))
             flash(
-                "Results not ready yet — the worker is still running. "
-                "Watch /test-execution/live and try again in a minute.",
+                f"Run did not finish cleanly (worker likely OOM-killed). "
+                f"Showing partial results for "
+                f"{len(payload.get('automation_assets') or {})} case(s) "
+                f"that completed before the crash.",
                 "warning",
             )
-            return redirect(url_for("test_execution_live") + f"?run_id={run_id}")
-        try:
-            with open(result_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception as exc:
-            flash(f"Cannot read run results: {exc}", "error")
-            return redirect(url_for("test_execution_page"))
+        else:
+            try:
+                with open(result_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception as exc:
+                flash(f"Cannot read run results: {exc}", "error")
+                return redirect(url_for("test_execution_page"))
 
         if payload.get("status") == "failed":
             flash(

@@ -98,6 +98,8 @@
                     <span style="color:#16a34a;font-weight:600;">✓ done</span>
                     {% elif run.status == 'running' %}
                     <span style="color:#0369a1;">● running</span>
+                    {% elif run.status == 'stalled' %}
+                    <span style="color:#b91c1c;font-weight:600;">⚠ stalled</span>
                     {% else %}
                     <span style="color:#94a3b8;">queued</span>
                     {% endif %}
@@ -108,6 +110,12 @@
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
                        class="btn btn-primary" style="padding:4px 10px;font-size:0.8em;">
                        Import results
+                    </a>
+                    {% elif run.status == 'stalled' %}
+                    <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
+                       class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;"
+                       title="Worker died — try to import whatever cases finished before the crash">
+                       Import partial
                     </a>
                     {% else %}
                     <a href="{{ url_for('test_execution_live') }}?run_id={{ run.run_id }}"

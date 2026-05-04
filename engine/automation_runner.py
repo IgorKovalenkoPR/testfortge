@@ -966,28 +966,21 @@ class AutomationRunner:
         if now - last < 0.2:
             return
         self._live_last_pump = now
-        # JPEG @ q=70 is roughly 8× cheaper to encode than PNG and
-        # decodes faster in the browser too. Render's 0.1 CPU was the
-        # bottleneck — switching encoding format cuts the per-pump CPU
-        # bill from ~600 ms to ~120 ms in our local benchmark, which
-        # means the 5-second pre-action budget actually fits inside the
-        # CPU slice we get on free tier. The strip files keep the .png
-        # extension because the route already serves them with
-        # mimetype="image/png" and PNG/JPEG are interchangeable for
-        # <img>; we explicitly send the right MIME below.
-        # NB: PNG is still used for the per-step "after" shots in
-        # _screenshot — those flow into the bug-report attachments and
-        # need to be lossless.
-        tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.jpg")
+        # 2026-05-04 follow-up: previous iteration wrote JPEG bytes to
+        # files with a .png extension and served them with
+        # mimetype="image/png". Modern Chrome with strict-MIME rejects
+        # that combination — every filmstrip slot rendered as a
+        # broken-image icon (operator-reported). Reverted to PNG so
+        # bytes match extension and MIME. The per-pump CPU cost is a
+        # bit higher on 0.1 CPU but the alternative is a useless live
+        # view, which defeats the whole feature.
+        tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.png")
         captured = False
         try:
-            # Drop timeout from 7s to 4s — Render's worker timeout is
-            # 300 s wall-clock, and a 7 s pump that fires every 0.2 s
-            # quickly racks up. With JPEG encoding cheap enough, 4 s is
-            # a comfortable budget. If we miss it, fall through to the
-            # mirror-only path so the strip stays live from _screenshot.
-            page.screenshot(path=tmp_shot, full_page=False,
-                            type="jpeg", quality=70, timeout=4000)
+            # 4 s budget per pump. If we miss it, fall through to the
+            # mirror-only path so the strip stays live from
+            # _screenshot's per-step writes (which use a 15 s budget).
+            page.screenshot(path=tmp_shot, full_page=False, timeout=4000)
             captured = True
         except Exception as exc:
             # Don't bail — we still want to refresh the live frame from
