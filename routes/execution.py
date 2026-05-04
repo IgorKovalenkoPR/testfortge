@@ -543,25 +543,68 @@ def register(app: Flask) -> None:
                           cid = getattr(r, "tc_id", None) or getattr(r, "case_id", None)
                           if not cid:
                               continue
-                          # Only include screenshots that actually exist on
-                          # disk and are non-zero size — otherwise the post-
-                          # run gallery shows a broken-image icon. Empty
-                          # screenshots can happen when page.screenshot
-                          # raised mid-run (e.g. navigation interrupted).
-                          shots = []
+                          # Only include screenshots that actually exist
+                          # on disk and are non-zero size — otherwise the
+                          # post-run gallery shows a broken-image icon.
+                          # Empty screenshots can happen when page.
+                          # screenshot raised mid-run (e.g. navigation
+                          # interrupted).
+                          #
+                          # Two parallel collections from May 2026:
+                          #  * shots[]   — clean per-step "after" frames.
+                          #                Goes into the test-execution
+                          #                gallery so Passed cases never
+                          #                show red error banners.
+                          #  * fail_shots[] + failure_step (idx, comment)
+                          #                — annotated copies (red banner
+                          #                + arrow + bbox highlight).
+                          #                Used as bug-report evidence on
+                          #                the FAILED step plus the prior
+                          #                step's "after" shot for context.
+                          shots: list[str] = []
+                          fail_shots: list[str] = []
+                          failure_step: dict | None = None
+                          prev_after: str = ""
                           for step in (getattr(r, "steps", []) or []):
                               after = getattr(step, "screenshot_after", "") or ""
-                              if not after:
-                                  continue
-                              abs_p = _os.path.join(STORAGE_ROOT, after.replace("/", _os.sep))
-                              try:
-                                  if _os.path.isfile(abs_p) and _os.path.getsize(abs_p) > 0:
-                                      shots.append(after)
-                              except OSError:
-                                  pass
+                              if after:
+                                  abs_p = _os.path.join(STORAGE_ROOT,
+                                                         after.replace("/", _os.sep))
+                                  try:
+                                      if (_os.path.isfile(abs_p)
+                                              and _os.path.getsize(abs_p) > 0):
+                                          shots.append(after)
+                                  except OSError:
+                                      pass
+                              fail = getattr(step, "screenshot_failure", "") or ""
+                              if fail:
+                                  abs_f = _os.path.join(STORAGE_ROOT,
+                                                         fail.replace("/", _os.sep))
+                                  try:
+                                      if (_os.path.isfile(abs_f)
+                                              and _os.path.getsize(abs_f) > 0):
+                                          fail_shots.append(fail)
+                                          # First failure wins — the run
+                                          # broke here; subsequent steps
+                                          # didn't execute.
+                                          if failure_step is None:
+                                              failure_step = {
+                                                  "index": getattr(step, "index", 0),
+                                                  "action": getattr(step, "action", ""),
+                                                  "comment": getattr(step, "comment", ""),
+                                                  "screenshot": fail,
+                                                  "context_screenshot": prev_after,
+                                                  "console_errors": list(
+                                                      getattr(step, "console_errors", []) or []
+                                                  )[:5],
+                                              }
+                                  except OSError:
+                                      pass
+                              if after:
+                                  prev_after = after
                           # Validate video too — Playwright finalises the
-                          # webm only on context close, so partial / failed
-                          # contexts can leave a 0-byte file.
+                          # webm only on context close, so partial /
+                          # failed contexts can leave a 0-byte file.
                           video = getattr(r, "video_path", "") or ""
                           if video:
                               abs_v = _os.path.join(STORAGE_ROOT, video.replace("/", _os.sep))
@@ -574,6 +617,9 @@ def register(app: Flask) -> None:
                               "status": getattr(r, "status", ""),
                               "video": video,
                               "screenshots": shots,
+                              "failure_screenshots": fail_shots,
+                              "failure_step": failure_step,
+                              "final_url": getattr(r, "final_url", "") or "",
                               "duration_ms": getattr(r, "duration_ms", 0),
                           }
                       session["automation_report"] = {
@@ -703,13 +749,87 @@ def register(app: Flask) -> None:
                       ev = automation_assets.get(linked) if linked else None
                       if ev:
                           existing_atts = list(bug_dict.get("attachments") or [])
-                          for shot in (ev.get("screenshots") or []):
+                          # Prefer evidence that actually demonstrates
+                          # what went wrong: the FAILED step's annotated
+                          # screenshot + the prior step's "after" frame
+                          # for context. Operator complaint: "screenshots
+                          # don't match the bug description". Reason was
+                          # we attached every clean step shot, which
+                          # reads as "here's the working flow" instead
+                          # of "here's the bug". Fall back to the clean
+                          # gallery only when no failure shot landed
+                          # (e.g. case marked Failed by the simulator
+                          # but Playwright never raised — rare).
+                          fstep = ev.get("failure_step") or {}
+                          targeted: list[str] = []
+                          if fstep.get("context_screenshot"):
+                              targeted.append(fstep["context_screenshot"])
+                          if fstep.get("screenshot"):
+                              targeted.append(fstep["screenshot"])
+                          if not targeted:
+                              # No annotated failure on disk — surface
+                              # at most the last 3 clean shots as best-
+                              # effort evidence.
+                              targeted = list((ev.get("screenshots") or [])[-3:])
+                          for shot in targeted:
                               if shot and shot not in existing_atts:
                                   existing_atts.append(shot)
                           v = ev.get("video")
                           if v and v not in existing_atts:
                               existing_atts.append(v)
                           bug_dict["attachments"] = existing_atts
+                          # Stash structured failure context onto the bug
+                          # for the bug-template to consume — see
+                          # engine/bug_template.py for the rules.
+                          if fstep:
+                              bug_dict["_automation_failure"] = {
+                                  "step_index": fstep.get("index"),
+                                  "step_action": fstep.get("action"),
+                                  "comment": fstep.get("comment"),
+                                  "console_errors": fstep.get(
+                                      "console_errors") or [],
+                                  "final_url": ev.get("final_url") or "",
+                              }
+
+                      # Rewrite the bug via the rule-driven template now
+                      # that automation context (if any) is attached.
+                      # Falls back to a light-touch scrub when no
+                      # Playwright failure landed for this item — keeps
+                      # simulator-only bugs but strips banned filler.
+                      try:
+                          from engine.bug_template import (
+                              rewrite_bug_from_automation as _rewrite_bug,
+                          )
+                          # Pull TC fields from the source items_data so
+                          # the rewrite has full context.
+                          linked_item = next(
+                              (it for it in items_data
+                               if it.get("id") == linked), None) if linked else None
+                          tc_fields = {
+                              "tc_summary": (linked_item or {}).get(
+                                  "summary")
+                              or (linked_item or {}).get("objective", ""),
+                              "tc_steps": (linked_item or {}).get(
+                                  "test_steps", ""),
+                              "tc_preconditions": (linked_item or {}).get(
+                                  "preconditions", ""),
+                              "tc_expected": (linked_item or {}).get(
+                                  "expected_result", ""),
+                              "tc_section": (linked_item or {}).get(
+                                  "section", "") or bug_dict.get(
+                                  "component", ""),
+                          }
+                          _rewrite_bug(
+                              bug_dict,
+                              automation_failure=bug_dict.pop(
+                                  "_automation_failure", None),
+                              base_url=base_url,
+                              **tc_fields,
+                          )
+                      except Exception as _rw_exc:
+                          log.warning(
+                              "bug rewrite skipped (%s): %s",
+                              type(_rw_exc).__name__, _rw_exc)
                       # Mirror to Postgres with execution context attached.
                       _persist_bug(bug_dict, source="execution",
                                    run_id=db_run_id)

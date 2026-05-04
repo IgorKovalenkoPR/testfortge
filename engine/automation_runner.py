@@ -95,6 +95,37 @@ def _rel_url(path: str, root: str) -> str:
     return os.path.relpath(path, root).replace(os.sep, "/")
 
 
+def _is_mostly_blank(image_path: str, threshold: float = 0.97) -> bool:
+    """Return True if >threshold fraction of sampled pixels are near-
+    white (R,G,B all >245). Used to detect screenshots taken before the
+    page actually painted — operator reported empty white thumbnails
+    in the post-run gallery. Sampling: every 16th pixel on every 16th
+    row, so this is O(width*height/256) and runs in <30 ms even on
+    1280×800. Returns False on any error so we never reject a real shot.
+    """
+    try:
+        from PIL import Image
+        with Image.open(image_path) as im:
+            im = im.convert("RGB")
+            w, h = im.size
+            if w < 64 or h < 64:
+                return False
+            px = im.load()
+            white = 0
+            sampled = 0
+            for y in range(0, h, 16):
+                for x in range(0, w, 16):
+                    r, g, b = px[x, y]
+                    sampled += 1
+                    if r > 245 and g > 245 and b > 245:
+                        white += 1
+            if sampled == 0:
+                return False
+            return (white / sampled) > threshold
+    except Exception:
+        return False
+
+
 @dataclass
 class StepResult:
     index: int
@@ -105,6 +136,11 @@ class StepResult:
     comment: str = ""
     screenshot_before: str = ""
     screenshot_after: str = ""
+    # Annotated copy of the after-shot — only populated when this step
+    # failed/blocked. Used exclusively as bug-report evidence; the post-
+    # run gallery still uses the clean screenshot_after so Passed cases
+    # never display red error banners.
+    screenshot_failure: str = ""
     console_errors: list[str] = field(default_factory=list)
 
 
@@ -719,10 +755,26 @@ class AutomationRunner:
                     self._live_pump(page, tc_dir, idx, "nav_skip")
                 else:
                     page.goto(target_url, wait_until="domcontentloaded")
-                    # Intermediate live frame so the operator sees the page
-                    # arrive on the live tab, not just after the whole step.
+                    # Intermediate live frame so the operator sees the
+                    # page arrive on the live tab, not just after the
+                    # whole step.
                     self._live_pump(page, tc_dir, idx, "nav")
-                # In headed mode perform a visible scroll so the user sees page activity
+                    # `domcontentloaded` returns as soon as the DOM is
+                    # parsed — stylesheets, fonts and images may still
+                    # be loading. The first per-step screenshot taken
+                    # immediately after was producing white thumbnails
+                    # in the gallery (operator complaint, May 2026).
+                    # Wait for the `load` event with a short budget so
+                    # the screenshot has actual content.
+                    try:
+                        page.wait_for_load_state("load", timeout=4000)
+                    except Exception:
+                        # `load` can take ages on heavy SPAs; the body-
+                        # children check inside _screenshot is a second
+                        # safety net.
+                        pass
+                # In headed mode perform a visible scroll so the user
+                # sees page activity. Also drives the live filmstrip.
                 self._visible_scroll(page)
             elif step.action == "click":
                 loc = _locator(page, step.target).first
@@ -851,11 +903,23 @@ class AutomationRunner:
         except AssertionError as e:
             sr.status = "failed"
             sr.comment = str(e)
+            # Always write a CLEAN per-step "after" screenshot — this is
+            # what the post-run gallery shows. Operators reported seeing
+            # red error banners on screenshots next to a Passed status,
+            # because we used to annotate the after_path in place. Now
+            # the annotated copy goes to a separate failure_path used
+            # only by bug-report attachments; the gallery stays clean.
+            failure_path = os.path.join(tc_dir, f"step_{idx:02d}_failure.png")
             self._screenshot(page, after_path)
-            self._annotate_failure(
-                after_path, target_bbox, sr.comment,
-                header=f"Step {idx} ({step.action})")
             sr.screenshot_after = _rel_url(after_path, self.storage_root)
+            try:
+                shutil.copyfile(after_path, failure_path)
+                self._annotate_failure(
+                    failure_path, target_bbox, sr.comment,
+                    header=f"Step {idx} ({step.action})")
+                sr.screenshot_failure = _rel_url(failure_path, self.storage_root)
+            except Exception as ann_exc:
+                _logger.debug("annotate_failure copy: %s", ann_exc)
         except Exception as e:
             msg = str(e)
             if "Timeout" in msg or "timeout" in msg:
@@ -865,11 +929,17 @@ class AutomationRunner:
                 sr.status = "failed"
                 sr.comment = f"{type(e).__name__}: {msg.splitlines()[0][:200]}"
             try:
+                failure_path = os.path.join(tc_dir, f"step_{idx:02d}_failure.png")
                 self._screenshot(page, after_path)
-                self._annotate_failure(
-                    after_path, target_bbox, sr.comment,
-                    header=f"Step {idx} ({step.action})")
                 sr.screenshot_after = _rel_url(after_path, self.storage_root)
+                try:
+                    shutil.copyfile(after_path, failure_path)
+                    self._annotate_failure(
+                        failure_path, target_bbox, sr.comment,
+                        header=f"Step {idx} ({step.action})")
+                    sr.screenshot_failure = _rel_url(failure_path, self.storage_root)
+                except Exception as ann_exc:
+                    _logger.debug("annotate_failure copy: %s", ann_exc)
             except Exception:
                 pass
 
@@ -1159,6 +1229,26 @@ class AutomationRunner:
         # pipeline both depend on this file. 8 s timeout (was 3 s)
         # so non-Chromium engines under CPU pressure on Render
         # free-tier still land a frame.
+        #
+        # Operator complaint (2026-05-04): "first thumbnail of some TCs
+        # is empty white". Root cause: page.screenshot can fire BEFORE
+        # the page has any rendered content — `wait_until=
+        # "domcontentloaded"` in goto returns as soon as the DOM is
+        # parsed, which is often before any stylesheets/images/JS-driven
+        # content has painted. Wait for the body to actually have
+        # children + non-trivial scrollHeight first; cheap and almost
+        # always already true by the time we reach this point.
+        try:
+            page.wait_for_function(
+                "() => document && document.body "
+                "&& document.body.children.length > 0 "
+                "&& document.body.scrollHeight > 80",
+                timeout=2500,
+            )
+        except Exception:
+            # Don't bail — some pages legitimately have a near-empty
+            # body (login walls, 204s, etc.). Just take the shot.
+            pass
         try:
             # 15-second timeout — Render free-tier (0.1 CPU)
             # consistently breached the previous 8-second ceiling.
@@ -1171,6 +1261,24 @@ class AutomationRunner:
             _logger.error("step screenshot failed (%s): %s",
                           type(exc).__name__, exc)
             return
+
+        # Blank-frame guard. If the result is mostly white (>97% of
+        # sampled pixels), we likely caught the page mid-paint. Wait
+        # 600 ms and retake exactly once. Best-effort: PIL missing →
+        # skip the check.
+        try:
+            from PIL import Image as _PIL  # noqa: F401
+            if _is_mostly_blank(path):
+                _logger.info("blank screenshot detected, retrying once: %s", path)
+                page.wait_for_timeout(600)
+                try:
+                    page.screenshot(path=path,
+                                    full_page=self.screenshot_full_page,
+                                    timeout=15000)
+                except Exception as retry_exc:
+                    _logger.debug("blank retry failed: %s", retry_exc)
+        except Exception as guard_exc:
+            _logger.debug("blank guard skipped: %s", guard_exc)
 
         # 2) Mirror to <live>/latest.png — pure filesystem copy, no
         # Playwright API surface, so this almost never fails. The
