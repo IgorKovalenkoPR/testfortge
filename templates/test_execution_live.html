@@ -72,6 +72,57 @@
     </a>
 </div>
 
+{% if recent_runs %}
+<div id="te-recent-runs" class="card" style="margin-top:14px;">
+    <strong>Recent automation runs</strong>
+    <p style="margin:4px 0 8px 0;font-size:0.85em;color:#64748b;">
+        Use these links if you came here without a run_id (back-button,
+        bookmark, or after a service restart). Importing partial
+        results loads whatever cases the worker managed to finish.
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em;">
+        <thead>
+            <tr style="background:#f1f5f9;text-align:left;">
+                <th style="padding:6px 8px;">run_id</th>
+                <th style="padding:6px 8px;">status</th>
+                <th style="padding:6px 8px;">age</th>
+                <th style="padding:6px 8px;">action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in recent_runs %}
+            <tr style="border-top:1px solid #e2e8f0;">
+                <td style="padding:6px 8px;font-family:monospace;">{{ run.run_id }}</td>
+                <td style="padding:6px 8px;">
+                    {% if run.status == 'done' %}
+                    <span style="color:#16a34a;font-weight:600;">✓ done</span>
+                    {% elif run.status == 'running' %}
+                    <span style="color:#0369a1;">● running</span>
+                    {% else %}
+                    <span style="color:#94a3b8;">queued</span>
+                    {% endif %}
+                </td>
+                <td style="padding:6px 8px;">{{ run.age_s }}s ago</td>
+                <td style="padding:6px 8px;">
+                    {% if run.status == 'done' %}
+                    <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
+                       class="btn btn-primary" style="padding:4px 10px;font-size:0.8em;">
+                       Import results
+                    </a>
+                    {% else %}
+                    <a href="{{ url_for('test_execution_live') }}?run_id={{ run.run_id }}"
+                       class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;">
+                       Watch
+                    </a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <p class="hint" style="margin-top:10px;color:#64748b;font-size:0.85em;">
     {{ t.get('te_live_hint',
        'Frames refresh once per second. After the run completes you can review per-case screenshots and recorded video on the Test Execution results page.') }}
@@ -131,15 +182,28 @@
                 if (s.status === 'done') {
                     redirected = true;
                     window.location.href = resultsUrl;
-                } else if (s.status === 'failed') {
+                } else if (s.status === 'failed' || s.status === 'stalled') {
                     redirected = true;
                     var p = document.getElementById('te-live-help');
                     if (p) {
                         p.hidden = false;
-                        p.innerHTML = '<strong>Run failed.</strong>'
+                        var heading = (s.status === 'stalled')
+                            ? 'Run stalled — worker process appears dead.'
+                            : 'Run failed.';
+                        // Stalled runs may still have partial results
+                        // worth importing — offer a button that hits
+                        // the results endpoint anyway. The endpoint
+                        // gracefully handles missing/incomplete
+                        // result.json by flashing a warning.
+                        var btn = '<a href="' + resultsUrl
+                            + '" class="btn btn-secondary" '
+                            + 'style="margin-top:8px;font-size:0.85em;">'
+                            + 'Try to import partial results</a>';
+                        p.innerHTML = '<strong>' + heading + '</strong>'
                             + '<p style="margin:6px 0 0 0;font-size:0.88em;">'
                             + (s.error || 'unknown error')
-                            + '</p>';
+                            + '</p>'
+                            + '<p style="margin:6px 0 0 0;">' + btn + '</p>';
                     }
                 }
             })

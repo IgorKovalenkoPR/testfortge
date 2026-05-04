@@ -100,16 +100,38 @@ def _maybe_restore_pack_from_db() -> None:
 
     No-op when:
       * session already carries a pack (avoid clobbering);
-      * project_id is missing (fresh visitor);
+      * neither session nor owner_sid resolves a project;
       * DB read raises or returns empty.
+
+    Recovery path (added 2026-05-04 after operator reported their
+    project + TC pack vanished after a Render dyno restart): when
+    ``session["project_id"]`` is missing, fall through to
+    :func:`ensure_active_project` which now consults
+    ``list_projects(owner_sid=...)`` before auto-creating. That re-pins
+    the original project and lets us load its pack from Postgres.
 
     Best-effort — never raises. Failures are debug-logged.
     """
-    pid = session.get("project_id")
-    if not pid:
-        return
     if session.get("test_cases_data") or session.get("checklist_data"):
         return
+    pid = session.get("project_id")
+    if not pid:
+        # Trigger the owner_sid-based recovery in ensure_active_project.
+        # Don't auto-create here — if the user has no prior project at
+        # all, leave the session empty so the page renders the
+        # "no pack yet" state instead of inventing data.
+        try:
+            from engine import db as _db
+            from routes._shared import get_session_id, ensure_active_project
+            sid = get_session_id(session)
+            if hasattr(_db, "list_projects"):
+                existing = _db.list_projects(owner_sid=sid) or []
+                if existing:
+                    pid = ensure_active_project()
+        except Exception as exc:
+            log.debug("restore: owner_sid project lookup failed: %s", exc)
+        if not pid:
+            return
     try:
         from engine import db as _db
         # The DB layer exposes `load_test_cases` / `load_checklist` for
@@ -121,8 +143,12 @@ def _maybe_restore_pack_from_db() -> None:
         return
     if tc:
         session["test_cases_data"] = tc
+        log.info("restore: rehydrated %d test cases from project %s",
+                 len(tc), pid)
     if cl:
         session["checklist_data"] = cl
+        log.info("restore: rehydrated %d checklist items from project %s",
+                 len(cl), pid)
 
 
 def register(app: Flask) -> None:
@@ -1156,7 +1182,50 @@ def register(app: Flask) -> None:
 
     @app.route("/test-execution/live", methods=["GET"])
     def test_execution_live():
-        return render_template("test_execution_live.html")
+        # When the user lands here without a ?run_id= query param (back-
+        # button, bookmark, manual nav after a Render restart), surface
+        # the most recent pending runs so they can pick up where they
+        # left off — especially the case where the worker subprocess
+        # is still chewing through cases but the browser tab lost the
+        # query string.
+        import os, glob, time
+        from routes.automation import STORAGE_ROOT
+        pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
+        recent_runs: list[dict] = []
+        try:
+            if os.path.isdir(pending_dir):
+                config_files = sorted(
+                    glob.glob(os.path.join(pending_dir, "*.json")),
+                    key=lambda p: os.path.getmtime(p),
+                    reverse=True,
+                )[:5]
+                for cf in config_files:
+                    rid = os.path.splitext(os.path.basename(cf))[0]
+                    if rid.endswith(".result"):
+                        # skip the result-file mirrors
+                        continue
+                    started = os.path.isfile(
+                        os.path.join(pending_dir, f"{rid}.started.flag"))
+                    done = os.path.isfile(
+                        os.path.join(pending_dir, f"{rid}.done.flag"))
+                    has_result = os.path.isfile(
+                        os.path.join(pending_dir, f"{rid}.result.json"))
+                    if done and has_result:
+                        rstatus = "done"
+                    elif started:
+                        rstatus = "running"
+                    else:
+                        rstatus = "queued"
+                    recent_runs.append({
+                        "run_id": rid,
+                        "status": rstatus,
+                        "started_at": int(os.path.getmtime(cf)),
+                        "age_s": int(time.time() - os.path.getmtime(cf)),
+                    })
+        except Exception as exc:
+            log.debug("recent_runs scan failed: %s", exc)
+        return render_template("test_execution_live.html",
+                               recent_runs=recent_runs)
 
     @app.route("/test-execution/live/frame")
     def test_execution_live_frame():
@@ -1240,10 +1309,16 @@ def register(app: Flask) -> None:
     def test_execution_run_status(run_id):
         """Polled by /test-execution/live to know when the detached
         worker has finished. Returns:
-          status: "running" | "done" | "failed" | "missing"
-          error:  populated when status=="failed"
+          status: "queued" | "running" | "stalled" | "done" | "failed"
+          error:  populated when status in ("failed","stalled")
+
+        "stalled" means the subprocess was started but the live
+        ``info.json`` hasn't been touched for >120 s. The most common
+        cause on Render free tier is the OS OOM-killing Chromium when
+        the dyno's 512 MB ceiling is hit — without this status the
+        live view would poll forever on a dead process.
         """
-        import os, json
+        import os, json, time
         from routes.automation import STORAGE_ROOT
         # Reject path-traversal payloads.
         if not run_id.replace("_", "").replace("-", "").isalnum():
@@ -1263,6 +1338,39 @@ def register(app: Flask) -> None:
             except Exception as exc:
                 return jsonify({"status": "failed", "error": str(exc)})
         if os.path.isfile(started_path):
+            # Stall detection — the runner pings _live/info.json every
+            # _live_pump (default ~200 ms) and on every per-step
+            # screenshot. If the latest ts is older than 120 s, the
+            # subprocess is almost certainly dead. Surface as "stalled"
+            # so the UI can stop spinning.
+            live_info = os.path.join(STORAGE_ROOT, "automation_runs",
+                                      "_live", "info.json")
+            try:
+                if os.path.isfile(live_info):
+                    with open(live_info, "r", encoding="utf-8") as f:
+                        live = json.load(f) or {}
+                    ts = int(live.get("ts") or 0) / 1000.0
+                    age = time.time() - ts if ts else 0
+                    if ts and age > 120:
+                        return jsonify({
+                            "status": "stalled",
+                            "error": (
+                                f"Worker has not updated info.json for "
+                                f"{int(age)} s — the subprocess is most "
+                                f"likely dead (OOM-kill on free tier is "
+                                f"the common cause). Run id: {run_id}. "
+                                f"Last known phase: "
+                                f"{live.get('phase', 'unknown')}; "
+                                f"cases done: "
+                                f"{live.get('cases_done', '?')}/"
+                                f"{live.get('cases_total', '?')}."
+                            ),
+                            "cases_done": live.get("cases_done", 0),
+                            "cases_total": live.get("cases_total", 0),
+                            "phase": live.get("phase", ""),
+                        })
+            except Exception as exc:
+                log.debug("run-status: stall check failed: %s", exc)
             return jsonify({"status": "running"})
         return jsonify({"status": "queued"})
 

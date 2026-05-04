@@ -225,9 +225,15 @@ def ensure_active_project(session_obj=None) -> str:
     """Return the active project id, creating one if the user hasn't
     explicitly picked one yet.
 
-    The auto-created project is named ``"Untitled project YYYY-MM-DD HH:MM"``
-    so the user can spot it later in the dashboard and rename via the
-    picker. Owner_sid is set so it stays scoped to the caller's session.
+    Resolution order:
+      1. ``session["project_id"]`` — explicit current pick.
+      2. Most recent project owned by this session id (Render free-tier
+         wipes session files on restart, but the cookie + Postgres data
+         persist; without this fallback the user sees a brand-new
+         "Untitled project" every time the dyno wakes from sleep, with
+         the original test-case pack orphaned. Operator-reported on
+         2026-05-04.)
+      3. Auto-create a fresh project with a timestamped name.
 
     Centralising this logic keeps every Phase-2 hook (estimation, TC,
     checklist, bugs, runs, Tedgie submissions) on the same code path —
@@ -245,6 +251,38 @@ def ensure_active_project(session_obj=None) -> str:
         return pid
 
     sid = get_session_id(sess)
+
+    # Recovery path: the cookie carries the same SID across Render
+    # restarts (SECRET_KEY is preserved per render.yaml), so any project
+    # already created by this session is still tagged with this owner_
+    # sid in Postgres. Pick the most recent one before falling back to
+    # auto-create — otherwise the user gets an empty "Untitled project"
+    # while their actual TC pack lives under the old project_id.
+    try:
+        if hasattr(_db, "list_projects"):
+            existing = _db.list_projects(owner_sid=sid) or []
+            if existing:
+                # list_projects returns most-recent-first per its sort.
+                # Defensive: also accept created_at desc if present.
+                pick = existing[0]
+                pid = pick.get("id") if isinstance(pick, dict) else None
+                if pid:
+                    log.info(
+                        "ensure_active_project: rehydrated project_id=%s "
+                        "from owner_sid=%s (session was empty)",
+                        pid, sid[:8])
+                    sess["project_id"] = pid
+                    setup = sess.get("project_setup") or {}
+                    if isinstance(pick, dict) and pick.get("name"):
+                        setup.setdefault("project_name", pick["name"])
+                    sess["project_setup"] = setup
+                    sess.modified = (True if hasattr(sess, "modified")
+                                     else None)
+                    return pid
+    except Exception as exc:
+        log.debug("ensure_active_project: owner_sid lookup failed: %s",
+                  exc)
+
     name = "Untitled project " + _dt.now().strftime("%Y-%m-%d %H:%M")
     try:
         pid = _db.upsert_project(name=name, owner_sid=sid)
