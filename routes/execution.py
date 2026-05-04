@@ -460,7 +460,7 @@ def register(app: Flask) -> None:
                           request.form.get("web_browser", "Chrome").strip()
                       )
                       pb = resolve_platform_browser(sel_os_ver, sel_browser)
-                      _log.info(
+                      log.info(
                           "automation: engine=%s ua_short=%s viewport=%dx%d "
                           "(os_version=%r browser=%r)",
                           pb["engine"], pb["ua"][:40] + "...",
