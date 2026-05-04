@@ -34,6 +34,8 @@ _URL_RE = re.compile(r"https?://[^\s)'\"]+")
 _QUOTE_RE = re.compile(r"[\"'«»]([^\"'«»]{1,80})[\"'«»]")
 
 _ACTION_PATTERNS = [
+    (re.compile(r"\b(scroll|прокрут|скрол)\b", re.I),                   "scroll"),
+    (re.compile(r"\b(redirect|redirects?\s+to|перенапр)\b", re.I),     "expect_url"),
     (re.compile(r"\b(navigate|go|open|visit|перейти|відкрити)\b", re.I), "goto"),
     (re.compile(r"\b(click|tap|press|натиснути|клікнути)\b", re.I),     "click"),
     (re.compile(r"\b(enter|type|input|fill|ввести|заповнити)\b", re.I), "fill"),
@@ -72,6 +74,17 @@ def parse_manual_step(raw_step: str, base_url: str = "") -> AutomationStep:
 
     if action == "goto":
         step.target = url or base_url
+    elif action == "scroll":
+        # 'scroll down', 'scroll to bottom', 'прокрутити вниз' → "down"
+        # 'scroll up', 'scroll to top', 'прокрутити вгору' → "up"
+        low = text.lower()
+        if any(k in low for k in ("up", "top", "вгор", "наверх")):
+            step.value = "up"
+        else:
+            step.value = "down"
+    elif action == "expect_url":
+        step.target = url or quoted
+        step.value = quoted or url
     elif action in ("click", "check"):
         step.target = quoted or _guess_role_target(text)
     elif action == "fill":

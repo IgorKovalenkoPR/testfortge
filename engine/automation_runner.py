@@ -746,6 +746,53 @@ class AutomationRunner:
                     if self.record_video or not self.headless:
                         self._highlight_text(page, step.value)
                         self._live_pump(page, tc_dir, idx, "scan_done")
+            elif step.action == "scroll":
+                # Smooth-scroll so the webm shows the bot moving the
+                # page — operators report "live view shows nothing
+                # changing" when the only steps are expect_text-only.
+                direction = (step.value or "down").lower()
+                if direction == "up":
+                    js = (
+                        "async () => {"
+                        "  const total = Math.max("
+                        "    document.documentElement.scrollHeight, 1);"
+                        "  const steps = 6;"
+                        "  for (let i = steps; i >= 0; i--) {"
+                        "    window.scrollTo({top: (total * i)/steps, behavior: \"smooth\"});"
+                        "    await new Promise(r => setTimeout(r, 240));"
+                        "  }"
+                        "}"
+                    )
+                else:
+                    js = (
+                        "async () => {"
+                        "  const total = Math.max("
+                        "    document.documentElement.scrollHeight, 1);"
+                        "  const steps = 6;"
+                        "  for (let i = 1; i <= steps; i++) {"
+                        "    window.scrollTo({top: (total * i)/steps, behavior: \"smooth\"});"
+                        "    await new Promise(r => setTimeout(r, 240));"
+                        "  }"
+                        "}"
+                    )
+                try:
+                    page.evaluate(js)
+                    self._live_pump(page, tc_dir, idx, f"scroll_{direction}")
+                except Exception as exc:
+                    _logger.debug("scroll: %s", exc)
+            elif step.action == "expect_url":
+                # Wait briefly for any in-flight nav, then assert the
+                # current URL matches what the TC expected. Substring
+                # match so the TC can write "https://example.com/contact"
+                # and pass even if the SUT appends a query string.
+                page.wait_for_timeout(400)
+                expected = (step.target or step.value or "").strip()
+                actual = page.url or ""
+                if expected and expected.lower() not in actual.lower():
+                    raise AssertionError(
+                        f"Expected URL to contain {expected!r}, "
+                        f"got {actual!r}"
+                    )
             elif step.action == "wait":
                 # Long waits get periodic live frames so the operator
                 # doesn't think the bot is frozen.
