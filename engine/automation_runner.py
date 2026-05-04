@@ -230,20 +230,24 @@ class AutomationRunner:
         # but we don't bloat per-case duration the way the old 500 ms
         # step_pause did. Without record_video, headless stays at full
         # speed (no audience to slow down for).
+        # Operator-reported pain: 62-case run took 89 min on Render free
+        # tier. Halving slow_mo + step_pause saves ~30% wall-clock
+        # without making the .webm unwatchable — the operator watches
+        # at their own pace anyway.
         if slow_mo_ms is not None:
             self.slow_mo_ms = slow_mo_ms
         elif not headless:
-            self.slow_mo_ms = 500
+            self.slow_mo_ms = 400
         elif record_video:
-            self.slow_mo_ms = 600
+            self.slow_mo_ms = 300
         else:
             self.slow_mo_ms = 0
         if step_pause_ms is not None:
             self.step_pause_ms = step_pause_ms
         elif not headless:
-            self.step_pause_ms = 700
+            self.step_pause_ms = 500
         elif record_video:
-            self.step_pause_ms = 250
+            self.step_pause_ms = 100
         else:
             self.step_pause_ms = 0
         self.credentials = credentials
@@ -438,20 +442,19 @@ class AutomationRunner:
                     )
                 else:
                     raise
+            BROWSER_RESTART_EVERY = 20  # See class docstring.
             try:
                 # In headed mode give the user ~1 second to notice the
                 # window appearing before we start firing test cases at it.
                 if not self.headless:
                     time.sleep(1.0)
+                import gc as _gc
                 for _idx_script, script in enumerate(scripts, start=1):
                     _logger.info("automation: case %d/%d starting tc_id=%s",
                                  _idx_script, len(scripts), script.tc_id)
                     self._write_phase(
                         f"case-running:{_idx_script}/{len(scripts)}:{script.tc_id}")
                     self._live_current_tc = (script.tc_id or "TC")
-                    # Step counter is per-test-case so the live page shows
-                    # "step #3" inside the current TC, not a cumulative
-                    # number across the whole run.
                     self._live_step = 0
                     self._write_live_info(status="running")
                     sr = self._run_script(browser, script, run_dir)
@@ -461,8 +464,40 @@ class AutomationRunner:
                     else: report.blocked += 1
                     self._live_done += 1
                     self._write_live_info(status="running")
+
+                    # Browser-restart cycle to keep memory bounded on
+                    # Render free-tier. Holding the same browser open
+                    # for 62 cases blew past the 512 MB ceiling around
+                    # case 29 and triggered a 502.
+                    if (_idx_script % BROWSER_RESTART_EVERY == 0
+                            and _idx_script < len(scripts)):
+                        _logger.info(
+                            "automation: rotating browser after %d cases "
+                            "to release memory", _idx_script)
+                        try:
+                            browser.close()
+                        except Exception as exc:
+                            _logger.debug("browser.close on rotate: %s", exc)
+                        _gc.collect()
+                        engine_args2 = (launch_args
+                                        if self.engine_kind == "chromium"
+                                        else [])
+                        browser = engine_obj.launch(
+                            headless=self.headless,
+                            slow_mo=self.slow_mo_ms,
+                            args=engine_args2,
+                        )
+                        _logger.info("automation: %s relaunched OK",
+                                     self.engine_kind)
+                    else:
+                        # Cheap reclaim between every case — temporaries
+                        # from per-step screenshots add up otherwise.
+                        _gc.collect()
             finally:
-                browser.close()
+                try:
+                    browser.close()
+                except Exception:
+                    pass
 
         report.duration_ms = int((time.time() - t0) * 1000)
         report.finished_at = datetime.now().isoformat(timespec="seconds")
