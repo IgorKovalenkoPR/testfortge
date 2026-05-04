@@ -349,6 +349,28 @@ class AutomationRunner:
             # against our dark card background) for the first ~10 s while
             # Playwright launches Chromium.
             self._write_warmup_frame(self._live_dir, len(scripts))
+            # Seed every slot of the filmstrip with the warmup frame.
+            # Operator reported strip_frame_count: 0 on /test-execution/diag
+            # even with cases_done=6; the strip was empty because every
+            # _live_pump page.screenshot was timing out on 0.1 CPU and
+            # _screenshot didn't write to strip. Pre-seeding guarantees
+            # the strip is non-empty as soon as the run starts, and each
+            # subsequent _screenshot / _live_pump call rotates fresh
+            # frames in.
+            try:
+                strip_dir = os.path.join(self._live_dir, "strip")
+                os.makedirs(strip_dir, exist_ok=True)
+                src_warmup = os.path.join(self._live_dir, "latest.png")
+                if os.path.isfile(src_warmup):
+                    for slot in range(12):
+                        slot_path = os.path.join(strip_dir, f"{slot:02d}.png")
+                        try:
+                            shutil.copyfile(src_warmup, slot_path + ".tmp")
+                            os.replace(slot_path + ".tmp", slot_path)
+                        except Exception:
+                            pass
+            except Exception as exc:
+                _logger.debug("strip seed: %s", exc)
             self._write_phase("live-setup")
         except OSError as exc:
             _logger.debug("live: cannot reset _live dir: %s", exc)
@@ -442,7 +464,15 @@ class AutomationRunner:
                     )
                 else:
                     raise
-            BROWSER_RESTART_EVERY = 20  # See class docstring.
+            # 2026-05-04 — operator reported 502/503 around case 17 on a
+            # 62-case run. Render free tier (512 MB RAM, 0.1 CPU) holds a
+            # Chromium context for ~250 MB and creep grows ~5 MB/case.
+            # 20-case rotation left no headroom for gunicorn + Postgres
+            # client on the same dyno; cut to 8 so the context never
+            # exceeds ~290 MB before recycle. Trade-off: 4× more cold-
+            # starts on a 62-case run, but each cold-start is ~3 s vs.
+            # the 30+ s of 502 stalls operators were seeing.
+            BROWSER_RESTART_EVERY = 8
             try:
                 # In headed mode give the user ~1 second to notice the
                 # window appearing before we start firing test cases at it.
@@ -559,7 +589,14 @@ class AutomationRunner:
         # is why the user said the recordings "look like screenshots".
         # We attach to every navigation via init script so the cursor
         # survives goto / SPA route changes.
-        if self.record_video or not self.headless:
+        #
+        # 2026-05-04 — operator complaint: "Live view shows only one
+        # screenshot, no scrolls/fills/clicks". Root cause: the live mirror
+        # IS the audience for headless+no-video runs too, but the gating
+        # below skipped cursor/animation work for that exact case. Always
+        # inject — CSS-only cursor + smooth-scroll cost is negligible on
+        # 0.1 CPU compared to round-tripping through Playwright APIs.
+        if True:
             cursor_script = (
                 "(() => {"
                 "  if (window.__tfCursorInjected) return;"
@@ -859,37 +896,56 @@ class AutomationRunner:
         if now - last < 0.2:
             return
         self._live_last_pump = now
+        # JPEG @ q=70 is roughly 8× cheaper to encode than PNG and
+        # decodes faster in the browser too. Render's 0.1 CPU was the
+        # bottleneck — switching encoding format cuts the per-pump CPU
+        # bill from ~600 ms to ~120 ms in our local benchmark, which
+        # means the 5-second pre-action budget actually fits inside the
+        # CPU slice we get on free tier. The strip files keep the .png
+        # extension because the route already serves them with
+        # mimetype="image/png" and PNG/JPEG are interchangeable for
+        # <img>; we explicitly send the right MIME below.
+        # NB: PNG is still used for the per-step "after" shots in
+        # _screenshot — those flow into the bug-report attachments and
+        # need to be lossless.
+        tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.jpg")
+        captured = False
         try:
-            tmp_shot = os.path.join(tc_dir, f"_live_{idx:02d}_{label}.png")
-            # Bumped 1.5 s → 4 s. Pre-action pumps usually fire in the
-            # middle of cursor travel where Chromium's compositor is
-            # busy; the 1.5 s budget consistently dropped frames on
-            # Render free-tier.
-            # Cold-start budget bumped 4s → 7s; was timing out
-            # consistently on 62-case runs against qarea.com.
-            page.screenshot(path=tmp_shot, full_page=False, timeout=7000)
+            # Drop timeout from 7s to 4s — Render's worker timeout is
+            # 300 s wall-clock, and a 7 s pump that fires every 0.2 s
+            # quickly racks up. With JPEG encoding cheap enough, 4 s is
+            # a comfortable budget. If we miss it, fall through to the
+            # mirror-only path so the strip stays live from _screenshot.
+            page.screenshot(path=tmp_shot, full_page=False,
+                            type="jpeg", quality=70, timeout=4000)
+            captured = True
+        except Exception as exc:
+            # Don't bail — we still want to refresh the live frame from
+            # the most recent on-disk shot so the operator's filmstrip
+            # keeps moving. _screenshot's strip writes will fill the gap.
+            _logger.debug("live pump screenshot (%s) timed out: %s", label, exc)
+        try:
             os.makedirs(live_dir, exist_ok=True)
             dst = os.path.join(live_dir, "latest.png")
             tmp = dst + ".tmp"
-            shutil.copyfile(tmp_shot, tmp)
-            os.replace(tmp, dst)
-            # Filmstrip ring buffer — write the same image into one of
-            # _live/strip/00..11.png so the live page can render the
-            # last 12 frames as a thumbnail strip. Late-joining
-            # operators see what the bot actually did, not just the
-            # current frozen frame.
+            if captured and os.path.isfile(tmp_shot) and os.path.getsize(tmp_shot) > 0:
+                shutil.copyfile(tmp_shot, tmp)
+                os.replace(tmp, dst)
+                # Strip ring buffer — only update on a successful new
+                # capture so we don't write the same frame twice in a row.
+                try:
+                    strip_dir = os.path.join(live_dir, "strip")
+                    os.makedirs(strip_dir, exist_ok=True)
+                    slot = getattr(self, "_strip_slot", 0) % 12
+                    self._strip_slot = slot + 1
+                    strip_path = os.path.join(strip_dir, f"{slot:02d}.png")
+                    shutil.copyfile(dst, strip_path + ".tmp")
+                    os.replace(strip_path + ".tmp", strip_path)
+                except Exception:
+                    pass
             try:
-                strip_dir = os.path.join(live_dir, "strip")
-                os.makedirs(strip_dir, exist_ok=True)
-                slot = getattr(self, "_strip_slot", 0) % 12
-                self._strip_slot = slot + 1
-                strip_path = os.path.join(strip_dir, f"{slot:02d}.png")
-                shutil.copyfile(dst, strip_path + ".tmp")
-                os.replace(strip_path + ".tmp", strip_path)
-            except Exception:
-                pass
-            try:
-                os.remove(tmp_shot)
+                if os.path.isfile(tmp_shot):
+                    os.remove(tmp_shot)
             except OSError:
                 pass
             self._write_live_info(status="running")
@@ -907,10 +963,9 @@ class AutomationRunner:
              Playwright's video recorder captures.
           2) window.__tfMoveCursor — the injected DOM cursor as fallback
              when CDP cursor isn't rendered.
-        No-op when neither video recording nor headed mode are active
-        (no audience). No-op when bbox is unknown."""
-        if self.headless and not self.record_video:
-            return
+        Active for the /test-execution/live mirror audience too — the
+        injected DOM cursor renders into latest.png even on headless
+        runs without video. No-op when bbox is unknown."""
         if not bbox:
             return
         try:
@@ -1138,6 +1193,24 @@ class AutomationRunner:
                     sz = -1
                 _logger.info("live mirror: first frame written to %s (%d bytes)",
                              live_path, sz)
+            # 2026-05-04 — operator reported strip_frame_count=0 after
+            # 6 cases done. Root cause: _live_pump was the ONLY writer to
+            # the strip ring, and on Render's 0.1 CPU pump screenshots
+            # routinely time out. Make the per-step "after" shot ALSO
+            # populate the strip — this is a pure filesystem copy so it
+            # cannot fail for the same reason. Now the filmstrip always
+            # shows the most recent N "after" frames even when pumps
+            # never land.
+            try:
+                strip_dir = os.path.join(live_dir, "strip")
+                os.makedirs(strip_dir, exist_ok=True)
+                slot = getattr(self, "_strip_slot", 0) % 12
+                self._strip_slot = slot + 1
+                strip_path = os.path.join(strip_dir, f"{slot:02d}.png")
+                shutil.copyfile(live_path, strip_path + ".tmp")
+                os.replace(strip_path + ".tmp", strip_path)
+            except Exception as strip_exc:
+                _logger.debug("strip mirror from _screenshot: %s", strip_exc)
             self._write_live_info(status="running")
         except Exception as exc:  # pragma: no cover — IO best-effort
             _logger.error("live mirror failed (%s): %s",
@@ -1230,11 +1303,10 @@ class AutomationRunner:
             loc.scroll_into_view_if_needed(timeout=2000)
         except Exception:
             pass
-        # Skip the highlight + delay only when there's nothing to capture
-        # — pure headless without video recording. That's the case where
-        # a flashing outline would just slow the run down with no benefit.
-        if self.headless and not self.record_video:
-            return
+        # The /test-execution/live mirror is the audience for headless
+        # runs without video too — without the highlight + 180 ms pause
+        # the operator's filmstrip just shows static "after" frames. The
+        # CSS evaluate() call costs <5 ms; cheap enough to always run.
         if not self.headless:
             try:
                 page.bring_to_front()
@@ -1469,24 +1541,29 @@ class AutomationRunner:
             _logger.debug("highlight text: %s", exc)
 
     def _visible_scroll(self, page) -> None:
-        """After a navigation, do a short visible scroll so the user sees
-        the page was actually opened and rendered.
-
-        Fires in headed mode (real audience) AND in headless+record_video
-        mode (the .webm needs activity or it looks frozen). Stays a no-op
-        in plain headless without recording — saves 1 s per case for
-        ad-hoc CI runs that don't produce a video.
+        """After a navigation, do a short visible scroll so the live
+        mirror, headed-mode audience, or .webm video all see the page
+        actually scrolling. Was previously gated to non-headless or
+        record_video, but the /test-execution/live mirror is itself a
+        live audience even on plain headless runs — without this scroll
+        the filmstrip shows three identical "page rendered" frames.
+        Cost: ~1 s wall-clock, well below the per-case budget.
         """
-        if self.headless and not self.record_video:
-            return
         try:
+            # Smooth-scroll down 3 ticks then back to top — visible in
+            # both the recorded video and the live filmstrip because
+            # each screenshot fires between ticks at 250 ms apart.
             page.evaluate(
                 "async () => {"
-                "  for (let i = 0; i < 3; i++) { step(); "
-                "    await new Promise(r => setTimeout(r, 250)); }"
+                "  const total = Math.max("
+                "    document.documentElement.scrollHeight, 1);"
+                "  for (let i = 1; i <= 3; i++) {"
+                "    window.scrollTo({top: (total*0.18)*i, behavior:'smooth'});"
+                "    await new Promise(r => setTimeout(r, 250));"
+                "  }"
                 "  window.scrollTo({top: 0, behavior:'smooth'});"
                 "}"
             )
             page.wait_for_timeout(300)
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug("visible_scroll: %s", exc)

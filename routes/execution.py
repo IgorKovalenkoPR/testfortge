@@ -481,7 +481,56 @@ def register(app: Flask) -> None:
                           user_agent=pb["ua"],
                           viewport_override=pb["viewport"],
                       )
-                      auto_report = runner.run(scripts)
+                      # ── ARCHITECTURAL DEBT ────────────────────────
+                      # The proper fix for 502/503 on long runs (100+
+                      # cases) is to dispatch this to engine.job_queue
+                      # (already used by /automation/run-async) and
+                      # have the request return immediately — the live
+                      # view polls until done, then a dedicated results
+                      # endpoint reads the JSON-on-disk and renders.
+                      #
+                      # Until that lands, we run the Playwright pass on
+                      # a daemon thread so a gunicorn force-kill of the
+                      # request thread doesn't murder Chromium mid-run:
+                      # the runner keeps writing _live/latest.png and
+                      # storage/automation_runs/<run_id>/* until natural
+                      # completion. The live filmstrip therefore stays
+                      # responsive even after the originating browser
+                      # tab has timed out and the operator has refreshed
+                      # /test-execution/live in a new tab.
+                      import threading as _threading
+                      import time as _time
+                      from concurrent.futures import (Future as _Future,
+                                                     TimeoutError as _FutTimeout)
+                      _fut: _Future = _Future()
+                      def _bg_run():
+                          try:
+                              _fut.set_result(runner.run(scripts))
+                          except BaseException as _exc:
+                              _fut.set_exception(_exc)
+                      _t0 = _time.time()
+                      _t = _threading.Thread(
+                          target=_bg_run, name="tf-execution-runner",
+                          daemon=True)
+                      _t.start()
+                      # Block this request thread until the runner
+                      # finishes — gunicorn --timeout (now 1800 s, see
+                      # render.yaml) is the wall-clock ceiling. If the
+                      # ceiling is breached the daemon keeps running in
+                      # the background, writes artifacts to disk, and
+                      # the operator picks up results via the live view.
+                      # log.info every 30 s as a heartbeat so Render's
+                      # logs show progress instead of silence.
+                      while True:
+                          try:
+                              auto_report = _fut.result(timeout=30)
+                              break
+                          except _FutTimeout:
+                              log.info(
+                                  "automation: still running after %d s "
+                                  "(waiter heartbeat)",
+                                  int(_time.time() - _t0))
+                              continue
                       # Index by case ID so the per-env loop below can pull
                       # screenshots / videos / status into the right run row.
                       # NOTE: RunReport.scripts (NOT .results) holds the
