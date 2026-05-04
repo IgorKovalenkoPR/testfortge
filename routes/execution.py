@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from flask import (Flask, Response, flash, g, redirect, render_template,
+from flask import (Flask, Response, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 
 from engine.log import get_logger
@@ -374,6 +374,38 @@ def register(app: Flask) -> None:
                   wants_automation, base_url, source, env_types,
                   len(selected_ids or []),
               )
+              # Pre-flight live-info write: even if the runner fails
+              # before its first internal status='starting' write, the
+              # live page will at least transition idle → starting →
+              # idle (or done). Operator will see SOME activity and not
+              # think the page is broken.
+              if wants_automation:
+                  try:
+                      from routes.automation import STORAGE_ROOT as _SR
+                      import json as _json, time as _time, os as _os
+                      live_dir = _os.path.join(
+                          _SR, "automation_runs", "_live")
+                      _os.makedirs(live_dir, exist_ok=True)
+                      info_path = _os.path.join(live_dir, "info.json")
+                      tmp = info_path + ".tmp"
+                      with open(tmp, "w", encoding="utf-8") as f:
+                          _json.dump({
+                              "status": "starting",
+                              "step": 0,
+                              "cases_done": 0,
+                              "cases_total": len(selected_ids or items_data or []),
+                              "current_tc": "",
+                              "base_url": base_url,
+                              "headless": True,
+                              "elapsed_ms": 0,
+                              "avg_ms_per_case": 0,
+                              "cases_per_minute": 0,
+                              "ts": int(_time.time() * 1000),
+                          }, f)
+                      _os.replace(tmp, info_path)
+                      log.info("live-preflight: status=starting written")
+                  except Exception as _exc:
+                      log.warning("live-preflight failed: %s", _exc)
               # Operator-visibility — when a Web / Mobile-Web env was
               # picked but no base_url was supplied, the run silently
               # falls back to the deterministic simulator (no live
@@ -934,6 +966,56 @@ def register(app: Flask) -> None:
     # container. Instead we mirror every Playwright screenshot to a
     # well-known location and the page below polls it once per second so
     # the operator gets a "live filmstrip" of what the bot is seeing.
+    @app.route("/test-execution/diag", methods=["GET"])
+    def test_execution_diag():
+        """Operator-facing diagnostic JSON. Reports playwright import
+        status, browser binary paths, _live directory presence, last
+        info.json, strip frame count, and recent run dirs.
+
+        Hit `/test-execution/diag` from a browser when live view stays
+        empty — it answers in one place whether Playwright was even
+        invoked and what artefacts landed on disk."""
+        import os, json, glob
+        from routes.automation import STORAGE_ROOT
+        out = {}
+        try:
+            from playwright.sync_api import sync_playwright as _pw
+            out["playwright_importable"] = True
+            try:
+                with _pw() as pw:
+                    out["chromium_path"] = getattr(pw.chromium, "executable_path", "—")
+                    out["firefox_path"]  = getattr(pw.firefox, "executable_path", "—")
+                    out["webkit_path"]   = getattr(pw.webkit, "executable_path", "—")
+            except Exception as exc:
+                out["playwright_open_error"] = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:
+            out["playwright_importable"] = False
+            out["playwright_import_error"] = str(exc)
+
+        live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
+        out["live_dir"] = live_dir
+        out["live_dir_exists"] = os.path.isdir(live_dir)
+        if out["live_dir_exists"]:
+            info_path = os.path.join(live_dir, "info.json")
+            out["info_json_exists"] = os.path.isfile(info_path)
+            if out["info_json_exists"]:
+                try:
+                    out["info_json"] = json.load(open(info_path, encoding="utf-8"))
+                except Exception as exc:
+                    out["info_json_error"] = str(exc)
+            out["latest_png_exists"] = os.path.isfile(
+                os.path.join(live_dir, "latest.png"))
+            strip_files = sorted(glob.glob(
+                os.path.join(live_dir, "strip", "*.png")))
+            out["strip_frame_count"] = len(strip_files)
+        runs_dir = os.path.join(STORAGE_ROOT, "automation_runs")
+        if os.path.isdir(runs_dir):
+            entries = [e for e in os.listdir(runs_dir) if e != "_live"]
+            out["recent_runs"] = sorted(entries)[-5:]
+        out["session_test_cases"] = len(session.get("test_cases_data") or [])
+        out["session_checklist"]  = len(session.get("checklist_data") or [])
+        return jsonify(out)
+
     @app.route("/test-execution/live", methods=["GET"])
     def test_execution_live():
         return render_template("test_execution_live.html")

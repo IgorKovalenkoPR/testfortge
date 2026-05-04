@@ -749,7 +749,15 @@
 
 {# ── Run progress overlay (shown while POST is in flight) ── #}
 <div id="te-run-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
-  <div class="te-run-card">
+  <div class="te-run-card" style="position:relative;">
+    {# Manual escape hatch — the synchronous POST occasionally outlives
+       the gunicorn 300 s ceiling on cold-start runs and the browser is
+       left staring at this overlay. The X dismisses the modal so the
+       operator can refresh manually. #}
+    <button type="button" id="te-overlay-close" aria-label="Close"
+            style="position:absolute;top:8px;right:10px;border:none;
+                   background:transparent;font-size:1.4em;color:#475569;
+                   cursor:pointer;line-height:1;">&times;</button>
     <h3>{{ t.get('te_overlay_title', 'Live automation view — run in progress') }}</h3>
     <p style="margin-bottom:10px;">
       {{ t.get('te_overlay_body',
@@ -1040,12 +1048,56 @@ toggleItemList();
     pollLive();
     overlay.hidden = false;
   });
-  // If the user hits browser-back from a page that triggered the overlay,
-  // bfcache may restore the page with overlay still visible — hide it.
+  // Manual close — the synchronous POST may outlive gunicorn's
+  // 300-second ceiling on cold-start runs and the page never reloads.
+  // The X button gives the operator a way out without losing access
+  // to results that may have already landed in the session.
+  var closeBtn = document.getElementById('te-overlay-close');
+  if (closeBtn) {
+      closeBtn.addEventListener('click', function() {
+          overlay.hidden = true;
+          if (tickHandle) clearInterval(tickHandle);
+          if (pollHandle) clearInterval(pollHandle);
+      });
+  }
+  document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape' && !overlay.hidden) {
+          ev.preventDefault();
+          overlay.hidden = true;
+          if (tickHandle) clearInterval(tickHandle);
+          if (pollHandle) clearInterval(pollHandle);
+      }
+  });
+  // 5-minute watchdog: if the page hasn't navigated away by then,
+  // surface a "this is taking longer than expected" message and stop
+  // pretending we know the run state. The actual run continues in the
+  // background; the user can refresh to see results.
+  var watchdog = null;
+  var origSubmit = form.querySelector('button#te-run-button');
+  form.addEventListener('submit', function(ev) {
+      var sm = ev.submitter || document.activeElement;
+      if (sm && sm.id !== 'te-run-button') return;
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(function() {
+          if (overlay.hidden) return;
+          var card = overlay.querySelector('.te-run-card');
+          if (!card) return;
+          var notice = document.createElement('p');
+          notice.style.cssText = 'margin-top:14px;padding:10px;'
+                              + 'background:#fef3c7;color:#92400e;'
+                              + 'border:1px solid #fbbf24;'
+                              + 'border-radius:6px;font-size:0.88em;';
+          notice.innerHTML = "{{ t.get('te_overlay_slow',
+              'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | safe }}";
+          card.appendChild(notice);
+      }, 5 * 60 * 1000);
+  }, false);
+
   window.addEventListener('pageshow', function() {
     overlay.hidden = true;
     if (tickHandle) clearInterval(tickHandle);
     if (pollHandle) clearInterval(pollHandle);
+    if (watchdog) clearTimeout(watchdog);
   });
 })();
 </script>
