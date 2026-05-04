@@ -104,6 +104,48 @@
     var infoUrl  = "{{ url_for('test_execution_live_info') }}";
     var lastTs = 0;
 
+    /* Detached-subprocess results endpoint:
+       /test-execution?run_id=<id> stamps a query param when the user
+       arrives here from the POST-dispatch redirect. We poll
+       /test-execution/run-status/<id> in parallel with the live frame
+       polls — when status flips to "done" we redirect to the results
+       endpoint, which loads result.json from disk and renders the
+       post-run gallery + bug reports. status="failed" surfaces the
+       error inline so the operator doesn't get stuck on a frozen page.
+    */
+    var qs = new URLSearchParams(window.location.search);
+    var runId = qs.get('run_id') || '';
+    var runStatusUrl = runId
+        ? ("/test-execution/run-status/" + encodeURIComponent(runId))
+        : "";
+    var resultsUrl = runId
+        ? ("/test-execution/results/" + encodeURIComponent(runId))
+        : "";
+    var redirected = false;
+    function pollRunStatus() {
+        if (!runStatusUrl || redirected) return;
+        fetch(runStatusUrl, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (!s || redirected) return;
+                if (s.status === 'done') {
+                    redirected = true;
+                    window.location.href = resultsUrl;
+                } else if (s.status === 'failed') {
+                    redirected = true;
+                    var p = document.getElementById('te-live-help');
+                    if (p) {
+                        p.hidden = false;
+                        p.innerHTML = '<strong>Run failed.</strong>'
+                            + '<p style="margin:6px 0 0 0;font-size:0.88em;">'
+                            + (s.error || 'unknown error')
+                            + '</p>';
+                    }
+                }
+            })
+            .catch(function () { /* keep polling */ });
+    }
+
     function paintStatus(info) {
         var status = (info && info.status) || 'idle';
         var colours = {
@@ -187,6 +229,7 @@
     function pollInfoMaybe() {
         if (paused) return;          // don't refresh frame while frozen
         pollInfo();
+        pollRunStatus();
     }
 
     /* Show an idle-help banner if status remains 'idle' for >30 s.
@@ -227,6 +270,7 @@
     });
 
     pollInfo();
+    pollRunStatus();
     setInterval(pollInfoMaybe, 1000);
 })();
 </script>

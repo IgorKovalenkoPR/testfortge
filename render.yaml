@@ -41,19 +41,20 @@ services:
     #    ~250 MB and 2 simultaneous workers OOM the 512 MB instance.
     #  * --threads 4 still serves smaller GETs (Tedgie chat, exports,
     #    health probes) concurrently while a long POST is in flight.
-    #  * 2026-05-04 — operator hit 502/503 around case 17 of a 62-case
-    #    /test-execution run. Each Playwright case averages ~58 s on
-    #    Render free tier, so a 100-case run wants ~100 min of wall
-    #    clock. 300 s timeout was killing the worker mid-run. Bumped to
-    #    1800 (30 min) to absorb realistic runs; for runs >30 min the
-    #    proper fix is to dispatch via engine.job_queue.JobQueue (see
-    #    routes/automation.py automation_run_async for the pattern) and
-    #    let the live view poll. Tracked as architectural debt.
+    #  * 2026-05-04 — /test-execution now dispatches the Playwright
+    #    pass to a fully detached subprocess (engine/runner_worker.py
+    #    via subprocess.Popen with start_new_session=True). The HTTP
+    #    request returns in <1 s with a redirect to the live view; the
+    #    worker keeps running independently of any gunicorn restart.
+    #    --timeout still matters for the synchronous deterministic-
+    #    simulator path (no Base URL) and for the /test-execution/
+    #    results/<id> endpoint that re-runs the per-env loop after the
+    #    worker writes result.json. 7200 (2 h) is generous backstop.
     dockerCommand: >-
       gunicorn
       --bind 0.0.0.0:$PORT
       --workers 1 --threads 4 --worker-class gthread
-      --timeout 1800 --graceful-timeout 30
+      --timeout 7200 --graceful-timeout 30
       --access-logfile - --error-logfile -
       app:app
     healthCheckPath: /healthz

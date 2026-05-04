@@ -428,25 +428,44 @@ def register(app: Flask) -> None:
                       "warning",
                   )
               if wants_automation:
+                  # ── DETACHED SUBPROCESS DISPATCH ──────────────────
+                  # Operator hit 502/503 around case 37 of 62 at the
+                  # ~12-13 min mark — well below gunicorn --timeout.
+                  # Root cause: Render's edge proxy closes the HTTP
+                  # connection after several minutes of silence, and
+                  # then subsequent requests pile up against gunicorn's
+                  # 4-thread worker until it returns 503. Daemon-thread
+                  # dispatch did NOT help because gunicorn force-kill
+                  # tears down ALL threads in the worker process.
+                  #
+                  # Fix: spawn the Playwright pass as a fully detached
+                  # subprocess (start_new_session=True). It survives
+                  # any gunicorn restart, writes result.json + done.flag
+                  # to <storage>/automation_runs/_pending/. The POST
+                  # responds in <1 s with a redirect to the live view;
+                  # JS auto-redirects to /test-execution/results/<id>
+                  # when the worker is done. The results endpoint
+                  # picks up the merged automation_assets, runs the
+                  # per-env loop + bug rewrite, and renders the same
+                  # post-run page operators are used to.
                   try:
-                      from engine.automation_qa import scripts_from_session
-                      from engine.automation_runner import AutomationRunner
                       from routes.automation import STORAGE_ROOT
-                      # Honour the per-item selection. Without this filter
-                      # Playwright drives EVERY test case in the project,
-                      # ignoring whatever the operator unchecked in the UI.
+                      import json as _json
+                      import os as _os
+                      import sys as _sys
+                      import subprocess as _subprocess
+                      import uuid as _uuid
+
                       automation_items = (
-                          [it for it in items_data if it.get("id") in selected_ids]
+                          [it for it in items_data
+                           if it.get("id") in selected_ids]
                           if selected_ids else items_data
                       )
-                      scripts = scripts_from_session(automation_items, base_url)
 
-                      # Feature #6 — pick the Playwright engine + UA +
-                      # viewport that match the OS/browser the tester
-                      # selected. For the Mobile Web env we use the
-                      # mobile-OS version + mobile browser instead of
-                      # the desktop pair.
-                      mw_active = "mobile_web" in env_types and "web" not in env_types
+                      # Resolve engine/UA/viewport ahead of dispatch so
+                      # the worker only deals with primitives.
+                      mw_active = ("mobile_web" in env_types
+                                   and "web" not in env_types)
                       sel_os_ver = (
                           (request.form.get("mw_os_version", "")
                            or request.form.get("mw_os", "")).strip()
@@ -460,192 +479,116 @@ def register(app: Flask) -> None:
                           request.form.get("web_browser", "Chrome").strip()
                       )
                       pb = resolve_platform_browser(sel_os_ver, sel_browser)
-                      log.info(
-                          "automation: engine=%s ua_short=%s viewport=%dx%d "
-                          "(os_version=%r browser=%r)",
-                          pb["engine"], pb["ua"][:40] + "...",
-                          pb["viewport"][0], pb["viewport"][1],
-                          sel_os_ver, sel_browser,
-                      )
-                      runner = AutomationRunner(
-                          storage_root=STORAGE_ROOT,
-                          base_url=base_url,
-                          headless=headless,
-                          record_video=record_video,
-                          default_timeout_ms=speed_timeout_ms,
-                          navigation_timeout_ms=speed_nav_timeout_ms,
-                          screenshot_full_page=speed_full_page,
-                          screenshot_before_steps=speed_before_steps,
-                          credentials=credentials if credentials.is_active() else None,
-                          engine_kind=pb["engine"],
-                          user_agent=pb["ua"],
-                          viewport_override=pb["viewport"],
-                      )
-                      # ── ARCHITECTURAL DEBT ────────────────────────
-                      # The proper fix for 502/503 on long runs (100+
-                      # cases) is to dispatch this to engine.job_queue
-                      # (already used by /automation/run-async) and
-                      # have the request return immediately — the live
-                      # view polls until done, then a dedicated results
-                      # endpoint reads the JSON-on-disk and renders.
-                      #
-                      # Until that lands, we run the Playwright pass on
-                      # a daemon thread so a gunicorn force-kill of the
-                      # request thread doesn't murder Chromium mid-run:
-                      # the runner keeps writing _live/latest.png and
-                      # storage/automation_runs/<run_id>/* until natural
-                      # completion. The live filmstrip therefore stays
-                      # responsive even after the originating browser
-                      # tab has timed out and the operator has refreshed
-                      # /test-execution/live in a new tab.
-                      import threading as _threading
-                      import time as _time
-                      from concurrent.futures import (Future as _Future,
-                                                     TimeoutError as _FutTimeout)
-                      _fut: _Future = _Future()
-                      def _bg_run():
-                          try:
-                              _fut.set_result(runner.run(scripts))
-                          except BaseException as _exc:
-                              _fut.set_exception(_exc)
-                      _t0 = _time.time()
-                      _t = _threading.Thread(
-                          target=_bg_run, name="tf-execution-runner",
-                          daemon=True)
-                      _t.start()
-                      # Block this request thread until the runner
-                      # finishes — gunicorn --timeout (now 1800 s, see
-                      # render.yaml) is the wall-clock ceiling. If the
-                      # ceiling is breached the daemon keeps running in
-                      # the background, writes artifacts to disk, and
-                      # the operator picks up results via the live view.
-                      # log.info every 30 s as a heartbeat so Render's
-                      # logs show progress instead of silence.
-                      while True:
-                          try:
-                              auto_report = _fut.result(timeout=30)
-                              break
-                          except _FutTimeout:
-                              log.info(
-                                  "automation: still running after %d s "
-                                  "(waiter heartbeat)",
-                                  int(_time.time() - _t0))
-                              continue
-                      # Index by case ID so the per-env loop below can pull
-                      # screenshots / videos / status into the right run row.
-                      # NOTE: RunReport.scripts (NOT .results) holds the
-                      # per-case ScriptResult objects, and screenshots are
-                      # nested in each ScriptResult.steps[*].screenshot_after
-                      # — extracting them here is what feeds the post-run
-                      # gallery in templates/test_execution.html.
-                      import os as _os
-                      for r in (getattr(auto_report, "scripts", []) or []):
-                          cid = getattr(r, "tc_id", None) or getattr(r, "case_id", None)
-                          if not cid:
-                              continue
-                          # Only include screenshots that actually exist
-                          # on disk and are non-zero size — otherwise the
-                          # post-run gallery shows a broken-image icon.
-                          # Empty screenshots can happen when page.
-                          # screenshot raised mid-run (e.g. navigation
-                          # interrupted).
-                          #
-                          # Two parallel collections from May 2026:
-                          #  * shots[]   — clean per-step "after" frames.
-                          #                Goes into the test-execution
-                          #                gallery so Passed cases never
-                          #                show red error banners.
-                          #  * fail_shots[] + failure_step (idx, comment)
-                          #                — annotated copies (red banner
-                          #                + arrow + bbox highlight).
-                          #                Used as bug-report evidence on
-                          #                the FAILED step plus the prior
-                          #                step's "after" shot for context.
-                          shots: list[str] = []
-                          fail_shots: list[str] = []
-                          failure_step: dict | None = None
-                          prev_after: str = ""
-                          for step in (getattr(r, "steps", []) or []):
-                              after = getattr(step, "screenshot_after", "") or ""
-                              if after:
-                                  abs_p = _os.path.join(STORAGE_ROOT,
-                                                         after.replace("/", _os.sep))
-                                  try:
-                                      if (_os.path.isfile(abs_p)
-                                              and _os.path.getsize(abs_p) > 0):
-                                          shots.append(after)
-                                  except OSError:
-                                      pass
-                              fail = getattr(step, "screenshot_failure", "") or ""
-                              if fail:
-                                  abs_f = _os.path.join(STORAGE_ROOT,
-                                                         fail.replace("/", _os.sep))
-                                  try:
-                                      if (_os.path.isfile(abs_f)
-                                              and _os.path.getsize(abs_f) > 0):
-                                          fail_shots.append(fail)
-                                          # First failure wins — the run
-                                          # broke here; subsequent steps
-                                          # didn't execute.
-                                          if failure_step is None:
-                                              failure_step = {
-                                                  "index": getattr(step, "index", 0),
-                                                  "action": getattr(step, "action", ""),
-                                                  "comment": getattr(step, "comment", ""),
-                                                  "screenshot": fail,
-                                                  "context_screenshot": prev_after,
-                                                  "console_errors": list(
-                                                      getattr(step, "console_errors", []) or []
-                                                  )[:5],
-                                              }
-                                  except OSError:
-                                      pass
-                              if after:
-                                  prev_after = after
-                          # Validate video too — Playwright finalises the
-                          # webm only on context close, so partial /
-                          # failed contexts can leave a 0-byte file.
-                          video = getattr(r, "video_path", "") or ""
-                          if video:
-                              abs_v = _os.path.join(STORAGE_ROOT, video.replace("/", _os.sep))
-                              try:
-                                  if not (_os.path.isfile(abs_v) and _os.path.getsize(abs_v) > 0):
-                                      video = ""
-                              except OSError:
-                                  video = ""
-                          automation_assets[cid] = {
-                              "status": getattr(r, "status", ""),
-                              "video": video,
-                              "screenshots": shots,
-                              "failure_screenshots": fail_shots,
-                              "failure_step": failure_step,
-                              "final_url": getattr(r, "final_url", "") or "",
-                              "duration_ms": getattr(r, "duration_ms", 0),
-                          }
-                      session["automation_report"] = {
-                          "passed": auto_report.passed,
-                          "failed": auto_report.failed,
-                          "blocked": auto_report.blocked,
-                          "run_id": auto_report.run_id,
+
+                      # Build a JSON-serialisable runner config.
+                      runner_kwargs = {
+                          "base_url": base_url,
+                          "headless": headless,
+                          "record_video": record_video,
+                          "default_timeout_ms": speed_timeout_ms,
+                          "navigation_timeout_ms": speed_nav_timeout_ms,
+                          "screenshot_full_page": speed_full_page,
+                          "screenshot_before_steps": speed_before_steps,
+                          "engine_kind": pb["engine"],
+                          "user_agent": pb["ua"],
+                          "viewport_override": list(pb["viewport"]),
                       }
-                      log.info(
-                          "automation-done: cases=%d passed=%d failed=%d "
-                          "blocked=%d duration_ms=%d run_id=%s",
-                          auto_report.total, auto_report.passed,
-                          auto_report.failed, auto_report.blocked,
-                          auto_report.duration_ms, auto_report.run_id,
+                      cred_payload = None
+                      if credentials and credentials.is_active():
+                          # TestCredentials is a dataclass — best-effort
+                          # serialise the public fields only.
+                          try:
+                              from dataclasses import asdict as _asdict
+                              cred_payload = _asdict(credentials)
+                          except Exception:
+                              cred_payload = None
+
+                      # Per-env config the results endpoint will need.
+                      # We snapshot env-specific form fields here so the
+                      # results endpoint doesn't have to re-read the
+                      # original POST.
+                      envs_meta: dict = {}
+                      for et in env_types:
+                          envs_meta[et] = {"environment": _build_env_string(et)}
+
+                      config_id = (datetime.now().strftime("%Y%m%d_%H%M%S_")
+                                   + _uuid.uuid4().hex[:6])
+                      pending_dir = _os.path.join(
+                          STORAGE_ROOT, "automation_runs", "_pending")
+                      _os.makedirs(pending_dir, exist_ok=True)
+                      config_path = _os.path.join(pending_dir,
+                                                   f"{config_id}.json")
+                      worker_log = _os.path.join(pending_dir,
+                                                  f"{config_id}.log")
+
+                      config_payload = {
+                          "config_id": config_id,
+                          "storage_root": STORAGE_ROOT,
+                          "base_url": base_url,
+                          "site_url": site_url,
+                          "items_data": automation_items,
+                          "selected_ids": selected_ids,
+                          "env_types": env_types,
+                          "manual_statuses": manual_statuses or {},
+                          "manual_bug_refs": manual_bug_refs or {},
+                          "session_id": get_session_id(session)
+                              if "get_session_id" in globals() else "",
+                          "tester_id": tester_id,
+                          "tester_name": (get_tester(tester_id).name
+                                           if get_tester(tester_id)
+                                           else tester_id),
+                          "testing_types": testing_types,
+                          "headless": headless,
+                          "record_video": record_video,
+                          "affects_version": affects_version,
+                          "source": source,
+                          "item_type": item_type,
+                          "envs": envs_meta,
+                          "runner_kwargs": runner_kwargs,
+                          "credentials": cred_payload,
+                      }
+                      with open(config_path, "w", encoding="utf-8") as _f:
+                          _json.dump(config_payload, _f)
+
+                      # Spawn detached worker. start_new_session=True is
+                      # the Linux equivalent of double-fork: the child
+                      # gets its own session and process group so it
+                      # doesn't get reaped when gunicorn kills the
+                      # parent worker. stdout/stderr go to a per-run
+                      # log file so we can debug without tailing
+                      # Render's combined stream.
+                      log_fh = open(worker_log, "w", encoding="utf-8")
+                      _proc = _subprocess.Popen(
+                          [_sys.executable, "-m", "engine.runner_worker",
+                           config_path],
+                          stdout=log_fh,
+                          stderr=_subprocess.STDOUT,
+                          start_new_session=True,
+                          close_fds=True,
+                          cwd=_os.path.dirname(STORAGE_ROOT) or None,
                       )
+                      log.info(
+                          "automation: dispatched worker pid=%s config=%s "
+                          "items=%d envs=%s",
+                          _proc.pid, config_id, len(automation_items),
+                          env_types,
+                      )
+                      session["pending_automation_run"] = config_id
                       flash(
-                          f"✓ Playwright executed {auto_report.total} case(s) "
-                          f"on {base_url} ({auto_report.passed} passed, "
-                          f"{auto_report.failed} failed, "
-                          f"{auto_report.blocked} blocked). "
-                          "Live view shows the recorded frames; bug reports "
-                          "carry annotated screenshots and video.",
+                          f"✓ Playwright pass dispatched ({len(automation_items)} "
+                          f"case(s)). Watch /test-execution/live — you'll be "
+                          f"redirected to the results page when it's done.",
                           "success",
                       )
+                      return redirect(
+                          url_for("test_execution_live") + f"?run_id={config_id}"
+                      )
+                      # The asset-building loop, session writes, and
+                      # flash that used to follow runner.run() now live
+                      # in /test-execution/results/<run_id>. The early
+                      # return above keeps everything below unreachable.
                   except Exception as exc:
-                      log.exception("Automation pass failed (non-fatal): %s", exc)
+                      log.exception("Automation dispatch failed: %s", exc)
                       # Stamp the phase + reason into info.json so the
                       # /test-execution/diag endpoint shows the operator
                       # exactly what blew up — without forcing them to
@@ -1292,6 +1235,341 @@ def register(app: Flask) -> None:
         resp = Response(json.dumps(payload), mimetype="application/json")
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return resp
+
+    @app.route("/test-execution/run-status/<run_id>")
+    def test_execution_run_status(run_id):
+        """Polled by /test-execution/live to know when the detached
+        worker has finished. Returns:
+          status: "running" | "done" | "failed" | "missing"
+          error:  populated when status=="failed"
+        """
+        import os, json
+        from routes.automation import STORAGE_ROOT
+        # Reject path-traversal payloads.
+        if not run_id.replace("_", "").replace("-", "").isalnum():
+            return jsonify({"status": "missing"}), 400
+        pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
+        done_path = os.path.join(pending_dir, f"{run_id}.done.flag")
+        result_path = os.path.join(pending_dir, f"{run_id}.result.json")
+        started_path = os.path.join(pending_dir, f"{run_id}.started.flag")
+        if os.path.isfile(done_path) and os.path.isfile(result_path):
+            try:
+                with open(result_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                return jsonify({
+                    "status": payload.get("status", "done"),
+                    "error":  payload.get("error", ""),
+                })
+            except Exception as exc:
+                return jsonify({"status": "failed", "error": str(exc)})
+        if os.path.isfile(started_path):
+            return jsonify({"status": "running"})
+        return jsonify({"status": "queued"})
+
+    @app.route("/test-execution/results/<run_id>", methods=["GET"])
+    def test_execution_results(run_id):
+        """Load the detached worker's result.json, run the per-env loop
+        + bug rewrite + session writes (the FAST part of the original
+        request), and render test_execution.html with the run visible.
+
+        Idempotent: hitting this URL twice for the same run_id repeats
+        the merge but doesn't double-bug because we delete the result
+        file after a successful merge.
+        """
+        import os, json
+        from routes.automation import STORAGE_ROOT
+        if not run_id.replace("_", "").replace("-", "").isalnum():
+            flash("Invalid run id.", "error")
+            return redirect(url_for("test_execution_page"))
+        pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
+        result_path = os.path.join(pending_dir, f"{run_id}.result.json")
+        if not os.path.isfile(result_path):
+            flash(
+                "Results not ready yet — the worker is still running. "
+                "Watch /test-execution/live and try again in a minute.",
+                "warning",
+            )
+            return redirect(url_for("test_execution_live") + f"?run_id={run_id}")
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception as exc:
+            flash(f"Cannot read run results: {exc}", "error")
+            return redirect(url_for("test_execution_page"))
+
+        if payload.get("status") == "failed":
+            flash(
+                "Automation run failed: "
+                f"{payload.get('error', 'unknown error')}. "
+                "Open /test-execution/diag for details.",
+                "error",
+            )
+            return redirect(url_for("test_execution_page"))
+
+        report = payload.get("report") or {}
+        automation_assets = payload.get("automation_assets") or {}
+        cfg = payload.get("config_echo") or {}
+
+        # Re-run the post-processing using the same logic the synchronous
+        # path used to run inline. Most fields come from the worker's
+        # config echo (so the user's selection of envs / tester etc. is
+        # honoured even though we're in a different request now).
+        items_data = cfg.get("items_data") or session.get(
+            "test_cases_data", []) or session.get("checklist_data", [])
+        env_types = cfg.get("env_types") or ["web"]
+        manual_statuses = cfg.get("manual_statuses") or {}
+        manual_bug_refs = cfg.get("manual_bug_refs") or {}
+        selected_ids = cfg.get("selected_ids") or []
+        tester_id = cfg.get("tester_id") or "mid_1"
+        tester_obj = get_tester(tester_id)
+        tester_name = (tester_obj.name if tester_obj
+                       else cfg.get("tester_name", tester_id))
+        testing_types = cfg.get("testing_types") or ["Regression"]
+        source = cfg.get("source") or "test_cases"
+        item_type = cfg.get("item_type") or "test_case"
+        site_url = cfg.get("site_url") or ""
+        base_url = cfg.get("base_url") or ""
+        headless = bool(cfg.get("headless", True))
+        record_video = bool(cfg.get("record_video", False))
+        affects_version = cfg.get("affects_version", "")
+
+        existing_bugs = [
+            dict_to_bug(b) for b in session.get("bug_reports_data", [])
+            if b.get("id")
+        ]
+        all_bugs = list(session.get("bug_reports_data", []) or [])
+        test_runs = list(session.get("test_runs", []) or [])
+
+        run_summaries = []
+        bug_total = 0
+        envs_meta = cfg.get("envs") or {}
+        for et in env_types:
+            environment = (envs_meta.get(et, {}) or {}).get("environment") \
+                or et.title()
+            db_run_id = None
+            try:
+                pid = ensure_active_project()
+                if pid:
+                    db_run_id = _db.start_execution_run(
+                        pid,
+                        env_payload={
+                            "env_type": et,
+                            "environment": environment,
+                            "tester_id": tester_id,
+                            "tester_name": tester_name,
+                            "testing_types": testing_types,
+                            "source": source,
+                            "site_url": site_url,
+                        },
+                        browser_visibility=("headless" if headless else "visible"),
+                        record_video=record_video,
+                        base_url=base_url,
+                    )
+            except Exception as exc:
+                log.warning("start_execution_run (results) failed: %s", exc)
+
+            execution = execute_items(
+                items=items_data,
+                item_type=item_type,
+                tester_id=tester_id,
+                environment=environment,
+                testing_types=testing_types,
+                selected_ids=selected_ids or None,
+                site_url=site_url,
+                manual_statuses=manual_statuses or None,
+                manual_bug_refs=manual_bug_refs or None,
+            )
+
+            bug_id_map: dict[str, str] = {}
+            running_bugs = list(existing_bugs) + [
+                dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
+            ]
+            for bug_dict in execution["bugs"]:
+                new_id = generate_bug_id(running_bugs)
+                bug_dict["id"] = new_id
+                if not bug_dict.get("affects_version"):
+                    bug_dict["affects_version"] = affects_version
+                bug_dict["environment"] = environment
+                bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                linked = bug_dict.get("linked_item_id", "")
+                ev = automation_assets.get(linked) if linked else None
+                if ev:
+                    existing_atts = list(bug_dict.get("attachments") or [])
+                    fstep = ev.get("failure_step") or {}
+                    targeted: list[str] = []
+                    if fstep.get("context_screenshot"):
+                        targeted.append(fstep["context_screenshot"])
+                    if fstep.get("screenshot"):
+                        targeted.append(fstep["screenshot"])
+                    if not targeted:
+                        targeted = list((ev.get("screenshots") or [])[-3:])
+                    for shot in targeted:
+                        if shot and shot not in existing_atts:
+                            existing_atts.append(shot)
+                    v = ev.get("video")
+                    if v and v not in existing_atts:
+                        existing_atts.append(v)
+                    bug_dict["attachments"] = existing_atts
+                    if fstep:
+                        bug_dict["_automation_failure"] = {
+                            "step_index": fstep.get("index"),
+                            "step_action": fstep.get("action"),
+                            "comment": fstep.get("comment"),
+                            "console_errors": fstep.get(
+                                "console_errors") or [],
+                            "final_url": ev.get("final_url") or "",
+                        }
+                # Rule-driven rewrite using bug_template (mirrors the
+                # synchronous path).
+                try:
+                    from engine.bug_template import (
+                        rewrite_bug_from_automation as _rewrite_bug,
+                    )
+                    linked_item = next(
+                        (it for it in items_data
+                         if it.get("id") == linked), None) if linked else None
+                    tc_fields = {
+                        "tc_summary": (linked_item or {}).get("summary")
+                            or (linked_item or {}).get("objective", ""),
+                        "tc_steps": (linked_item or {}).get("test_steps", ""),
+                        "tc_preconditions": (linked_item or {}).get(
+                            "preconditions", ""),
+                        "tc_expected": (linked_item or {}).get(
+                            "expected_result", ""),
+                        "tc_section": (linked_item or {}).get("section", "")
+                            or bug_dict.get("component", ""),
+                    }
+                    _rewrite_bug(
+                        bug_dict,
+                        automation_failure=bug_dict.pop(
+                            "_automation_failure", None),
+                        base_url=base_url,
+                        **tc_fields,
+                    )
+                except Exception as _rw_exc:
+                    log.warning("results: bug rewrite skipped: %s", _rw_exc)
+                _persist_bug(bug_dict, source="execution",
+                             run_id=db_run_id)
+                all_bugs.append(bug_dict)
+                try:
+                    running_bugs.append(dict_to_bug(bug_dict))
+                except Exception:
+                    running_bugs = list(existing_bugs) + [
+                        dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
+                    ]
+
+            for r in execution["results"]:
+                if r["bug_id"].startswith("__pending_"):
+                    r["bug_id"] = bug_id_map.get(r["item_id"], r["bug_id"])
+                asset = automation_assets.get(r["item_id"])
+                if asset and et in ("web", "mobile_web"):
+                    if asset.get("video"):
+                        r["video"] = asset["video"]
+                    if asset.get("screenshots"):
+                        r["screenshots"] = asset["screenshots"]
+
+            if db_run_id is not None:
+                for r in execution["results"]:
+                    try:
+                        _db.save_case_result(
+                            db_run_id,
+                            case_external_id=r.get("item_id"),
+                            case_kind=("test_case"
+                                       if item_type == "test_cases"
+                                       else "checklist_item"),
+                            status=r.get("status"),
+                            evidence_path=(r.get("video")
+                                            or (r.get("screenshots")
+                                                or [None])[0]),
+                            notes=r.get("comment"),
+                        )
+                    except Exception as exc:
+                        log.warning("save_case_result (results) failed: %s", exc)
+                try:
+                    _db.finish_execution_run(
+                        db_run_id, status="completed",
+                        stats=execution.get("stats") or {},
+                    )
+                except Exception as exc:
+                    log.warning("finish_execution_run (results) failed: %s", exc)
+
+            results_summary = [
+                {"item_id": r.get("item_id"),
+                 "status":  r.get("status"),
+                 "source":  r.get("source", "auto"),
+                 "bug_id":  r.get("bug_id"),
+                 "comment": r.get("comment", ""),
+                 "duration_ms": r.get("duration_ms"),
+                 "video": r.get("video", ""),
+                 "screenshots": (r.get("screenshots") or [])[:6]}
+                for r in (execution.get("results") or [])
+            ]
+            run_record = {
+                "run_id": len(test_runs) + 1,
+                "db_run_id": db_run_id,
+                "source": source,
+                "tester_id": tester_id,
+                "tester_name": tester_name,
+                "environment": environment,
+                "env_type": et,
+                "testing_types": ", ".join(testing_types),
+                "results": results_summary,
+                "stats": execution["stats"],
+                "bug_count": len(execution["bugs"]),
+                "site_url": site_url,
+                "base_url": base_url,
+                "headless": headless,
+                "record_video": record_video,
+                "automation_used": (et in ("web", "mobile_web")),
+                "created_at": datetime.now().isoformat(),
+            }
+            test_runs.append(run_record)
+            run_summaries.append(
+                (environment, execution["stats"], len(execution["bugs"])))
+            bug_total += len(execution["bugs"])
+
+        test_runs = test_runs[-20:]
+        session["bug_reports_data"] = all_bugs
+        session["test_runs"] = test_runs
+        session["automation_report"] = {
+            "passed":  int(report.get("passed", 0)),
+            "failed":  int(report.get("failed", 0)),
+            "blocked": int(report.get("blocked", 0)),
+            "run_id":  report.get("run_id", run_id),
+        }
+
+        parts = [g.t.get("te_results_saved",
+                          "Test execution results saved successfully") + "."]
+        for env_str, stats, bug_n in run_summaries:
+            parts.append(
+                f"[{env_str}] {stats['passed']} P / {stats['failed']} F / "
+                f"{stats['blocked']} B ({stats['pass_rate']}%)"
+                + (f", {bug_n} bug(s)" if bug_n else "")
+                + "."
+            )
+        if base_url:
+            parts.append(
+                f"Playwright session ran against {base_url} "
+                f"({'headless' if headless else 'visible'}, "
+                f"{'video on' if record_video else 'no video'})."
+            )
+        if bug_total:
+            parts.append(
+                f"{bug_total} bug report(s) auto-created — see Bug Reports."
+            )
+        flash(" ".join(parts), "success")
+
+        # Clean up pending files so subsequent visits to this URL
+        # don't double-bug. Best-effort.
+        for suffix in (".done.flag", ".started.flag", ".result.json", ".json", ".log"):
+            p = os.path.join(pending_dir, f"{run_id}{suffix}")
+            try:
+                if os.path.isfile(p):
+                    os.remove(p)
+            except OSError:
+                pass
+
+        return redirect(url_for("test_execution_page"))
 
     @app.route("/create-bug-report", methods=["POST"])
     def create_bug_report():
