@@ -88,26 +88,125 @@
     </div>
 
     <h3 style="margin-top:1.25rem">{{ t.est_source }}</h3>
-    <div class="form-row">
+
+    {# ── Three-tab source selector ─────────────────────────────────
+       2026-05-04 redesign: a single Estimation page now exposes the
+       three discovery paths a real QA Manager uses — written
+       requirements, design mockups, or a live URL. The radio inputs
+       (data-source) double as the form's `source` value, so the
+       backend dispatch in routes/estimation.py stays unchanged.
+       Inactive tabs are display:none — their fields don't submit. #}
+    <div class="te-tabs" role="tablist"
+         style="display:flex;gap:6px;border-bottom:2px solid #e5e7eb;margin-bottom:14px;">
+      <button type="button" class="te-tab is-active" role="tab"
+              data-tab="text" aria-selected="true"
+              style="padding:10px 16px;border:none;border-bottom:3px solid var(--tf-primary,#FF865C);background:transparent;font-weight:600;cursor:pointer;">
+        📝 {{ t.get('est_tab_text', 'Requirements text') }}
+      </button>
+      <button type="button" class="te-tab" role="tab"
+              data-tab="mockups" aria-selected="false"
+              style="padding:10px 16px;border:none;border-bottom:3px solid transparent;background:transparent;font-weight:500;color:#64748b;cursor:pointer;">
+        🎨 {{ t.get('est_tab_mockups', 'Mockups') }}
+      </button>
+      <button type="button" class="te-tab" role="tab"
+              data-tab="url" aria-selected="false"
+              style="padding:10px 16px;border:none;border-bottom:3px solid transparent;background:transparent;font-weight:500;color:#64748b;cursor:pointer;">
+        🌐 {{ t.get('est_tab_url', 'URL crawl') }}
+      </button>
+    </div>
+
+    <input type="hidden" name="source" id="est-source-input"
+           value="{{ last.source if last and last.source else 'text' }}">
+
+    {# ── TAB 1 · Requirements text + .docx/.pdf upload ────────── #}
+    <div class="te-tab-pane" data-pane="text">
+      <p class="hint" style="margin-top:0;">
+        {{ t.get('est_tab_text_hint',
+           'Paste the spec, user stories, or a feature list. The estimator parses bullet points, tables, and free-form prose. You can also attach a .docx / .pdf / .xlsx with the same contents — it will be merged with the textarea below.') }}
+      </p>
       <div class="form-group">
-        <label>
-          <input type="radio" name="source" value="url" checked> {{ t.est_source_url }}
-        </label>
-        <input type="url" name="url" placeholder="https://example.com" value="{{ last.url or '' }}">
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="radio" name="source" value="attachment"> {{ t.est_source_file }}
-        </label>
-        <input type="file" name="attachment" accept=".txt,.md,.csv,.xlsx,.docx,.pdf">
-      </div>
-      <div class="form-group">
-        <label>{{ t.est_source_text }}</label>
-        <textarea name="text_input" rows="4"
+        <label>{{ t.get('est_text_input_label', 'Paste requirements') }}</label>
+        <textarea name="text_input" rows="6" style="width:100%;font-family:inherit;"
                   placeholder="{{ t.est_source_text_ph }}">{{ last.text_input or '' }}</textarea>
       </div>
+      <div class="form-group">
+        <label>{{ t.get('est_text_attachment_label', 'Or attach a document') }}</label>
+        <input type="file" name="attachment"
+               accept=".txt,.md,.csv,.xlsx,.docx,.pdf">
+        <small class="hint">{{ t.get('est_text_attachment_hint',
+          'Supported: .txt, .md, .csv, .xlsx, .docx, .pdf. The file is parsed for text only.') }}</small>
+      </div>
     </div>
+
+    {# ── TAB 2 · Mockups (PNG/JPG/PDF + Figma URL) ─────────────── #}
+    <div class="te-tab-pane" data-pane="mockups" hidden>
+      <p class="hint" style="margin-top:0;">
+        {{ t.get('est_tab_mockups_hint',
+           'Upload design screens (PNG / JPG / PDF) or paste a Figma file URL. The estimator analyses the visual UI to identify forms, navigation, dialogs, error states, and other testable elements — then computes Min/Max effort and a starter test-case set.') }}
+      </p>
+      <div class="form-group">
+        <label>{{ t.get('est_mockups_files_label', 'Upload mockups (one or many)') }}</label>
+        <input type="file" name="mockup_files" multiple
+               accept=".png,.jpg,.jpeg,.webp,.pdf">
+        <small class="hint">{{ t.get('est_mockups_files_hint',
+          'PNG / JPG / WebP / PDF. PDFs are split into one image per page. Up to 20 images per run.') }}</small>
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('est_mockups_figma_label', 'Or a Figma URL') }}</label>
+        <input type="url" name="figma_url"
+               placeholder="https://www.figma.com/file/..."
+               value="{{ last.figma_url or '' }}">
+        <small class="hint">{{ t.get('est_mockups_figma_hint',
+          'Public Figma file or frame URL. The cover image is fetched and analysed; for richer extraction add the file ID to FIGMA_PAT in env.') }}</small>
+      </div>
+      <div class="form-group">
+        <label>{{ t.get('est_mockups_context_label', 'Optional context') }}</label>
+        <textarea name="mockup_context" rows="3" style="width:100%;font-family:inherit;"
+                  placeholder="{{ t.get('est_mockups_context_ph', 'e.g. \"This is the checkout flow for an e-commerce app — focus on payment validation.\"') }}">{{ last.mockup_context or '' }}</textarea>
+      </div>
+    </div>
+
+    {# ── TAB 3 · URL crawl ─────────────────────────────────────── #}
+    <div class="te-tab-pane" data-pane="url" hidden>
+      <p class="hint" style="margin-top:0;">
+        {{ t.get('est_tab_url_hint',
+           'Paste the production / staging URL. The estimator crawls the site, identifies pages and forms, infers the architecture (CMS, SPA, e-commerce, …), and produces an effort breakdown.') }}
+      </p>
+      <div class="form-group">
+        <label>{{ t.est_source_url }}</label>
+        <input type="url" name="url" style="width:100%;"
+               placeholder="https://example.com" value="{{ last.url or '' }}">
+      </div>
+    </div>
+
   </div>
+  <script>
+  (function () {
+    var tabs  = document.querySelectorAll('.te-tab');
+    var panes = document.querySelectorAll('.te-tab-pane');
+    var input = document.getElementById('est-source-input');
+    function activate(name) {
+      tabs.forEach(function (t) {
+        var on = t.dataset.tab === name;
+        t.classList.toggle('is-active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.style.borderBottomColor = on ? 'var(--tf-primary,#FF865C)' : 'transparent';
+        t.style.color = on ? '' : '#64748b';
+        t.style.fontWeight = on ? '600' : '500';
+      });
+      panes.forEach(function (p) {
+        p.hidden = (p.dataset.pane !== name);
+      });
+      if (input) input.value = name;
+    }
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { activate(t.dataset.tab); });
+    });
+    // Restore the last-used tab from the form snapshot.
+    var initial = input && input.value ? input.value : 'text';
+    activate(['text','mockups','url'].indexOf(initial) >= 0 ? initial : 'text');
+  })();
+  </script>
 
   <div class="form-actions">
     <button type="submit" class="btn btn-primary btn-lg">{{ t.est_run }} &rarr;</button>
@@ -150,8 +249,21 @@
   </div>
   <p style="margin-top:.75rem"><em>{{ t.est_source_label }}:</em>
     {{ result.source }}{% if result.source_ref %} — {{ result.source_ref }}{% endif %}</p>
-  <p><a class="btn btn-secondary" href="{{ url_for('estimation_export') }}">
-      <i data-lucide="save" class="icon-sm"></i> {{ t.est_export }}</a></p>
+  <p style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn btn-secondary" href="{{ url_for('estimation_export') }}">
+      <i data-lucide="save" class="icon-sm"></i> {{ t.est_export }}
+    </a>
+    {# CTA — convert this estimate into actual test cases. The
+       backend stashed `estimation_extracted_text` (mockup path) or
+       feature names (text/url paths); the route below pre-fills the
+       /test-cases textarea via session["prefill_input_text"] and
+       redirects so the operator hits the existing TC generator. #}
+    <a class="btn btn-primary"
+       href="{{ url_for('estimation_to_test_cases') }}">
+      <i data-lucide="list-checks" class="icon-sm"></i>
+      {{ t.get('est_to_tc', 'Generate test cases from this estimate →') }}
+    </a>
+  </p>
 </div>
 
 {# ── History calibration hint (always visible — actionable). #}

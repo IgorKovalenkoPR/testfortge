@@ -337,9 +337,14 @@ def register(app: Flask) -> None:
                                    has_data=True, errors=[],
                                    resource_urls=extract_resource_urls())
 
+        # Drain a one-shot prefill key set by upstream pages (e.g.
+        # /estimation's "Generate test cases from this estimate" CTA).
+        # Pop on read so a refresh doesn't re-prefill stale content.
+        prefill = session.pop("prefill_input_text", "") or ""
         return render_template("test_cases.html",
                                test_cases=[], traceability=[],
-                               has_data=False, errors=[], resource_urls=[])
+                               has_data=False, errors=[], resource_urls=[],
+                               prefill_input_text=prefill)
 
     @app.route("/checklist", methods=["GET", "POST"])
     def checklist_page():

@@ -6,8 +6,13 @@
 
     <div class="form-group">
         <label>{{ t.text_input }}</label>
+        {# `prefill_input_text` is set by upstream routes that hand the
+           user content from another module (e.g. /estimation's
+           "Generate test cases from this estimate" CTA prefills the
+           extracted feature list here). The route is responsible for
+           clearing the session key after the GET. #}
         <textarea name="input_text" rows="8"
-                  placeholder="{{ t.input_placeholder }}">{{ request.form.get('input_text', '') }}</textarea>
+                  placeholder="{{ t.input_placeholder }}">{{ request.form.get('input_text', '') or (prefill_input_text if prefill_input_text is defined else '') }}</textarea>
     </div>
 
     <div class="form-group">

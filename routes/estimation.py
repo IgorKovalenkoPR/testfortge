@@ -34,6 +34,72 @@ from engine.job_queue import get_queue, DONE, FAILED
 from engine import db as _db
 
 from .automation import STORAGE_ROOT, MAX_CONCURRENT_JOBS_PER_SESSION
+
+def _historical_calibration(result, owner_sid: str) -> None:
+    """Decorate ``result`` with a soft hint comparing it to the user's
+    past estimations of similar size. Never modifies the numbers — only
+    populates ``history_hint`` / ``history_median_hours_per_feature`` /
+    ``history_sample_size`` so the UI can show a sentence like
+    "Past 5 projects averaged 3.2 h/feature; this one is 5.8 h/feature".
+
+    Skips silently when fewer than 3 comparable past estimations exist
+    (a single data point is noise, not signal).
+    """
+    if not owner_sid:
+        return
+    feat_n = sum(1 for f in (result.features or []) if not f.is_section)
+    if feat_n <= 0:
+        return
+    try:
+        peers = _db.list_estimations_by_owner(
+            owner_sid=owner_sid, similar_features=feat_n, tolerance=0.4,
+            limit=12,
+        )
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("history calibration query failed: %s", exc)
+        return
+
+    if len(peers) < 3:
+        return
+
+    ratios = []
+    for est in peers:
+        ihrs = est.get("total_hours") or 0.0
+        ifeat = (est.get("input_payload") or {}).get("features_count") or 0
+        if ifeat and ihrs:
+            ratios.append(ihrs / ifeat)
+    if len(ratios) < 3:
+        return
+
+    ratios.sort()
+    median = ratios[len(ratios) // 2]
+    current = result.full_total_expected / max(1, feat_n)
+    deviation = (current - median) / median if median else 0.0
+
+    result.history_median_hours_per_feature = round(median, 2)
+    result.history_sample_size = len(ratios)
+    if abs(deviation) < 0.30:
+        result.history_hint = (
+            f"In line with {len(ratios)} similar past projects "
+            f"(~{median:.1f} h/feature)."
+        )
+    elif deviation > 0:
+        result.history_hint = (
+            f"Higher than {len(ratios)} similar past projects: "
+            f"history median ~{median:.1f} h/feature, this estimate "
+            f"~{current:.1f} h/feature ({deviation*100:+.0f}%). "
+            "Consider whether this project genuinely has more risk / "
+            "scope, or revisit the per-TC minutes / buffer."
+        )
+    else:
+        result.history_hint = (
+            f"Lower than {len(ratios)} similar past projects: "
+            f"history median ~{median:.1f} h/feature, this estimate "
+            f"~{current:.1f} h/feature ({deviation*100:+.0f}%). "
+            "Make sure no testing phase was missed (compatibility, "
+            "regression, bug rechecks)."
+        )
+
 from ._shared import get_session_id, ensure_active_project
 
 
@@ -155,6 +221,8 @@ def register(app: Flask) -> None:
         source_choice = request.form.get("source", "url")
         url = request.form.get("url", "").strip()
         text_input = request.form.get("text_input", "").strip()
+        figma_url = request.form.get("figma_url", "").strip()
+        mockup_context = request.form.get("mockup_context", "").strip()
 
         session["estimation_form"] = {
             "project_name": project_name, "rate_usd": rate_usd,
@@ -165,24 +233,23 @@ def register(app: Flask) -> None:
             "pm_overhead": pm_percent,
             "max_testing_stretch": max_testing_stretch,
             "primary_platform": primary_platform, "url": url, "text_input": text_input,
+            "figma_url": figma_url, "mockup_context": mockup_context,
+            "source": source_choice,
         }
 
         features: list = []
         source = "manual"
         source_ref = ""
 
-        # 1. URL source
-        if source_choice == "url" and url:
-            try:
-                analysis = crawl_site(url)
-                features = features_from_site_analysis(analysis)
-                source, source_ref = "url", url
-            except Exception as exc:
-                log.warning("estimation site crawl failed: %s", exc)
-                flash(f"Crawl failed: {exc}", "warning")
-
-        # 2. Attachment source
-        if not features and source_choice == "attachment":
+        # ── Tab 1 — Requirements text ───────────────────────────
+        # Combines pasted text + parsed-text-from-attachment so the
+        # tester can mix sources within one tab. Both `attachment`
+        # (legacy radio value) and `text` (new tab name) hit this
+        # branch — backwards-compat with bookmarks.
+        if source_choice in ("text", "attachment"):
+            collected_lines: list[str] = []
+            if text_input:
+                collected_lines.append(text_input)
             up = request.files.get("attachment")
             if up and up.filename and allowed_file(up.filename):
                 safe_name = secure_filename(up.filename) or "upload.bin"
@@ -191,18 +258,86 @@ def register(app: Flask) -> None:
                 lines, err = parse_file(save_path, safe_name)
                 if err:
                     flash(f"Attachment parse warning: {err}", "warning")
-                features = features_from_text("\n".join(lines or []))
-                source, source_ref = "attachment", safe_name
+                if lines:
+                    collected_lines.extend(lines)
+                source_ref = safe_name
+            if collected_lines:
+                features = features_from_text("\n".join(collected_lines))
+                source = "text" if not source_ref else "attachment"
+                if not source_ref:
+                    source_ref = "pasted input"
 
-        # 3. Manual text
-        if not features and text_input:
-            features = features_from_text(text_input)
-            source, source_ref = "text", "pasted input"
+        # ── Tab 2 — Mockups (vision pipeline) ────────────────────
+        # Image / PDF uploads + optional Figma URL go through
+        # engine.mockup_vision which calls Claude vision and emits
+        # a feature-list bullet text consumed by features_from_text.
+        elif source_choice == "mockups":
+            try:
+                from engine.mockup_vision import analyse as _vision_analyse
+                saved_paths: list[str] = []
+                upload_dir = current_app.config["UPLOAD_FOLDER"]
+                for up in request.files.getlist("mockup_files"):
+                    if not up or not up.filename:
+                        continue
+                    if not allowed_file(up.filename):
+                        flash(f"Skipped unsupported file: {up.filename}",
+                              "warning")
+                        continue
+                    safe = secure_filename(up.filename) or "mockup.bin"
+                    p = os.path.join(upload_dir, safe)
+                    up.save(p)
+                    saved_paths.append(p)
+                vres = _vision_analyse(
+                    file_paths=saved_paths,
+                    figma_url=figma_url,
+                    context=mockup_context,
+                )
+                for w in (vres.warnings or []):
+                    flash(w, "warning")
+                if vres.error:
+                    flash(vres.error, "danger")
+                if vres.text:
+                    features = features_from_text(vres.text)
+                    source = "mockups"
+                    label_bits = []
+                    if saved_paths:
+                        label_bits.append(f"{len(saved_paths)} file(s)")
+                    if figma_url:
+                        label_bits.append("Figma URL")
+                    source_ref = (vres.source_label
+                                   or " + ".join(label_bits)
+                                   or "uploaded mockups")
+                    # Stash the raw bullet text so the operator can
+                    # review what the vision model extracted before
+                    # generating test cases.
+                    session["estimation_extracted_text"] = vres.text
+            except Exception as exc:
+                log.exception("mockup vision pipeline failed: %s", exc)
+                flash(f"Mockup analysis failed: {type(exc).__name__}", "danger")
+
+        # ── Tab 3 — URL crawl ────────────────────────────────────
+        elif source_choice == "url" and url:
+            try:
+                analysis = crawl_site(url)
+                features = features_from_site_analysis(analysis)
+                source, source_ref = "url", url
+            except Exception as exc:
+                log.warning("estimation site crawl failed: %s", exc)
+                flash(f"Crawl failed: {exc}", "warning")
 
         if not features:
-            flash("No features could be extracted — provide a URL, attachment or feature list.",
-                  "danger")
+            flash(
+                "No features could be extracted from the selected "
+                "source. Switch tabs or provide more content.",
+                "danger",
+            )
             return redirect(url_for("estimation_page"))
+
+        # Optional team_size — drives Brooks's-Law overhead. Default 1.
+        try:
+            team_size = max(1, int(request.form.get("team_size", "1") or 1))
+        except (TypeError, ValueError):
+            team_size = 1
 
         result = compute_estimation(
             features=features,
@@ -219,7 +354,15 @@ def register(app: Flask) -> None:
             bug_report_rate=bug_report_rate,
             pm_overhead=pm_overhead,
             max_testing_stretch=max_testing_stretch,
+            team_size=team_size,
         )
+
+        # Historical calibration — soft hint based on past estimations
+        # for the current owner_sid. Never mutates the numbers.
+        try:
+            _historical_calibration(result, get_session_id())
+        except Exception as exc:  # pragma: no cover
+            log.warning("history calibration skipped: %s", exc)
 
         result_dict = asdict(result)
         session["estimation_result"] = result_dict
@@ -232,6 +375,8 @@ def register(app: Flask) -> None:
                 "compatibility_rate": compatibility_rate,
                 "bug_report_rate": bug_report_rate,
                 "pm_overhead": pm_overhead,
+                "team_size": team_size,
+                "features_count": sum(1 for f in features if not f.is_section),
                 "max_testing_stretch": max_testing_stretch,
             },
             result_dict=result_dict,
@@ -383,6 +528,49 @@ def register(app: Flask) -> None:
                 result_dict=job.result,
             )
         return jsonify(payload)
+
+    @app.route("/estimation/to-test-cases", methods=["GET"])
+    def estimation_to_test_cases():
+        """Bridge: hand the current estimation's feature list to the
+        /test-cases generator as pre-filled input.
+
+        Source priority (matches the 3-tab UI):
+          1. ``estimation_extracted_text`` — raw vision-extracted
+             bullets from the Mockups tab. Highest fidelity.
+          2. Feature names from the stored estimation result — works
+             for the URL crawl + Requirements text tabs.
+          3. The pasted text from the form snapshot — last-resort
+             fallback so the operator never lands on an empty page.
+
+        Stashed under ``session["prefill_input_text"]`` which the
+        ``_input_block.html`` partial reads exactly once and then
+        clears (see /test-cases GET).
+        """
+        prefill = (session.get("estimation_extracted_text") or "").strip()
+        if not prefill:
+            data = session.get("estimation_result") or {}
+            features = data.get("features") or []
+            if features:
+                prefill = "\n".join(
+                    f"* {f.get('name', '').strip()}"
+                    for f in features
+                    if f.get("name")
+                )
+        if not prefill:
+            form = session.get("estimation_form") or {}
+            prefill = (form.get("text_input") or "").strip()
+        if not prefill:
+            flash(
+                "No estimation source to convert. Run an estimation "
+                "first, then click again.",
+                "warning",
+            )
+            return redirect(url_for("estimation_page"))
+        session["prefill_input_text"] = prefill
+        # Drop the raw vision text so we don't keep re-prefilling
+        # from a stale run after the user navigates around.
+        session.pop("estimation_extracted_text", None)
+        return redirect(url_for("test_cases_page"))
 
     @app.route("/estimation/export", methods=["GET"])
     def estimation_export():
