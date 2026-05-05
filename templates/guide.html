@@ -11,7 +11,7 @@
     </p>
 </div>
 
-{# ── 8-card grid (7 modules + Pro tips) ───────────────────────
+{# ── 9-card grid (7 modules + Projects + Pro tips) ────────────
    Inline styles only so the guide doesn't depend on style.css
    classes that may move. Each card is a button that opens a modal
    populated from the matching <template> below. Esc / overlay click
@@ -26,7 +26,7 @@
                    transition:transform .15s ease, box-shadow .15s ease;">
         <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📊</div>
         <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Dashboard</strong>
-        <small style="color:#64748b;">Project picker + live metrics</small>
+        <small style="color:#64748b;">Saved projects + live metrics</small>
     </button>
 
     <button type="button" class="guide-card" data-section="estimation"
@@ -83,6 +83,15 @@
         <small style="color:#64748b;">QA assistant · ISTQB-trained</small>
     </button>
 
+    <button type="button" class="guide-card" data-section="projects"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">🗂</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Projects</strong>
+        <small style="color:#64748b;">Switch / create from any module</small>
+    </button>
+
     <button type="button" class="guide-card" data-section="tips"
             style="text-align:left;padding:18px;border:1px solid #e2e8f0;
                    background:white;border-radius:8px;cursor:pointer;
@@ -130,8 +139,9 @@
     <ol>
       <li><strong>Pick or create a project.</strong> Every other
           module attaches its work to the active project. The
-          sidebar shows the current project name; click "Projects"
-          to switch.</li>
+          sidebar shows the current project name; the 🗂 picker
+          card on every module lets you switch without leaving the
+          page (see the dedicated Projects card for details).</li>
       <li><strong>Skim the metrics.</strong> Pass-rate, bug
           severity distribution and environments covered tell you
           at a glance whether the last release was clean.</li>
@@ -141,9 +151,9 @@
     </ol>
     <h3>Common mistakes</h3>
     <ul>
-      <li>Not setting an active project before generating —
-          artefacts go into a stand-in "Untitled" bucket and are
-          harder to find later.</li>
+      <li>Not setting a meaningful project name up front —
+          auto-created "Untitled project YYYY-MM-DD HH:MM" rows
+          accumulate. Use the 🗂 picker's <em>Create</em> form.</li>
     </ul>
   </template>
 
@@ -379,12 +389,79 @@
        answers; vague phrasing yields generic answers.</p>
   </template>
 
+  <template data-content="projects">
+    <h3>What it is</h3>
+    <p>The project picker — the 🗂 card at the top of every module
+       (Dashboard, Estimation, Test Cases, Checklist, Test
+       Execution, Bug Reports). Lets you switch between projects
+       without leaving the page you are on, and create a new project
+       from anywhere with one click. Replaces the old "must navigate
+       to Dashboard first" flow.</p>
+    <h3>How it works</h3>
+    <ul>
+      <li><strong>Active project</strong> shows in the sidebar's
+          bottom-left corner ("Project: …"). The picker dropdown
+          highlights it.</li>
+      <li><strong>Switch</strong> — pick another project from the
+          dropdown and click the <em>Switch</em> button. The page
+          re-renders with that project's test cases, checklist
+          items, and bug reports loaded from the database. Your
+          previous project's data is wiped from the session (it
+          remains in the DB, just not in this tab's view).</li>
+      <li><strong>Create</strong> — type a name in the right-hand
+          input and click <em>Create</em>. The new project is
+          saved to the database, becomes active, and the page
+          re-renders with empty session — clean slate to start
+          fresh work.</li>
+      <li>The dropdown labels show counts at a glance:
+          <code>Acme Checkout (12 TC · 5 CL · 3 bugs)</code>.</li>
+    </ul>
+    <h3>What attaches to the active project</h3>
+    <p>Every save path automatically tags the active project_id.
+       In particular:</p>
+    <ul>
+      <li>Generated <strong>test cases</strong> + traceability →
+          via <code>_persist_test_cases()</code></li>
+      <li>Generated <strong>checklist</strong> items → via
+          <code>_persist_checklist()</code></li>
+      <li><strong>Estimations</strong> (every Run) → via
+          <code>_persist_estimation()</code></li>
+      <li>Auto-generated and manual <strong>bug reports</strong>
+          → via <code>_persist_bug()</code></li>
+      <li><strong>Test Execution runs</strong> + per-case
+          results + evidence paths → via
+          <code>start_execution_run()</code> / <code>save_case_result()</code></li>
+    </ul>
+    <h3>Recovery</h3>
+    <p>If a Render dyno restart wipes your session,
+       <code>ensure_active_project()</code> looks up your most
+       recent project for this session ID and re-pins it
+       automatically. You should see your work return on the next
+       page load — no manual recovery needed.</p>
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Generating test cases without a meaningful project name
+          — auto-created "Untitled project YYYY-MM-DD HH:MM" rows
+          accumulate over time. Rename them or create a named
+          project up front.</li>
+      <li>Switching projects in the middle of a long Test
+          Execution run — the run is already attached to the
+          project that was active when you clicked "Run", so the
+          switch only affects subsequent work.</li>
+      <li>Trying to delete a project to "clear" it — that drops
+          ALL its test cases, runs and bugs from the database.
+          Use the picker to switch instead.</li>
+    </ul>
+  </template>
+
   <template data-content="tips">
     <h3>Things that save hours</h3>
     <ul>
       <li><strong>Use the project picker.</strong> Pinning an
           active project means every TC, run, and bug
-          auto-attaches. Survives Render dyno restarts.</li>
+          auto-attaches. The 🗂 picker on every module lets you
+          switch from anywhere — see the dedicated Projects card
+          for the full mechanics.</li>
       <li><strong>Start at Estimation, not Test Cases.</strong>
           Even when you have a clear scope, running the
           estimator first surfaces edge cases you'd otherwise
