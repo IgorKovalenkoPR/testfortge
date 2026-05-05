@@ -511,7 +511,7 @@ button{font:inherit;cursor:pointer}
 <section class="section" id="capabilities">
   <div class="container">
     <h2>What TestForTge does for your <span class="accent">QA team</span></h2>
-    <p class="sub">Seven capabilities. One Flask app. Multi-project workspace backed by Postgres. No vendor lock-in — every artefact exports to the tools your team already uses.</p>
+    <p class="sub">Seven capabilities. One Flask app. Estimation from text, mockups, or a live URL. Crash-safe Playwright execution with a live filmstrip. ISTQB-aligned bug reports. Multi-project workspace backed by Postgres. No vendor lock-in — every artefact exports to the tools your team already uses.</p>
     <div class="cards">
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
@@ -525,42 +525,42 @@ button{font:inherit;cursor:pointer}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
         </div>
         <h3>Test cases &amp; checklists</h3>
-        <p>Positive, negative and edge-case test cases reviewed by a built-in QA Lead pass. Compact checklists in the TestFort format. Exports to MD / HTML / CSV / XLSX.</p>
+        <p>Positive, negative and edge-case test cases reviewed by a built-in QA Lead pass — auto-prefilled from your estimation's feature list with one click. Compact checklists in the TestFort format. Per-stage progress modal with deterministic stages so the user knows what is happening at every moment. Exports to MD / HTML / CSV / XLSX, plus Jira-XML straight to engineering.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
         </div>
-        <h3>QA estimation</h3>
-        <p>PERT-based hours from the same input — minutes-per-TC × features × platforms, with compatibility, bug rate and PM overhead applied. Full XLSX breakdown ready for clients.</p>
+        <h3>QA estimation — text · mockups · URL</h3>
+        <p>Three input tabs in one page: paste a spec, drop PNG/JPG/PDF mockups (Claude vision identifies every testable element on every screen), or feed a live URL — the crawler walks up to 50 pages and infers the architecture (WordPress / SPA / e-commerce / dashboard) for an architecture-aware test budget. PERT-based hours per phase — Test design · Execution · Regression · Bug reporting + buffer — with compatibility, bug rate and PM overhead applied. One click converts the extracted feature list into a real Test-Cases pack. Full XLSX breakdown ready for clients.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
         </div>
-        <h3>Test execution</h3>
-        <p>One module for both flows: step-by-step manual runs and one-click Playwright automation. Target Web, Mobile Web, iOS or Android in the same run, headless or visible, with optional video capture and per-case screenshot evidence.</p>
+        <h3>Test execution — live filmstrip + crash-safe runs</h3>
+        <p>One module for both flows: step-by-step manual runs and one-click Playwright automation. Target Web, Mobile Web, iOS or Android in the same run, headless or visible, with optional video capture and per-case screenshot evidence. The Playwright pass runs as a fully detached subprocess — it survives the web server restarting, gets a live filmstrip you can watch frame-by-frame, and salvages partial results if the worker is OOM-killed mid-run. Failed test cases lead the gallery with the annotated failure shot (red box + arrow on the broken element); passed cases stay clean.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6l4-4z"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>
         </div>
-        <h3>Bug reports &amp; metrics</h3>
-        <p>Structured bug forms (severity, priority, repro steps, attachments) — kept in the project DB and auto-linked to the failing test case and the run that produced them. Live status, coverage and severity dashboards. One-click Markdown / CSV export of the whole bug base.</p>
+        <h3>Bug reports &amp; metrics — ISTQB-aligned</h3>
+        <p>Auto-generated bugs follow the test.io / softwaretestinghelp / qatestlab standards: title is "[Component]: [Observable defect]" — banned filler phrases like "does not work as expected" are stripped automatically. Severity / Priority are derived from the actual Playwright defect class (click-timeout, text-assertion-fail, navigation-error, server-error, …) and bumped to Critical/Highest when the affected area is a core path (login, checkout, search). Steps to Reproduce numbered atomically, Actual Result includes the verbatim Playwright error, Expected Result uses "should" phrasing. Attachments narrowed to the prior step's frame for context + the failed step's annotated screenshot. Live status, coverage and severity dashboards. Jira-XML / Markdown / CSV export of the whole bug base.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 11a3 3 0 0 1 6 0v1H9v-1z"/><circle cx="12" cy="16" r="1"/></svg>
         </div>
         <h3>Tedgie — ISTQB-grounded QA assistant</h3>
-        <p>Built-in AI chat trained on the ISTQB Foundation Level Syllabus and certification-prep material. Answers theory questions with verbatim syllabus wording, walks juniors through test design techniques, and turns free-form bug descriptions from end-users into structured drafts that land directly in your Bug Reports queue for triage.</p>
+        <p>Built-in AI chat trained on the ISTQB Foundation Level (CTFL v4.0.1) syllabus, the Advanced-Level test-analyst material and certification-prep textbooks. Answers theory questions with verbatim syllabus wording, walks juniors through test design techniques, helps triage runs ("why is my live view empty?", "summarise the last 10 bugs by component"), and turns free-form bug descriptions from end-users into structured drafts that land directly in your Bug Reports queue for triage.</p>
       </article>
       <article class="card reveal">
         <div class="icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
         </div>
         <h3>Multi-project workspace</h3>
-        <p>Every artefact — test cases, checklists, estimations, runs, bugs, dashboard snapshots — is stored per project in Postgres. Switch context with a click, browse history of estimations, watch coverage trends across releases, and ship a deployable QA pack for each project independently.</p>
+        <p>Every artefact — test cases, checklists, estimations, runs, bugs, dashboard snapshots — is stored per project in Postgres. The 🗂 project picker is on every module (Dashboard, Estimation, Test Cases, Checklist, Test Execution, Bug Reports), so switching context never costs a redirect. Auto-recovery via session ID means a server restart restores your active project + work in flight on the next page load. Browse history of estimations, watch coverage trends across releases, and ship a deployable QA pack for each project independently.</p>
       </article>
     </div>
   </div>
@@ -799,7 +799,14 @@ button{font:inherit;cursor:pointer}
       <details class="faq-item reveal">
         <summary>Is Tedgie's QA knowledge actually trustworthy?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
-          Tedgie is grounded in the <strong>ISTQB Foundation Level (CTFL v4.0.1) syllabus</strong> and a certification-prep textbook — testing principles, the test process, levels &amp; types, all design techniques (equivalence partitioning, BVA, decision tables, state transition, exploratory, error-guessing), reviews and risk-based testing.
+          Tedgie is grounded in the <strong>ISTQB Foundation Level (CTFL v4.0.1) syllabus</strong>, the <strong>Advanced-Level Test Analyst</strong> material and a certification-prep textbook — testing principles, the test process, levels &amp; types, all design techniques (equivalence partitioning, BVA, decision tables, state transition, exploratory, error-guessing), reviews and risk-based testing. Tedgie also reads your saved test cases, checklist and bug reports, so you can ask "summarise the last 10 bugs by component" or "suggest 5 negative cases I'm missing for the login flow" and get answers grounded in your actual project.
+        </div>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary>Mockups instead of a written spec — does that actually work?<span class="faq-mark" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          Yes. Drop PNG / JPG / WebP / PDF design screens (up to 20 frames per run, PDFs split into one image per page) or paste a public Figma file URL. Claude vision lists every testable element it sees — forms, dialogs, navigation, error states, empty states, loading states — with the same register an ISTQB test-case summary uses. The output feeds into the same estimator that text and URL inputs use, so you can compare effort across all three sources for the same scope.
         </div>
       </details>
 
@@ -820,7 +827,7 @@ button{font:inherit;cursor:pointer}
       <details class="faq-item reveal">
         <summary>How does the built-in automation work?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
-          One click. The framework synthesises Playwright scripts directly from your test cases, runs them headless in Chromium, and captures video, screenshots and a per-step HAR trace. Async job queue with a per-session concurrency cap means you can launch a new run while a previous one is still finishing.
+          One click. The framework synthesises Playwright scripts directly from your test cases, runs them headless in Chromium / Firefox / WebKit, and captures video, per-step screenshots and console errors. The Playwright pass is a fully detached subprocess — it survives the web server restarting (no more "stalled at case 17 of 62"), and writes a live filmstrip you can watch frame-by-frame in a separate tab. If the worker crashes mid-run, the results endpoint salvages whatever cases finished. Async job queue with a per-session concurrency cap means you can launch a new run while a previous one is still finishing.
         </div>
       </details>
 
@@ -834,7 +841,7 @@ button{font:inherit;cursor:pointer}
       <details class="faq-item reveal">
         <summary>Can I run multiple projects in parallel?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
-          Yes. Every run is scoped to an active project — create as many as you need from the dashboard, each with its own base URL and description. Test cases, checklists, estimations, runs, bugs and dashboard snapshots are stored separately per project, so the team can switch context without polluting another release's history.
+          Yes. Every run is scoped to an active project — create as many as you need, each with its own base URL and description. The 🗂 project picker is on every module (not just the dashboard), so you can switch context from anywhere without losing the page you are on. Test cases, checklists, estimations, runs, bugs and dashboard snapshots are stored separately per project, so the team can switch without polluting another release's history. Auto-recovery via session ID restores the active project + work in flight if the server restarts.
         </div>
       </details>
 
