@@ -207,10 +207,53 @@ def register(app: Flask) -> None:
         tickets — single URL the operator can share."""
         return jsonify(_mockup_env_state())
 
+    def _drain_est_job_into_session() -> None:
+        """If a previous async dispatch left an ``estimation_job_id`` in
+        the session and that job is now DONE, copy its result into the
+        session keys the GET render reads. No-op when the id is missing
+        or the job is still pending. Mirrors :func:`_drain_tc_job_into_session`
+        in routes/generation.py — the same safety net so a user who
+        navigates away mid-run still sees their result on return."""
+        job_id = session.get("estimation_job_id")
+        if not job_id:
+            return
+        try:
+            job = get_queue().get(job_id)
+        except Exception:
+            return
+        if not job or job.kind != "estimation":
+            return
+        if job.status == DONE and job.result:
+            try:
+                result = dict(job.result)
+                extracted = result.pop("_extracted_text", "")
+                session["estimation_result"] = result
+                if extracted:
+                    session["estimation_extracted_text"] = extracted
+                _persist_estimation(
+                    input_payload=getattr(job, "meta", {}) or {},
+                    result_dict=result,
+                )
+            except Exception as exc:
+                log.warning("drain estimation job: %s", exc)
+            session.pop("estimation_job_id", None)
+        elif job.status == FAILED:
+            flash(
+                "Estimation failed: " + (job.error or "unknown error"),
+                "danger",
+            )
+            session.pop("estimation_job_id", None)
+
     @app.route("/estimation", methods=["GET"])
     def estimation_page():
         lang = session.get("lang", "en")
         t = get_lang(lang)
+        # Drain any background-finished job before rendering — same
+        # safety net the TC / CL pages use.
+        try:
+            _drain_est_job_into_session()
+        except Exception as exc:
+            log.debug("estimation drain skipped: %s", exc)
         return render_template(
             "estimation.html",
             t=t, lang=lang,
@@ -510,19 +553,27 @@ def register(app: Flask) -> None:
 
     @app.route("/estimation/run-async", methods=["POST"])
     def estimation_run_async():
-        """Submit site-crawl + feature extraction to the background worker.
-
-        Crawling large sites can stretch into many seconds; return a
-        ``job_id`` immediately so the UI can display a progress banner
+        """Submit estimation work to the background JobQueue and return
+        a ``job_id`` immediately so the UI can show a progress modal
         and poll ``/estimation/status/<id>`` until done.
 
-        The file-upload and text-paste code paths complete in milliseconds
-        and don't need to go async — this endpoint is URL-only.
+        Handles ALL three source types — Text (instant), Mockups
+        (vision API takes 5-30 s on Claude), and URL (site crawl can
+        stretch to many seconds). Operator-reported on 2026-05-04 that
+        the legacy sync /estimation/run path's result template never
+        rendered after the recent refactor; standardising on the
+        async pattern fixes that AND brings the same progress modal
+        the Test Cases / Checklist generators use.
+
+        File uploads are saved to UPLOAD_FOLDER inside this request
+        BEFORE the job is submitted — the worker thread has no access
+        to ``request.files``.
         """
+        source_choice = request.form.get("source", "text").strip()
         url = request.form.get("url", "").strip()
-        if not url:
-            return jsonify({"error": "no_url",
-                            "message": "Provide a URL to crawl."}), 400
+        text_input = request.form.get("text_input", "").strip()
+        figma_url = request.form.get("figma_url", "").strip()
+        mockup_context = request.form.get("mockup_context", "").strip()
 
         # Per-session concurrency cap (shared threshold with automation).
         sid = get_session_id(session)
@@ -542,6 +593,50 @@ def register(app: Flask) -> None:
             # a 15s hint is more than enough in practice.
             resp.headers["Retry-After"] = "15"
             return resp
+
+        # Pre-save uploaded files BEFORE dispatching to the worker,
+        # because the worker thread has no request context. Each path
+        # records the absolute file paths into ``saved_paths`` so the
+        # worker can re-open them via plain pathlib.
+        saved_attachment_path = ""
+        saved_mockup_paths: list[str] = []
+        upload_dir = current_app.config["UPLOAD_FOLDER"]
+        if source_choice in ("text", "attachment"):
+            up = request.files.get("attachment")
+            if up and up.filename and allowed_file(up.filename):
+                safe_name = secure_filename(up.filename) or "upload.bin"
+                saved_attachment_path = os.path.join(upload_dir, safe_name)
+                up.save(saved_attachment_path)
+        elif source_choice == "mockups":
+            for up in request.files.getlist("mockup_files"):
+                if not up or not up.filename:
+                    continue
+                if not allowed_file(up.filename):
+                    continue
+                safe = secure_filename(up.filename) or "mockup.bin"
+                p = os.path.join(upload_dir, safe)
+                up.save(p)
+                saved_mockup_paths.append(p)
+
+        # Validation per source type. URL needs the URL; mockups
+        # needs at least one image OR a Figma URL; text needs at
+        # least pasted text or an attachment.
+        if source_choice == "url" and not url:
+            return jsonify({
+                "error": "no_url",
+                "message": "URL tab is selected but no URL was provided.",
+            }), 400
+        if source_choice == "mockups" and not (saved_mockup_paths or figma_url):
+            return jsonify({
+                "error": "no_mockups",
+                "message": "Upload at least one mockup or paste a Figma URL.",
+            }), 400
+        if (source_choice in ("text", "attachment")
+                and not text_input and not saved_attachment_path):
+            return jsonify({
+                "error": "no_text",
+                "message": "Paste requirements text or attach a document.",
+            }), 400
 
         # Same clamping as /estimation/run — keep numeric inputs sane.
         def _clamp_int(name: str, default: int, lo: int, hi: int) -> int:
@@ -583,18 +678,109 @@ def register(app: Flask) -> None:
             "bug_report_rate": bug_percent,
             "pm_overhead": pm_percent,
             "max_testing_stretch": max_testing_stretch,
-            "primary_platform": primary_platform, "url": url, "text_input": "",
+            "primary_platform": primary_platform,
+            "url": url, "text_input": text_input,
+            "figma_url": figma_url, "mockup_context": mockup_context,
+            "source": source_choice,
         }
 
         compat_rate = compat_percent / 100.0
         bug_rate = bug_percent / 100.0
         pm_ov = pm_percent / 100.0
 
+        # Capture every primitive the worker needs into closure-local
+        # variables — request.form / request.files don't exist in the
+        # background thread.
+        _src         = source_choice
+        _url         = url
+        _text_input  = text_input
+        _figma_url   = figma_url
+        _mockup_ctx  = mockup_context
+        _att_path    = saved_attachment_path
+        _mockup_paths = list(saved_mockup_paths)
+
         def _worker():
-            analysis = crawl_site(url)
-            features = features_from_site_analysis(analysis)
+            """Dispatch by source type, return asdict(EstimationResult)."""
+            features: list = []
+            source = "manual"
+            source_ref = ""
+            extracted_text = ""
+
+            if _src in ("text", "attachment"):
+                lines: list[str] = []
+                if _text_input:
+                    lines.append(_text_input)
+                if _att_path:
+                    try:
+                        from os.path import basename
+                        parsed_lines, err = parse_file(_att_path,
+                                                        basename(_att_path))
+                        if parsed_lines:
+                            lines.extend(parsed_lines)
+                        source_ref = basename(_att_path)
+                    except Exception as exc:
+                        log.warning("worker parse_file failed: %s", exc)
+                if lines:
+                    features = features_from_text("\n".join(lines))
+                    source = "text" if not source_ref else "attachment"
+                    if not source_ref:
+                        source_ref = "pasted input"
+
+            elif _src == "mockups":
+                try:
+                    from engine.mockup_vision import analyse as _va
+                    vres = _va(file_paths=_mockup_paths,
+                               figma_url=_figma_url,
+                               context=_mockup_ctx)
+                    if vres.text:
+                        features = features_from_text(vres.text)
+                        source = "mockups"
+                        bits = []
+                        if _mockup_paths:
+                            bits.append(f"{len(_mockup_paths)} file(s)")
+                        if _figma_url:
+                            bits.append("Figma URL")
+                        source_ref = (vres.source_label
+                                       or " + ".join(bits)
+                                       or "uploaded mockups")
+                        extracted_text = vres.text
+                    elif vres.error:
+                        raise RuntimeError(
+                            f"Mockup analysis: {vres.error}")
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Mockup analysis failed: "
+                        f"{type(exc).__name__} — {exc}") from exc
+
+            elif _src == "url":
+                try:
+                    analysis = crawl_site(_url)
+                    features = features_from_site_analysis(analysis)
+                    if features:
+                        source, source_ref = "url", _url
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Could not crawl {_url}: "
+                        f"{type(exc).__name__} — {exc}") from exc
+
+            # Legacy fallback — try pasted text regardless of tab.
+            if not features and _text_input:
+                try:
+                    features = features_from_text(_text_input)
+                    if features:
+                        source = source or "text"
+                        source_ref = source_ref or "pasted input (fallback)"
+                except Exception:
+                    pass
+
             if not features:
-                raise RuntimeError("No features could be extracted from the site.")
+                raise RuntimeError(
+                    "No features could be extracted from the selected "
+                    "source. Pick a different tab, paste more detailed "
+                    "content, or check the URL is reachable.")
+
             result = compute_estimation(
                 features=features,
                 rate_usd=rate_usd,
@@ -604,18 +790,24 @@ def register(app: Flask) -> None:
                 project_name=project_name,
                 primary_platform=primary_platform,
                 platforms_list=_DEFAULT_COMPAT_PLATFORMS[:additional_platforms],
-                source="url",
-                source_ref=url,
+                source=source,
+                source_ref=source_ref,
                 compatibility_rate=compat_rate,
                 bug_report_rate=bug_rate,
                 pm_overhead=pm_ov,
                 max_testing_stretch=max_testing_stretch,
             )
-            return asdict(result)
+            payload = asdict(result)
+            if extracted_text:
+                # Carried back into session via /estimation/status so
+                # the "Generate test cases" CTA has the bullet text.
+                payload["_extracted_text"] = extracted_text
+            return payload
 
         job_id = get_queue().submit(
             "estimation", _worker,
             meta={
+                "source": source_choice,
                 "url": url,
                 "project_name": project_name,
                 "session_id": sid,  # used by count_active_by_meta()
@@ -628,8 +820,16 @@ def register(app: Flask) -> None:
     def estimation_status(job_id):
         """Return current status of an estimation job.
 
-        On success, ``result`` is written to the session and returned
-        inline so the client can render without a second request.
+        On DONE the worker's result is written to the session
+        (``estimation_result`` and, for the Mockups path,
+        ``estimation_extracted_text``) and a ``redirect_url`` is
+        included in the JSON so the client navigates back to GET
+        /estimation where the result template renders normally —
+        matches the pattern Test Cases / Checklist generators use.
+
+        On FAILED the error string is surfaced in the JSON so the
+        client modal shows a friendly message instead of polling
+        forever.
         """
         job = get_queue().get(job_id)
         if job is None or job.kind != "estimation":
@@ -637,15 +837,24 @@ def register(app: Flask) -> None:
 
         payload = job.to_public_dict()
         if job.status == DONE and job.result is not None:
-            session["estimation_result"] = job.result
-            payload["result"] = job.result
+            result = dict(job.result)  # don't mutate the queued payload
+            extracted = result.pop("_extracted_text", "")
+            session["estimation_result"] = result
+            if extracted:
+                session["estimation_extracted_text"] = extracted
+            session.pop("estimation_job_id", None)
+            payload["result"] = result
+            payload["redirect_url"] = url_for("estimation_page")
             # Mirror the result into the project's estimation history.
-            # Async path doesn't have access to the original form values
-            # the way the sync handler did, so we fall back to job.meta.
-            _persist_estimation(
-                input_payload=getattr(job, "meta", {}) or {},
-                result_dict=job.result,
-            )
+            try:
+                _persist_estimation(
+                    input_payload=getattr(job, "meta", {}) or {},
+                    result_dict=result,
+                )
+            except Exception as exc:
+                log.warning("persist on status drain failed: %s", exc)
+        elif job.status == FAILED:
+            session.pop("estimation_job_id", None)
         return jsonify(payload)
 
     @app.route("/estimation/to-test-cases", methods=["GET"])
