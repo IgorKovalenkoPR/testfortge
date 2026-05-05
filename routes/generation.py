@@ -790,7 +790,10 @@ def register(app: Flask) -> None:
         if not trace and stories and tc_list:
             trace = generate_traceability(stories, tc_list)
 
-        name = session.get("project_setup", {}).get("project_name", "project").replace(" ", "_")
+        # Defensive `.get() or {}` so a session whose project_setup
+        # key was explicitly set to None doesn't 500 (audit finding).
+        name = ((session.get("project_setup") or {}).get(
+            "project_name", "project") or "project").replace(" ", "_")
 
         if fmt == "markdown":
             content = export_markdown(name, stories, tc_list, cl_list, trace, {})

@@ -5,382 +5,471 @@
 <div class="page-header">
     <h1>📖 TestForTge — User Guide</h1>
     <p class="subtitle">
-        How to use every module of TestForTge end-to-end. Each section
-        below covers what the module does, the typical workflow, the
-        key controls, and the common mistakes that bite first-time
-        users.
+        Pick a module to see how it works end-to-end. Each card opens
+        a focused panel with the typical workflow, key controls, and
+        common mistakes.
     </p>
 </div>
 
-{# ── Sticky table of contents ────────────────────────────────── #}
-<nav class="card" id="guide-toc"
-     style="position:sticky;top:10px;z-index:10;display:flex;
-            gap:6px;flex-wrap:wrap;font-size:0.88em;">
-    <strong style="margin-right:8px;color:#64748b;">Jump to:</strong>
-    <a href="#dashboard">Dashboard</a> ·
-    <a href="#estimation">Estimation</a> ·
-    <a href="#test-cases">Test Cases</a> ·
-    <a href="#checklist">Checklist</a> ·
-    <a href="#test-execution">Test Execution</a> ·
-    <a href="#bug-reports">Bug Reports</a> ·
-    <a href="#tedgie">Tedgie chat</a> ·
-    <a href="#tips">Pro tips</a>
-</nav>
+{# ── 8-card grid (7 modules + Pro tips) ───────────────────────
+   Inline styles only so the guide doesn't depend on style.css
+   classes that may move. Each card is a button that opens a modal
+   populated from the matching <template> below. Esc / overlay click
+   close. No JS framework — vanilla DOM. #}
+<div class="guide-grid"
+     style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+            gap:14px;margin-top:14px;">
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="dashboard">
-    <h2>📊 Dashboard</h2>
-    <p>
-        The landing page. Shows your saved projects, live session
-        metrics (test-case count, checklist items, execution
-        ratios, bug severity, environments covered), and quick
-        access to recent runs.
-    </p>
+    <button type="button" class="guide-card" data-section="dashboard"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📊</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Dashboard</strong>
+        <small style="color:#64748b;">Project picker + live metrics</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="estimation"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📈</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Estimation</strong>
+        <small style="color:#64748b;">Min/Max hours from text · mockups · URL</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="test-cases"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">✅</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Cases</strong>
+        <small style="color:#64748b;">ISTQB-shaped TC pack from requirements</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="checklist"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📋</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Checklist</strong>
+        <small style="color:#64748b;">High-level smoke / sanity coverage</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="test-execution"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">▶️</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Execution</strong>
+        <small style="color:#64748b;">Run TCs in real Playwright + live view</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="bug-reports"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">🐞</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Bug Reports</strong>
+        <small style="color:#64748b;">ISTQB-aligned defect store, Jira-friendly</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="tedgie"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">💬</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Tedgie chat</strong>
+        <small style="color:#64748b;">QA assistant · ISTQB-trained</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="tips"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">💡</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Pro tips</strong>
+        <small style="color:#64748b;">Things that save hours</small>
+    </button>
+</div>
+
+{# ── Modal scaffold (one shared modal, content swapped in JS) ── #}
+<div id="guide-modal" hidden role="dialog" aria-modal="true"
+     aria-labelledby="guide-modal-title"
+     style="position:fixed;inset:0;background:rgba(15,23,42,0.55);
+            z-index:1000;display:none;align-items:flex-start;
+            justify-content:center;padding:5vh 16px;overflow-y:auto;">
+    <div id="guide-modal-card" role="document"
+         style="background:white;max-width:760px;width:100%;
+                border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.25);
+                padding:24px 28px;max-height:90vh;overflow-y:auto;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;
+                    gap:14px;margin-bottom:14px;">
+            <h2 id="guide-modal-title" style="margin:0;font-size:1.35em;"></h2>
+            <button type="button" id="guide-modal-close" aria-label="Close"
+                    style="background:transparent;border:none;font-size:1.6em;
+                           line-height:1;cursor:pointer;color:#64748b;
+                           padding:0 6px;">×</button>
+        </div>
+        <div id="guide-modal-body"></div>
+    </div>
+</div>
+
+{# ── Section content blocks — one per card, hidden by default,
+     copied into the modal body on demand. Plain HTML so a tech
+     writer can edit without touching Python. #}
+<div class="guide-sections" hidden>
+
+  <template data-content="dashboard">
+    <h3>What it is</h3>
+    <p>The landing page. Shows your saved projects, live session
+       metrics (test-case count, checklist items, execution
+       ratios, bug severity, environments covered), and quick
+       access to recent runs.</p>
     <h3>Typical workflow</h3>
     <ol>
-        <li><strong>Pick or create a project.</strong> Every other
-            module attaches its work to the active project. The
-            sidebar shows the current project name; click "Projects"
-            to switch.</li>
-        <li><strong>Skim the metrics.</strong> Pass-rate, bug
-            severity distribution and environments covered tell you
-            at a glance whether the last release was clean.</li>
-        <li><strong>Open the relevant module.</strong> Estimation
-            for new scope, Test Cases for design, Test Execution
-            for running, Bug Reports for triage.</li>
+      <li><strong>Pick or create a project.</strong> Every other
+          module attaches its work to the active project. The
+          sidebar shows the current project name; click "Projects"
+          to switch.</li>
+      <li><strong>Skim the metrics.</strong> Pass-rate, bug
+          severity distribution and environments covered tell you
+          at a glance whether the last release was clean.</li>
+      <li><strong>Open the relevant module.</strong> Estimation
+          for new scope, Test Cases for design, Test Execution
+          for running, Bug Reports for triage.</li>
     </ol>
     <h3>Common mistakes</h3>
     <ul>
-        <li>Not setting an active project before generating —
-            artefacts go into a stand-in "Untitled" bucket and are
-            harder to find later.</li>
+      <li>Not setting an active project before generating —
+          artefacts go into a stand-in "Untitled" bucket and are
+          harder to find later.</li>
     </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="estimation">
-    <h2>📈 Estimation</h2>
-    <p>
-        Produces a Min/Max QA effort breakdown plus a starter test-
-        case set from one of three sources. Output: hours per phase
-        (Test design · Execution · Regression · Bug reporting +
-        buffer) and a one-platform vs full-compatibility roll-up
-        with PERT confidence bands.
-    </p>
+  <template data-content="estimation">
+    <h3>What it is</h3>
+    <p>Produces a Min/Max QA effort breakdown plus a starter test-
+       case set from one of three sources. Output: hours per phase
+       (Test design · Execution · Regression · Bug reporting +
+       buffer) and a one-platform vs full-compatibility roll-up
+       with PERT confidence bands.</p>
     <h3>Three input tabs</h3>
     <ol>
-        <li>
-            <strong>📝 Requirements text.</strong> Paste a spec,
-            user-story list, or feature backlog. The estimator
-            normalises bullets / tables / freeform prose into a
-            Feature list. You can also attach a .docx / .pdf /
-            .xlsx — its text is merged with the textarea content.
-            Best for: written specifications, BRD/PRD documents,
-            transcribed kickoff notes.
-        </li>
-        <li>
-            <strong>🎨 Mockups.</strong> Upload PNG / JPG / WebP /
-            PDF design screens (up to 20), or paste a public Figma
-            file/frame URL. A vision model lists every testable
-            element it sees — forms, dialogs, navigation, error
-            states — and feeds them into the same estimator.
-            Best for: design hand-off before code exists,
-            visual-spec changes, third-party mockups.
-        </li>
-        <li>
-            <strong>🌐 URL crawl.</strong> Paste a production or
-            staging URL. The crawler walks the site, identifies
-            pages and forms, and infers the architecture (CMS /
-            SPA / e-commerce). Best for: existing sites,
-            re-estimation, competitor benchmarking.
-        </li>
+      <li><strong>📝 Requirements text.</strong> Paste a spec,
+          user-story list, or feature backlog. The estimator
+          normalises bullets / tables / freeform prose into a
+          Feature list. You can also attach a .docx / .pdf /
+          .xlsx — its text is merged with the textarea content.</li>
+      <li><strong>🎨 Mockups.</strong> Upload PNG / JPG / WebP /
+          PDF design screens (up to 20), or paste a public Figma
+          file/frame URL. A vision model lists every testable
+          element it sees — forms, dialogs, navigation, error
+          states — and feeds them into the same estimator.</li>
+      <li><strong>🌐 URL crawl.</strong> Paste a production or
+          staging URL. The crawler walks the site, identifies
+          pages and forms, and infers the architecture.</li>
     </ol>
     <h3>Reading the result</h3>
     <ul>
-        <li>The summary card shows total test cases, total feature
-            hours, and the one-platform vs full-compatibility
-            roll-ups. The "PERT confidence" panel under it is the
-            statistical view; the headline numbers stay
-            two-point.</li>
-        <li>The phase table breaks the total into Communication ·
-            Documentation review · Checklist creation · Functional/
-            UI · Bug reporting · Bug rechecking · Regression ·
-            Compatibility (per extra platform). Each row is editable
-            via the coefficients above.</li>
-        <li>The history-calibration hint compares the current
-            estimate against your past projects so you can spot
-            outliers ("This is 1.8× your average for similar
-            scope").</li>
+      <li>The summary card shows total test cases, total feature
+          hours, and the one-platform vs full-compatibility
+          roll-ups. The "PERT confidence" panel under it is the
+          statistical view; the headline numbers stay
+          two-point.</li>
+      <li>The phase table breaks the total into Communication ·
+          Documentation review · Checklist creation · Functional/
+          UI · Bug reporting · Bug rechecking · Regression ·
+          Compatibility (per extra platform).</li>
+      <li>Click "Generate test cases from this estimate →" to
+          drop the extracted feature list into the Test Cases
+          generator.</li>
     </ul>
-    <h3>Convert estimate → real test cases</h3>
-    <p>
-        After the estimate renders, click <em>"Generate test cases
-        from this estimate →"</em>. The extracted feature list is
-        pre-loaded into the Test Cases generator's input box; click
-        Generate to materialise them.
-    </p>
     <h3>Common mistakes</h3>
     <ul>
-        <li>Switching tabs but leaving content in the previous tab
-            — only the active tab's fields are submitted. Move your
-            text/files to the right tab before clicking Run.</li>
-        <li>Bumping the buffer to 30%+ "just in case" — the PERT
-            band already contains the variability. Stack on top
-            only when you have a concrete reason (new tooling,
-            unfamiliar domain, unreliable team).</li>
-        <li>For Mockups: needing more than 20 frames — split the
-            run by epic / flow.</li>
-        <li>Figma URLs without a public link — only the cover image
-            is fetched. Set <code>FIGMA_PAT</code> in env to enable
-            the REST API path that pulls per-frame renders.</li>
+      <li>Switching tabs but leaving content in the previous tab
+          — only the active tab's fields are submitted.</li>
+      <li>Bumping the buffer to 30%+ "just in case" — the PERT
+          band already contains the variability.</li>
+      <li>For Mockups: needing more than 20 frames — split the
+          run by epic / flow.</li>
+      <li>Figma URLs without <code>FIGMA_PAT</code> — only the
+          cover image is fetched; set the env var for per-frame
+          renders.</li>
     </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="test-cases">
-    <h2>✅ Test Cases</h2>
-    <p>
-        Generates ISTQB-shaped test cases (id / section / summary /
-        preconditions / steps / data / expected / category / type /
-        priority / status) from requirements text. Saves to the
-        active project automatically.
-    </p>
+  <template data-content="test-cases">
+    <h3>What it is</h3>
+    <p>Generates ISTQB-shaped test cases (id / section / summary /
+       preconditions / steps / data / expected / category / type /
+       priority / status) from requirements text. Saves to the
+       active project automatically.</p>
     <h3>Typical workflow</h3>
     <ol>
-        <li>Paste requirements (or arrive prefilled from
-            Estimation). Optionally attach .docx / .pdf / .xlsx /
-            .csv / .md — text is extracted and merged.</li>
-        <li>Add a custom prompt if you need a specific focus
-            ("regression cases with form fills, submits and
-            scrolls", "negative + edge cases only", "API only").</li>
-        <li>Click Generate. The generator spawns a background job
-            so the UI stays responsive; a progress modal polls
-            until done.</li>
-        <li>Review the result. Cases group by section. Use Export
-            (top right) for .xlsx / .csv / .docx / Jira-XML.</li>
+      <li>Paste requirements (or arrive prefilled from
+          Estimation). Optionally attach .docx / .pdf / .xlsx /
+          .csv / .md — text is extracted and merged.</li>
+      <li>Add a custom prompt if you need a specific focus
+          ("regression cases with form fills, submits and
+          scrolls", "negative + edge cases only", "API only").</li>
+      <li>Click Generate. Background job; progress modal polls
+          until done.</li>
+      <li>Review. Cases group by section. Use Export for
+          .xlsx / .csv / .docx / Jira-XML.</li>
     </ol>
     <h3>Common mistakes</h3>
     <ul>
-        <li>Vague input ("test the login page") → vague output
-            ("verify login works"). Give the generator structure:
-            list fields, paths, error messages, environment.</li>
-        <li>Re-running the same input expecting identical output —
-            LLM generation is non-deterministic by design. Seed
-            with the custom prompt for reproducibility.</li>
-        <li>Forgetting to save / export. The pack persists to the
-            project's Postgres row, so it survives session wipes,
-            but bookmarking the page won't preserve a custom
-            prompt.</li>
+      <li>Vague input → vague output. Give the generator
+          structure: list fields, paths, error messages,
+          environment.</li>
+      <li>Re-running the same input expecting identical output —
+          LLM generation is non-deterministic by design. Seed
+          with the custom prompt for reproducibility.</li>
     </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="checklist">
-    <h2>📋 Checklist</h2>
-    <p>
-        High-level smoke checklist — broader strokes than test
-        cases, suitable for sanity checks, exploratory rounds, and
-        cross-team sign-off. Same input pattern as Test Cases but
-        the LLM is prompted for objectives instead of detailed
-        steps.
-    </p>
+  <template data-content="checklist">
+    <h3>What it is</h3>
+    <p>High-level smoke checklist — broader strokes than test
+       cases, suitable for sanity checks, exploratory rounds, and
+       cross-team sign-off.</p>
     <h3>Typical workflow</h3>
     <ol>
-        <li>Drop your requirements / pasted text / attachment as
-            on the Test Cases page.</li>
-        <li>Tweak the custom prompt if you want a specific lens
-            ("from a security perspective", "mobile-first",
-            "regression-only").</li>
-        <li>Generate. Items group by section, show a category
-            (Positive / Negative / Edge / Security) and a one-line
-            objective.</li>
-        <li>Use Export for sharing with non-technical stakeholders
-            — the XLSX is friendlier than a TC pack.</li>
+      <li>Drop your requirements / pasted text / attachment.</li>
+      <li>Tweak the custom prompt for a specific lens
+          ("from a security perspective", "mobile-first",
+          "regression-only").</li>
+      <li>Generate. Items group by section, show a category
+          (Positive / Negative / Edge / Security) and a one-line
+          objective.</li>
+      <li>Export to XLSX for non-technical stakeholders.</li>
     </ol>
     <h3>When to pick Checklist over Test Cases</h3>
     <ul>
-        <li>Time-boxed exploratory testing.</li>
-        <li>Stakeholder demos / acceptance walk-throughs.</li>
-        <li>Smoke + sanity rounds on a release candidate.</li>
-        <li>You don't yet have detailed specs but need a structured
-            coverage list.</li>
+      <li>Time-boxed exploratory testing.</li>
+      <li>Stakeholder demos / acceptance walk-throughs.</li>
+      <li>Smoke + sanity rounds on a release candidate.</li>
+      <li>You don't yet have detailed specs but need a structured
+          coverage list.</li>
     </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="test-execution">
-    <h2>▶️ Test Execution</h2>
-    <p>
-        Runs your TC pack against an environment. Two modes:
-    </p>
-    <ol>
-        <li><strong>Deterministic simulator</strong> (no Base URL):
-            assigns Pass/Fail/Blocked using heuristics on the test
-            case content. Fast, no browser needed.</li>
-        <li><strong>Real Playwright run</strong> (Base URL set):
-            spawns a headless Chromium / Firefox / WebKit, executes
-            the steps for real, captures per-step screenshots and
-            optional video, and produces evidence for any
-            failures.</li>
-    </ol>
+  <template data-content="test-execution">
+    <h3>What it is</h3>
+    <p>Runs your TC pack against an environment. Two modes:
+       <strong>deterministic simulator</strong> (no Base URL — fast,
+       heuristic) or <strong>real Playwright run</strong> (Base URL
+       set — headless browser, screenshots, optional video).</p>
     <h3>Typical workflow</h3>
     <ol>
-        <li>Set the <strong>Base URL</strong> (top of Automation
-            Configuration). Without it the run is simulator-only —
-            no live preview, no screenshots, no bug-attached
-            video.</li>
-        <li>Pick the environment(s) — Web / Mobile Web / iOS /
-            Android. Each one produces its own run record so you
-            can compare side-by-side.</li>
-        <li>Optionally open <em>"Open live view in new tab"</em>
-            to watch the headless browser frame-by-frame.</li>
-        <li>Click <strong>Run Test Execution</strong>. The form
-            stays put and shows in-page progress; the Playwright
-            pass runs as a fully detached subprocess so it survives
-            any web-server restart.</li>
-        <li>When the worker finishes, the page auto-imports
-            results: gallery thumbnails, per-case Pass/Fail, and
-            auto-generated bug reports for failures.</li>
+      <li>Set <strong>Base URL</strong>. Without it the run is
+          simulator-only — no live preview, no screenshots, no
+          bug-attached video.</li>
+      <li>Pick environment(s) — Web / Mobile Web / iOS /
+          Android. Each one produces its own run record.</li>
+      <li>Optionally open <em>"Open live view in new tab"</em>
+          to watch frame-by-frame.</li>
+      <li>Click <strong>Run Test Execution</strong>. The form
+          stays put and shows in-page progress; the Playwright
+          pass runs as a fully detached subprocess so it
+          survives any web-server restart.</li>
+      <li>When the worker finishes, the page auto-imports
+          results: gallery thumbnails, per-case Pass/Fail, and
+          auto-generated bug reports for failures.</li>
     </ol>
     <h3>Reading screenshots</h3>
     <ul>
-        <li>Passed TCs show the clean per-step "after" frames.</li>
-        <li>Failed TCs lead with the <em>annotated failure
-            screenshot</em> (red box + arrow on the broken element)
-            plus the previous step's frame for context.</li>
-        <li>Identical consecutive frames are deduped — a sequence
-            like (click → expect_text → expect_url) on the same
-            page becomes one thumbnail, not three.</li>
+      <li>Passed TCs show clean per-step "after" frames.</li>
+      <li>Failed TCs lead with the <em>annotated failure
+          screenshot</em> (red box + arrow on the broken element)
+          plus the previous step's frame for context.</li>
+      <li>Identical consecutive frames are deduped.</li>
     </ul>
     <h3>If the run stalls</h3>
-    <ul>
-        <li>The <strong>recent runs</strong> table on
-            <code>/test-execution/live</code> labels stalled runs
-            with a red "stalled" badge (no info.json updates for
-            &gt;2 min — usually OOM-killed Chromium on the free
-            tier).</li>
-        <li>Click <em>Import partial</em> to load whatever cases
-            finished before the crash.</li>
-    </ul>
+    <p>The recent-runs table on <code>/test-execution/live</code>
+       labels stalled runs (no info.json updates for &gt;2 min)
+       with a red badge. Click <em>Import partial</em> to load
+       whatever cases finished before the crash.</p>
     <h3>Common mistakes</h3>
     <ul>
-        <li>Forgetting Base URL — the simulator runs and you
-            wonder why the live view stays empty.</li>
-        <li>Running 100+ cases on the free tier — Chromium memory
-            adds up and the dyno OOM-kills it. Split into batches
-            of ≤62 or upgrade to a Render Background Worker.</li>
-        <li>Closing the browser tab before the worker finishes —
-            harmless on its own (the worker is detached) but you
-            lose the auto-redirect to results. Re-open
-            <code>/test-execution/live</code> and use the recent
-            runs table.</li>
+      <li>Forgetting Base URL — the simulator runs and you
+          wonder why the live view stays empty.</li>
+      <li>Running 100+ cases on the free tier — Chromium memory
+          adds up. Split into batches of ≤62 or upgrade to a
+          Render Background Worker.</li>
     </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="bug-reports">
-    <h2>🐞 Bug Reports</h2>
-    <p>
-        ISTQB-aligned, Jira-friendly defect store. Bugs are created
-        automatically from Failed/Blocked test executions and can
-        also be added manually.
-    </p>
+  <template data-content="bug-reports">
+    <h3>What it is</h3>
+    <p>ISTQB-aligned, Jira-friendly defect store. Bugs are created
+       automatically from Failed/Blocked test executions and can
+       also be added manually.</p>
     <h3>What's in a bug</h3>
     <ul>
-        <li><strong>Title</strong> — "[Component]: [Observable
-            defect]" format. Phrases like "does not work as
-            expected" are stripped automatically.</li>
-        <li><strong>Description</strong> — 2-5 sentence narrative,
-            third-person, observable language only.</li>
-        <li><strong>Steps to Reproduce</strong> — numbered atomic
-            steps starting from "1. Navigate to &lt;URL&gt;".</li>
-        <li><strong>Actual Result</strong> — observable state plus
-            the verbatim Playwright error if available.</li>
-        <li><strong>Expected Result</strong> — "should" phrasing.</li>
-        <li><strong>Severity / Priority / Frequency</strong> —
-            heuristically derived from the defect class
-            (click_timeout, text_assertion_fail, etc.). Bumped to
-            Critical/Highest when the affected area is a core path
-            (login, checkout, search).</li>
-        <li><strong>Attachments</strong> — the FAILED step's
-            annotated screenshot + the prior step's frame for
-            context, plus the recorded video when present.</li>
+      <li><strong>Title</strong> — "[Component]: [Observable
+          defect]" format. Filler phrases like "does not work as
+          expected" are stripped automatically.</li>
+      <li><strong>Description</strong> — 2-5 sentence narrative,
+          third-person, observable language only.</li>
+      <li><strong>Steps to Reproduce</strong> — numbered atomic
+          steps starting from "1. Navigate to &lt;URL&gt;".</li>
+      <li><strong>Actual Result</strong> — observable state plus
+          the verbatim Playwright error if available.</li>
+      <li><strong>Expected Result</strong> — "should" phrasing.</li>
+      <li><strong>Severity / Priority / Frequency</strong> —
+          heuristically derived from the defect class. Bumped to
+          Critical/Highest when the affected area is a core
+          path (login, checkout, search).</li>
+      <li><strong>Attachments</strong> — failed step's annotated
+          screenshot + prior step's frame for context, plus
+          recorded video when present.</li>
     </ul>
     <h3>Typical workflow</h3>
     <ol>
-        <li>After a run, open Bug Reports — auto-generated bugs
-            sit there with linked test-case IDs.</li>
-        <li>Click a bug to expand. The screenshot above shows
-            exactly where the run broke.</li>
-        <li>Triage: bump priority/severity if the heuristic
-            misjudged, assign to a developer, add labels.</li>
-        <li>Export to Jira (XML) when ready to hand off.</li>
+      <li>After a run, open Bug Reports.</li>
+      <li>Click a bug to expand. The screenshot above shows
+          exactly where the run broke.</li>
+      <li>Triage: bump priority/severity if the heuristic
+          misjudged, assign, add labels.</li>
+      <li>Export to Jira (XML) when ready.</li>
     </ol>
-    <h3>Common mistakes</h3>
-    <ul>
-        <li>Creating a manual bug without preconditions / steps —
-            the form accepts it but the export is awkward. Aim for
-            ISTQB minimum: title, severity, repro steps, AR, ER.</li>
-        <li>Trusting the auto-generated severity blindly — review
-            and adjust based on business context the heuristic
-            can't see.</li>
-    </ul>
-</section>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="tedgie">
-    <h2>💬 Tedgie chat</h2>
-    <p>
-        The TestForTge AI assistant. Tedgie answers questions about
-        the app's modules, can analyse your saved test cases /
-        checklist / bug reports, and runs ad-hoc QA reasoning
-        ("what risks does this scope create?", "what's missing
-        from this checklist?").
-    </p>
+  <template data-content="tedgie">
+    <h3>What it is</h3>
+    <p>The TestForTge AI assistant. Tedgie is trained on the
+       <strong>ISTQB Foundation Level &amp; Advanced syllabuses</strong> —
+       it answers QA-theory questions (test design techniques,
+       defect lifecycle, risk-based testing, test types) and
+       practical questions about the app's modules, your
+       saved test cases, checklist and bug reports.</p>
     <h3>What Tedgie is good at</h3>
     <ul>
-        <li>"Why is my live view empty?" → Tedgie walks the diag
-            checklist (Base URL set? Playwright importable?
-            screenshots writing?).</li>
-        <li>"Summarise the last 10 bugs by component." → Tedgie
-            reads your session bugs and groups them.</li>
-        <li>"Suggest 5 negative cases I'm missing for the login
-            flow." → Tedgie generates targeted ideas from the
-            current TC pack.</li>
+      <li><em>"What's the difference between equivalence
+          partitioning and boundary value analysis?"</em> →
+          ISTQB definitions + a worked example.</li>
+      <li><em>"Which testing types apply to a payment flow?"</em>
+          → functional, security, performance, compatibility,
+          accessibility — each with a one-line rationale.</li>
+      <li><em>"Why is my live view empty?"</em> → walks the
+          diag checklist (Base URL set? Playwright importable?
+          screenshots writing?).</li>
+      <li><em>"Summarise the last 10 bugs by component."</em> →
+          reads your session bugs and groups them.</li>
+      <li><em>"Suggest 5 negative cases I'm missing for the
+          login flow."</em> → generates targeted ideas from the
+          current TC pack.</li>
+      <li><em>"What's a good severity for an intermittent
+          checkout error?"</em> → ISTQB-aligned answer with the
+          Critical-vs-Major-vs-Minor reasoning.</li>
     </ul>
     <h3>What Tedgie is NOT</h3>
     <ul>
-        <li>A test runner — use Test Execution.</li>
-        <li>An estimation engine — use Estimation.</li>
-        <li>An autonomous agent — Tedgie answers questions and
-            generates content, but doesn't click buttons in your
-            app for you.</li>
+      <li>A test runner — use Test Execution.</li>
+      <li>An estimation engine — use Estimation.</li>
+      <li>An autonomous agent — Tedgie answers questions and
+          generates content, but doesn't click buttons in your
+          app for you.</li>
     </ul>
-</section>
+    <h3>Tip</h3>
+    <p>Anchor questions in ISTQB terms ("what TEST DESIGN
+       TECHNIQUE applies here?") to get the most precise
+       answers; vague phrasing yields generic answers.</p>
+  </template>
 
-{# ─────────────────────────────────────────────────────────────── #}
-<section class="card" id="tips">
-    <h2>💡 Pro tips that save hours</h2>
+  <template data-content="tips">
+    <h3>Things that save hours</h3>
     <ul>
-        <li><strong>Use the project picker.</strong> Pinning an
-            active project means every TC, run, and bug
-            auto-attaches there. Survives Render dyno restarts.</li>
-        <li><strong>Start at Estimation, not Test Cases.</strong>
-            Even when you have a clear scope, running the
-            estimator first surfaces edge cases you'd otherwise
-            miss in TC generation.</li>
-        <li><strong>Set Base URL even on the simulator path.</strong>
-            It enables real-site checks (HTTP probes, header
-            validation) that catch bugs the simulator can't see.</li>
-        <li><strong>Open Live view in a separate tab</strong> when
-            running &gt;30 cases. Watching frame-by-frame is
-            usually how you spot WHY a run stalled.</li>
-        <li><strong>Export to .xlsx for stakeholders, .docx for
-            documentation, Jira-XML for engineering.</strong> All
-            three exports preserve the same data.</li>
-        <li><strong>Use the Bug Reports tabs (severity / priority
-            / status) to triage.</strong> The auto-bugs land Open;
-            move them through the workflow as they're worked.</li>
+      <li><strong>Use the project picker.</strong> Pinning an
+          active project means every TC, run, and bug
+          auto-attaches. Survives Render dyno restarts.</li>
+      <li><strong>Start at Estimation, not Test Cases.</strong>
+          Even when you have a clear scope, running the
+          estimator first surfaces edge cases you'd otherwise
+          miss in TC generation.</li>
+      <li><strong>Set Base URL even on the simulator path.</strong>
+          It enables real-site checks that catch bugs the
+          simulator can't see.</li>
+      <li><strong>Open Live view in a separate tab</strong>
+          when running &gt;30 cases. Watching frame-by-frame is
+          usually how you spot WHY a run stalled.</li>
+      <li><strong>Export to .xlsx for stakeholders, .docx for
+          documentation, Jira-XML for engineering.</strong>
+          All three exports preserve the same data.</li>
+      <li><strong>Use the Bug Reports tabs to triage.</strong>
+          The auto-bugs land Open; move them through the
+          workflow as they're worked.</li>
+      <li><strong>Ask Tedgie when you're stuck.</strong> The
+          ISTQB-trained assistant knows the test-design
+          techniques and the app's diag flow.</li>
     </ul>
-</section>
+  </template>
+
+</div>
+
+<script>
+(function () {
+    var modal     = document.getElementById('guide-modal');
+    var titleEl   = document.getElementById('guide-modal-title');
+    var bodyEl    = document.getElementById('guide-modal-body');
+    var closeBtn  = document.getElementById('guide-modal-close');
+    var sections  = document.querySelector('.guide-sections');
+
+    function openSection(name, label) {
+        var tpl = sections.querySelector('template[data-content="' + name + '"]');
+        if (!tpl) return;
+        titleEl.textContent = label || name;
+        bodyEl.innerHTML = '';
+        bodyEl.appendChild(tpl.content.cloneNode(true));
+        modal.hidden = false;
+        modal.style.display = 'flex';
+        // Move focus into the modal for keyboard users.
+        setTimeout(function () { closeBtn && closeBtn.focus(); }, 50);
+        // Lock background scroll.
+        document.body.style.overflow = 'hidden';
+    }
+    function closeModal() {
+        modal.hidden = true;
+        modal.style.display = 'none';
+        bodyEl.innerHTML = '';
+        document.body.style.overflow = '';
+    }
+
+    document.querySelectorAll('.guide-card').forEach(function (btn) {
+        btn.addEventListener('mouseenter', function () {
+            btn.style.transform = 'translateY(-2px)';
+            btn.style.boxShadow = '0 8px 18px rgba(15,23,42,0.10)';
+        });
+        btn.addEventListener('mouseleave', function () {
+            btn.style.transform = '';
+            btn.style.boxShadow = '';
+        });
+        btn.addEventListener('click', function () {
+            var section = btn.dataset.section;
+            var label = btn.querySelector('strong').textContent.trim();
+            openSection(section, label);
+        });
+    });
+
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.hidden) closeModal();
+    });
+
+    /* Deep-link: /guide#tedgie auto-opens the Tedgie panel.
+       Used by other modules' empty-state CTAs to link directly
+       to the relevant guide section. */
+    var hash = (window.location.hash || '').replace('#', '');
+    if (hash) {
+        var btn = document.querySelector(
+            '.guide-card[data-section="' + hash + '"]');
+        if (btn) btn.click();
+    }
+})();
+</script>
 {% endblock %}

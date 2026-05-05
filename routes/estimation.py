@@ -146,6 +146,67 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 
 def register(app: Flask) -> None:
+    def _mockup_env_state() -> dict:
+        """Detect what the Mockups tab can actually do given the
+        deployment's current environment. Drives an inline banner in
+        the template so the operator sees missing prerequisites
+        BEFORE clicking Run instead of after a failed pass.
+
+        Cheap (no network calls): we only check env-var presence and
+        whether two Python imports succeed. Result is rendered as a
+        coloured chip per capability.
+
+        Wrapped in a defensive try/except — a failure here used to
+        500 the entire /estimation page (operator-reported after my
+        2026-05-04 deploy: URL-tab POST landed on a redirect to GET,
+        but GET 500'd if anything inside this helper raised).
+        """
+        try:
+            import os
+            state = {
+                "anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "figma_pat":     bool(os.environ.get("FIGMA_PAT")),
+                "pdf2image_ok":  False,
+                "poppler_ok":    False,
+                "vision_model":  os.environ.get("ANTHROPIC_MODEL",
+                                                 "claude-sonnet-4-5"),
+            }
+            try:
+                import pdf2image  # noqa: F401
+                state["pdf2image_ok"] = True
+            except Exception:
+                pass
+            # Cheap probe — pdf2image needs `pdftoppm` from poppler-utils.
+            try:
+                import shutil as _sh
+                state["poppler_ok"] = bool(_sh.which("pdftoppm"))
+            except Exception:
+                pass
+            state["mockups_minimum"] = state["anthropic_key"]
+            state["mockups_pdf"] = (state["anthropic_key"]
+                                     and state["pdf2image_ok"]
+                                     and state["poppler_ok"])
+            state["mockups_figma_full"] = (state["anthropic_key"]
+                                            and state["figma_pat"])
+            return state
+        except Exception as exc:
+            log.warning("mockup env state probe failed: %s", exc)
+            return {
+                "anthropic_key": False, "figma_pat": False,
+                "pdf2image_ok": False, "poppler_ok": False,
+                "vision_model": "unknown",
+                "mockups_minimum": False, "mockups_pdf": False,
+                "mockups_figma_full": False,
+                "_probe_error": str(exc)[:200],
+            }
+
+    @app.route("/estimation/diag", methods=["GET"])
+    def estimation_diag():
+        """Operator-facing JSON dump of what the Mockups tab can /
+        cannot do under the current environment. Useful for support
+        tickets — single URL the operator can share."""
+        return jsonify(_mockup_env_state())
+
     @app.route("/estimation", methods=["GET"])
     def estimation_page():
         lang = session.get("lang", "en")
@@ -155,10 +216,31 @@ def register(app: Flask) -> None:
             t=t, lang=lang,
             result=session.get("estimation_result"),
             last=session.get("estimation_form", {}),
+            mockup_env=_mockup_env_state(),
         )
 
     @app.route("/estimation/run", methods=["POST"])
     def estimation_run():
+        # Top-level safety net — converts any unhandled exception into
+        # a friendly flash + redirect instead of a 500 page.
+        # Operator-reported 2026-05-04: URL-tab estimation hit a 500
+        # with no clear cause; the inner code paths each have their
+        # own try/except, but a fresh defensive wrapper here ensures
+        # the user never sees a Flask traceback for any reason.
+        try:
+            return _estimation_run_inner()
+        except Exception as exc:
+            log.exception("estimation_run unhandled: %s", exc)
+            flash(
+                f"Estimation failed unexpectedly: "
+                f"{type(exc).__name__} — {str(exc)[:200]}. "
+                "Try a different source (Text / Mockups / URL) or "
+                "open /estimation/diag for diagnostics.",
+                "danger",
+            )
+            return redirect(url_for("estimation_page"))
+
+    def _estimation_run_inner():
         # Input clamping — keep user-supplied numbers inside sane bounds so
         # malformed or abusive values can't blow up computations or exports.
         project_name = (request.form.get("project_name", "").strip())[:120]
@@ -316,19 +398,56 @@ def register(app: Flask) -> None:
                 flash(f"Mockup analysis failed: {type(exc).__name__}", "danger")
 
         # ── Tab 3 — URL crawl ────────────────────────────────────
-        elif source_choice == "url" and url:
+        elif source_choice == "url":
+            if not url:
+                flash(
+                    "URL tab is selected but no URL was provided.",
+                    "warning",
+                )
+            else:
+                try:
+                    analysis = crawl_site(url)
+                    features = features_from_site_analysis(analysis)
+                    if features:
+                        source, source_ref = "url", url
+                    else:
+                        flash(
+                            f"Crawled {url} but no testable features "
+                            f"were extracted. Try the Text or Mockups "
+                            f"tab, or check that the URL serves real "
+                            f"HTML content.",
+                            "warning",
+                        )
+                except Exception as exc:
+                    log.warning("estimation site crawl failed: %s", exc)
+                    flash(
+                        f"Could not crawl {url}: "
+                        f"{type(exc).__name__} — {str(exc)[:200]}. "
+                        "Switch to the Text tab and paste the spec, or "
+                        "try a different URL.",
+                        "warning",
+                    )
+
+        # ── Legacy fallback: try text_input regardless of tab ───
+        # If the chosen source produced nothing but the user ALSO
+        # pasted something into the text textarea, use that as a
+        # fallback. Restores the pre-3-tab-refactor behaviour
+        # operators relied on.
+        if not features and text_input:
             try:
-                analysis = crawl_site(url)
-                features = features_from_site_analysis(analysis)
-                source, source_ref = "url", url
+                features = features_from_text(text_input)
+                if features:
+                    source = source or "text"
+                    source_ref = source_ref or "pasted input (fallback)"
             except Exception as exc:
-                log.warning("estimation site crawl failed: %s", exc)
-                flash(f"Crawl failed: {exc}", "warning")
+                log.warning("text fallback features_from_text failed: %s",
+                            exc)
 
         if not features:
             flash(
                 "No features could be extracted from the selected "
-                "source. Switch tabs or provide more content.",
+                "source. Pick a different tab, paste more detailed "
+                "content, or check the URL is reachable.",
                 "danger",
             )
             return redirect(url_for("estimation_page"))

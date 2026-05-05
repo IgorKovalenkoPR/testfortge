@@ -25,6 +25,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+# ── System packages ──────────────────────────────────────────────
+# poppler-utils provides `pdftoppm` which pdf2image shells out to when
+# rasterising PDF mockups for the /estimation Mockups tab. Without it
+# pdf2image throws PDFInfoNotInstalledError and the route silently
+# falls back to text-only PDF rendering — losing the visual signal
+# vision analysis depends on. The package is ~7 MB and adds no runtime
+# overhead when no PDFs are uploaded.
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
+
 # ── App layout ────────────────────────────────────────────────────
 WORKDIR /app
 

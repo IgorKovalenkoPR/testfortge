@@ -9,6 +9,10 @@ python-docx==1.1.2
 openpyxl==3.1.5
 pypdf==5.1.0
 Pillow==11.1.0
+# pdf2image rasterises PDF mockups into per-page images for the
+# /estimation Mockups vision pipeline (engine/mockup_vision.py).
+# Needs the poppler-utils system package — see Dockerfile.
+pdf2image==1.17.0
 markdown==3.7
 playwright==1.49.1
 beautifulsoup4==4.12.3

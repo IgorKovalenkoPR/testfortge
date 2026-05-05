@@ -144,6 +144,72 @@
         {{ t.get('est_tab_mockups_hint',
            'Upload design screens (PNG / JPG / PDF) or paste a Figma file URL. The estimator analyses the visual UI to identify forms, navigation, dialogs, error states, and other testable elements — then computes Min/Max effort and a starter test-case set.') }}
       </p>
+
+      {# ── Environment-readiness banner ───────────────────────────
+         Renders one of three states based on /estimation/diag:
+           green  → all features ready
+           yellow → vision works, PDF/Figma optional features missing
+           red    → ANTHROPIC_API_KEY missing, vision tab won't run
+         The full JSON is one click away for support requests. #}
+      {% if mockup_env %}
+      {% set _all_ok = mockup_env.mockups_minimum and mockup_env.mockups_pdf and mockup_env.mockups_figma_full %}
+      <div style="margin:0 0 14px 0;padding:10px 14px;border-radius:6px;
+                  border:1px solid {{ '#86efac' if _all_ok else ('#fbbf24' if mockup_env.mockups_minimum else '#fca5a5') }};
+                  background:{{ '#ecfdf5' if _all_ok else ('#fffbeb' if mockup_env.mockups_minimum else '#fef2f2') }};
+                  color:{{ '#065f46' if _all_ok else ('#92400e' if mockup_env.mockups_minimum else '#991b1b') }};">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <strong>
+            {% if _all_ok %}✓{% elif mockup_env.mockups_minimum %}⚠{% else %}✗{% endif %}
+            Mockup vision readiness:
+          </strong>
+          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
+                       background:{{ '#10b981' if mockup_env.anthropic_key else '#ef4444' }};color:white;">
+            ANTHROPIC_API_KEY: {{ 'set' if mockup_env.anthropic_key else 'missing' }}
+          </span>
+          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
+                       background:{{ '#10b981' if mockup_env.pdf2image_ok else '#94a3b8' }};color:white;">
+            pdf2image: {{ 'installed' if mockup_env.pdf2image_ok else 'absent' }}
+          </span>
+          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
+                       background:{{ '#10b981' if mockup_env.poppler_ok else '#94a3b8' }};color:white;">
+            poppler: {{ 'installed' if mockup_env.poppler_ok else 'absent' }}
+          </span>
+          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
+                       background:{{ '#10b981' if mockup_env.figma_pat else '#94a3b8' }};color:white;">
+            FIGMA_PAT: {{ 'set' if mockup_env.figma_pat else 'unset (cover-only)' }}
+          </span>
+          <a href="{{ url_for('estimation_diag') }}" target="_blank"
+             style="margin-left:auto;font-size:0.85em;">diag JSON ↗</a>
+        </div>
+        {% if not mockup_env.anthropic_key %}
+        <p style="margin:8px 0 0 0;font-size:0.88em;">
+          <strong>Vision analysis disabled.</strong> Set
+          <code>ANTHROPIC_API_KEY</code> in Render env vars
+          (Settings → Environment) before this tab can produce
+          estimates. PNG / PDF uploads will be saved but no feature
+          list will be extracted.
+        </p>
+        {% elif not (mockup_env.pdf2image_ok and mockup_env.poppler_ok) %}
+        <p style="margin:8px 0 0 0;font-size:0.88em;">
+          <strong>PDF rasterisation degraded.</strong> The container
+          is missing <code>pdf2image</code> and/or
+          <code>poppler-utils</code>; PDF uploads fall back to a
+          text-only render which loses visual signal. PNG / JPG
+          uploads still work fully.
+        </p>
+        {% elif not mockup_env.figma_pat %}
+        <p style="margin:8px 0 0 0;font-size:0.88em;">
+          <strong>Figma support is degraded.</strong> Without
+          <code>FIGMA_PAT</code>, only the file's cover image is
+          fetched — enough for high-level scope but not screen-by-
+          screen detail. Get a token at
+          <a href="https://www.figma.com/settings" target="_blank">figma.com/settings</a>
+          and add it to Render env vars.
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <div class="form-group">
         <label>{{ t.get('est_mockups_files_label', 'Upload mockups (one or many)') }}</label>
         <input type="file" name="mockup_files" multiple

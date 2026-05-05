@@ -87,6 +87,28 @@ services:
         sync: false
       - key: TESTFORTGE_BASIC_PASSWORD
         sync: false
+      # Anthropic API key — REQUIRED for Tedgie chat AND for the
+      # /estimation Mockups vision pipeline (engine/mockup_vision.py).
+      # Without it the mockup tab returns "Vision analysis returned no
+      # output" and Tedgie falls back to the rule-based dispatcher.
+      # Get one at https://console.anthropic.com/settings/keys.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional — Figma Personal Access Token. When set, the mockup
+      # vision pipeline pulls per-frame PNG renders from the Figma
+      # REST API (up to 5 frames per file). Without it, only the file
+      # cover image (Open Graph) is fetched, which is enough for
+      # high-level scope but loses screen-by-screen detail. Get one at
+      # https://www.figma.com/settings (→ Personal access tokens).
+      # Required scopes: `file_content:read`.
+      - key: FIGMA_PAT
+        sync: false
+      # Optional — override the Anthropic model used everywhere
+      # (Tedgie chat + mockup vision). Defaults to claude-sonnet-4-5
+      # which supports vision; if you change to a text-only model the
+      # Mockups tab will fail.
+      - key: ANTHROPIC_MODEL
+        sync: false
       # Optional: turn on Tedgie AI mode by setting an Anthropic API key.
       # Leave empty for rule-based fallback.
       - key: ANTHROPIC_API_KEY

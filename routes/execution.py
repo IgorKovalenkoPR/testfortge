@@ -201,7 +201,11 @@ def _reconstruct_partial_payload(run_id: str, config_path: str,
                 "final_url": "",
                 "duration_ms": 0,
             }
-    except OSError:
+    except Exception as exc:
+        # Catch the full superclass — OSError + PermissionError +
+        # anything else the directory walk surfaces. Return None so
+        # the caller flashes the friendly "no salvage possible" path.
+        log.warning("partial-payload reconstruction failed: %s", exc)
         return None
     if not automation_assets:
         return None
@@ -314,6 +318,12 @@ def _reconcile_with_automation(execution: dict,
             # Clear any pending bug reference.
             if r.get("bug_id", "").startswith("__pending_"):
                 r["bug_id"] = ""
+            # Audit fix (2026-05-04): Wipe failure_step + failure
+            # screenshots from the asset bucket so the per-env
+            # decoration loop downstream doesn't render the (now
+            # orphaned) annotated shot next to a Passed status.
+            ev["failure_step"] = None
+            ev["failure_screenshots"] = []
         else:
             # Playwright says Failed/Blocked but simulator said
             # otherwise. Promote the verdict; ensure a bug exists.

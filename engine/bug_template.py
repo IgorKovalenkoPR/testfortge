@@ -177,9 +177,13 @@ def extract_component(*, tc_section: str = "",
     first 3 words. Always returns SOMETHING because empty component
     produces titles like ": Button click times out" which look broken.
     """
-    if tc_section and tc_section.strip():
+    if tc_section and isinstance(tc_section, str) and tc_section.strip():
         return tc_section.strip().rstrip(":")
-    if final_url:
+    # Defensive: callers occasionally hand us None / non-string values
+    # for final_url when reconstruction failed mid-flight. Coerce to
+    # string and bail early when there's nothing to parse — without
+    # this guard we'd produce titles like "None Page".
+    if final_url and isinstance(final_url, str):
         try:
             from urllib.parse import urlparse
             path = (urlparse(final_url).path or "").strip("/")

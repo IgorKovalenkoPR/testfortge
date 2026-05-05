@@ -285,8 +285,10 @@ def _call_claude_vision(images: list[bytes], context: str) -> tuple[str, str]:
     except Exception as exc:
         _logger.warning("anthropic SDK missing: %s", exc)
         return "", ""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        _logger.info("ANTHROPIC_API_KEY not set; skipping vision call")
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        _logger.info("ANTHROPIC_API_KEY not set or empty; skipping vision "
+                     "call. Set it in Render env vars to enable Mockups.")
         return "", ""
     model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
     max_tokens = int(os.environ.get("ANTHROPIC_VISION_MAX_TOKENS", "2000"))
@@ -327,6 +329,14 @@ def _normalise_to_bullets(raw: str) -> str:
 
     Tolerant: Claude usually obeys but occasionally emits a header
     line ("### Login") or numbered items; we down-convert both.
+
+    Audit fix (2026-05-04): the previous implementation prefixed
+    headings with "* " AFTER stripping leading "#"s, but the strip
+    was order-dependent — `s.lstrip("# ")` consumed leading hash
+    characters AND any spaces, then the next branch also re-wrapped
+    in "* ". Result: "## Login Form" became "* ## Login Form" because
+    the second branch saw "## Login Form" still starting with "#".
+    Now we sanitise hashes FIRST in their own branch and short-circuit.
     """
     if not raw:
         return ""
@@ -335,14 +345,20 @@ def _normalise_to_bullets(raw: str) -> str:
         s = line.strip()
         if not s:
             continue
-        if s.startswith("#"):
-            # Headings become a context-only bullet.
-            s = "* " + s.lstrip("# ").strip()
-        if re.match(r"^\d+[.)]\s+", s):
-            s = "* " + re.sub(r"^\d+[.)]\s+", "", s)
-        if not s.startswith(("*", "-", "•")):
-            s = "* " + s
-        out.append(s)
+        # 1) Strip ALL leading hashes + whitespace in one shot. A
+        # heading like "### Login" becomes "Login"; "##Login" becomes
+        # "Login" too. After this step `s` never starts with "#".
+        s = re.sub(r"^#+\s*", "", s).strip()
+        if not s:
+            continue
+        # 2) Strip leading numeric markers ("1. ", "2) ", ...).
+        s = re.sub(r"^\d+[.)]\s+", "", s).strip()
+        # 3) Strip an existing bullet glyph so we control the final
+        # marker uniformly.
+        s = re.sub(r"^[*\-•]\s+", "", s).strip()
+        if not s:
+            continue
+        out.append("* " + s)
     # Dedupe while preserving order.
     seen: set[str] = set()
     deduped: list[str] = []
