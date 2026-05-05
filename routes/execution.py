@@ -232,6 +232,158 @@ def _reconstruct_partial_payload(run_id: str, config_path: str,
     }
 
 
+def _reconcile_with_automation(execution: dict,
+                                automation_assets: dict,
+                                env_type: str) -> None:
+    """Mutate ``execution`` so the simulator's verdict and bug list
+    are reconciled with Playwright's actual observations.
+
+    Operator-reported architectural smell (2026-05-04): the simulator
+    in :func:`engine.qa_testers.execute_items` produces a verdict
+    independent of what Playwright sees. When automation actually ran,
+    Playwright is the authoritative source — its screenshots are the
+    evidence the user is looking at. Without reconciliation a TC can
+    show "Failed" with a bug whose description doesn't match the
+    attached screenshot, because:
+
+      * Simulator decided Failed for one reason (e.g. heuristic match
+        on the TC summary), and
+      * Playwright actually Passed (or failed for a different reason).
+
+    Reconciliation rules (applied only for Web/Mobile-Web envs where
+    Playwright actually drove the browser):
+
+      1. If Playwright's per-TC status is **passed** → override the
+         simulator verdict to Passed and drop any bug the simulator
+         created for that TC. The page worked; there's nothing to
+         report.
+
+      2. If Playwright's status is **failed/blocked** → keep / promote
+         to that status, mark the existing bug for rewrite (the bug-
+         template will replace its content with the actual Playwright
+         failure context). If the simulator said Passed but Playwright
+         failed, mint a synthetic bug placeholder so the
+         downstream bug-rewrite produces real content.
+
+      3. Stats (passed/failed/blocked totals + pass_rate) are
+         recomputed after the override so the UI matches the bug
+         list.
+
+    No-op for non-web envs (iOS/Android natives don't run through
+    Playwright). Mutates execution in place.
+    """
+    if env_type not in ("web", "mobile_web"):
+        return
+    if not automation_assets:
+        return
+    results = execution.get("results") or []
+    bugs = execution.get("bugs") or []
+    bugs_by_item = {b.get("linked_item_id"): b for b in bugs}
+    new_bugs: list[dict] = []
+    drop_item_ids: set[str] = set()
+    promote_to_failed: dict[str, str] = {}  # item_id -> "Failed"/"Blocked"
+
+    # Status mapping: runner uses lowercase, simulator uses Title.
+    runner_to_sim = {
+        "passed":  "Passed",
+        "failed":  "Failed",
+        "blocked": "Blocked",
+    }
+
+    for r in results:
+        item_id = r.get("item_id") or ""
+        ev = automation_assets.get(item_id) if item_id else None
+        if not ev:
+            continue
+        runner_status_raw = (ev.get("status") or "").lower()
+        runner_status = runner_to_sim.get(runner_status_raw)
+        if not runner_status:
+            continue
+        sim_status = r.get("status") or ""
+        if runner_status == sim_status:
+            continue  # already aligned, no work
+        if runner_status == "Passed":
+            # Drop the bug if simulator created one — page worked fine.
+            if sim_status in ("Failed", "Blocked"):
+                drop_item_ids.add(item_id)
+            r["status"] = "Passed"
+            r["comment"] = (
+                "Playwright observed the scenario passing — overrode "
+                "simulator verdict.")
+            r["source"] = "real_check"
+            # Clear any pending bug reference.
+            if r.get("bug_id", "").startswith("__pending_"):
+                r["bug_id"] = ""
+        else:
+            # Playwright says Failed/Blocked but simulator said
+            # otherwise. Promote the verdict; ensure a bug exists.
+            r["status"] = runner_status
+            promote_to_failed[item_id] = runner_status
+            fstep = ev.get("failure_step") or {}
+            comment = (fstep.get("comment") or "").strip()
+            if comment:
+                r["comment"] = comment
+            r["source"] = "real_check"
+            if item_id not in bugs_by_item:
+                # Synthesize a placeholder; bug_template.rewrite will
+                # fill it in with proper title/STR/AR/ER from the
+                # Playwright failure context downstream.
+                placeholder = {
+                    "id": "",
+                    "title": f"{item_id} — automated failure",
+                    "severity": "Major",
+                    "priority": "High",
+                    "status": "Open",
+                    "environment": "",
+                    "preconditions": "",
+                    "steps_to_reproduce": "",
+                    "actual_result": comment or "Playwright run failed.",
+                    "expected_result": "",
+                    "frequency": "Always",
+                    "affects_version": "",
+                    "found_in_build": "",
+                    "attachments": [],
+                    "linked_item_id": item_id,
+                    "linked_item_type": r.get("item_type", "test_case"),
+                    "reporter": r.get("tester_name", ""),
+                    "assignee": "",
+                    "created_at": r.get("timestamp", ""),
+                    "component": "",
+                    "labels": [r.get("item_type", "test_case"), "auto-synthesized"],
+                    "comment": comment,
+                }
+                new_bugs.append(placeholder)
+                # Tag the result with a pending marker the per-env
+                # loop later replaces with the assigned bug ID.
+                r["bug_id"] = f"__pending_synth_{item_id}"
+
+    # Drop simulator bugs for TCs Playwright passed.
+    if drop_item_ids:
+        execution["bugs"] = [
+            b for b in bugs
+            if b.get("linked_item_id") not in drop_item_ids
+        ]
+        bugs = execution["bugs"]
+    # Add synth bugs for Playwright-only failures.
+    if new_bugs:
+        execution["bugs"] = list(bugs) + new_bugs
+    # Recompute stats from the reconciled results.
+    passed = sum(1 for r in results if r.get("status") == "Passed")
+    failed = sum(1 for r in results if r.get("status") == "Failed")
+    blocked = sum(1 for r in results if r.get("status") == "Blocked")
+    total = passed + failed + blocked
+    execution["stats"] = {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "blocked": blocked,
+        "pass_rate": round(passed / total * 100, 1) if total else 0,
+        "sources": (execution.get("stats") or {}).get("sources") or {},
+        "site_url": (execution.get("stats") or {}).get("site_url") or "",
+        "reconciled_with_automation": True,
+    }
+
+
 def _maybe_restore_pack_from_db() -> None:
     """If the session has no TC / CL pack but the active project does,
     rehydrate the session keys from the DB so the run page shows what
@@ -779,20 +931,32 @@ def register(app: Flask) -> None:
                           _proc.pid, config_id, len(automation_items),
                           env_types,
                       )
-                      session["pending_automation_run"] = config_id
+                      # Store the run_id in session so the GET handler
+                      # can render a polling status widget on the same
+                      # page. Operator-reported UX bug: the previous
+                      # iteration redirected to /test-execution/live,
+                      # which conflicted with the existing "Open live
+                      # view in new tab" button (operator opened the
+                      # tab manually, then the form-tab also navigated
+                      # away — duplicate live-view tabs). Now the
+                      # form stays put and shows progress in-place;
+                      # operator clicks Open-in-new-tab when they
+                      # actually want frame-by-frame view.
+                      session["active_automation_run"] = {
+                          "run_id": config_id,
+                          "case_count": len(automation_items),
+                          "started_at": datetime.now().isoformat(),
+                      }
                       flash(
-                          f"✓ Playwright pass dispatched ({len(automation_items)} "
-                          f"case(s)). Watch /test-execution/live — you'll be "
-                          f"redirected to the results page when it's done.",
+                          f"✓ Playwright pass dispatched "
+                          f"({len(automation_items)} case(s)). The form "
+                          f"will show live progress; results auto-import "
+                          f"when the worker is done. Use the "
+                          f"\"Open live view in new tab\" button if you "
+                          f"want frame-by-frame view.",
                           "success",
                       )
-                      return redirect(
-                          url_for("test_execution_live") + f"?run_id={config_id}"
-                      )
-                      # The asset-building loop, session writes, and
-                      # flash that used to follow runner.run() now live
-                      # in /test-execution/results/<run_id>. The early
-                      # return above keeps everything below unreachable.
+                      return redirect(url_for("test_execution_page"))
                   except Exception as exc:
                       log.exception("Automation dispatch failed: %s", exc)
                       # Stamp the phase + reason into info.json so the
@@ -1129,12 +1293,38 @@ def register(app: Flask) -> None:
         existing_bug_ids = [
             b.get("id") for b in session.get("bug_reports_data", []) if b.get("id")
         ]
+        # An "active_automation_run" session entry — set by the POST
+        # handler when a Playwright pass is dispatched — drives the
+        # in-page progress widget. We auto-clear it once the worker is
+        # done (the results endpoint pops it on import); leftover
+        # entries from older runs are pruned here too so a stale entry
+        # doesn't render a permanent banner.
+        active_run = session.get("active_automation_run")
+        if active_run:
+            try:
+                import os as _os
+                from routes.automation import STORAGE_ROOT as _SR
+                rid = active_run.get("run_id", "")
+                done = _os.path.isfile(_os.path.join(
+                    _SR, "automation_runs", "_pending",
+                    f"{rid}.done.flag"))
+                # Pruning rule: if the done.flag exists AND the
+                # results endpoint has already cleaned the pending
+                # files (no .json), the run is fully imported — drop.
+                cfg_exists = _os.path.isfile(_os.path.join(
+                    _SR, "automation_runs", "_pending", f"{rid}.json"))
+                if done and not cfg_exists:
+                    session.pop("active_automation_run", None)
+                    active_run = None
+            except Exception:
+                pass
         return render_template("test_execution.html",
                                has_tc_data=has_tc, has_cl_data=has_cl,
                                tc_count=len(tc_data), cl_count=len(cl_data),
                                tc_items=tc_data, cl_items=cl_data,
                                test_runs=test_runs,
                                resource_urls=resource_urls,
+                               active_automation_run=active_run,
                                # Pre-fill Base URL from the previous run so
                                # the tester doesn't retype it. Empty string
                                # is fine — the template falls back to the
@@ -1727,6 +1917,16 @@ def register(app: Flask) -> None:
                 manual_statuses=manual_statuses or None,
                 manual_bug_refs=manual_bug_refs or None,
             )
+            # Verdict reconciliation — for Web/Mobile-Web envs where
+            # Playwright actually drove the browser, its observation
+            # is the authoritative source. The simulator's heuristic
+            # verdict gets overridden, simulator bugs for Passed
+            # cases are dropped, and Playwright-only failures get
+            # synthesised bugs (their content is filled in by the
+            # rewrite step below). Without this, a TC could ship a
+            # bug whose description has nothing to do with the
+            # screenshots attached to it.
+            _reconcile_with_automation(execution, automation_assets, et)
 
             bug_id_map: dict[str, str] = {}
             running_bugs = list(existing_bugs) + [
@@ -1813,7 +2013,27 @@ def register(app: Flask) -> None:
                 if asset and et in ("web", "mobile_web"):
                     if asset.get("video"):
                         r["video"] = asset["video"]
-                    if asset.get("screenshots"):
+                    # Pick a shot list that matches the TC verdict:
+                    #   * Failed/Blocked → lead with the annotated
+                    #     failure shot + the previous step's "after"
+                    #     (context). Operator-reported: "I see Failed
+                    #     status but no red box anywhere on the
+                    #     attached shots."
+                    #   * Passed → clean per-step gallery.
+                    fstep = asset.get("failure_step") or {}
+                    is_failure = (r.get("status") in ("Failed", "Blocked"))
+                    if is_failure and fstep.get("screenshot"):
+                        gallery: list[str] = []
+                        if fstep.get("context_screenshot"):
+                            gallery.append(fstep["context_screenshot"])
+                        gallery.append(fstep["screenshot"])
+                        # Tail: the rest of clean shots so the
+                        # operator sees the run's progression.
+                        for s in (asset.get("screenshots") or []):
+                            if s and s not in gallery:
+                                gallery.append(s)
+                        r["screenshots"] = gallery
+                    elif asset.get("screenshots"):
                         r["screenshots"] = asset["screenshots"]
 
             if db_run_id is not None:
@@ -1916,6 +2136,10 @@ def register(app: Flask) -> None:
                     os.remove(p)
             except OSError:
                 pass
+
+        # Drop the in-page run-progress widget marker — results are
+        # imported, the banner is no longer relevant.
+        session.pop("active_automation_run", None)
 
         return redirect(url_for("test_execution_page"))
 

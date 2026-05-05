@@ -461,6 +461,126 @@
             {{ t.get('te_live_open', 'Open live view in new tab ↗') }}
         </a>
     </div>
+
+    {# ── In-page run progress widget ────────────────────────────
+       Populated by the POST handler when a Playwright pass is
+       dispatched. Polls /test-execution/run-status/<id> every
+       2 s; when status flips to done/stalled the widget hands
+       control to /test-execution/results/<id>. The form stays
+       on /test-execution so the operator doesn't lose context. #}
+    {% if active_automation_run %}
+    <div id="te-active-run" class="card"
+         data-run-id="{{ active_automation_run.run_id }}"
+         data-case-count="{{ active_automation_run.case_count }}"
+         style="margin-bottom:14px;border:2px solid #0369a1;background:#f0f9ff;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <span id="te-active-pill"
+                  style="display:inline-block;padding:4px 12px;border-radius:999px;
+                         font-weight:700;font-size:0.85em;background:#dcfce7;color:#166534;">
+                ● running
+            </span>
+            <span id="te-active-progress"
+                  style="font-size:0.92em;color:#0f172a;font-weight:600;">
+                0 / {{ active_automation_run.case_count }} cases
+            </span>
+            <span style="font-size:0.85em;color:#64748b;margin-left:auto;">
+                run_id: <code>{{ active_automation_run.run_id }}</code>
+            </span>
+        </div>
+        <p id="te-active-hint" style="margin:8px 0 0 0;font-size:0.85em;color:#0c4a6e;">
+            Worker is running in the background. Page will refresh
+            automatically when done; you can navigate away — the run
+            keeps going.
+        </p>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="{{ url_for('test_execution_live') }}?run_id={{ active_automation_run.run_id }}"
+               target="_blank" rel="noopener"
+               class="btn btn-secondary" style="font-size:0.85em;">
+                Open live filmstrip ↗
+            </a>
+            <a href="{{ url_for('test_execution_results', run_id=active_automation_run.run_id) }}"
+               id="te-active-results-btn"
+               class="btn btn-primary" style="font-size:0.85em;display:none;">
+                Import results
+            </a>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var card = document.getElementById('te-active-run');
+        if (!card) return;
+        var runId = card.dataset.runId;
+        var total = parseInt(card.dataset.caseCount, 10) || 0;
+        var pill = document.getElementById('te-active-pill');
+        var prog = document.getElementById('te-active-progress');
+        var hint = document.getElementById('te-active-hint');
+        var btn  = document.getElementById('te-active-results-btn');
+        var statusUrl = "/test-execution/run-status/" + encodeURIComponent(runId);
+        var infoUrl  = "{{ url_for('test_execution_live_info') }}";
+        function paint(stat) {
+            var s = (stat && stat.status) || 'queued';
+            if (s === 'done') {
+                pill.textContent = '✓ done';
+                pill.style.background = '#e0e7ff';
+                pill.style.color = '#3730a3';
+                hint.textContent = 'Run finished. Importing results…';
+                if (btn) { btn.style.display = ''; }
+                // One-time auto-import; if it fails the user has the
+                // button. 1.5s delay so the user sees the success pill.
+                setTimeout(function () {
+                    window.location.href =
+                        "/test-execution/results/" + encodeURIComponent(runId);
+                }, 1500);
+            } else if (s === 'stalled' || s === 'failed') {
+                pill.textContent = (s === 'stalled') ? '⚠ stalled' : '✗ failed';
+                pill.style.background = '#fee2e2';
+                pill.style.color = '#991b1b';
+                hint.textContent = stat.error
+                    || 'Worker did not finish cleanly.';
+                if (btn) {
+                    btn.style.display = '';
+                    btn.textContent = 'Import partial results';
+                }
+            } else {
+                pill.textContent = '● running';
+                pill.style.background = '#dcfce7';
+                pill.style.color = '#166534';
+            }
+        }
+        function pollProgress() {
+            // Pull progress from live info.json — the worker writes
+            // cases_done there even when run-status hasn't flipped yet.
+            fetch(infoUrl, { cache: 'no-store' })
+                .then(function (r) { return r.json(); })
+                .then(function (info) {
+                    if (info && info.cases_done >= 0) {
+                        var done = info.cases_done || 0;
+                        var grand = info.cases_total || total || 1;
+                        prog.textContent = done + ' / ' + grand + ' cases';
+                    }
+                })
+                .catch(function () {});
+        }
+        function pollStatus() {
+            fetch(statusUrl, { cache: 'no-store' })
+                .then(function (r) { return r.json(); })
+                .then(paint)
+                .catch(function () {});
+        }
+        pollStatus();
+        pollProgress();
+        var iv = setInterval(function () {
+            pollStatus();
+            pollProgress();
+        }, 2000);
+        // Stop polling once we've redirected — defensive against
+        // memory leaks if the redirect is delayed.
+        window.addEventListener('beforeunload', function () {
+            clearInterval(iv);
+        });
+    })();
+    </script>
+    {% endif %}
     <div class="form-grid">
         <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;">

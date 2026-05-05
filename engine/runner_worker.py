@@ -102,17 +102,46 @@ def _serialise_report(rep) -> dict[str, Any]:
     }
 
 
+def _file_md5(path: str, chunk: int = 65536) -> str:
+    """MD5 hex digest of a file. Used to dedupe consecutive byte-
+    identical screenshots in a TC's gallery — operator-reported the
+    runner produces 3-4 nearly-identical shots per TC because most
+    steps don't change page state visibly. Hashing once per shot is
+    cheap (~1 ms for a 1280x800 PNG) and lets us drop the noise
+    without losing the genuine "before / after" pairs."""
+    import hashlib
+    h = hashlib.md5()
+    try:
+        with open(path, "rb") as f:
+            while True:
+                buf = f.read(chunk)
+                if not buf:
+                    break
+                h.update(buf)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
 def _build_automation_assets(report_dict: dict[str, Any],
                               storage_root: str) -> dict[str, Any]:
     """Mirror the inline assets-builder from routes/execution.py so the
     results endpoint can hand the same dict to the per-env loop without
-    re-running the validation logic."""
+    re-running the validation logic.
+
+    Consecutive byte-identical shots are deduped per TC (only the
+    first occurrence is kept). Most TCs spend several steps on the
+    same page (expect_text, scroll, expect_url), producing identical
+    "after" frames; deduping gives the gallery a clean visual story
+    instead of a wall of look-alikes.
+    """
     assets: dict[str, Any] = {}
     for r in (report_dict.get("scripts") or []):
         cid = r.get("tc_id") or ""
         if not cid:
             continue
         shots: list[str] = []
+        seen_hashes: list[str] = []  # ordered, parallel to shots
         fail_shots: list[str] = []
         failure_step: dict | None = None
         prev_after = ""
@@ -124,7 +153,14 @@ def _build_automation_assets(report_dict: dict[str, Any],
                 try:
                     if (os.path.isfile(abs_p)
                             and os.path.getsize(abs_p) > 0):
-                        shots.append(after)
+                        h = _file_md5(abs_p)
+                        # Drop only when the SAME hash already lives at
+                        # the tail of shots. Non-adjacent duplicates
+                        # are still meaningful (e.g. user navigated
+                        # away and back).
+                        if not seen_hashes or seen_hashes[-1] != h:
+                            shots.append(after)
+                            seen_hashes.append(h)
                 except OSError:
                     pass
             fail = step.get("screenshot_failure") or ""
