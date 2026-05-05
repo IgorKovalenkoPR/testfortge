@@ -14,14 +14,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ── Loading overlay for slow generation endpoints ─────────────
-    // /test-cases, /checklist and /estimation/run can take 30-90 s on
-    // a free-tier instance because they crawl the URL + run a real
-    // headless browser. Without feedback the user thinks the page hung
-    // and reloads, which discards the upload + re-runs the crawl.
-    // This overlay shows a spinner with a clear "this can take a
-    // minute" message once any matching form is submitted, and lets
-    // the user cancel by reloading the tab.
-    const SLOW_PATHS = ['/test-cases', '/checklist', '/estimation/run', '/estimation'];
+    // /test-cases and /checklist can take 30-90 s on a free-tier
+    // instance because they crawl the URL + run a real headless
+    // browser. Without feedback the user thinks the page hung and
+    // reloads, which discards the upload + re-runs the crawl. This
+    // overlay shows a spinner once any matching form is submitted.
+    //
+    // 2026-05-04: /estimation/* routes were dropped from this list.
+    // The estimation form has its own per-stage modal
+    // (templates/estimation.html:est-gen-overlay) showing tab-aware
+    // labels ("Asking Claude vision…", "Crawling pages…", etc.).
+    // Letting THIS generic overlay fire on top would stack two
+    // modals — operator-reported as the wrong UX.
+    const SLOW_PATHS = ['/test-cases', '/checklist'];
     const isSlowEndpoint = (form) => {
         const action = form.getAttribute('action') || window.location.pathname;
         const url = new URL(action, window.location.origin);
@@ -29,12 +34,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Skip the upload form on /test-cases or /checklist — it's fast.
         if (form.action && /\/upload$/.test(url.pathname)) return false;
         if (form.classList && form.classList.contains('upload-existing')) return false;
-        // Skip forms that have their own async-progress modal — the
-        // tc-gen-form / cl-gen-form pair show their own dedicated
-        // overlay backed by the JobQueue and would otherwise fire two
-        // overlays at once (the legacy "30-90 seconds" one + the new
-        // stage-by-stage one).
-        if (form.id === 'tc-gen-form' || form.id === 'cl-gen-form') return false;
+        // Skip forms that have their own async-progress modal — each of
+        // these renders a dedicated stage-aware overlay backed by the
+        // JobQueue. Stacking two would be double-overlay UX (operator-
+        // reported on /estimation 2026-05-04).
+        if (form.id === 'tc-gen-form'
+            || form.id === 'cl-gen-form'
+            || form.id === 'estimation-form') return false;
         return SLOW_PATHS.some(p => url.pathname === p);
     };
 

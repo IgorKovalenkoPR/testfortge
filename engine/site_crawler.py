@@ -28,7 +28,13 @@ _logger = get_logger(__name__)
 
 # ── Limits ────────────────────────────────────────────────────────
 
-MAX_PAGES = 15          # max pages to fetch
+# 2026-05-04 — operator reported testfort.com only got 10 pages crawled
+# and ~66 TCs total, "too shallow even for a low-level checklist".
+# Bumped 15 → 50 so a typical marketing/WordPress site (which usually
+# has 20-40 internal pages) is fully covered. The per-page cap in
+# engine/qa_estimator.features_from_site_analysis was bumped in
+# parallel so the richer crawl actually surfaces as features.
+MAX_PAGES = 50          # max pages to fetch
 FETCH_TIMEOUT = 8       # seconds per request
 MAX_BODY_KB = 512       # truncate response body
 

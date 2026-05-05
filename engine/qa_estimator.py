@@ -59,13 +59,25 @@ class Feature:
 
 @dataclass
 class TaskRow:
-    """A single row in the estimation table."""
+    """A single row in the estimation table.
+
+    Carries both the legacy two-point fields (min_h / max_h /
+    expected_h = avg) AND a triangular / Beta-PERT layer
+    (most_likely_h, pert_expected_h, sigma_h). The XLSX export and the
+    classic UI continue to read the legacy fields unchanged; the new
+    fields are surfaced by the UI as a confidence panel without
+    altering any client-facing deliverable.
+    """
     key: str           # stable identifier (e.g. "communication")
     title: str         # human-readable title
     description: str   # long description shown in the sheet
     min_h: float
     max_h: float
     expected_h: float
+    # ── Triangular / Beta-PERT (additive — never replaces expected_h)
+    most_likely_h: float = 0.0      # M — heuristic between O and P
+    pert_expected_h: float = 0.0    # (O + 4M + P) / 6
+    sigma_h: float = 0.0            # (P - O) / 6
 
 
 @dataclass
@@ -124,6 +136,32 @@ class EstimationResult:
     cost_full_min: float = 0.0
     cost_full_max: float = 0.0
     cost_full_expected: float = 0.0
+
+    # ── Beta-PERT aggregates (additive layer, never alters legacy fields above)
+    # Aggregated across the 7 core task rows. ``pert_sigma`` is the
+    # combined standard deviation under the assumption that task durations
+    # are independent — sqrt(sum of variances). Confidence bands follow
+    # the 68-95-99.7 rule for a normal approximation of Beta-PERT.
+    team_size: int = 1
+    pert_expected: float = 0.0
+    pert_sigma: float = 0.0
+    band_68_low: float = 0.0
+    band_68_high: float = 0.0
+    band_95_low: float = 0.0
+    band_95_high: float = 0.0
+    band_99_low: float = 0.0
+    band_99_high: float = 0.0
+    # Brooks's-Law communication-overhead penalty in hours (0 when
+    # team_size <= 1). Surfaced in the UI as its own line so the user
+    # sees why the expected-with-team grew — XLSX rows untouched.
+    brooks_overhead_hours: float = 0.0
+    # Historical calibration — populated by the route layer after a
+    # peer-group lookup. When set, the UI shows a soft hint explaining
+    # how the new estimate compares to past projects of the same owner
+    # and similar feature count. Never overrides the actual numbers.
+    history_hint: str = ""
+    history_median_hours_per_feature: float = 0.0
+    history_sample_size: int = 0
 
 
 # ── Core formulas ────────────────────────────────────────────────
@@ -219,6 +257,9 @@ def compute_estimation(
     bug_report_rate: float | None = None,
     pm_overhead: float | None = None,
     max_testing_stretch: float | None = None,
+    # Team size for Brooks's-Law communication overhead. Default=1 keeps
+    # legacy behaviour byte-identical for callers that don't pass it.
+    team_size: int = 1,
 ) -> EstimationResult:
     """Apply the estimation formulas from the reference template.
 
@@ -244,6 +285,7 @@ def compute_estimation(
         bug_report_rate=_bug,
         pm_overhead=_pm,
         max_testing_stretch=_stretch,
+        team_size=max(1, int(team_size or 1)),
         source=source,
         source_ref=source_ref,
         created_at=datetime.now().strftime("%Y-%m-%d"),
@@ -346,6 +388,57 @@ def compute_estimation(
     res.cost_full_min = res.full_total_min * rate
     res.cost_full_max = res.full_total_max * rate
     res.cost_full_expected = res.full_total_expected * rate
+
+    # ── Beta-PERT layer (additive) ───────────────────────────────
+    # Per-row M (most-likely) heuristic: nudge ~40% above the optimistic
+    # floor — empirically matches QA effort distributions where the floor
+    # is the "happy path" runtime and the ceiling builds in unknowns.
+    # Source: standard PERT practice + Wikipedia 'Three-point estimation'.
+    import math as _math
+    pert_total_expected = 0.0
+    pert_total_variance = 0.0
+    for t in res.tasks[:7]:  # 7 core rows only — compatibility scales separately
+        O, P = float(t.min_h), float(t.max_h)
+        M = O + 0.4 * (P - O)
+        sigma = (P - O) / 6.0
+        e_pert = (O + 4.0 * M + P) / 6.0
+        t.most_likely_h = round(M, 3)
+        t.pert_expected_h = round(e_pert, 3)
+        t.sigma_h = round(sigma, 3)
+        pert_total_expected += e_pert
+        pert_total_variance += sigma * sigma
+    pert_total_sigma = _math.sqrt(pert_total_variance)
+    # PM overhead is multiplicative on top of the core 7 rows.
+    pert_total_expected_with_pm = pert_total_expected * (1.0 + _pm)
+    pert_total_sigma_with_pm    = pert_total_sigma * (1.0 + _pm)
+
+    # ── Brooks's Law: communication overhead with team_size > 1 ─
+    # Each engineer past the first adds a small amount of comm overhead.
+    # We use 7% per additional channel (n*(n-1)/2), capped at +35% so a
+    # very large team doesn't inflate to absurd numbers without a human
+    # in the loop. team_size <= 1 → zero penalty.
+    n = max(1, int(res.team_size or 1))
+    if n > 1:
+        channels = n * (n - 1) / 2
+        brooks_factor = min(0.35, 0.07 * channels)
+        res.brooks_overhead_hours = round(
+            pert_total_expected_with_pm * brooks_factor, 2,
+        )
+    else:
+        res.brooks_overhead_hours = 0.0
+
+    res.pert_expected = round(
+        pert_total_expected_with_pm + res.brooks_overhead_hours, 2,
+    )
+    res.pert_sigma = round(pert_total_sigma_with_pm, 2)
+    # 68-95-99.7 confidence bands assuming a normal approximation
+    # of the Beta-PERT distribution. Floor at 0 — negative hours are nonsense.
+    res.band_68_low  = round(max(0.0, res.pert_expected - res.pert_sigma), 2)
+    res.band_68_high = round(res.pert_expected + res.pert_sigma, 2)
+    res.band_95_low  = round(max(0.0, res.pert_expected - 2 * res.pert_sigma), 2)
+    res.band_95_high = round(res.pert_expected + 2 * res.pert_sigma, 2)
+    res.band_99_low  = round(max(0.0, res.pert_expected - 3 * res.pert_sigma), 2)
+    res.band_99_high = round(res.pert_expected + 3 * res.pert_sigma, 2)
 
     return res
 
@@ -685,12 +778,21 @@ def features_from_site_analysis(analysis) -> list[Feature]:
     interactive_types = {"spa", "ecommerce", "dashboard", "app"}
     interactive = site_type in interactive_types
 
-    # For content-heavy sites we keep at most ~8 unique pages to avoid
-    # inflating the total with near-identical marketing pages.
+    # Per-page cap = how many unique pages we surface as Features rows.
+    # Operator-reported on 2026-05-04: testfort.com got only 10 pages
+    # in the result table — too shallow even for a low-level checklist.
+    # Was: WordPress 8 / static 6 / landing 3 / SPA 12 / app 12 /
+    #       dashboard 15 / ecommerce 18 / generic 10.
+    # Now bumped roughly 2-3x because a real estimation table for a
+    # marketing or e-commerce site needs to enumerate every page that
+    # could harbour testable behaviour. The crawler's MAX_PAGES (50)
+    # is the upper ceiling — these caps are just the per-architecture
+    # de-duplication threshold.
     per_page_cap_count = {
-        "wordpress": 8, "static": 6, "landing": 3,
-        "spa": 12, "app": 12, "dashboard": 15, "ecommerce": 18, "generic": 10,
-    }.get(site_type, 10)
+        "wordpress": 25, "static": 20, "landing": 8,
+        "spa": 30, "app": 30, "dashboard": 35,
+        "ecommerce": 40, "generic": 25,
+    }.get(site_type, 25)
 
     unique_pages: list[tuple] = []
     for page in getattr(analysis, "pages", []) or []:
