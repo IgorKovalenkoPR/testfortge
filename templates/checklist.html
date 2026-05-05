@@ -7,6 +7,8 @@
     <p class="subtitle">{{ t.cl_subtitle }}</p>
 </div>
 
+{% include '_project_picker.html' %}
+
 <!-- Input form. Same async pattern as /test-cases — submit posts to
      /checklist/run-async and a progress modal polls /checklist/status. -->
 <form method="POST" enctype="multipart/form-data" id="cl-gen-form">

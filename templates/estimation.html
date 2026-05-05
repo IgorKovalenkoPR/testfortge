@@ -6,6 +6,8 @@
   <h1>{{ t.est_title }}</h1>
 </div>
 
+{% include '_project_picker.html' %}
+
 {# ── Estimation progress modal — same UX as TC / CL generation:
    full-screen overlay with stage labels, elapsed counter, error
    surface + manual Retry. Replaces the old inline progress bar

@@ -297,6 +297,40 @@ def ensure_active_project(session_obj=None) -> str:
     return pid
 
 
+def get_picker_context(session_obj=None) -> dict:
+    """Build the ``projects`` + ``active_project_id`` template kwargs
+    that ``_project_picker.html`` needs.
+
+    Centralised so every module's GET handler doesn't have to repeat
+    the same DB call. Best-effort: a DB outage returns an empty list
+    instead of raising — the picker still renders its "Create new"
+    form so the user has a way forward.
+
+    Returned dict shape::
+
+        {
+            "projects": [{ "id": "...", "name": "...",
+                           "test_cases_count": int,
+                           "checklist_count": int,
+                           "bug_count": int, ... }, ...],
+            "active_project_id": "uuid-hex-or-empty-string",
+        }
+    """
+    sess = session_obj if session_obj is not None else session
+    try:
+        from engine import db as _db
+        sid = get_session_id(sess)
+        projects = (_db.list_projects(owner_sid=sid)
+                    if hasattr(_db, "list_projects") else [])
+    except Exception as exc:
+        log.debug("get_picker_context list_projects failed: %s", exc)
+        projects = []
+    return {
+        "projects": projects or [],
+        "active_project_id": sess.get("project_id") or "",
+    }
+
+
 __all__ = [
     # constants
     "SAFE_FOLDER_RE", "SAFE_ASSET_RE", "URL_PATTERN", "GENERATED_KEYS",
@@ -310,5 +344,7 @@ __all__ = [
     "extract_resource_urls",
     # session
     "get_session_id",
+    # project picker
+    "get_picker_context",
     "ensure_active_project",
 ]

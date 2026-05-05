@@ -4,6 +4,9 @@
 {% block content %}
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
 <p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
+
+{% include '_project_picker.html' %}
+
 {# ── Pack status badge — Feature #15. Shows at-a-glance how many
    items the current session pack holds, so the tester knows what
    they're about to Run before scrolling. Hidden until at least one

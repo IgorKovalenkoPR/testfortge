@@ -53,6 +53,27 @@ def _set_active_project(project_id: str, name: str,
     session["project_id"] = project_id
 
 
+def _safe_next_target(default_endpoint: str = "index") -> str:
+    """Honour an optional ``next`` form field so the project-picker
+    redirect lands the user back on the module they came from
+    (Estimation, Test Cases, …) instead of bouncing to the dashboard.
+
+    Hardened: only allows same-origin paths starting with ``/``. Any
+    cross-site value (or one that smells like a protocol) falls back
+    to ``default_endpoint`` — protects against open-redirect abuse.
+    """
+    raw = (request.form.get("next") or "").strip()
+    if not raw:
+        return url_for(default_endpoint)
+    # Reject anything that looks like a scheme or a protocol-relative
+    # URL. We only want our own paths.
+    if (not raw.startswith("/")) or raw.startswith("//"):
+        return url_for(default_endpoint)
+    if "://" in raw:
+        return url_for(default_endpoint)
+    return raw
+
+
 def register(app: Flask) -> None:
     """Attach project-management routes on the app."""
 
@@ -156,13 +177,21 @@ def register(app: Flask) -> None:
 
     @app.route("/projects/db/create", methods=["POST"])
     def db_create_project():
-        """Create a fresh project from the dashboard picker form."""
+        """Create a fresh project from any module's project-picker form.
+
+        Honours an optional ``next`` form field so the user lands back
+        on the module they came from (Estimation, Test Cases, …)
+        instead of being kicked to the dashboard. Operator-reported
+        2026-05-04: the legacy hard-coded redirect to ``index`` was
+        a dead-end UX every time the picker fired off /estimation.
+        """
         name = (request.form.get("project_name") or "").strip()
         base_url = (request.form.get("base_url") or "").strip() or None
         description = (request.form.get("description") or "").strip() or None
+        next_url = _safe_next_target("index")
         if not name:
             flash("Project name is required.", "error")
-            return redirect(url_for("index"))
+            return redirect(next_url)
 
         try:
             project_id = _db.upsert_project(
@@ -171,26 +200,61 @@ def register(app: Flask) -> None:
             )
         except ValueError as exc:
             flash(str(exc), "error")
-            return redirect(url_for("index"))
+            return redirect(next_url)
 
-        # Newly-created project becomes the active one — but we don't
-        # touch GENERATED_KEYS so any in-flight work survives the click.
+        # Wipe generated keys (TCs/CL/runs/bugs from a previous active
+        # project) so switching to a fresh project shows an empty
+        # workspace instead of the previous project's artefacts.
+        for key in GENERATED_KEYS:
+            session.pop(key, None)
         _set_active_project(project_id, name, base_url)
         flash(f"Project '{name}' created and activated.", "success")
-        return redirect(url_for("index"))
+        return redirect(next_url)
 
     @app.route("/projects/db/select/<project_id>", methods=["POST"])
     def db_select_project(project_id):
-        """Activate an existing project without overwriting session data."""
+        """Activate an existing project AND hydrate the session from DB
+        so the page the user lands on shows that project's TCs / CL /
+        bugs (instead of the previous project's leftover data).
+
+        Honours optional ``next`` form field for redirect target.
+        """
+        next_url = _safe_next_target("index")
         if not _is_valid_project_id(project_id):
             abort(400)
         meta = _db.get_project(project_id)
         if not meta:
             flash("Project not found.", "error")
-            return redirect(url_for("index"))
+            return redirect(next_url)
+
+        # Wipe the previous project's generated keys before loading the
+        # selected one — otherwise switching from a 60-TC project to a
+        # 5-TC project would leave the 60 TCs in session.
+        for key in GENERATED_KEYS:
+            session.pop(key, None)
+
         _set_active_project(meta["id"], meta["name"], meta.get("base_url"))
+
+        # Hydrate from DB. Each of these is best-effort — a brand-new
+        # project will return empty lists, which is fine.
+        try:
+            tcs = _db.load_test_cases(project_id) if hasattr(
+                _db, "load_test_cases") else []
+            cls = _db.load_checklist(project_id) if hasattr(
+                _db, "load_checklist") else []
+            bugs = (_db.list_bugs(project_id=project_id)
+                    if hasattr(_db, "list_bugs") else [])
+            if tcs:
+                session["test_cases_data"] = tcs
+            if cls:
+                session["checklist_data"] = cls
+            if bugs:
+                session["bug_reports_data"] = bugs
+        except Exception as exc:
+            log.warning("project select: hydrate failed: %s", exc)
+
         flash(f"Active project: {meta['name']}", "success")
-        return redirect(url_for("index"))
+        return redirect(next_url)
 
 
     @app.route("/projects/db/rename/<project_id>", methods=["POST"])

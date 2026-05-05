@@ -7,6 +7,8 @@
     <p class="subtitle">{{ t.tc_subtitle }}</p>
 </div>
 
+{% include '_project_picker.html' %}
+
 <!-- Input form: files + text + prompt. The submit handler intercepts
      and routes to /test-cases/run-async so a slow LLM doesn't freeze the
      page; a progress modal polls /test-cases/status/<id> until done.

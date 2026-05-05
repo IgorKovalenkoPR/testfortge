@@ -1,0 +1,116 @@
+{# ── Reusable project-picker partial ──────────────────────────────
+   Renders a horizontal bar with:
+     * the list of projects owned by this session as a <select>
+     * a "Switch" button (disabled when the chosen option is already
+       active — keeps the click idempotent)
+     * an inline "Create new" inputs row that posts to /projects/db/create
+
+   Both forms include a hidden ``next`` field set to ``request.path``
+   so the user stays on the module page they came from instead of
+   bouncing to the dashboard like the legacy projects routes do.
+
+   Usage:
+       {% include '_project_picker.html' %}
+
+   Required template context (each route's GET handler must pass these):
+     * projects:          list of dicts from db.list_projects(owner_sid=sid)
+     * active_project_id: current session["project_id"] (may be empty)
+
+   When ``projects`` is missing or empty the partial still renders
+   the create form so a fresh visitor can spin up their first
+   project from any module — Estimation no longer requires a side
+   trip to /dashboard. #}
+
+<div class="card project-picker"
+     style="margin-bottom:14px;padding:14px 18px;background:#f8fafc;
+            border:1px solid #e2e8f0;">
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;flex:1 1 360px;min-width:280px;">
+      <label for="pp-select"
+             style="font-weight:600;color:#0f172a;white-space:nowrap;">
+        🗂 {{ t.get('pp_active_project', 'Active project:') }}
+      </label>
+      <form method="POST" id="pp-select-form"
+            style="display:flex;gap:6px;flex:1;align-items:center;"
+            data-base-action="{{ url_for('db_select_project', project_id='__ID__') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <select id="pp-select" name="project_id"
+                style="flex:1;min-width:200px;padding:6px 10px;
+                       border:1px solid #cbd5e1;border-radius:4px;background:white;">
+          {% if not projects %}
+          <option value="" disabled selected>
+            {{ t.get('pp_none', 'No projects yet — create one →') }}
+          </option>
+          {% else %}
+          {% for p in projects %}
+          <option value="{{ p.id }}"
+                  {% if active_project_id and p.id == active_project_id %}selected{% endif %}>
+            {{ p.name }}
+            {% if p.test_cases_count or p.checklist_count or p.bug_count %}
+              ({{ p.test_cases_count or 0 }} TC ·
+               {{ p.checklist_count or 0 }} CL ·
+               {{ p.bug_count or 0 }} bugs)
+            {% endif %}
+          </option>
+          {% endfor %}
+          {% endif %}
+        </select>
+        <button type="submit" id="pp-switch-btn"
+                {% if not projects %}disabled{% endif %}
+                class="btn btn-secondary"
+                style="padding:6px 14px;font-size:0.9em;">
+          {{ t.get('pp_switch', 'Switch') }}
+        </button>
+      </form>
+    </div>
+
+    <div style="flex:1 1 340px;min-width:280px;">
+      <form method="POST" action="{{ url_for('db_create_project') }}"
+            style="display:flex;gap:6px;align-items:center;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input type="text" name="project_name" required
+               placeholder="{{ t.get('pp_new_placeholder', 'New project name…') }}"
+               style="flex:1;min-width:160px;padding:6px 10px;
+                      border:1px solid #cbd5e1;border-radius:4px;">
+        <button type="submit" class="btn btn-primary"
+                style="padding:6px 14px;font-size:0.9em;white-space:nowrap;">
+          + {{ t.get('pp_create', 'Create') }}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <p style="margin:8px 0 0 0;font-size:0.82em;color:#64748b;">
+    {{ t.get('pp_hint',
+       'All activities (estimations, test cases, checklist items, runs and bugs) attach to the active project automatically. Switch any time — your work persists in the database.') }}
+  </p>
+</div>
+
+<script>
+/* The select form's action varies per project_id, but we can't bake
+   that into <form action> in Jinja. Instead we rewrite the action on
+   submit using the dropdown's current value. Disabled when the
+   currently-selected option is already the active project (idempotent
+   click that would just bounce to itself). */
+(function () {
+  var selectForm = document.getElementById('pp-select-form');
+  var sel        = document.getElementById('pp-select');
+  var btn        = document.getElementById('pp-switch-btn');
+  if (!selectForm || !sel || !btn) return;
+  var baseAction = selectForm.dataset.baseAction;
+  function refreshState() {
+    if (!sel.value) { btn.disabled = true; return; }
+    var current = "{{ active_project_id or '' }}";
+    btn.disabled = (sel.value === current);
+  }
+  sel.addEventListener('change', refreshState);
+  selectForm.addEventListener('submit', function (e) {
+    var pid = sel.value;
+    if (!pid) { e.preventDefault(); return; }
+    selectForm.action = baseAction.replace('__ID__', encodeURIComponent(pid));
+  });
+  refreshState();
+})();
+</script>

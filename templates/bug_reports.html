@@ -5,6 +5,8 @@
 <h1>{{ t.get('bug_title', 'Bug Reports') }}</h1>
 <p class="subtitle">{{ t.get('bug_subtitle', 'Jira-style ISTQB-aligned defect reports') }}</p>
 
+{% include '_project_picker.html' %}
+
 {% if bugs %}
 {# ── Stats Summary ── #}
 <div class="bug-stats-row">

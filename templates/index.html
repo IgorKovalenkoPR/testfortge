@@ -7,6 +7,11 @@
     <p class="subtitle">{{ t.dashboard_subtitle }}</p>
 </div>
 
+{# Compact project switcher — same partial used on every module so
+   users can change the active project from anywhere. The longer
+   "Create + activate" card with description / base_url stays below. #}
+{% include '_project_picker.html' %}
+
 <div class="dashboard-actions">
     <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary btn-lg">
         <span class="btn-icon"><i data-lucide="check-circle-2" class="icon-sm"></i></span> {{ t.nav_test_cases }}
