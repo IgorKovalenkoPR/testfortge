@@ -93,6 +93,89 @@ def _persist_bug(bug_dict: dict, source: str = "manual",
 
 
 
+def _dedupe_bugs_by_root_cause(execution: dict,
+                                automation_assets: dict) -> None:
+    """Group bugs that share the same root cause so the operator
+    triages 3-5 unique defects instead of 60+ carbon copies.
+
+    Operator-reported on 2026-05-05: a 62-TC run produced 62 bug
+    reports, mostly identical "Locator.click: Timeout" messages on
+    the same URL. Dedup key is ``(defect_class, final_url)`` —
+    bugs sharing both fields collapse into a single primary bug
+    whose ``linked_test_cases`` list holds every affected TC.
+
+    Side effect: writes ``execution["_bug_alias"]`` mapping every
+    merged TC's ``linked_item_id`` -> the primary's. The per-env
+    loop downstream uses it to keep result rows pointed at the
+    consolidated bug instead of the now-removed dupes.
+    """
+    bugs = execution.get("bugs") or []
+    if len(bugs) < 2:
+        return
+    try:
+        from engine.bug_template import classify_error
+    except Exception:
+        # Without classify_error the dedup key collapses to "unknown",
+        # which would over-merge. Skip dedup defensively.
+        return
+
+    groups: dict[tuple, list[int]] = {}
+    for i, b in enumerate(bugs):
+        linked = b.get("linked_item_id", "")
+        ev = automation_assets.get(linked) if linked else None
+        if not ev:
+            # No Playwright evidence — keep as its own group so
+            # simulator-only bugs don't get over-merged.
+            key = ("__no_ev__", str(i))
+        else:
+            fstep = ev.get("failure_step") or {}
+            comment = (fstep.get("comment") or "").strip()
+            defect = classify_error(comment) if comment else "unknown"
+            url = (ev.get("final_url") or "").strip()
+            # Truncate URL to path-only so query strings don't split
+            # otherwise-identical bugs across pages.
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                url_key = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            except Exception:
+                url_key = url
+            key = (defect, url_key)
+        groups.setdefault(key, []).append(i)
+
+    new_bugs: list[dict] = []
+    aliases: dict[str, str] = {}
+    for (defect_key, url_key), indices in groups.items():
+        primary = bugs[indices[0]]
+        merged_tcs: list[str] = []
+        for j in indices[1:]:
+            merged_linked = bugs[j].get("linked_item_id", "")
+            if merged_linked:
+                merged_tcs.append(merged_linked)
+                aliases[merged_linked] = primary.get(
+                    "linked_item_id", "")
+        if merged_tcs:
+            primary_linked = primary.get("linked_item_id", "") or ""
+            all_tcs = [primary_linked] + merged_tcs
+            primary["linked_test_cases"] = [t for t in all_tcs if t]
+            count = len(primary["linked_test_cases"])
+            existing_title = (primary.get("title") or "").rstrip()
+            primary["title"] = (
+                f"{existing_title} — affects {count} test cases")
+            existing_comment = primary.get("comment") or ""
+            note = (
+                f"Same root cause was observed across {count} test "
+                f"cases: {', '.join(primary['linked_test_cases'])}. "
+                f"Fixing the primary should resolve all of them — "
+                f"verify each linked TC after the fix."
+            )
+            primary["comment"] = (existing_comment + "\n\n" + note).strip()
+        new_bugs.append(primary)
+
+    execution["bugs"] = new_bugs
+    execution["_bug_alias"] = aliases
+
+
 def _reconstruct_partial_payload(run_id: str, config_path: str,
                                   storage_root: str,
                                   live: dict) -> dict | None:
@@ -674,19 +757,25 @@ def register(app: Flask) -> None:
                   record_video = (_vid_form == "1")
               # Hard-coded "fast" speed preset — the dropdown was removed
               # because all three options shipped with subtle bugs and
-              # operators just want it to be fast and clear. Element
-              # actions still get a 3 s ceiling, but page navigation
-              # gets a separate 15 s budget so a real cold-start website
-              # doesn't blow up the whole run at goto.
+              # operators just want it to be fast and clear.
               speed_full_page = False
               speed_before_steps = False
-              # Tightened again after the 10 min/4 cases report. 1 s
-              # for elements in the DOM (slow selectors are TC bugs and
-              # should fail fast), 6 s for page navigation — any real
-              # cold-start site loads within that; beyond it we mark
-              # Blocked rather than burn the run-budget waiting.
-              speed_timeout_ms = 1000
-              speed_nav_timeout_ms = 6000
+              # 2026-05-05 reset to sane production defaults.
+              # Operator-reported a run of 62 TCs producing 0 Passed,
+              # 27 Failed, 35 Blocked — every Blocked entry was
+              # "Locator.click: Timeout 1000ms exceeded" or
+              # "Page.goto: Timeout 6000ms exceeded". Those values
+              # were the previous "tightened" preset and were way too
+              # aggressive for real cold-start websites: a CMS-backed
+              # marketing site routinely needs 2-4 s before its
+              # interactive elements are clickable, and a fresh page
+              # load over Render free-tier latency can take 8-15 s.
+              # The new defaults match Playwright's documented
+              # recommendations: 5 s for element actions, 20 s for
+              # page navigation. This restores Pass-rate on TCs that
+              # weren't actual defects.
+              speed_timeout_ms = 5000
+              speed_nav_timeout_ms = 20000
               session["automation_base_url"] = base_url
 
               # Pick the URL used by the deterministic site-tester. Prefer
@@ -1055,6 +1144,12 @@ def register(app: Flask) -> None:
                   running_bugs = list(existing_bugs) + [
                       dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
                   ]
+                  # Dedupe carbon-copy bugs (same defect_class +
+                  # final_url) so a 62-TC failure run produces 3-5
+                  # actionable bugs instead of 62 identical ones.
+                  # Operator-reported on 2026-05-05.
+                  _dedupe_bugs_by_root_cause(execution, automation_assets)
+                  _bug_aliases = execution.get("_bug_alias") or {}
                   for bug_dict in execution["bugs"]:
                       new_id = generate_bug_id(running_bugs)
                       bug_dict["id"] = new_id
@@ -1062,6 +1157,14 @@ def register(app: Flask) -> None:
                           bug_dict["affects_version"] = affects_version
                       bug_dict["environment"] = environment
                       bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                      # Propagate the alias map: every TC that was
+                      # merged into this bug should land on the same
+                      # bug_id when the per-env loop rewrites
+                      # __pending_X tokens further down.
+                      for alias_tc, primary_tc in _bug_aliases.items():
+                          if primary_tc == bug_dict.get(
+                                  "linked_item_id", ""):
+                              bug_id_map[alias_tc] = new_id
                       # Pull screenshots + video from the automation
                       # evidence we collected for this exact case so the
                       # bug carries reproduction artefacts. Each entry is
@@ -2033,6 +2136,12 @@ def register(app: Flask) -> None:
             # bug whose description has nothing to do with the
             # screenshots attached to it.
             _reconcile_with_automation(execution, automation_assets, et)
+            # Dedupe carbon-copy bugs (same defect_class + final_url)
+            # so a 62-TC failure run produces 3-5 actionable bugs
+            # instead of 62 identical ones — operator-reported on
+            # 2026-05-05.
+            _dedupe_bugs_by_root_cause(execution, automation_assets)
+            _bug_aliases = execution.get("_bug_alias") or {}
 
             bug_id_map: dict[str, str] = {}
             running_bugs = list(existing_bugs) + [
@@ -2045,6 +2154,12 @@ def register(app: Flask) -> None:
                     bug_dict["affects_version"] = affects_version
                 bug_dict["environment"] = environment
                 bug_id_map[bug_dict.get("linked_item_id", "")] = new_id
+                # Propagate the alias map so every TC merged into this
+                # bug lands on the same bug_id when result rows are
+                # rewritten further down.
+                for alias_tc, primary_tc in _bug_aliases.items():
+                    if primary_tc == bug_dict.get("linked_item_id", ""):
+                        bug_id_map[alias_tc] = new_id
                 linked = bug_dict.get("linked_item_id", "")
                 ev = automation_assets.get(linked) if linked else None
                 if ev:

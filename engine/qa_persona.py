@@ -954,16 +954,26 @@ def generate_professional_checklist(analysis: AnalysisResult,
                 continue
             if is_instruction(req_text):
                 continue
-            # Add requirement-specific checks
+            # Add requirement-specific checks. 2026-05-05: stripped
+            # "as expected" filler per the low-level checklist rules
+            # (uniform formatting → start with infinitive). Each line
+            # is now atomic, observable, and tester-actionable.
             short = req_text[:80].rstrip(".")
             items.append(CheckItem(
-                objective=f"Verify that {short} is functioning as expected",
+                objective=f"Verify {short} with valid input",
                 category="Positive", priority="High",
                 section="Requirements-specific",
             ))
             items.append(CheckItem(
-                objective=f"Verify that {short} is rejected with invalid input",
+                objective=f"Verify {short} rejects invalid input "
+                           "with a clear validation message",
                 category="Negative", priority="High",
+                section="Requirements-specific",
+            ))
+            items.append(CheckItem(
+                objective=f"Verify {short} on boundary values "
+                           "(min, min+1, max-1, max)",
+                category="Edge case", priority="Medium",
                 section="Requirements-specific",
             ))
 

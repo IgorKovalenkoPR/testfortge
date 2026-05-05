@@ -78,31 +78,91 @@ ERROR_CLASS_PATTERNS = (
     (re.compile(r"\b(403|404|500|502|503|504)\b"),       "server_error"),
 )
 
-# Defect-class -> severity / priority defaults. Tunable per area
-# importance via :func:`adjust_for_area`.
-CLASS_DEFAULTS: dict[str, dict[str, str]] = {
-    "click_timeout":        {"severity": "Major",    "priority": "High"},
-    "fill_timeout":         {"severity": "Major",    "priority": "High"},
-    "select_timeout":       {"severity": "Major",    "priority": "High"},
-    "check_timeout":        {"severity": "Minor",    "priority": "Medium"},
-    "navigation_timeout":   {"severity": "Critical", "priority": "Highest"},
-    "navigation_error":     {"severity": "Critical", "priority": "Highest"},
-    "dns_error":            {"severity": "Critical", "priority": "Highest"},
-    "text_assertion_fail":  {"severity": "Major",    "priority": "High"},
-    "url_assertion_fail":   {"severity": "Major",    "priority": "High"},
-    "selector_ambiguous":   {"severity": "Minor",    "priority": "Medium"},
-    "server_error":         {"severity": "Critical", "priority": "Highest"},
-    "unknown":              {"severity": "Major",    "priority": "Medium"},
+# Defect-class -> Severity baseline (system impact ONLY).
+# Aligned with testsigma's framing:
+#   https://testsigma.com/blog/difference-between-priority-and-severity/
+#
+# **Severity** measures how badly the defect impairs the application
+# itself — it is INDEPENDENT of when/whether the team fixes it.
+#
+#   * Critical — system unusable; blocks core flow; data loss / crash;
+#     security breach; whole module down.
+#   * Major    — important feature works incorrectly; significant
+#     deviation from spec; common task is broken; workaround
+#     exists but is inconvenient.
+#   * Minor    — small deviation that doesn't break the feature;
+#     visual glitch on a non-critical screen; one of several paths
+#     fails.
+#   * Trivial  — cosmetic issue; typo; spacing; non-blocking
+#     accessibility hint; no functional impact.
+#
+# Defect classes map to severity by what they actually break in the
+# system, NOT by the area:
+CLASS_SEVERITY: dict[str, str] = {
+    # The element disappeared / didn't show — the action itself can't
+    # complete. Regardless of WHICH action, the user is stuck on this
+    # step.
+    "click_timeout":        "Major",
+    "fill_timeout":         "Major",
+    "select_timeout":       "Major",
+    "check_timeout":        "Minor",   # checkbox toggle is rarely path-blocking
+    # The PAGE doesn't load — the user can't even reach the feature.
+    # That's "system unusable" by any definition.
+    "navigation_timeout":   "Critical",
+    "navigation_error":     "Critical",
+    "dns_error":            "Critical",
+    # Content / contract assertions — the page renders but doesn't
+    # match what the spec promises. Major if the assertion was about
+    # something the user actively reads (text, URL); Minor if it's
+    # about flexibility (one of multiple selectors matched).
+    "text_assertion_fail":  "Major",
+    "url_assertion_fail":   "Major",
+    "selector_ambiguous":   "Minor",
+    # Server returned 4xx/5xx — system-level failure regardless of
+    # which screen the user was on.
+    "server_error":         "Critical",
+    "unknown":              "Major",
 }
 
-# Areas considered "core" for severity boosting. Substring-matched against
-# component / TC summary / URL path.
-CORE_AREA_HINTS = (
-    "login", "sign in", "signin", "auth",
-    "checkout", "payment", "cart", "purchase", "order",
-    "register", "sign up", "signup",
-    "search", "navigation", "nav",
-    "home", "homepage",
+# **Priority** measures how urgently the team should fix the defect.
+# Per testsigma, priority is DRIVEN BY:
+#   * how visible the defect is to end-users (frequency of encounter)
+#   * what business value the affected area carries
+#   * release timing pressure
+#
+# Priority is NOT a function of severity alone — a Critical bug in a
+# rarely-used admin screen may be Low priority, while a Trivial typo on
+# the homepage hero may be Highest because every visitor sees it.
+#
+# We model priority via the affected area's BUSINESS WEIGHT, then fold
+# in severity as a tie-breaker.
+
+# Area weight lookup. Substring-matched against component / TC summary
+# / URL path. Higher weight = more business-critical.
+AREA_WEIGHTS: list[tuple[tuple[str, ...], int]] = [
+    # Revenue-path features get the top weight — broken checkout costs
+    # money every minute it's down.
+    (("checkout", "payment", "cart", "purchase", "order",
+      "billing", "invoice", "subscription"), 5),
+    # Auth gates everything; users who can't log in see nothing.
+    (("login", "sign in", "signin", "auth",
+      "register", "sign up", "signup",
+      "password", "2fa", "mfa", "otp"), 4),
+    # First-impression surfaces — the homepage and search are the most-
+    # visited pages on most products.
+    (("home", "homepage", "landing", "index",
+      "search", "navigation", "nav", "menu", "header"), 3),
+    # Core in-app workflows below the auth gate.
+    (("dashboard", "profile", "account", "settings",
+      "create", "edit", "delete"), 2),
+    # Everything else (admin, support, marketing pages…) defaults to 1.
+]
+
+# Backwards-compat — the picker still imports CORE_AREA_HINTS for
+# is_core_area. We keep the symbol but redefine via the new weights.
+CORE_AREA_HINTS = tuple(
+    kw for keywords, weight in AREA_WEIGHTS if weight >= 3
+    for kw in keywords
 )
 
 
@@ -123,39 +183,76 @@ def classify_error(error_message: str) -> str:
 
 
 def is_core_area(*hints: str) -> bool:
-    """True if any hint string contains a core-area keyword. Used to
-    bump severity from Major -> Critical when a primary user journey
-    is affected."""
+    """True if any hint string contains a core-area keyword (auth,
+    checkout, search, navigation, homepage). Surfaces in the Guide
+    explanation; severity_priority() uses the richer area-weight model
+    instead."""
     blob = " ".join(h or "" for h in hints).lower()
     return any(k in blob for k in CORE_AREA_HINTS)
 
 
+def _area_weight(*hints: str) -> int:
+    """Resolve the business weight of the affected area. Returns the
+    HIGHEST weight from AREA_WEIGHTS that has at least one keyword
+    appearing in the supplied hints. Falls back to 1 (everything else)
+    when nothing matches."""
+    blob = " ".join(h or "" for h in hints).lower()
+    best = 1
+    for keywords, weight in AREA_WEIGHTS:
+        if any(k in blob for k in keywords) and weight > best:
+            best = weight
+    return best
+
+
 def severity_priority(defect_class: str,
                       *area_hints: str) -> tuple[str, str]:
-    """Return (severity, priority) for a defect class.
+    """Return (severity, priority) computed as INDEPENDENT axes
+    per the testsigma framing.
 
-    Boosts severity to Critical and priority to Highest when the affected
-    area is one of CORE_AREA_HINTS — login, checkout, etc. The full
-    decision table lives in CLASS_DEFAULTS; this is the only public
-    knob callers should touch.
+    **Severity** comes purely from the defect class — what's broken
+    in the system, regardless of where:
+        Critical / Major / Minor / Trivial → CLASS_SEVERITY[defect_class]
+
+    **Priority** comes from the AREA WEIGHT + severity tie-breaker:
+        weight 5 (revenue path)        → Highest at any non-Trivial sev
+        weight 4 (auth, gating)        → Highest if Critical, else High
+        weight 3 (homepage, search,    → High if Critical, Medium if
+                  navigation)            Major, Low if Minor
+        weight 2 (in-app workflows)    → Medium if Critical, Low if
+                                         Major, Lowest if Minor
+        weight 1 (everything else)     → Low if Critical, Lowest else
+
+    This deliberately produces decoupled examples like:
+      * login click_timeout       → Major / Highest (Major bug, but
+                                    auth flow → fix immediately)
+      * homepage typo             → Trivial / High (cosmetic, but
+                                    every visitor sees it)
+      * admin-page text mismatch  → Major / Low (real bug, niche
+                                    audience, fix in next sprint)
     """
-    base = CLASS_DEFAULTS.get(defect_class, CLASS_DEFAULTS["unknown"])
-    sev = base["severity"]
-    pri = base["priority"]
-    if is_core_area(*area_hints):
-        # Bump one rung up the ladder.
-        sev_ladder = ["Trivial", "Minor", "Major", "Critical"]
-        pri_ladder = ["Lowest", "Low", "Medium", "High", "Highest"]
-        try:
-            sev = sev_ladder[min(sev_ladder.index(sev) + 1,
-                                 len(sev_ladder) - 1)]
-        except ValueError:
-            pass
-        try:
-            pri = pri_ladder[min(pri_ladder.index(pri) + 1,
-                                 len(pri_ladder) - 1)]
-        except ValueError:
-            pass
+    sev = CLASS_SEVERITY.get(defect_class) or CLASS_SEVERITY["unknown"]
+    weight = _area_weight(*area_hints)
+
+    # Map (weight, severity) -> priority. Independent table — easier
+    # to reason about than a chain of if/elif.
+    if weight >= 5:
+        pri = "Highest" if sev != "Trivial" else "High"
+    elif weight == 4:
+        pri = ("Highest" if sev == "Critical"
+               else "High" if sev in ("Major", "Minor")
+               else "Medium")
+    elif weight == 3:
+        pri = ("High" if sev == "Critical"
+               else "Medium" if sev == "Major"
+               else "Low" if sev == "Minor"
+               else "Lowest")
+    elif weight == 2:
+        pri = ("Medium" if sev == "Critical"
+               else "Low" if sev == "Major"
+               else "Lowest")
+    else:  # weight 1 — niche / admin / non-customer-visible
+        pri = "Low" if sev == "Critical" else "Lowest"
+
     return sev, pri
 
 

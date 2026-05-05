@@ -53,7 +53,7 @@
                    transition:transform .15s ease, box-shadow .15s ease;">
         <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📋</div>
         <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Checklist</strong>
-        <small style="color:#64748b;">High-level smoke / sanity coverage</small>
+        <small style="color:#64748b;">Low-level atomic coverage list</small>
     </button>
 
     <button type="button" class="guide-card" data-section="test-execution"
@@ -241,27 +241,58 @@
 
   <template data-content="checklist">
     <h3>What it is</h3>
-    <p>High-level smoke checklist — broader strokes than test
-       cases, suitable for sanity checks, exploratory rounds, and
-       cross-team sign-off.</p>
+    <p><strong>Low-level checklist</strong> — a detailed list that
+       breaks each function down into specific checks, including
+       negative scenarios and edge cases. The goal is exhaustive
+       testing of a specific module.</p>
+    <p>Example items:</p>
+    <ul>
+      <li>Authorization with empty fields.</li>
+      <li>Authorization with an invalid password.</li>
+      <li>Password recovery via email.</li>
+    </ul>
+    <h3>Rules for an effective checklist</h3>
+    <ol>
+      <li><strong>Atomicity (one item = one operation).</strong>
+          Do not mix "Adding to cart" and "Payment" — these are
+          separate actions and belong in separate items.</li>
+      <li><strong>Unambiguity.</strong> Items must be brief but
+          clear enough for a tester new to the product to know
+          exactly what to do.</li>
+      <li><strong>Language consistency.</strong> Write the whole
+          list in one language (on real projects, almost always
+          English).</li>
+      <li><strong>Logical structure.</strong> Group checks by
+          functional area — "Registration", "Shopping Cart",
+          "User Profile".</li>
+      <li><strong>Uniform formatting.</strong> Start every item
+          with a noun ("Verification of…", "Submission of…") or
+          an infinitive ("Verify…", "Send…").</li>
+      <li><strong>Platforms &amp; Browsers.</strong> Always specify
+          the devices, browsers and versions used for testing in
+          separate columns.</li>
+    </ol>
     <h3>Typical workflow</h3>
     <ol>
       <li>Drop your requirements / pasted text / attachment.</li>
       <li>Tweak the custom prompt for a specific lens
           ("from a security perspective", "mobile-first",
           "regression-only").</li>
-      <li>Generate. Items group by section, show a category
-          (Positive / Negative / Edge / Security) and a one-line
-          objective.</li>
-      <li>Export to XLSX for non-technical stakeholders.</li>
+      <li>Generate. Items group by functional area, each item
+          starts with a verb or noun, includes negative scenarios
+          and edge cases, and is small enough that a new tester
+          can execute it without questions.</li>
+      <li>Export to XLSX. Add Platforms &amp; Browsers columns
+          before sharing with the team.</li>
     </ol>
     <h3>When to pick Checklist over Test Cases</h3>
     <ul>
-      <li>Time-boxed exploratory testing.</li>
+      <li>You want exhaustive coverage of a specific module rather
+          than test-script-shaped Steps to Reproduce.</li>
+      <li>Time-boxed exploratory testing where each tester
+          executes the same atomic items.</li>
       <li>Stakeholder demos / acceptance walk-throughs.</li>
       <li>Smoke + sanity rounds on a release candidate.</li>
-      <li>You don't yet have detailed specs but need a structured
-          coverage list.</li>
     </ul>
   </template>
 
@@ -315,36 +346,129 @@
     <h3>What it is</h3>
     <p>ISTQB-aligned, Jira-friendly defect store. Bugs are created
        automatically from Failed/Blocked test executions and can
-       also be added manually.</p>
+       also be added manually. Each bug carries the evidence (annotated
+       screenshot + recorded video) and links to the test case that
+       produced it.</p>
     <h3>What's in a bug</h3>
     <ul>
-      <li><strong>Title</strong> — "[Component]: [Observable
-          defect]" format. Filler phrases like "does not work as
-          expected" are stripped automatically.</li>
-      <li><strong>Description</strong> — 2-5 sentence narrative,
-          third-person, observable language only.</li>
-      <li><strong>Steps to Reproduce</strong> — numbered atomic
-          steps starting from "1. Navigate to &lt;URL&gt;".</li>
-      <li><strong>Actual Result</strong> — observable state plus
-          the verbatim Playwright error if available.</li>
-      <li><strong>Expected Result</strong> — "should" phrasing.</li>
-      <li><strong>Severity / Priority / Frequency</strong> —
-          heuristically derived from the defect class. Bumped to
-          Critical/Highest when the affected area is a core
-          path (login, checkout, search).</li>
-      <li><strong>Attachments</strong> — failed step's annotated
-          screenshot + prior step's frame for context, plus
-          recorded video when present.</li>
+      <li><strong>Title</strong> — a concise summary in the format
+          <em>"[Component]: [Observable defect]"</em>. The component
+          tells the developer where to look (e.g. "Career Page",
+          "Login Form"); the defect describes what's actually
+          happening (e.g. "click does not register; element times
+          out"). Filler phrases like "does not work as expected"
+          are stripped automatically because they do not describe
+          observable behaviour.</li>
+
+      <li><strong>Description</strong> — a 2-5 sentence narrative
+          that explains the defect in third-person, observable
+          language. Includes the scenario context, the affected
+          URL, the action that triggers the defect, and the
+          user-impact ("the user cannot complete checkout"). Does
+          NOT speculate about root cause — only describes what was
+          observed.</li>
+
+      <li><strong>Steps to Reproduce</strong> — a numbered list of
+          atomic actions that reliably reproduce the defect on a
+          fresh session. Starts with <em>"1. Navigate to
+          &lt;URL&gt;"</em>. Each step is one action, expressed in
+          the same register a tester would use ("Click the
+          'Submit' button", "Enter 'invalid@example' in the email
+          field"). Pre-conditions appear before the numbered
+          steps.</li>
+
+      <li><strong>Actual Result (AR)</strong> — the observable
+          state right after the last step in Steps to Reproduce.
+          For automated bugs we include the verbatim Playwright
+          error message and the final URL the browser was on,
+          plus any browser console errors that fired during the
+          step.</li>
+
+      <li><strong>Expected Result (ER)</strong> — describes what
+          should happen if the bug was fixed. Written in
+          <em>"should"</em> phrasing ("The button should respond
+          to the click within 1 second and open the application
+          form"). Concrete and verifiable — a developer reading it
+          knows exactly when the fix is done.</li>
+
+      <li><strong>Severity</strong> — measures the <em>impact on
+          the system itself</em>. Independent of who's affected
+          or when the team plans to fix it. Levels:
+          <ul>
+            <li><em>Critical</em> — system unusable, core flow
+                blocked, data loss, security breach.</li>
+            <li><em>Major</em> — important feature works
+                incorrectly; common task is broken; workaround
+                exists but is inconvenient.</li>
+            <li><em>Minor</em> — small deviation that doesn't
+                break the feature; visual glitch on a
+                non-critical screen.</li>
+            <li><em>Trivial</em> — cosmetic, typo, spacing — no
+                functional impact.</li>
+          </ul></li>
+
+      <li><strong>Priority</strong> — measures <em>how urgently
+          the team should fix the defect</em>. Driven by business
+          weight (revenue path? auth? niche admin screen?), user
+          visibility, and release timing. <strong>Severity and
+          Priority are independent axes</strong> — you can have:
+          <ul>
+            <li>Critical severity / Low priority — payment
+                module crashes only on an obscure carrier the
+                product hasn't launched on yet.</li>
+            <li>Trivial severity / Highest priority — typo on
+                the homepage hero seen by every visitor.</li>
+            <li>Major severity / Medium priority — checkout
+                edge case affects 2% of users; fix in next
+                sprint.</li>
+          </ul>
+          See the <a href="https://testsigma.com/blog/difference-between-priority-and-severity/"
+          target="_blank" rel="noopener">testsigma article</a>
+          for the canonical reference.</li>
+
+      <li><strong>Frequency</strong> — how often the defect can
+          be reproduced. <em>Always</em> means every attempt
+          reproduces; <em>Sometimes</em> means it's intermittent
+          and timing-sensitive; <em>Rarely</em> needs specific
+          state to trigger. Auto-generated bugs default to
+          <em>Always</em> because they came from a deterministic
+          Playwright run.</li>
+
+      <li><strong>Attachments</strong> — the FAILED step's
+          annotated screenshot (red box + arrow on the broken
+          element) PLUS the previous step's clean screenshot for
+          context. If video recording is on, the .webm of the
+          full run is attached so reviewers can scrub to the
+          moment the bug surfaced.</li>
     </ul>
+
     <h3>Typical workflow</h3>
     <ol>
       <li>After a run, open Bug Reports.</li>
-      <li>Click a bug to expand. The screenshot above shows
-          exactly where the run broke.</li>
-      <li>Triage: bump priority/severity if the heuristic
-          misjudged, assign, add labels.</li>
-      <li>Export to Jira (XML) when ready.</li>
+      <li>Click a bug to expand. The screenshot above the form
+          shows exactly where the run broke.</li>
+      <li>Triage: read the auto-derived Severity and Priority,
+          adjust based on business context the heuristic can't
+          see (e.g. "this defect is on a feature shipping next
+          week — bump to Highest").</li>
+      <li>Assign to a developer, add labels, set the
+          fix-version.</li>
+      <li>Export to Jira (XML) when ready to hand off.</li>
     </ol>
+
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Treating Severity and Priority as the same thing —
+          they aren't. A high-severity bug in a rarely-used
+          flow may be Low priority; a low-severity bug on a
+          page everyone sees may be Highest.</li>
+      <li>Creating manual bugs without Steps to Reproduce —
+          a developer can't fix what they can't reproduce.</li>
+      <li>Trusting the auto-derived Severity blindly. The
+          heuristic looks at the defect class and the affected
+          area; it can't know that "this is the demo
+          environment for a board meeting tomorrow".</li>
+    </ul>
   </template>
 
   <template data-content="tedgie">
@@ -417,27 +541,33 @@
           <code>Acme Checkout (12 TC · 5 CL · 3 bugs)</code>.</li>
     </ul>
     <h3>What attaches to the active project</h3>
-    <p>Every save path automatically tags the active project_id.
-       In particular:</p>
+    <p>Every action you take on the platform is tagged with the
+       project that is active at that moment. When you switch
+       projects, you switch context — the new project's data
+       loads in, and any new work starts attaching to it.</p>
     <ul>
-      <li>Generated <strong>test cases</strong> + traceability →
-          via <code>_persist_test_cases()</code></li>
-      <li>Generated <strong>checklist</strong> items → via
-          <code>_persist_checklist()</code></li>
-      <li><strong>Estimations</strong> (every Run) → via
-          <code>_persist_estimation()</code></li>
-      <li>Auto-generated and manual <strong>bug reports</strong>
-          → via <code>_persist_bug()</code></li>
-      <li><strong>Test Execution runs</strong> + per-case
-          results + evidence paths → via
-          <code>start_execution_run()</code> / <code>save_case_result()</code></li>
+      <li>Generated <strong>test cases</strong> and the
+          traceability matrix that links them to user
+          stories.</li>
+      <li>Generated <strong>checklist</strong> items.</li>
+      <li><strong>Estimation snapshots</strong> — every time you
+          click Run on the Estimation page, the result is
+          recorded so you can compare scope changes across
+          releases.</li>
+      <li>Auto-generated and manually-created <strong>bug
+          reports</strong>, with their attachments.</li>
+      <li><strong>Test Execution runs</strong> — the per-case
+          Pass/Fail/Blocked status, the recorded video, and the
+          screenshot evidence each step produced.</li>
     </ul>
-    <h3>Recovery</h3>
-    <p>If a Render dyno restart wipes your session,
-       <code>ensure_active_project()</code> looks up your most
-       recent project for this session ID and re-pins it
-       automatically. You should see your work return on the next
-       page load — no manual recovery needed.</p>
+    <h3>Automatic recovery</h3>
+    <p>The free Render hosting tier wipes sessions when it
+       restarts (overnight, on redeploy, when memory runs low).
+       The platform notices this on your next visit and quietly
+       re-pins your most recent project so your work appears
+       again. No manual import, no lost data — your projects
+       live in the database, the session is just a thin pointer
+       to the active one.</p>
     <h3>Common mistakes</h3>
     <ul>
       <li>Generating test cases without a meaningful project name
