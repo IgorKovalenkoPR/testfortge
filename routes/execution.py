@@ -1554,10 +1554,106 @@ def register(app: Flask) -> None:
             out["strip_frame_count"] = len(strip_files)
         runs_dir = os.path.join(STORAGE_ROOT, "automation_runs")
         if os.path.isdir(runs_dir):
-            entries = [e for e in os.listdir(runs_dir) if e != "_live"]
+            entries = [e for e in os.listdir(runs_dir) if e != "_live"
+                       and e != "_pending"]
             out["recent_runs"] = sorted(entries)[-5:]
+        else:
+            out["recent_runs"] = []
+        # _pending dir tells us whether a run was ever DISPATCHED — the
+        # run_dir's existence tells us whether it ever STARTED writing
+        # artifacts. The two answers are different and both matter for
+        # debugging: a config in _pending without a started.flag means
+        # the worker subprocess never spawned at all (Render restart
+        # killed the dispatch before fork).
+        pending_dir = os.path.join(runs_dir, "_pending")
+        out["pending_dir_exists"] = os.path.isdir(pending_dir)
+        if out["pending_dir_exists"]:
+            try:
+                pending_items = []
+                import time as _time
+                for fn in sorted(os.listdir(pending_dir)):
+                    if fn.endswith(".json") and not fn.endswith(".result.json"):
+                        rid = os.path.splitext(fn)[0]
+                        pending_items.append({
+                            "run_id": rid,
+                            "started": os.path.isfile(
+                                os.path.join(pending_dir, f"{rid}.started.flag")),
+                            "done": os.path.isfile(
+                                os.path.join(pending_dir, f"{rid}.done.flag")),
+                            "has_result": os.path.isfile(
+                                os.path.join(pending_dir, f"{rid}.result.json")),
+                            "age_s": int(_time.time() - os.path.getmtime(
+                                os.path.join(pending_dir, fn))),
+                        })
+                out["pending_runs"] = pending_items[-5:]
+            except Exception as exc:
+                out["pending_dir_error"] = str(exc)
+
+        # Session pack — the "what's in front of the user right now".
+        # Operator-reported on 2026-05-05: log showed session_test_cases
+        # = 0 and the user got stuck on /test-execution/live without
+        # any dispatch happening, because the form was empty.
         out["session_test_cases"] = len(session.get("test_cases_data") or [])
         out["session_checklist"]  = len(session.get("checklist_data") or [])
+        out["session_active_run"] = (session.get(
+            "active_automation_run") or {}).get("run_id", "")
+
+        # Project context — without this, "session_test_cases: 0" is
+        # ambiguous. Surface the active project + how many TCs it has
+        # in the DB. Helps distinguish "no project" from "wrong project
+        # selected" from "project has no TCs yet".
+        out["session_project_id"] = session.get("project_id") or ""
+        out["session_project_name"] = (
+            session.get("project_setup") or {}).get("project_name", "")
+        try:
+            from engine import db as _db
+            from routes._shared import get_session_id as _gsid
+            sid = _gsid(session)
+            out["session_id_short"] = (sid or "")[:8]
+            if hasattr(_db, "list_projects"):
+                owned = _db.list_projects(owner_sid=sid) or []
+                out["projects_for_owner"] = [
+                    {"id": (p.get("id") or "")[:8] + "…",
+                     "name": p.get("name", ""),
+                     "tc_count": p.get("test_cases_count", 0),
+                     "cl_count": p.get("checklist_count", 0),
+                     "bug_count": p.get("bug_count", 0)}
+                    for p in owned[:10]
+                ]
+            pid = session.get("project_id")
+            if pid and hasattr(_db, "load_test_cases"):
+                out["active_project_db_tc_count"] = len(
+                    _db.load_test_cases(pid) or [])
+            if pid and hasattr(_db, "load_checklist"):
+                out["active_project_db_cl_count"] = len(
+                    _db.load_checklist(pid) or [])
+        except Exception as exc:
+            out["project_context_error"] = str(exc)[:200]
+
+        # Actionable next-step suggestion so the operator can act on
+        # the diag without parsing the whole blob.
+        if out["session_test_cases"] == 0 and out["session_checklist"] == 0:
+            if out.get("active_project_db_tc_count", 0) > 0:
+                out["suggested_action"] = (
+                    "Active project has test cases in the DB but not in "
+                    "session. Visit /projects/db/select/<id> for the "
+                    "active project to rehydrate, or click the picker's "
+                    "Switch button.")
+            elif out.get("projects_for_owner"):
+                out["suggested_action"] = (
+                    "No test cases in the active project. Switch to a "
+                    "project that has TCs (see projects_for_owner) or "
+                    "generate fresh ones at /test-cases.")
+            else:
+                out["suggested_action"] = (
+                    "No projects, no test cases. Start at /test-cases "
+                    "to generate, or /estimation to scope first.")
+        elif not out.get("recent_runs") and not out.get("pending_runs"):
+            out["suggested_action"] = (
+                f"You have {out['session_test_cases']} TCs in session "
+                "but no runs have been dispatched yet. Go to "
+                "/test-execution and click 'Run Test Execution'.")
+
         return jsonify(out)
 
     @app.route("/test-execution/live", methods=["GET"])

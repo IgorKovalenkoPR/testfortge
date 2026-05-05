@@ -11,6 +11,49 @@
    items the current session pack holds, so the tester knows what
    they're about to Run before scrolling. Hidden until at least one
    collection has data. #}
+{# Empty-state CTA — fires when the active project has no TCs and no
+   CL items in session. Operator-reported on 2026-05-05: silent empty
+   form left users staring at /test-execution/live indefinitely without
+   knowing that the missing piece was generation, not a server bug.
+   This banner makes the next step explicit. #}
+{% if not has_tc_data and not has_cl_data %}
+<div class="card"
+     style="margin-bottom:14px;padding:18px 22px;
+            background:linear-gradient(90deg,#fffbeb 0%,#fef3c7 100%);
+            border:2px solid #fbbf24;color:#92400e;">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+        <div style="font-size:2em;line-height:1;">📭</div>
+        <div style="flex:1;min-width:240px;">
+            <strong style="display:block;font-size:1.05em;margin-bottom:4px;">
+                {{ t.get('te_empty_title',
+                   'Nothing to run yet') }}
+            </strong>
+            <p style="margin:0;font-size:0.9em;color:#78350f;">
+                {{ t.get('te_empty_body',
+                    'The active project has no test cases or checklist items in your session. Generate a pack first — or switch to a project that already has one via the picker above.') }}
+            </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="{{ url_for('test_cases_page') }}"
+               class="btn btn-primary" style="font-size:0.9em;">
+                ✅ {{ t.get('te_empty_to_tc',
+                   'Generate test cases →') }}
+            </a>
+            <a href="{{ url_for('checklist_page') }}"
+               class="btn btn-secondary" style="font-size:0.9em;">
+                📋 {{ t.get('te_empty_to_cl',
+                   'Generate checklist') }}
+            </a>
+            <a href="{{ url_for('estimation_page') }}"
+               class="btn btn-secondary" style="font-size:0.9em;">
+                📈 {{ t.get('te_empty_to_est',
+                   'Scope at /estimation') }}
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% if has_tc_data or has_cl_data %}
 <div class="card pack-status-badge"
      style="display:flex;align-items:center;gap:14px;padding:10px 16px;

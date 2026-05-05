@@ -72,6 +72,38 @@
     </a>
 </div>
 
+{# First-load idle banner — fires when the user opens /test-execution/
+   live directly (bookmark, sidebar nav) without a ?run_id= query AND
+   no _pending runs exist on disk. Operator-reported 2026-05-05:
+   sitting on /live polling /live/info forever with no signal that
+   nothing was dispatched. The empty yellow #te-live-help only shows
+   after 30s of idle status; this banner shows immediately. #}
+{% if not request.args.get('run_id') and not recent_runs %}
+<div class="card"
+     style="margin:14px 0;padding:16px 20px;
+            background:linear-gradient(90deg,#fffbeb 0%,#fef3c7 100%);
+            border:2px solid #fbbf24;color:#92400e;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="font-size:1.7em;line-height:1;">🎬</div>
+        <div style="flex:1;min-width:240px;">
+            <strong style="display:block;font-size:1em;margin-bottom:4px;">
+                {{ t.get('te_live_idle_title',
+                    'No automation run has been dispatched yet') }}
+            </strong>
+            <p style="margin:0;font-size:0.88em;color:#78350f;">
+                {{ t.get('te_live_idle_body',
+                    'This page streams the headless browser only while a Playwright run is in progress. To start one, go to Test Execution, set a Base URL, and click Run Test Execution.') }}
+            </p>
+        </div>
+        <a href="{{ url_for('test_execution_page') }}"
+           class="btn btn-primary" style="font-size:0.9em;">
+            ▶️ {{ t.get('te_live_idle_cta',
+                'Go to Test Execution →') }}
+        </a>
+    </div>
+</div>
+{% endif %}
+
 {% if recent_runs %}
 <div id="te-recent-runs" class="card" style="margin-top:14px;">
     <strong>Recent automation runs</strong>
