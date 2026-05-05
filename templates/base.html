@@ -67,6 +67,13 @@
                     {{ t.get('nav_bug_reports', 'Bug Reports') }}
                 </a>
             </li>
+            <li class="nav-divider"></li>
+            <li class="{% if request.endpoint == 'guide_page' %}active{% endif %}">
+                <a href="{{ url_for('guide_page') }}">
+                    <span class="step-icon"><i data-lucide="book-open" class="icon-sm"></i></span>
+                    {{ t.get('nav_guide', 'Guide') }}
+                </a>
+            </li>
         </ul>
         {% if session.get('project_setup', {}).get('project_name') %}
         <div class="sidebar-project">
