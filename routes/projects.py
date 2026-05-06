@@ -235,8 +235,14 @@ def register(app: Flask) -> None:
 
         _set_active_project(meta["id"], meta["name"], meta.get("base_url"))
 
-        # Hydrate from DB. Each of these is best-effort — a brand-new
-        # project will return empty lists, which is fine.
+        # Hydrate from DB. Each load is best-effort — a brand-new
+        # project will return empty lists, which is fine. The set of
+        # things we hydrate has to mirror exactly what each module's
+        # GET handler reads from the session — operator-reported
+        # 2026-05-05: the previous switch loaded TCs / CL / bugs but
+        # silently lost estimations and run history, leaving the user
+        # confused why their previous project's estimation table was
+        # empty after switching back.
         try:
             tcs = _db.load_test_cases(project_id) if hasattr(
                 _db, "load_test_cases") else []
@@ -250,10 +256,77 @@ def register(app: Flask) -> None:
                 session["checklist_data"] = cls
             if bugs:
                 session["bug_reports_data"] = bugs
+
+            # Latest estimation snapshot — Estimation page reads
+            # session["estimation_result"] to render the result card.
+            # Without this hydrate, switching to a project that had a
+            # past estimation showed an empty Estimation page.
+            if hasattr(_db, "list_estimations"):
+                ests = _db.list_estimations(project_id, limit=1) or []
+                if ests:
+                    latest = ests[0] or {}
+                    rp = (latest.get("result_payload")
+                          or latest.get("result") or {})
+                    if isinstance(rp, dict) and rp:
+                        session["estimation_result"] = rp
+                    ip = (latest.get("input_payload")
+                          or latest.get("input") or {})
+                    if isinstance(ip, dict) and ip:
+                        # Re-populate the form snapshot so the next
+                        # /estimation render shows the same coefficients
+                        # the user used last time on this project.
+                        prev_form = session.get("estimation_form") or {}
+                        for k, v in ip.items():
+                            prev_form.setdefault(k, v)
+                        session["estimation_form"] = prev_form
+
+            # Test-execution run history — Test Execution page renders
+            # session["test_runs"] as a list of past runs. We keep the
+            # last 20 (matching the in-page cap) so switching back
+            # shows the actual run table the user remembers.
+            if hasattr(_db, "list_execution_runs"):
+                runs = _db.list_execution_runs(project_id, limit=20) or []
+                if runs:
+                    # Shape the DB rows so the existing template's
+                    # iterators don't trip on missing keys.
+                    test_runs_session: list[dict] = []
+                    for r in runs:
+                        env_payload = r.get("env_payload") or {}
+                        test_runs_session.append({
+                            "run_id": r.get("id") or r.get("run_id"),
+                            "db_run_id": r.get("id"),
+                            "source": env_payload.get("source", ""),
+                            "tester_id": env_payload.get("tester_id", ""),
+                            "tester_name": env_payload.get(
+                                "tester_name", ""),
+                            "environment": env_payload.get(
+                                "environment", ""),
+                            "env_type": env_payload.get("env_type", ""),
+                            "testing_types": ", ".join(
+                                env_payload.get("testing_types") or []),
+                            "results": [],
+                            "stats": r.get("stats") or {},
+                            "bug_count": 0,
+                            "site_url": "",
+                            "base_url": r.get("base_url", ""),
+                            "headless": (r.get("browser_visibility")
+                                         == "headless"),
+                            "record_video": bool(r.get("record_video")),
+                            "automation_used": True,
+                            "created_at": r.get("started_at", ""),
+                        })
+                    session["test_runs"] = test_runs_session[-20:]
         except Exception as exc:
             log.warning("project select: hydrate failed: %s", exc)
 
-        flash(f"Active project: {meta['name']}", "success")
+        flash(
+            f"Active project: {meta['name']} "
+            f"({len(session.get('test_cases_data') or [])} TC · "
+            f"{len(session.get('checklist_data') or [])} CL · "
+            f"{len(session.get('bug_reports_data') or [])} bugs · "
+            f"{len(session.get('test_runs') or [])} runs).",
+            "success",
+        )
         return redirect(next_url)
 
 

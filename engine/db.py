@@ -481,6 +481,29 @@ def get_project(project_id: str) -> dict | None:
         return _row_to_dict(p) if p else None
 
 
+def touch_project(project_id: str) -> bool:
+    """Bump ``updated_at`` on a project so list_projects() surfaces it
+    at the top of the dropdown. Called by every persistence helper so
+    "recent activity" actually means recent activity, not just creation
+    time. Returns True when a row was touched, False if the id was bogus
+    or the row was missing. Best-effort: never raises — DB outage just
+    means the project's updated_at doesn't advance, which is harmless.
+    """
+    if not project_id:
+        return False
+    try:
+        with session_scope() as sess:
+            p = sess.get(Project, project_id)
+            if not p:
+                return False
+            p.updated_at = _utcnow()
+            sess.add(p)
+            sess.flush()
+            return True
+    except Exception:
+        return False
+
+
 def update_project(project_id: str, *,
                    name: str | None = None,
                    base_url: str | None = None,
@@ -582,11 +605,20 @@ def delete_project(project_id: str) -> None:
 # ── Test cases ─────────────────────────────────────────────────────
 
 def save_test_cases(project_id: str, test_cases: list) -> int:
-    """Replace all TC for a project with the new list. Returns rows written."""
+    """Replace all TC for a project with the new list. Returns rows written.
+
+    Bumps ``project.updated_at`` so the picker dropdown shows
+    recently-touched projects at the top.
+    """
     if not project_id:
         raise ValueError("project_id is required")
     written = 0
     with session_scope() as sess:
+        # Bump updated_at on the parent project so list_projects()
+        # surfaces this row to the top of the dropdown.
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
         # Wipe-and-replace keeps semantics simple — caller treats DB as
         # the single source of truth for the *current* TC set.
         sess.query(TestCase).filter(TestCase.project_id == project_id).delete()
@@ -656,6 +688,10 @@ def save_checklist(project_id: str, items: list) -> int:
         raise ValueError("project_id is required")
     written = 0
     with session_scope() as sess:
+        # Bump project recency for the picker dropdown.
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
         sess.query(ChecklistItem).filter(ChecklistItem.project_id == project_id).delete()
         for cl in items or []:
             d = cl if isinstance(cl, dict) else getattr(cl, "__dict__", {})
@@ -715,6 +751,12 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
         "comment", "reporter", "related_case_id", "run_id",
     )}
     with session_scope() as sess:
+        # Bump project recency so a fresh bug surfaces the project at
+        # the top of the picker dropdown.
+        if project_id:
+            proj = sess.get(Project, project_id)
+            if proj is not None:
+                proj.updated_at = _utcnow()
         row = BugReport(
             project_id=project_id,
             external_id=bug.get("id"),
@@ -760,6 +802,10 @@ def save_estimation(project_id: str, input_payload: dict,
     if not project_id:
         raise ValueError("project_id is required")
     with session_scope() as sess:
+        # Bump project recency for the picker dropdown.
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
         row = Estimation(
             project_id=project_id,
             input_payload=input_payload or {},
@@ -842,6 +888,11 @@ def start_execution_run(project_id: str, env_payload: dict,
     if not project_id:
         raise ValueError("project_id is required")
     with session_scope() as sess:
+        # Bump project recency — a new run is the strongest signal of
+        # active work on this project, should be top of the picker.
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
         row = ExecutionRun(
             project_id=project_id,
             env_payload=env_payload or {},
