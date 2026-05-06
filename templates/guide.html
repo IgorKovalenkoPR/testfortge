@@ -529,9 +529,10 @@
       <li><strong>Switch</strong> — pick another project from the
           dropdown and click the <em>Switch</em> button. The page
           re-renders with that project's test cases, checklist
-          items, and bug reports loaded from the database. Your
-          previous project's data is wiped from the session (it
-          remains in the DB, just not in this tab's view).</li>
+          items, bug reports, last estimation snapshot, and last
+          20 test-execution runs all loaded from the database.
+          Your previous project's data is wiped from the session
+          (it remains in the DB, just not in this tab's view).</li>
       <li><strong>Create</strong> — type a name in the right-hand
           input and click <em>Create</em>. The new project is
           saved to the database, becomes active, and the page
@@ -539,6 +540,43 @@
           fresh work.</li>
       <li>The dropdown labels show counts at a glance:
           <code>Acme Checkout (12 TC · 5 CL · 3 bugs)</code>.</li>
+    </ul>
+
+    <h3>🕒 Recent projects on the Dashboard</h3>
+    <p>The Dashboard shows a "Recent projects" card with the top
+       5 projects you've touched, sorted by last activity. Each
+       card displays the project name, content counts (TC / CL /
+       bugs), and a last-activity timestamp; one-click "Open →"
+       activates the project and rehydrates everything in one
+       request. The currently active project is highlighted with
+       an orange border and "Active" badge so you can see at a
+       glance where you are. Projects beyond the top 5 stay in
+       the picker dropdown — the widget just makes the most
+       recent ones discoverable without scrolling a list.</p>
+
+    <h3>What "recent" means</h3>
+    <p>The system tracks an <em>activity timestamp</em> per
+       project that bumps every time you save anything to it —
+       generating test cases, running an estimation, recording
+       a bug, starting a test execution run. So "Recent" means
+       "where you actually did work", not "where you happened
+       to land last week".</p>
+
+    <h3>What's restored when you switch</h3>
+    <ul>
+      <li><strong>Test cases</strong> + traceability matrix.</li>
+      <li><strong>Checklist</strong> items.</li>
+      <li><strong>Bug reports</strong> with their attachments.</li>
+      <li><strong>The latest estimation snapshot</strong> — the
+          /estimation page renders the result card (PERT bands +
+          phase table + history calibration) without re-running
+          the estimator. Coefficients you used last time are
+          pre-filled in the form.</li>
+      <li><strong>The last 20 test-execution runs</strong> — the
+          /test-execution page shows them in the run history with
+          their stats, browser visibility, video flag, and start
+          time. The full per-case results + screenshots stay on
+          disk; click into a run to load them.</li>
     </ul>
     <h3>What attaches to the active project</h3>
     <p>Every action you take on the platform is tagged with the

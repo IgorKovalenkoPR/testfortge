@@ -560,7 +560,7 @@ button{font:inherit;cursor:pointer}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
         </div>
         <h3>Multi-project workspace</h3>
-        <p>Every artefact — test cases, checklists, estimations, runs, bugs, dashboard snapshots — is stored per project in Postgres. The 🗂 project picker is on every module (Dashboard, Estimation, Test Cases, Checklist, Test Execution, Bug Reports), so switching context never costs a redirect. Auto-recovery via session ID means a server restart restores your active project + work in flight on the next page load. Browse history of estimations, watch coverage trends across releases, and ship a deployable QA pack for each project independently.</p>
+        <p>Every artefact — test cases, checklists, estimations, runs, bugs, dashboard snapshots — is stored per project in Postgres. The 🗂 project picker sits on every module (Dashboard, Estimation, Test Cases, Checklist, Test Execution, Bug Reports), so switching context never costs a redirect. <strong>Switching restores everything in one click</strong>: TCs, checklist, bugs, the latest estimation snapshot with its coefficients pre-filled, and the last 20 test-execution runs from the project's history. The Dashboard surfaces a "Recent projects" card with the top 5 by last-activity timestamp — every save bumps that field, so the projects you actually work on rise to the top. Auto-recovery via session ID means a server restart restores your active project + work in flight on the next page load — your data lives in Postgres, the session is just a thin pointer.</p>
       </article>
     </div>
   </div>
@@ -841,7 +841,7 @@ button{font:inherit;cursor:pointer}
       <details class="faq-item reveal">
         <summary>Can I run multiple projects in parallel?<span class="faq-mark" aria-hidden="true">+</span></summary>
         <div class="faq-body">
-          Yes. Every run is scoped to an active project — create as many as you need, each with its own base URL and description. The 🗂 project picker is on every module (not just the dashboard), so you can switch context from anywhere without losing the page you are on. Test cases, checklists, estimations, runs, bugs and dashboard snapshots are stored separately per project, so the team can switch without polluting another release's history. Auto-recovery via session ID restores the active project + work in flight if the server restarts.
+          Yes. Every run is scoped to an active project — create as many as you need, each with its own base URL and description. The 🗂 project picker sits on every module (not just the dashboard), so you can switch context from anywhere without losing the page you are on. The Dashboard's "Recent projects" widget shows the top 5 you touched most recently for one-click context-switching; the dropdown holds the rest. Test cases, checklists, estimations, runs, bugs and dashboard snapshots are stored separately per project — switching does NOT lose the previous project's data, it just reloads the new project's TCs, checklist, bugs, last estimation snapshot, and last 20 runs into your session. Auto-recovery via session ID restores the active project + work in flight if the server restarts.
         </div>
       </details>
 
