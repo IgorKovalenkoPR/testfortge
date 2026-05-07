@@ -1133,6 +1133,27 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     if any(_has_token_phrase(g) for g in _GRATITUDE):
         return _gratitude(lang)
 
+    # Guide-promised handlers — match the six concrete sample
+    # questions advertised in templates/guide.html ("What Tedgie is
+    # good at"). Run BEFORE the glossary, ISTQB topic detector and
+    # module-synonym matcher so messages like "Suggest 5 negative
+    # cases for the login flow" don't shadow into the Test Cases
+    # module help card, and "What's a good severity for an
+    # intermittent checkout error?" gets a real recommendation
+    # instead of a glossary dump. The detectors in chatbot_guide are
+    # narrow (they require an action cue + a domain keyword) so they
+    # won't false-positive on plain definitional questions like
+    # "what is severity?", which still flow into the glossary path
+    # below.
+    try:
+        from . import chatbot_guide
+        guide_reply = chatbot_guide.try_guide_handlers(raw, low, lang)
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("guide handlers failed, falling through: %s", exc)
+        guide_reply = None
+    if guide_reply is not None:
+        return guide_reply
+
     # Definitional questions ("what is a bug", "що таке дефект", ...) —
     # always answered with the verbatim ISTQB glossary entry. Runs
     # *before* the bug-form trigger so a theory question can never be
