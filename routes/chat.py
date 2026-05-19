@@ -1,7 +1,8 @@
 """TestFortge — Chatbot routes.
 
 Tiny JSON API powering the floating QA assistant widget:
-  * POST /chat            — answer a user message
+  * POST /chat            — answer a user message (legacy, blocking)
+  * GET  /chat/stream     — same answer streamed as Server-Sent Events
   * GET  /chat/history    — return the per-session transcript
   * POST /chat/reset      — clear the transcript
   * POST /chat/bug-form   — submit a structured bug report from the chat
@@ -9,20 +10,51 @@ Tiny JSON API powering the floating QA assistant widget:
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from datetime import datetime
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, Response, jsonify, request, session, stream_with_context
 from werkzeug.utils import secure_filename
 
 from engine import db as _db
 
 from ._shared import ensure_active_project
 
+from engine import chatbot as _chatbot_mod
 from engine.chatbot import respond_dict as _chatbot_respond
 from engine.bug_report import (
     BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
 )
+from engine.log import get_logger
+
+_logger = get_logger(__name__)
+
+
+# ── SSE helpers ────────────────────────────────────────────────────
+
+def _sse(event_name: str, data: dict) -> str:
+    """Format a single Server-Sent Event frame.
+
+    ``ensure_ascii=False`` keeps Cyrillic readable on the wire (smaller
+    payloads, easier to debug in DevTools). The wire format is the
+    standard ``event: <name>\\ndata: <json>\\n\\n``.
+    """
+    return (
+        f"event: {event_name}\n"
+        f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    )
+
+
+def _reply_to_dict(reply) -> dict:
+    """ChatReply dataclass → JSON-ready dict. Identical shape to /chat."""
+    return {
+        "text": reply.text,
+        "intent": reply.intent,
+        "suggestions": list(reply.suggestions or []),
+        "follow_up": list(reply.follow_up or []),
+    }
 
 
 def register(app: Flask) -> None:
@@ -74,6 +106,158 @@ def register(app: Flask) -> None:
         session["chat_history"] = history[-keep:]
 
         return jsonify(reply)
+
+    @app.route("/chat/stream", methods=["GET"])
+    def chat_stream_route():
+        """Stream a chatbot reply as Server-Sent Events.
+
+        Mirrors the ``POST /chat`` contract but emits incremental
+        ``event: delta`` frames as Anthropic's stream produces tokens.
+        Fast-path replies (greeting / guide / istqb / bug_form) skip the
+        LLM entirely and are delivered as a single ``event: full`` +
+        ``event: done`` pair.
+
+        Heartbeat ``: heartbeat`` comment lines are emitted every ~10 s
+        of token silence to survive Render's 30 s idle-connection timer.
+        """
+        message = (request.args.get("message") or "").strip()
+        lang = (request.args.get("lang") or session.get("lang") or "en").lower()
+        if lang not in ("en", "ua"):
+            lang = "en"
+
+        max_chars = app.config.get("CHAT_MESSAGE_MAX_CHARS", 4000)
+        if len(message) > max_chars:
+            message = message[:max_chars]
+
+        # Snapshot the session list now so the generator (which runs
+        # outside Flask's request context once streaming starts) can
+        # append the final transcript entry without hitting the
+        # ``RuntimeError: Working outside of request context`` trap.
+        history_keep = app.config.get("CHAT_HISTORY_MAX_ENTRIES", 40)
+
+        def _append_history(user_msg: str, reply_dict: dict) -> None:
+            history = session.get("chat_history", [])
+            history.append({"role": "user", "text": user_msg})
+            history.append({
+                "role": "bot",
+                "text": reply_dict.get("text", ""),
+                "suggestions": reply_dict.get("suggestions", []),
+                "follow_up": reply_dict.get("follow_up", []),
+            })
+            session["chat_history"] = history[-history_keep:]
+
+        def generate():
+            # Empty-message safety net — mirror the POST behaviour.
+            if not message:
+                fallback = {
+                    "text": "Please type a message.",
+                    "intent": "empty",
+                    "suggestions": [],
+                    "follow_up": [],
+                }
+                yield _sse("full", fallback)
+                yield _sse("done", {"intent": "empty"})
+                return
+
+            # 1. Fast-path rule handlers (greeting / guide / istqb /
+            # bug_form). Returns None when the LLM is needed.
+            try:
+                fast = _chatbot_mod.try_fast_path(message, lang)
+            except Exception as exc:  # pragma: no cover — defensive
+                _logger.warning("fast-path failed, falling back: %s", exc)
+                fast = None
+
+            if fast is not None:
+                reply_dict = _reply_to_dict(fast)
+                yield _sse("full", reply_dict)
+                yield _sse("done", {"intent": reply_dict["intent"]})
+                _append_history(message, reply_dict)
+                return
+
+            # 2. LLM streaming path. Missing key → rule-based fallback.
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            if not api_key:
+                fallback = _chatbot_mod.rule_based_fallback(message, lang)
+                reply_dict = _reply_to_dict(fallback)
+                yield _sse("full", reply_dict)
+                yield _sse("done", {"intent": reply_dict["intent"]})
+                _append_history(message, reply_dict)
+                return
+
+            yield _sse("meta", {"intent": "ai_generic", "lang": lang})
+
+            chunks: list[str] = []
+            try:
+                # Lazy import — keeps the route loadable in environments
+                # without the SDK installed, matching how
+                # ``engine.chatbot`` handles its import.
+                from anthropic import Anthropic  # type: ignore
+
+                client = Anthropic(api_key=api_key)
+                last_emit = time.monotonic()
+                with client.messages.stream(
+                    model=_chatbot_mod._ANTHROPIC_MODEL,
+                    max_tokens=_chatbot_mod._ANTHROPIC_MAX_TOKENS,
+                    system=_chatbot_mod._ai_system_prompt(lang),
+                    messages=[{"role": "user", "content": message}],
+                ) as stream:
+                    for text in stream.text_stream:
+                        # Heartbeat if the upstream went quiet — Render's
+                        # proxy kills idle connections at 30 s, so we
+                        # emit a comment line every ~10 s of silence.
+                        now = time.monotonic()
+                        if now - last_emit > 10:
+                            yield ": heartbeat\n\n"
+                        if not text:
+                            continue
+                        chunks.append(text)
+                        yield _sse("delta", {"text": text})
+                        last_emit = time.monotonic()
+                    # Drain final message so we can log usage / detect
+                    # the <BUG_FORM/> marker emitted by the persona.
+                    try:
+                        final = stream.get_final_message()
+                    except Exception:  # pragma: no cover — defensive
+                        final = None
+
+                full_text = "".join(chunks).strip()
+                intent = "ai_generic"
+                if "<BUG_FORM/>" in full_text:
+                    full_text = full_text.replace("<BUG_FORM/>", "").strip()
+                    intent = "bug_form"
+
+                if final is not None:
+                    usage = getattr(final, "usage", None)
+                    if usage is not None:
+                        _logger.info("anthropic stream usage: %s", usage)
+
+                reply_dict = {
+                    "text": full_text,
+                    "intent": intent,
+                    "suggestions": [],
+                    "follow_up": [],
+                }
+                _append_history(message, reply_dict)
+                yield _sse("done", {
+                    "intent": intent,
+                    "suggestions": [],
+                    "follow_up": [],
+                })
+            except GeneratorExit:
+                _logger.info("SSE client disconnected mid-stream")
+                raise
+            except Exception as exc:
+                _logger.warning("chat stream failed: %s", exc)
+                yield _sse("error", {"message": "Stream interrupted"})
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.route("/chat/history", methods=["GET"])
     def chat_history_route():
