@@ -1,0 +1,175 @@
+version: 1
+area: auth
+locale: en
+sections:
+  - name: "Login Form — UI"
+    prefix: LGN
+    items:
+      - objective: "Verify that the login form is displayed with email/username and password fields"
+        category: Positive
+        priority: High
+      - objective: "Verify that the password field is masked (characters are hidden)"
+        category: Positive
+        priority: High
+      - objective: "Verify that 'Show password' toggle is revealed/hidden password characters"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 'Forgot password' link is displayed and redirected to recovery page"
+        category: Positive
+        priority: High
+      - objective: "Verify that 'Remember me' checkbox is present and functional"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 'Sign up' / 'Register' link is displayed for new users"
+        category: Positive
+        priority: Medium
+  - name: "Login — Positive"
+    prefix: LGN
+    items:
+      - objective: "Verify that the user is logged in successfully with valid email and password"
+        category: Positive
+        priority: High
+      - objective: "Verify that the user is redirected to the expected page after successful login"
+        category: Positive
+        priority: High
+      - objective: "Verify that the session cookie/token is set after successful login"
+        category: Positive
+        priority: High
+      - objective: "Verify that the username/avatar is displayed in the Header after login"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 'Remember me' is extended the session beyond browser close"
+        category: Positive
+        priority: Medium
+  - name: "Login — Negative"
+    prefix: LGN
+    items:
+      - objective: "Verify that login is rejected with a password that does not match the stored hash"
+        category: Negative
+        priority: High
+      - objective: "Verify that login is rejected with non-existent email"
+        category: Negative
+        priority: High
+      - objective: "Verify that login is rejected when email field is left empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that login is rejected when password field is left empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that the error message does not reveal which specific field failed validation (uniform 'invalid credentials' message)"
+        category: Negative
+        priority: High
+      - objective: "Verify that multiple failed attempts are triggered account lockout or CAPTCHA"
+        category: Negative
+        priority: High
+  - name: "Login — Edge Cases & Security"
+    prefix: LGN
+    items:
+      - objective: "Verify that email field is accepted with maximum length (254 characters)"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that password field is accepted with special characters (!@#$%^&*)"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that login returns the expected outcome per the spec after session timeout"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that concurrent sessions from different devices are handled per policy"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that SQL injection is blocked in the email field"
+        category: Security
+        priority: High
+      - objective: "Verify that XSS payload is sanitized in the email field"
+        category: Security
+        priority: High
+      - objective: "Verify that brute-force protection is activated after multiple failed attempts"
+        category: Security
+        priority: High
+      - objective: "Verify that the password is not logged in server logs or browser console"
+        category: Security
+        priority: High
+  - name: "Registration Form — UI"
+    prefix: REG
+    items:
+      - objective: "Verify that the registration form is displayed with all required fields"
+        category: Positive
+        priority: High
+      - objective: "Verify that password strength indicator is displayed while typing"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 'Terms and Conditions' checkbox is present"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 'Already have an account? Sign in' link is displayed"
+        category: Positive
+        priority: Medium
+  - name: "Registration — Positive"
+    prefix: REG
+    items:
+      - objective: "Verify that a new account is created successfully with valid data"
+        category: Positive
+        priority: High
+      - objective: "Verify that confirmation email is sent after successful registration"
+        category: Positive
+        priority: High
+      - objective: "Verify that the user is redirected to welcome/login page after registration"
+        category: Positive
+        priority: High
+  - name: "Registration — Negative"
+    prefix: REG
+    items:
+      - objective: "Verify that registration is rejected with already existing email"
+        category: Negative
+        priority: High
+      - objective: "Verify that registration is rejected with weak password (less than 8 chars)"
+        category: Negative
+        priority: High
+      - objective: "Verify that registration is rejected when required fields are empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that registration is rejected with mismatched password confirmation"
+        category: Negative
+        priority: High
+      - objective: "Verify that registration is rejected with invalid email format"
+        category: Negative
+        priority: High
+  - name: "Password Recovery"
+    prefix: PWD
+    items:
+      - objective: "Verify that 'Forgot password' page is displayed with email input field"
+        category: Positive
+        priority: High
+      - objective: "Verify that password reset email is sent for a valid registered email"
+        category: Positive
+        priority: High
+      - objective: "Verify that the reset link in the email is redirected to the password change form"
+        category: Positive
+        priority: High
+      - objective: "Verify that the new password is saved successfully after reset"
+        category: Positive
+        priority: High
+      - objective: "Verify that the reset link is expired after a single use"
+        category: Security
+        priority: High
+      - objective: "Verify that the reset link is expired after a timeout period (e.g. 24h)"
+        category: Security
+        priority: Medium
+      - objective: "Verify that no information is revealed for non-existent email"
+        category: Security
+        priority: High
+  - name: "Logout"
+    prefix: LGO
+    items:
+      - objective: "Verify that the user is logged out successfully when clicking Logout"
+        category: Positive
+        priority: High
+      - objective: "Verify that the session is destroyed after logout"
+        category: Positive
+        priority: High
+      - objective: "Verify that protected pages are not accessible after logout"
+        category: Positive
+        priority: High
+      - objective: "Verify that the browser Back button does not restore the authenticated session"
+        category: Security
+        priority: High

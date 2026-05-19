@@ -1,0 +1,85 @@
+version: 1
+area: forms
+locale: en
+sections:
+  - name: "Form Fields — UI"
+    prefix: FRM
+    items:
+      - objective: "Verify that all every form field has a visible label whose text matches the design spec"
+        category: Positive
+        priority: High
+      - objective: "Verify that required fields are indicated with an asterisk (*)"
+        category: Positive
+        priority: High
+      - objective: "Verify that placeholder text is displayed in empty fields"
+        category: Positive
+        priority: Low
+      - objective: "Verify that every field uses the HTML input type declared in the spec (email, number, date, tel, url)"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that every dropdown lists every option from the spec in the declared order"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that date picker is displayed and functional"
+        category: Positive
+        priority: Medium
+  - name: "Form Validation — Positive"
+    prefix: FRM
+    items:
+      - objective: "Verify that the form is submitted successfully with all valid data"
+        category: Positive
+        priority: High
+      - objective: "Verify that success message/notification is displayed after submission"
+        category: Positive
+        priority: High
+      - objective: "Verify that the submitted payload appears in the backend storage with all fields intact"
+        category: Positive
+        priority: High
+      - objective: "Verify that the form is reset/redirected after successful submission"
+        category: Positive
+        priority: Medium
+  - name: "Form Validation — Negative"
+    prefix: FRM
+    items:
+      - objective: "Verify that validation error is displayed when required fields are empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that email field is rejected with invalid format"
+        category: Negative
+        priority: High
+      - objective: "Verify that numeric fields are rejected with non-numeric input"
+        category: Negative
+        priority: High
+      - objective: "Verify that error messages are clear and specific per field"
+        category: Negative
+        priority: High
+      - objective: "Verify that form data is preserved when validation error occurs"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that the form is not submitted when validation fails"
+        category: Negative
+        priority: High
+  - name: "Form — Edge Cases"
+    prefix: FRM
+    items:
+      - objective: "Verify that fields are accepted with minimum allowed length"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that fields are accepted with maximum allowed length"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that fields are returns the expected outcome per the spec at boundary values (min-1, max+1)"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that special characters are returns the expected outcome per the spec in text fields"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that copy-paste is producing the outcome defined in the design spec in all fields"
+        category: "Edge Case"
+        priority: Low
+      - objective: "Verify that double submission is prevented (double-click protection)"
+        category: "Edge Case"
+        priority: High
+      - objective: "Verify that the the form can be submitted using only Tab to reach the submit button and Enter to trigger it"
+        category: "Edge Case"
+        priority: Medium

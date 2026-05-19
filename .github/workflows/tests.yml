@@ -56,6 +56,12 @@ jobs:
           python --version
           pip list
 
+      # Validate YAML-backed QA knowledge before tests so malformed
+      # content fails fast with a clean error instead of via cascading
+      # test failures.
+      - name: Validate qa_knowledge YAML
+        run: python -c "from engine.qa_knowledge_loader import LOADER; assert LOADER.areas(), 'no areas loaded'"
+
       # No playwright browser install — tests don't launch a real browser.
       # The async endpoint tests submit jobs to the in-process queue and
       # mock / bypass the runner. If that changes, add:

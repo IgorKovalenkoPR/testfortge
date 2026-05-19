@@ -1,0 +1,250 @@
+version: 1
+area: web_general
+locale: en
+sections:
+  - name: "Header & Navigation"
+    prefix: HDR
+    items:
+      - objective: "Verify that the company logo is displayed in the Header"
+        category: Positive
+        priority: High
+      - objective: "Click the company logo and verify the browser navigates to the Homepage URL"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the main navigation menu in the Header lists every expected item"
+        category: Positive
+        priority: High
+      - objective: "Click each navigation link and verify the browser opens the URL that matches the link label"
+        category: Positive
+        priority: High
+      - objective: "Verify that the navigation item for the current page has the active visual state (highlight / underline / different background)"
+        category: Positive
+        priority: Medium
+      - objective: "Hover a navigation item with a submenu and verify that the submenu becomes visible with all expected items"
+        category: Positive
+        priority: Medium
+      - objective: "Resize the viewport to 375px and verify that the Header navigation collapses into a hamburger menu button"
+        category: Positive
+        priority: High
+      - objective: "Tap the hamburger menu and verify the menu opens; tap outside and verify the menu closes"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the browser tab title matches the page name shown in the Header"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the breadcrumb trail shows the exact path the user navigated (if breadcrumbs are used on this page)"
+        category: Positive
+        priority: Low
+  - name: "Content & Layout"
+    prefix: CNT
+    items:
+      - objective: "Verify that the page contains exactly one H1 element and its text matches the page topic"
+        category: Positive
+        priority: High
+      - objective: "Verify that body text uses the site's declared font family and is legible (no clipped characters, no overflow)"
+        category: Positive
+        priority: High
+      - objective: "Load the page and verify that every <img> element returns HTTP 200 (no broken icons)"
+        category: Positive
+        priority: High
+      - objective: 'Verify that every decorative image has alt="" and every content image has a descriptive alt attribute'
+        category: Positive
+        priority: Medium
+      - objective: "Verify that every CTA button (e.g. 'Buy', 'Sign Up', 'Submit') is visible above the fold and reacts to click"
+        category: Positive
+        priority: High
+      - objective: "Verify that content sections appear in the order defined by the design spec (hero → features → pricing → footer, etc.)"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the live page contains no 'Lorem Ipsum' or 'TBD' placeholder strings"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that no two visible elements overlap and every control stays inside its parent container at 1280px and 375px"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that long text (e.g. > 100 chars) in titles/cards is truncated with ellipsis and a tooltip reveals the full value"
+        category: "Edge Case"
+        priority: Low
+  - name: "Links & Media"
+    prefix: LNK
+    items:
+      - objective: "Click every internal link on the page and verify the destination URL is on the same origin and returns HTTP 200"
+        category: Positive
+        priority: High
+      - objective: 'Verify that every external link carries target="_blank" and rel="noopener"'
+        category: Positive
+        priority: Medium
+      - objective: "Crawl every link on the page and verify none returns HTTP 404 or 5xx"
+        category: Negative
+        priority: High
+      - objective: "Click play on each video/audio element and verify playback starts within 2 seconds with no decoder errors"
+        category: Positive
+        priority: Medium
+      - objective: "Click each social-media link and verify the destination URL matches the brand's official account for that network"
+        category: Positive
+        priority: Medium
+      - objective: "Click a mailto: link and verify the default email client opens with the prefilled recipient address"
+        category: Positive
+        priority: Low
+      - objective: "Tap a tel: link on a mobile device and verify the dialer opens with the prefilled phone number"
+        category: Positive
+        priority: Low
+  - name: "Footer"
+    prefix: FTR
+    items:
+      - objective: "Verify that the Footer is rendered at the bottom of the page and stays below the content on every viewport"
+        category: Positive
+        priority: Medium
+      - objective: "Click every link inside the Footer and verify each destination returns HTTP 200 and matches the link label"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the copyright line in the Footer shows the current year and the legal entity name from the design spec"
+        category: Positive
+        priority: Low
+      - objective: "Visit at least three pages of the site and verify the Footer has the same structure and links on each page"
+        category: Positive
+        priority: Low
+  - name: "Forms & Input"
+    prefix: FRM
+    items:
+      - objective: "Verify that every form field has a visible label matching the spec (no placeholder-only labels)"
+        category: Positive
+        priority: High
+      - objective: 'Verify that every required field is marked with an asterisk and carries aria-required="true"'
+        category: Positive
+        priority: Medium
+      - objective: "Fill every field with valid sample data and submit: verify the backend accepts the payload and the UI shows a success state"
+        category: Positive
+        priority: High
+      - objective: "Submit the form with required fields empty and verify an inline error appears next to each missing field"
+        category: Negative
+        priority: High
+      - objective: "Enter invalid email values ('test@', '@domain', 'no-at-sign') and verify each is rejected with a 'valid email required' message"
+        category: Negative
+        priority: High
+      - objective: "Enter letters into the phone field and verify the form blocks submission with a numeric-only message"
+        category: Negative
+        priority: Medium
+      - objective: "Submit a valid form and verify that a success banner or toast appears within 2 seconds and the URL/state updates as designed"
+        category: Positive
+        priority: High
+      - objective: "Enter valid data, trigger a validation error on one field, and verify the other fields keep their values"
+        category: Negative
+        priority: Medium
+      - objective: "Enter the field's maximum allowed length (per spec) and verify the form submits without truncation or error"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Enter the field's minimum allowed length and verify it passes validation"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Enter Unicode and emoji characters (e.g. 'Привіт 🚀') and verify they survive submission and round-trip in the saved record"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Submit '<script>alert(1)</script>' in every text field and verify it is stored/displayed as inert text, not executed"
+        category: Security
+        priority: High
+      - objective: "Submit \"' OR 1=1 --\" in every text field and verify the response is a normal validation error, not a SQL error or changed result set"
+        category: Security
+        priority: High
+  - name: "Responsive Design"
+    prefix: RSP
+    items:
+      - objective: "Resize the viewport to 375px width and verify the layout uses a single column with no horizontal scrollbar"
+        category: Positive
+        priority: High
+      - objective: "Resize the viewport to 768px width and verify the layout matches the tablet breakpoint of the design spec"
+        category: Positive
+        priority: High
+      - objective: "Resize the viewport to 1280px+ and verify the layout matches the desktop breakpoint of the design spec"
+        category: Positive
+        priority: High
+      - objective: "Resize the viewport between 375px and 1920px and verify images scale proportionally with no distortion or cropping of faces/text"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that no page state (normal, modal open, form focused) introduces a horizontal scrollbar at any viewport ≥ 320px"
+        category: Negative
+        priority: High
+      - objective: "Open the page on a 375px viewport and verify every body text paragraph is legible at 100% zoom (font-size ≥ 14px)"
+        category: Positive
+        priority: Medium
+      - objective: "Tap each interactive control on a mobile viewport (375px) and verify its hit area measures ≥ 44×44 CSS pixels including padding"
+        category: Positive
+        priority: Medium
+      - objective: "Rotate a mobile device from portrait to landscape and verify the layout re-flows without truncation or fixed-position overlap"
+        category: "Edge Case"
+        priority: Low
+  - name: "Performance"
+    prefix: PRF
+    items:
+      - objective: "Verify that the page is loaded within 3 seconds on a standard connection"
+        category: Positive
+        priority: High
+      - objective: "Verify that no JavaScript console errors are present on page load"
+        category: Negative
+        priority: High
+      - objective: "Verify that images are optimized (compressed, WebP format where supported)"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that lazy loading is applied to below-the-fold images"
+        category: Positive
+        priority: Low
+      - objective: "Verify that the page is usable on a slow 3G connection"
+        category: "Edge Case"
+        priority: Medium
+  - name: "Accessibility (WCAG 2.1)"
+    prefix: A11Y
+    items:
+      - objective: "Verify that all images have descriptive alt text"
+        category: Positive
+        priority: High
+      - objective: "Verify that color contrast ratio meets WCAG 2.1 AA standard (4.5:1 for text)"
+        category: Positive
+        priority: High
+      - objective: "Verify that the page is navigable using keyboard only (Tab, Enter, Escape)"
+        category: Positive
+        priority: High
+      - objective: "Verify that focus indicators are visible on interactive elements"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that screen reader can read all content in logical order"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that form fields have associated labels for assistive technologies"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that every interactive region has an aria-role matching its purpose (navigation, main, complementary)"
+        category: Positive
+        priority: Low
+  - name: "Security (Basic)"
+    prefix: SEC
+    items:
+      - objective: "Verify that the page is served over HTTPS"
+        category: Positive
+        priority: High
+      - objective: "Verify that no sensitive data is exposed in page source or console"
+        category: Negative
+        priority: High
+      - objective: "Verify that Content Security Policy (CSP) headers are present"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that cookies are set with Secure and HttpOnly flags"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that no mixed content (HTTP resources on HTTPS page) is present"
+        category: Negative
+        priority: Medium
+  - name: "SEO (Basic)"
+    prefix: SEO
+    items:
+      - objective: "Verify that meta title is present and under 60 characters"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that meta description is present and under 160 characters"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that canonical URL is specified"
+        category: Positive
+        priority: Low
+      - objective: "Verify that the page has exactly one H1 and its H2/H3 tags do not skip levels"
+        category: Positive
+        priority: Low

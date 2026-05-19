@@ -1,0 +1,38 @@
+version: 1
+area: search
+locale: en
+default_section: Search
+cases:
+  - summary: "Verify that the search returns items whose title or body contains the query string, ordered by relevance"
+    preconditions: "Application is accessible. Searchable data is present in the system."
+    steps:
+      - "Navigate to the page with search functionality"
+      - "Enter a valid search term that matches existing data"
+      - "Submit the search (press Enter or click Search button)"
+      - "Review the results"
+    test_data: "Search term matching existing data (e.g. 'software testing')"
+    expected_result: "Search results should be displayed. Results should be relevant to the search term. Result count should be accurate."
+    category: Positive
+    priority: High
+    section: Search
+  - summary: "Verify that 'No results' message is displayed for a non-matching query"
+    preconditions: "Application is accessible. Search functionality is available."
+    steps:
+      - "Enter a search term that does not match any existing data"
+      - "Submit the search"
+    test_data: "Search term: 'xyznonexistent123456'"
+    expected_result: "'No results found' message should be displayed. No errors should occur. Search UI should remain intact."
+    category: Negative
+    priority: High
+    section: Search
+  - summary: "Verify that XSS and SQL injection are blocked in the search field"
+    preconditions: "Application is accessible. Search functionality is available."
+    steps:
+      - "Enter an XSS payload in the search field and submit"
+      - "Enter an SQL injection payload in the search field and submit"
+      - "Observe the page behavior after each submission"
+    test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
+    expected_result: "Payloads should be sanitized. No script execution or database error should occur. Search should return empty results or an error message."
+    category: Security
+    priority: High
+    section: Search

@@ -1,0 +1,94 @@
+version: 1
+area: search
+locale: en
+sections:
+  - name: "Search — UI"
+    prefix: SRCH
+    items:
+      - objective: "Verify that the search input field is displayed and accessible"
+        category: Positive
+        priority: High
+      - objective: "Verify that a search icon or button is present"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that placeholder text is displayed in the search field"
+        category: Positive
+        priority: Low
+      - objective: "Verify that the search field is focused when clicked"
+        category: Positive
+        priority: Low
+  - name: "Search — Positive"
+    prefix: SRCH
+    items:
+      - objective: "Verify that relevant results are returned for a valid search query"
+        category: Positive
+        priority: High
+      - objective: "Verify that search results contain the search term highlighted"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the result count is displayed and accurate"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that search is triggered by pressing Enter key"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that search is triggered by clicking the search button"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that pagination is displayed when results exceed the page limit"
+        category: Positive
+        priority: Medium
+  - name: "Search — Negative"
+    prefix: SRCH
+    items:
+      - objective: "Verify that 'No results found' message is displayed for non-matching query"
+        category: Negative
+        priority: High
+      - objective: "Verify that search is handled gracefully with empty query submission"
+        category: Negative
+        priority: High
+      - objective: "Verify that the search UI is not broken when no results are returned"
+        category: Negative
+        priority: Medium
+  - name: "Search — Edge Cases & Security"
+    prefix: SRCH
+    items:
+      - objective: "Verify that search returns the expected outcome per the spec with special characters (!@#$%^&*)"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that search returns the expected outcome per the spec with very long query (500+ characters)"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that search returns the expected outcome per the spec with Unicode/emoji characters"
+        category: "Edge Case"
+        priority: Low
+      - objective: "Verify that SQL injection is blocked in the search field"
+        category: Security
+        priority: High
+      - objective: "Verify that XSS payload is sanitized in the search field"
+        category: Security
+        priority: High
+  - name: "Filter & Sort"
+    prefix: FLT
+    items:
+      - objective: "Verify that filter options are visible and matches the design spec"
+        category: Positive
+        priority: High
+      - objective: "Verify that results are updated when a filter is applied"
+        category: Positive
+        priority: High
+      - objective: "Verify that multiple filters are applied simultaneously"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that applied filters are cleared when 'Reset' is clicked"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that each sort option (A-Z, Z-A, date, price) reorders results in the expected direction and persists after a refresh"
+        category: Positive
+        priority: High
+      - objective: "Verify that the active sort/filter state is preserved after page navigation"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that filter results show 'No matches' when no items match criteria"
+        category: Negative
+        priority: Medium

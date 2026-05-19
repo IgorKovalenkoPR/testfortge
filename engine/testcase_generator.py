@@ -1019,11 +1019,11 @@ def generate_checklist(stories: list[UserStory], custom_prompt: str = "",
     # Convert to ChecklistItem with TestFort IDs
     items: list[ChecklistItem] = []
     prefix_counters: dict[str, int] = {}
-    from .qa_persona import _SECTION_PREFIXES as QA_PREFIXES
+    from .qa_knowledge_loader import LOADER
 
     directives = _parse_tc_prompt(custom_prompt)
     for item in pro_items:
-        prefix = QA_PREFIXES.get(item.section, "GEN")
+        prefix = LOADER.get_section_prefix(item.section) or "GEN"
         if prefix not in prefix_counters:
             prefix_counters[prefix] = 1
         counter = prefix_counters[prefix]

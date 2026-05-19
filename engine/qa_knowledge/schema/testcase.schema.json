@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QA Test Case Templates",
+  "type": "object",
+  "required": ["version", "area", "locale", "cases"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "area": {"type": "string", "minLength": 1},
+    "locale": {"type": "string", "minLength": 2},
+    "default_section": {"type": "string"},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["summary", "preconditions", "steps", "expected_result", "category"],
+        "properties": {
+          "summary": {"type": "string", "minLength": 1},
+          "preconditions": {"type": "string"},
+          "steps": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "test_data": {"type": "string"},
+          "expected_result": {"type": "string", "minLength": 1},
+          "category": {"type": "string", "enum": ["Positive", "Negative", "Edge Case", "Edge case", "Security", "Performance", "Accessibility"]},
+          "priority": {"type": "string", "enum": ["High", "Medium", "Low"]},
+          "section": {"type": "string"},
+          "comment": {"type": "string"},
+          "testing_type": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

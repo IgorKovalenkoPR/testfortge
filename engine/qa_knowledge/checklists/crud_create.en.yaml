@@ -1,0 +1,52 @@
+version: 1
+area: crud_create
+locale: en
+sections:
+  - name: "Create — Positive"
+    prefix: CRT
+    items:
+      - objective: "Verify that the creation form is displayed with all required fields"
+        category: Positive
+        priority: High
+      - objective: "Verify that a new record is created successfully with valid data"
+        category: Positive
+        priority: High
+      - objective: "Verify that success confirmation is displayed after create"
+        category: Positive
+        priority: High
+      - objective: "Verify that the new record is appeared in the list view"
+        category: Positive
+        priority: High
+      - objective: "Verify that every submitted field appears in the database row with the exact value entered"
+        category: Positive
+        priority: High
+  - name: "Create — Negative"
+    prefix: CRT
+    items:
+      - objective: "Verify that create is rejected when required fields are empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that create is rejected with invalid data format"
+        category: Negative
+        priority: High
+      - objective: "Verify that duplicate record create returns the expected outcome per the spec"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that validation errors are displayed per field"
+        category: Negative
+        priority: High
+  - name: "Create — Edge Cases"
+    prefix: CRT
+    items:
+      - objective: "Verify that create returns the expected outcome per the spec with minimum length data"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that create returns the expected outcome per the spec with maximum length data"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that special characters are accepted in text fields"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that concurrent create requests are returns the expected outcome per the spec"
+        category: "Edge Case"
+        priority: Low

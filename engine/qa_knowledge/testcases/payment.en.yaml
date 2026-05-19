@@ -1,0 +1,52 @@
+version: 1
+area: payment
+locale: en
+default_section: "Payment & Checkout"
+cases:
+  - summary: "Verify that items are added to the cart successfully"
+    preconditions: "Application is accessible. Products are available."
+    steps:
+      - "Navigate to a product page"
+      - "Click 'Add to Cart' button"
+      - "Navigate to the cart page"
+      - "Verify the item shows the same name, price, and image that are stored on the product page"
+    test_data: "Any available product"
+    expected_result: "Product should be added to the cart. Cart count should be updated. Product details in the cart match the product page fields exactly."
+    category: Positive
+    priority: High
+    section: "Payment & Checkout"
+  - summary: "Verify that checkout is completed successfully with valid payment details"
+    preconditions: "Items are in the cart. Checkout page is accessible."
+    steps:
+      - "Navigate to checkout"
+      - "Fill shipping/billing information"
+      - "Enter valid payment details"
+      - "Complete the purchase"
+      - "Verify order confirmation"
+    test_data: "Valid card: 4242 4242 4242 4242, Exp: 12/28, CVC: 123"
+    expected_result: "Order should be placed successfully. Confirmation page/email should be received. Cart should be cleared."
+    category: Positive
+    priority: High
+    section: "Payment & Checkout"
+  - summary: "Verify that checkout is rejected with invalid payment details"
+    preconditions: "Items are in the cart. Checkout page is opened."
+    steps:
+      - "Enter invalid or expired payment details"
+      - "Attempt to complete the purchase"
+      - "Observe the error handling"
+    test_data: "Declined card: 4000 0000 0000 0002, Expired: 01/20"
+    expected_result: "Payment should be declined. Clear error message should be displayed. Cart should be preserved for retry."
+    category: Negative
+    priority: High
+    section: "Payment & Checkout"
+  - summary: "Verify that double-charge is prevented on multiple submit clicks"
+    preconditions: "Checkout page is reached. Payment form is filled."
+    steps:
+      - "Click the 'Pay' / 'Place Order' button rapidly multiple times"
+      - "Verify payment was processed only once"
+      - "Check for duplicate charges"
+    test_data: ""
+    expected_result: "Only one charge should be processed. No duplicate orders should be created."
+    category: "Edge Case"
+    priority: High
+    section: "Payment & Checkout"
