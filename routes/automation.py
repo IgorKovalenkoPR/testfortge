@@ -32,17 +32,11 @@ from engine.test_credentials import (
     generate_test_account,
 )
 from engine.job_queue import get_queue, DONE, FAILED
+from engine.automation_paths import STORAGE_ROOT  # re-exported below
 
 from ._shared import SAFE_ASSET_RE, get_session_id
 
 log = get_logger(__name__)
-
-# Storage root shared with the estimation module (both live under /storage).
-STORAGE_ROOT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "storage",
-)
-os.makedirs(STORAGE_ROOT, exist_ok=True)
 
 # Per-session concurrency cap for /automation/run-async + /estimation/run-async.
 # Prevents a single user from monopolising the (small) worker pool.
