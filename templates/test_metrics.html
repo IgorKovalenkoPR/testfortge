@@ -2,6 +2,12 @@
 {% block title %}TestForTge — {{ t.tm_title }}{% endblock %}
 
 {% block content %}
+{# uPlot CSS — vendored under static/vendor so we don't depend on a CDN
+   at runtime (CSP-safe). Cheap (~1.8 KB minified). Loaded inside
+   ``content`` because ``base.html`` doesn't expose a ``head`` block;
+   the browser still picks it up since <link> is valid in <body>. #}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/uplot.min.css') }}">
+
 <div class="page-header">
     <h1>{{ t.tm_title }}</h1>
     <p class="subtitle">{{ t.tm_subtitle }}</p>
@@ -262,6 +268,26 @@
 </div>
 {% endif %}
 
+{# Trend chart — Sprint 3 task 3.3. Pulls /metrics/history JSON for the
+   active project and renders pass-rate + defect-density as uPlot lines.
+   Empty-state path shows a short note instead of a blank canvas (the
+   route returns {"snapshots": []} when there's no project_id or no
+   data yet). #}
+<section class="card" id="metrics-history-card">
+    <h2>{{ t.tm_history_title }}</h2>
+    <p class="subtitle" style="margin-top:-.25rem;margin-bottom:.75rem;">
+        {{ t.tm_history_subtitle }}
+    </p>
+    <div id="metrics-history-empty"
+         style="display:none;color:#64748b;font-size:.92em;
+                padding:1rem 0;text-align:center;">
+        {{ t.tm_history_empty }}
+    </div>
+    <div id="metrics-history"
+         style="width:100%;height:260px;"
+         data-project-id="{{ active_project_id or '' }}"></div>
+</section>
+
 <div class="form-actions">
     <a href="{{ url_for('status_report_page') }}" class="btn btn-secondary">&larr; {{ t.nav_status_report }}</a>
     <a href="{{ url_for('techniques') }}" class="btn btn-primary">{{ t.nav_techniques }} &rarr;</a>
@@ -276,5 +302,64 @@ function showTab(tabId) {
     document.getElementById(tabId).classList.add('active');
     event.target.classList.add('active');
 }
+</script>
+<script src="{{ url_for('static', filename='vendor/uplot.iife.min.js') }}"
+        nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+// Trend chart bootstrap (Sprint 3 task 3.3).
+// Pulls /metrics/history for the active project, renders pass-rate +
+// defect-density as two uPlot lines. Handles three states: no project
+// (empty list, message), data present (chart), error/network (message).
+(function () {
+    var host = document.getElementById('metrics-history');
+    var empty = document.getElementById('metrics-history-empty');
+    if (!host || typeof uPlot === 'undefined') { return; }
+    var pid = (host.getAttribute('data-project-id') || '').trim();
+    var url = '/metrics/history?days=30'
+        + (pid ? '&project_id=' + encodeURIComponent(pid) : '');
+
+    function showEmpty() {
+        host.style.display = 'none';
+        if (empty) { empty.style.display = 'block'; }
+    }
+
+    fetch(url, {credentials: 'same-origin'})
+        .then(function (r) { return r.ok ? r.json() : {snapshots: []}; })
+        .then(function (data) {
+            var snaps = (data && data.snapshots) || [];
+            if (!snaps.length) { showEmpty(); return; }
+            var xs = snaps.map(function (s) {
+                return Math.floor(Date.parse(s.ts) / 1000);
+            });
+            var pass = snaps.map(function (s) {
+                var v = parseFloat(s.pass_rate);
+                return isFinite(v) ? v : null;
+            });
+            var density = snaps.map(function (s) {
+                var v = parseFloat(s.defect_density);
+                return isFinite(v) ? v * 100 : null;
+            });
+            var opts = {
+                width: host.clientWidth || 600,
+                height: 260,
+                series: [
+                    {},
+                    {label: 'Pass %', stroke: '#16a34a', width: 2},
+                    {label: 'Defect density ×100', stroke: '#dc2626', width: 2},
+                ],
+                scales: {x: {time: true}},
+                axes: [
+                    {},
+                    {label: '', size: 50},
+                ],
+            };
+            try {
+                new uPlot(opts, [xs, pass, density], host);
+            } catch (e) {
+                showEmpty();
+            }
+        })
+        .catch(function () { showEmpty(); });
+})();
 </script>
 {% endblock %}

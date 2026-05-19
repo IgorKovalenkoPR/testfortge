@@ -14,6 +14,22 @@ Formulas (QA Best Practices):
   - Defect Density = Total Bugs / Total Test Cases
   - Test Coverage = (Executed / Total Planned) * 100
   - Defect Removal Efficiency = (Bugs Found in QA / Total Known Bugs) * 100
+
+Also exposes dashboard metric helpers used by the trend-history feature
+(Sprint 3 task 3.3):
+  - ``compute_session_metrics`` — pure variant of the old
+    ``routes.dashboard._compute_dashboard_metrics``; reads pre-extracted
+    lists rather than ``flask.session`` so it can be called from
+    out-of-request code paths (workers, scheduled threads) without
+    pulling Flask into engine modules.
+  - ``_aggregate_from_db_rows`` — same shape, but built from raw DB
+    rows returned by ``engine.db.load_test_cases / load_checklist /
+    list_bugs / list_execution_runs``.
+  - ``snapshot_metrics`` — in-request entry point that wraps
+    ``compute_session_metrics`` and persists the result.
+  - ``snapshot_metrics_from_db`` — out-of-request entry point for the
+    detached ``runner_worker`` subprocess and the daily catch-up
+    thread.
 """
 
 from dataclasses import dataclass, field
@@ -261,3 +277,228 @@ def generate_test_metrics(
 
     metrics.kpis = kpis
     return metrics
+
+
+# ── Dashboard metrics (Sprint 3 task 3.3) ───────────────────────────
+
+
+def compute_session_metrics(
+    tc_data: list | None = None,
+    cl_data: list | None = None,
+    test_runs: list | None = None,
+    bugs_data: list | None = None,
+) -> dict:
+    """Pure aggregator behind the landing-page KPI dashboard.
+
+    Takes plain lists (already pulled out of ``flask.session`` or any
+    other store) and produces the dict that the dashboard template
+    consumes. Field shape is **load-bearing** — every key here is read
+    from ``templates/index.html`` and from the trend-history JSON
+    endpoint, and ``_aggregate_from_db_rows`` mirrors it exactly. If
+    you add a field, update both call sites and add the parity check
+    in ``tests/test_metrics_history.py``.
+    """
+    tc_data = tc_data or []
+    cl_data = cl_data or []
+    test_runs = test_runs or []
+    bugs_data = bugs_data or []
+
+    # ── Test cases breakdown ──────────────────────────────────
+    tc_total = len(tc_data)
+    tc_by_category: dict[str, int] = {}
+    tc_by_priority: dict[str, int] = {}
+    for tc in tc_data:
+        cat = tc.get("category", "Other")
+        tc_by_category[cat] = tc_by_category.get(cat, 0) + 1
+        pri = tc.get("priority", "Medium")
+        tc_by_priority[pri] = tc_by_priority.get(pri, 0) + 1
+
+    # ── Checklist breakdown ───────────────────────────────────
+    cl_total = len(cl_data)
+    cl_by_category: dict[str, int] = {}
+    cl_by_priority: dict[str, int] = {}
+    for cl in cl_data:
+        cat = cl.get("category", "Other")
+        cl_by_category[cat] = cl_by_category.get(cat, 0) + 1
+        pri = cl.get("priority", "Medium")
+        cl_by_priority[pri] = cl_by_priority.get(pri, 0) + 1
+
+    # ── Execution status ratios ───────────────────────────────
+    exec_passed = exec_failed = exec_blocked = 0
+    for run in test_runs:
+        stats = run.get("stats", {}) or {}
+        exec_passed += stats.get("passed", 0) or 0
+        exec_failed += stats.get("failed", 0) or 0
+        exec_blocked += stats.get("blocked", 0) or 0
+    exec_total = exec_passed + exec_failed + exec_blocked
+    exec_pass_rate = round(exec_passed / exec_total * 100, 1) if exec_total else 0
+
+    # ── Bug severity distribution ─────────────────────────────
+    bug_total = len(bugs_data)
+    bug_by_severity: dict[str, int] = {}
+    bug_by_priority: dict[str, int] = {}
+    bug_by_status: dict[str, int] = {}
+    for bug in bugs_data:
+        sev = bug.get("severity", "Minor") or "Minor"
+        bug_by_severity[sev] = bug_by_severity.get(sev, 0) + 1
+        pri = bug.get("priority", "Medium") or "Medium"
+        bug_by_priority[pri] = bug_by_priority.get(pri, 0) + 1
+        st = bug.get("status", "Open") or "Open"
+        bug_by_status[st] = bug_by_status.get(st, 0) + 1
+
+    # ── Environments covered ──────────────────────────────────
+    environments = []
+    seen_envs: set[str] = set()
+    for run in test_runs:
+        env = run.get("environment", "")
+        if env and env not in seen_envs:
+            seen_envs.add(env)
+            parts = [p.strip() for p in env.split("/")]
+            environments.append({
+                "full": env,
+                "platform": parts[0] if len(parts) > 0 else "",
+                "browser": parts[1] if len(parts) > 1 else "",
+                "device": parts[2] if len(parts) > 2 else "",
+                "screen": parts[3] if len(parts) > 3 else "",
+                "runs": sum(1 for r in test_runs if r.get("environment") == env),
+            })
+
+    has_data = bool(tc_total or cl_total or test_runs or bugs_data)
+
+    return {
+        "has_data": has_data,
+        "tc_total": tc_total,
+        "tc_by_category": tc_by_category,
+        "tc_by_priority": tc_by_priority,
+        "cl_total": cl_total,
+        "cl_by_category": cl_by_category,
+        "cl_by_priority": cl_by_priority,
+        "exec_total": exec_total,
+        "exec_passed": exec_passed,
+        "exec_failed": exec_failed,
+        "exec_blocked": exec_blocked,
+        "exec_pass_rate": exec_pass_rate,
+        "runs_count": len(test_runs),
+        "bug_total": bug_total,
+        "bug_by_severity": bug_by_severity,
+        "bug_by_priority": bug_by_priority,
+        "bug_by_status": bug_by_status,
+        "environments": environments,
+    }
+
+
+def _aggregate_from_db_rows(
+    tcs: list | None,
+    bugs: list | None,
+    runs: list | None,
+    cls: list | None = None,
+) -> dict:
+    """Build the dashboard metrics dict from raw DB rows.
+
+    Mirrors ``compute_session_metrics`` exactly (same keys, same dtypes).
+    The detached ``runner_worker`` subprocess and the daily catch-up
+    thread call this — they have no ``flask.session`` to consult.
+
+    ``ExecutionRun`` rows store status counts under ``stats`` (same
+    layout as the in-session runs), so the aggregation logic is
+    identical. ``BugReport`` rows use ``severity / priority / status``
+    column names that already match the dataclass conventions, so they
+    drop in unchanged.
+
+    Stripping any fields here that aren't in ``compute_session_metrics``
+    would break the trend chart's "data only contains keys both sides
+    set" guarantee. Don't.
+    """
+    # The DB rows already use the same key names as the session dicts
+    # (load_test_cases / load_checklist preserve dataclass field names,
+    # list_bugs / list_execution_runs return _row_to_dict output which
+    # uses column names). We only have to construct a synthetic
+    # "test_runs"-shaped list that includes the ``stats`` payload and
+    # an ``environment`` string the aggregator expects.
+    tcs = tcs or []
+    cls = cls or []
+    bugs = bugs or []
+    runs = runs or []
+
+    synthetic_runs: list[dict] = []
+    for r in runs:
+        env_payload = r.get("env_payload") or {}
+        # The session-flavoured run dicts carry a flat "environment"
+        # string like "Windows/Chrome". DB rows store the structured
+        # ``env_payload`` instead. Stitch the same shape so the
+        # aggregator counts environments consistently.
+        if isinstance(env_payload, dict):
+            env_str = env_payload.get("environment") or env_payload.get("label") or ""
+            if not env_str:
+                platform = env_payload.get("platform", "")
+                browser = env_payload.get("browser", "")
+                if platform or browser:
+                    env_str = f"{platform}/{browser}".strip("/")
+        else:
+            env_str = ""
+        synthetic_runs.append({
+            "stats": r.get("stats") or {},
+            "environment": env_str,
+        })
+
+    return compute_session_metrics(
+        tc_data=tcs,
+        cl_data=cls,
+        test_runs=synthetic_runs,
+        bugs_data=bugs,
+    )
+
+
+def snapshot_metrics(project_id: str) -> int | None:
+    """Persist a metric snapshot from the current request's session.
+
+    Returns the row id of the persisted snapshot, or ``None`` when
+    there's nothing to snapshot (no active project, empty dashboard).
+    """
+    if not project_id:
+        return None
+    try:
+        from flask import session  # local import — keeps this module Flask-free at import time
+    except Exception:
+        return None
+    metrics = compute_session_metrics(
+        tc_data=session.get("test_cases_data", []),
+        cl_data=session.get("checklist_data", []),
+        test_runs=session.get("test_runs", []),
+        bugs_data=session.get("bug_reports_data", []),
+    )
+    if not metrics.get("has_data"):
+        return None
+    from engine import db as _db
+    return _db.save_metric_snapshot(project_id, metrics)
+
+
+def snapshot_metrics_from_db(project_id: str) -> int | None:
+    """Out-of-request snapshot — pulls everything from the DB.
+
+    Used by ``runner_worker`` (detached subprocess, no Flask context)
+    and the daily catch-up thread. Best-effort: returns ``None`` if
+    there's no data yet, raises whatever the DB raises if persistence
+    blows up (caller handles).
+    """
+    if not project_id:
+        return None
+    from engine import db as _db
+    tcs = _db.load_test_cases(project_id)
+    cls = _db.load_checklist(project_id)
+    bugs = _db.list_bugs(project_id)
+    runs = _db.list_execution_runs(project_id)
+    metrics = _aggregate_from_db_rows(tcs, bugs, runs, cls=cls)
+    if not metrics.get("has_data"):
+        return None
+    return _db.save_metric_snapshot(project_id, metrics)
+
+
+__all__ = [
+    # legacy template helpers
+    "CoverageRow", "ExecutionRow", "IssuesSummary", "KPI", "TestMetrics",
+    "generate_test_metrics",
+    # dashboard / trend-history
+    "compute_session_metrics", "_aggregate_from_db_rows",
+    "snapshot_metrics", "snapshot_metrics_from_db",
+]

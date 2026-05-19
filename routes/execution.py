@@ -1024,6 +1024,10 @@ def register(app: Flask) -> None:
                           "manual_bug_refs": manual_bug_refs or {},
                           "session_id": get_session_id(session)
                               if "get_session_id" in globals() else "",
+                          # S3.3: passed to the detached worker so it can
+                          # write a dashboard metric snapshot after the
+                          # run finishes (subprocess has no Flask session).
+                          "project_id": session.get("project_id") or "",
                           "tester_id": tester_id,
                           "tester_name": (get_tester(tester_id).name
                                            if get_tester(tester_id)
