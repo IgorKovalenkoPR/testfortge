@@ -605,75 +605,84 @@ class AutomationRunner:
         if self.user_agent:
             ctx_kwargs["user_agent"] = self.user_agent
 
+        # Sprint 1 Task 3 — full context-lifetime try/finally.
+        # Previously only the step loop (lines ~676-697) was wrapped, so
+        # any crash during page setup, init-script injection, or
+        # authenticate() leaked the BrowserContext. On 512 MB Render
+        # dynos ~4 leaked contexts (each ~80 MB) tripped the OOM killer.
+        # Now `context` is the very first thing created inside the try,
+        # and `finally` always calls context.close(). `page` is sentinel-
+        # initialised so we never NameError if new_page() itself raises.
         context = browser.new_context(**ctx_kwargs)
-        page = context.new_page()
-        # In headed mode raise the window/tab to the front so it isn't
-        # hidden behind the IDE / Flask console when the run starts.
-        if not self.headless:
-            try:
-                page.bring_to_front()
-            except Exception:
-                pass
-        page.set_default_timeout(self.default_timeout_ms)
-        page.set_default_navigation_timeout(self.navigation_timeout_ms)
-        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
-        page.on("pageerror", lambda exc: console_errors.append(str(exc)))
-
-        # Inject a custom CSS cursor on every page so the recorded video
-        # AND screenshots have a visible pointer. Headless Chromium does
-        # NOT render the OS cursor in either video or screenshots, which
-        # is why the user said the recordings "look like screenshots".
-        # We attach to every navigation via init script so the cursor
-        # survives goto / SPA route changes.
-        #
-        # 2026-05-04 — operator complaint: "Live view shows only one
-        # screenshot, no scrolls/fills/clicks". Root cause: the live mirror
-        # IS the audience for headless+no-video runs too, but the gating
-        # below skipped cursor/animation work for that exact case. Always
-        # inject — CSS-only cursor + smooth-scroll cost is negligible on
-        # 0.1 CPU compared to round-tripping through Playwright APIs.
-        if True:
-            cursor_script = (
-                "(() => {"
-                "  if (window.__tfCursorInjected) return;"
-                "  window.__tfCursorInjected = true;"
-                "  const c = document.createElement('div');"
-                "  c.id = '__tf_cursor';"
-                "  c.style.cssText = 'position:fixed;left:0;top:0;width:28px;"
-                "height:28px;pointer-events:none;z-index:2147483647;"
-                "transition:transform 350ms ease;transform:translate(0,0);'"
-                "+ \"background:url(\\\"data:image/svg+xml;utf8,\""
-                "+ encodeURIComponent('<svg xmlns=\\\"http://www.w3.org/2000/svg\\\""
-                " width=\\\"28\\\" height=\\\"28\\\" viewBox=\\\"0 0 28 28\\\">"
-                "<path d=\\\"M2 2 L2 22 L7 18 L11 27 L15 25 L11 16 L19 16 Z\\\""
-                " fill=\\\"%23dc2626\\\" stroke=\\\"white\\\" stroke-width=\\\"1.5\\\""
-                "/></svg>') + \"\\\") no-repeat;\";"
-                "  document.body && document.body.appendChild(c);"
-                "  window.__tfMoveCursor = (x, y) => {"
-                "    const el = document.getElementById('__tf_cursor');"
-                "    if (el) el.style.transform = 'translate(' + x + 'px,' + y + 'px)';"
-                "  };"
-                "})();"
-            )
-            try:
-                context.add_init_script(cursor_script)
-                page.evaluate(cursor_script)
-            except Exception as exc:
-                _logger.debug("cursor inject: %s", exc)
-
-        # Authenticate (and auto-register when requested) before running
-        # test-case steps. Any failure here is recorded as a synthetic
-        # step so the engineer sees what went wrong.
-        if self.credentials and self.credentials.is_active():
-            auth_step = self._authenticate(page, tc_dir)
-            if auth_step is not None:
-                result.steps.append(auth_step)
-                if auth_step.status == "failed":
-                    result.status = "blocked"
-                    result.comment = f"Login failed: {auth_step.comment}"
-
+        page = None
         t_script = time.time()
         try:
+            page = context.new_page()
+            # In headed mode raise the window/tab to the front so it isn't
+            # hidden behind the IDE / Flask console when the run starts.
+            if not self.headless:
+                try:
+                    page.bring_to_front()
+                except Exception:
+                    pass
+            page.set_default_timeout(self.default_timeout_ms)
+            page.set_default_navigation_timeout(self.navigation_timeout_ms)
+            page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+            page.on("pageerror", lambda exc: console_errors.append(str(exc)))
+
+            # Inject a custom CSS cursor on every page so the recorded video
+            # AND screenshots have a visible pointer. Headless Chromium does
+            # NOT render the OS cursor in either video or screenshots, which
+            # is why the user said the recordings "look like screenshots".
+            # We attach to every navigation via init script so the cursor
+            # survives goto / SPA route changes.
+            #
+            # 2026-05-04 — operator complaint: "Live view shows only one
+            # screenshot, no scrolls/fills/clicks". Root cause: the live mirror
+            # IS the audience for headless+no-video runs too, but the gating
+            # below skipped cursor/animation work for that exact case. Always
+            # inject — CSS-only cursor + smooth-scroll cost is negligible on
+            # 0.1 CPU compared to round-tripping through Playwright APIs.
+            if True:
+                cursor_script = (
+                    "(() => {"
+                    "  if (window.__tfCursorInjected) return;"
+                    "  window.__tfCursorInjected = true;"
+                    "  const c = document.createElement('div');"
+                    "  c.id = '__tf_cursor';"
+                    "  c.style.cssText = 'position:fixed;left:0;top:0;width:28px;"
+                    "height:28px;pointer-events:none;z-index:2147483647;"
+                    "transition:transform 350ms ease;transform:translate(0,0);'"
+                    "+ \"background:url(\\\"data:image/svg+xml;utf8,\""
+                    "+ encodeURIComponent('<svg xmlns=\\\"http://www.w3.org/2000/svg\\\""
+                    " width=\\\"28\\\" height=\\\"28\\\" viewBox=\\\"0 0 28 28\\\">"
+                    "<path d=\\\"M2 2 L2 22 L7 18 L11 27 L15 25 L11 16 L19 16 Z\\\""
+                    " fill=\\\"%23dc2626\\\" stroke=\\\"white\\\" stroke-width=\\\"1.5\\\""
+                    "/></svg>') + \"\\\") no-repeat;\";"
+                    "  document.body && document.body.appendChild(c);"
+                    "  window.__tfMoveCursor = (x, y) => {"
+                    "    const el = document.getElementById('__tf_cursor');"
+                    "    if (el) el.style.transform = 'translate(' + x + 'px,' + y + 'px)';"
+                    "  };"
+                    "})();"
+                )
+                try:
+                    context.add_init_script(cursor_script)
+                    page.evaluate(cursor_script)
+                except Exception as exc:
+                    _logger.debug("cursor inject: %s", exc)
+
+            # Authenticate (and auto-register when requested) before running
+            # test-case steps. Any failure here is recorded as a synthetic
+            # step so the engineer sees what went wrong.
+            if self.credentials and self.credentials.is_active():
+                auth_step = self._authenticate(page, tc_dir)
+                if auth_step is not None:
+                    result.steps.append(auth_step)
+                    if auth_step.status == "failed":
+                        result.status = "blocked"
+                        result.comment = f"Login failed: {auth_step.comment}"
+
             for i, step in enumerate(script.steps, start=1):
                 sr = self._run_step(page, step, i, tc_dir)
                 sr.console_errors = list(console_errors)
@@ -688,13 +697,24 @@ class AutomationRunner:
                     break
             result.final_url = page.url
         finally:
+            # Resolve the video path BEFORE closing the context — Playwright
+            # only flushes the .webm to disk once context.close() returns,
+            # but page.video itself is available from new_page() onward.
+            video = None
+            if page is not None:
+                try:
+                    video = page.video
+                except Exception:
+                    video = None
             try:
-                video = page.video
                 context.close()
-                if video and self.record_video:
+            except Exception as exc:
+                _logger.debug("context.close on cleanup: %s", exc)
+            if video and self.record_video:
+                try:
                     result.video_path = _rel_url(video.path(), self.storage_root)
-            except Exception:
-                context.close()
+                except Exception as exc:
+                    _logger.debug("video path resolve: %s", exc)
 
         result.duration_ms = int((time.time() - t_script) * 1000)
         return result
