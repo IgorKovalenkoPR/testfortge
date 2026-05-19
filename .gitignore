@@ -5,8 +5,13 @@ flask_session/
 uploads/
 storage/
 # Local SQLite/SQLAlchemy fallback DBs — Postgres is the prod backend.
+# WAL mode creates two sidecar files alongside the main DB (-wal, -shm).
 *.db
+*.db-wal
+*.db-shm
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 .env
 *.egg-info/
 dist/

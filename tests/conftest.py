@@ -7,6 +7,13 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Tests run against SQLite by default. The production-safety guard in
+# ``engine.db.init_db`` refuses to boot on SQLite unless FLASK_DEBUG=1
+# (or the explicit TESTFORTGE_ALLOW_SQLITE_PROD escape hatch). Set the
+# debug flag here, before any module that touches the DB gets imported,
+# so the whole suite sees a consistent local-dev environment.
+os.environ.setdefault("FLASK_DEBUG", "1")
+
 from app import app as flask_app
 
 

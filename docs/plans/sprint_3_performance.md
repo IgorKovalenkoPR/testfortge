@@ -387,6 +387,7 @@ Refuse to boot by default; escape hatch for solo-VM self-hosters.
 - `README.md` — Postgres-in-prod note
 - `tests/test_sqlite_pragmas.py` — open fresh engine, assert `journal_mode == 'wal'`, `busy_timeout == 5000`
 - `tests/test_concurrent_writes.py` — 5 threads × 10 writes, assert no deadlock
+- `tests/test_db_safety.py` — `init_db()` on SQLite + non-debug must raise; escape hatch lets it boot
 
 ### Risks
 - **NFS/SMB incompatible with WAL.** Render uses ext4-local, fine. Document.
