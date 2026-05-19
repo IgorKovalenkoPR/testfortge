@@ -51,6 +51,7 @@ flask.log
 # whitelist individual scripts.
 tools/*
 !tools/build_istqb_corpus.py
+!tools/measure_prompts.py
 
 # Temporary DOCX build helpers and generated artefacts
 _build_requirements_docx.js
