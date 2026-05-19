@@ -101,12 +101,23 @@ def _build_engine(url: str) -> Engine:
             future=True,
         )
 
-        # Foreign keys are off by default in SQLite; turn them on
-        # for every connection so cascade-delete actually fires.
+        # Configure SQLite for safer concurrent access:
+        #   * ``foreign_keys=ON`` — off by default in SQLite; needed so
+        #     cascade-delete actually fires.
+        #   * ``journal_mode=WAL`` — snapshot writer + runner worker stop
+        #     blocking each other on read.
+        #   * ``synchronous=NORMAL`` — WAL-safe durability with much less
+        #     fsync cost than FULL.
+        #   * ``busy_timeout=5000`` — rare write-write collisions wait
+        #     quietly for up to 5s instead of raising ``database is
+        #     locked`` immediately.
         @event.listens_for(eng, "connect")
-        def _enable_sqlite_fk(dbapi_conn, _):  # pragma: no cover
+        def _configure_sqlite_pragmas(dbapi_conn, _):
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.execute("PRAGMA busy_timeout=5000")
             cur.close()
 
         return eng
@@ -121,12 +132,39 @@ def _build_engine(url: str) -> Engine:
     )
 
 
+def _assert_prod_safety(url: str) -> None:
+    """Refuse to boot a production process backed by SQLite.
+
+    SQLite is fine for unit tests and local dev, but in production the
+    snapshot writer + detached ``runner_worker`` issue concurrent writes
+    from multiple gunicorn workers and will deadlock under load.
+    ``FLASK_DEBUG=1`` is our "this is local" signal; anything else is
+    assumed to be a real deployment and must use Postgres.
+
+    Escape hatch for solo-VM self-hosters:
+    ``TESTFORTGE_ALLOW_SQLITE_PROD=1`` downgrades the hard raise to a
+    loud warning.
+    """
+    in_debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    if not in_debug and url.startswith("sqlite"):
+        msg = ("TestForTge starting with SQLite in non-debug mode. "
+               "SQLite OK for unit tests and local dev, NOT production: "
+               "concurrent writes from gunicorn workers + detached "
+               "runner_worker will deadlock under load. Set "
+               "DATABASE_URL=postgresql://... or FLASK_DEBUG=1.")
+        if os.environ.get("TESTFORTGE_ALLOW_SQLITE_PROD") == "1":
+            log.warning(msg + " Continuing because TESTFORTGE_ALLOW_SQLITE_PROD=1.")
+        else:
+            raise RuntimeError(msg)
+
+
 def init_db() -> None:
     """Create the engine + tables. Safe to call multiple times."""
     global _engine, _Session
     if _engine is not None:
         return
     url = database_url()
+    _assert_prod_safety(url)
     log.info("Initialising DB engine: %s",
              "sqlite" if url.startswith("sqlite") else "postgresql")
     _engine = _build_engine(url)
