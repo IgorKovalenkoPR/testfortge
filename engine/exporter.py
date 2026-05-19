@@ -19,6 +19,25 @@ from .user_story_generator import UserStory
 from .testcase_generator import TestCase, ChecklistItem
 
 
+# ── CSV/XLSX formula-injection guard ─────────────────────────────
+# Spreadsheet apps (Excel, LibreOffice, Google Sheets) interpret cells
+# whose text starts with one of `= + - @ | \t \r` as a formula. A user-
+# controlled summary/comment like `=cmd|'/c calc'!A1` would execute when
+# the recipient opens our export. We neutralize this by prepending a
+# single apostrophe — the canonical Excel "treat as literal text" escape.
+# Non-string values (None, int, float, bool, dates) pass through untouched
+# so numeric/date columns stay native.
+_INJECTION_PREFIXES = ("=", "+", "-", "@", "|", "\t", "\r")
+
+
+def _sanitize_cell(val):
+    """Return val with a leading apostrophe if it's a string that begins
+    with a character spreadsheets treat as a formula trigger."""
+    if isinstance(val, str) and val and val[0] in _INJECTION_PREFIXES:
+        return "'" + val
+    return val
+
+
 def export_markdown(project_name: str, stories: list[UserStory],
                     test_cases: list[TestCase], checklist: list[ChecklistItem],
                     traceability: list[dict], recommendations: dict) -> str:
@@ -203,9 +222,11 @@ def export_csv_testcases(test_cases: list[TestCase]) -> str:
     w.writerow(["TC ID", "Section", "Summary", "User Story", "Category", "Priority",
                 "Preconditions", "Test Steps", "Test Data", "Expected Result", "Issues", "Comment", "Status"])
     for tc in test_cases:
-        w.writerow([tc.id, tc.section, tc.summary, tc.user_story_id, tc.category, tc.priority,
-                     tc.preconditions, tc.test_steps, tc.test_data, tc.expected_result,
-                     tc.issues, tc.comment, tc.status])
+        w.writerow([_sanitize_cell(v) for v in (
+            tc.id, tc.section, tc.summary, tc.user_story_id, tc.category, tc.priority,
+            tc.preconditions, tc.test_steps, tc.test_data, tc.expected_result,
+            tc.issues, tc.comment, tc.status,
+        )])
     return buf.getvalue()
 
 
@@ -214,7 +235,9 @@ def export_csv_checklist(checklist: list[ChecklistItem]) -> str:
     w = csv.writer(buf)
     w.writerow(["ID", "Section", "Objective", "Category", "Priority", "Status", "Comments"])
     for cl in checklist:
-        w.writerow([cl.id, cl.section, cl.objective, cl.category, cl.priority, cl.status, cl.comments])
+        w.writerow([_sanitize_cell(v) for v in (
+            cl.id, cl.section, cl.objective, cl.category, cl.priority, cl.status, cl.comments,
+        )])
     return buf.getvalue()
 
 
@@ -324,7 +347,7 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
         is_alt = (row_idx % 2 == 0)
 
         for col_idx, val in enumerate(values, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell = ws.cell(row=row_idx, column=col_idx, value=_sanitize_cell(val))
             cell.border = _THIN_BORDER
 
             # Wrap text for long-form columns
@@ -338,7 +361,7 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
             if is_alt:
                 cell.fill = _ALT_ROW_FILL
 
-            # Priority coloring
+            # Priority coloring (lookup against the original, unsanitized value)
             if col_idx == col_priority:
                 fill = _PRIORITY_FILLS.get(val)
                 if fill:
@@ -386,13 +409,14 @@ def export_xlsx_checklist(checklist: list[ChecklistItem]) -> bytes:
         is_alt = (row_idx % 2 == 0)
 
         for col_idx, val in enumerate(values, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell = ws.cell(row=row_idx, column=col_idx, value=_sanitize_cell(val))
             cell.border = _THIN_BORDER
             cell.alignment = _DEFAULT_ALIGNMENT
 
             if is_alt:
                 cell.fill = _ALT_ROW_FILL
 
+            # Lookup colors against the original, unsanitized value
             if col_idx == col_priority:
                 fill = _PRIORITY_FILLS.get(val)
                 if fill:
