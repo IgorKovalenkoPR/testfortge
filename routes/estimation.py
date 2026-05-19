@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict
 from datetime import datetime
 
 from flask import (Flask, current_app, flash, jsonify, redirect, render_template,
@@ -24,16 +23,37 @@ from engine.log import get_logger
 from engine.i18n import get_lang
 from engine.qa_estimator import (
     Feature, compute_estimation,
-    features_from_text, features_from_site_analysis,
     export_estimation_xlsx,
 )
-from engine.site_crawler import crawl_site
-from engine.file_parser import parse_file, allowed_file
+from engine.estimation_service import (
+    EstimationInput, run_estimation,
+)
+from engine.file_parser import allowed_file
 from engine.job_queue import get_queue, DONE, FAILED
 
 from engine import db as _db
 
 from .automation import STORAGE_ROOT, MAX_CONCURRENT_JOBS_PER_SESSION
+
+class _DictShim:
+    """Minimal attribute carrier so :func:`_historical_calibration` can
+    read ``.features`` / ``.full_total_expected`` off a plain result
+    dict without us rebuilding the full ``EstimationResult`` dataclass."""
+
+    class _Feat:
+        __slots__ = ("is_section",)
+
+        def __init__(self, d: dict) -> None:
+            self.is_section = bool(d.get("is_section"))
+
+    def __init__(self, result_dict: dict) -> None:
+        self.features = [self._Feat(f) for f in result_dict.get("features", [])]
+        self.full_total_expected = float(
+            result_dict.get("full_total_expected") or 0.0)
+        self.history_hint = None
+        self.history_median_hours_per_feature = None
+        self.history_sample_size = None
+
 
 def _historical_calibration(result, owner_sid: str) -> None:
     """Decorate ``result`` with a soft hint comparing it to the user's
@@ -283,270 +303,178 @@ def register(app: Flask) -> None:
             )
             return redirect(url_for("estimation_page"))
 
-    def _estimation_run_inner():
-        # Input clamping — keep user-supplied numbers inside sane bounds so
-        # malformed or abusive values can't blow up computations or exports.
+    def _build_input(saved_attachment_path: str = "",
+                     saved_mockup_paths: list[str] | None = None) -> EstimationInput:
+        """Read clamped + normalised values from ``request.form`` into
+        an :class:`EstimationInput`. Upload-saving stays in the route
+        (only the route has request.files); pass the saved paths in."""
+
+        def _ci(name: str, default: int, lo: int, hi: int) -> int:
+            try:
+                return int(_clamp(
+                    int(request.form.get(name, str(default)) or default),
+                    lo, hi))
+            except ValueError:
+                return default
+
+        def _cf(name: str, default: float, lo: float, hi: float) -> float:
+            try:
+                return _clamp(
+                    float(request.form.get(name, str(default)) or default),
+                    lo, hi)
+            except ValueError:
+                return default
+
         project_name = (request.form.get("project_name", "").strip())[:120]
-        try:
-            rate_usd = _clamp(float(request.form.get("rate_usd", "0") or 0),
-                              0.0, 10_000.0)
-        except ValueError:
-            rate_usd = 0.0
-        try:
-            additional_platforms = int(_clamp(
-                int(request.form.get("additional_platforms", "9") or 9),
-                0, current_app.config["EST_MAX_ADDITIONAL_PLATFORMS"]))
-        except ValueError:
-            additional_platforms = 9
-        try:
-            minutes_per_tc = int(_clamp(
-                int(request.form.get("minutes_per_tc", "5") or 5),
-                1, current_app.config["EST_MAX_MINUTES_PER_TC"]))
-        except ValueError:
-            minutes_per_tc = 5
-        try:
-            buffer_percent = _clamp(
-                float(request.form.get("buffer_percent", "12") or 12),
-                0.0, float(current_app.config["EST_MAX_BUFFER_PERCENT"]))
-        except ValueError:
-            buffer_percent = 12.0
-        buffer = 1.0 + buffer_percent / 100.0
+        rate_usd = _cf("rate_usd", 0.0, 0.0, 10_000.0)
+        additional_platforms = _ci(
+            "additional_platforms", 9,
+            0, current_app.config["EST_MAX_ADDITIONAL_PLATFORMS"])
+        minutes_per_tc = _ci(
+            "minutes_per_tc", 5,
+            1, current_app.config["EST_MAX_MINUTES_PER_TC"])
+        buffer_percent = _cf(
+            "buffer_percent", 12.0,
+            0.0, float(current_app.config["EST_MAX_BUFFER_PERCENT"]))
+        compat_percent = _cf("compatibility_rate", 0.3, 0.0, 100.0)
+        bug_percent = _cf("bug_report_rate", 15.0, 0.0, 100.0)
+        pm_percent = _cf("pm_overhead", 8.0, 0.0, 100.0)
+        max_testing_stretch = _cf("max_testing_stretch", 1.5, 1.0, 10.0)
+        team_size = _ci("team_size", 1, 1, 50)
+        primary_platform = (
+            request.form.get("primary_platform", "Windows 10").strip()
+            or "Windows 10")
 
-        # Per-run user-tunable coefficients. UI supplies them as percents
-        # (compat/bug/PM) or a plain multiplier (stretch); default if missing.
-        try:
-            compat_percent = _clamp(
-                float(request.form.get("compatibility_rate", "0.3") or 0.3),
-                0.0, 100.0)
-        except ValueError:
-            compat_percent = 0.3
-        compatibility_rate = compat_percent / 100.0
-        try:
-            bug_percent = _clamp(
-                float(request.form.get("bug_report_rate", "15") or 15),
-                0.0, 100.0)
-        except ValueError:
-            bug_percent = 15.0
-        bug_report_rate = bug_percent / 100.0
-        try:
-            pm_percent = _clamp(
-                float(request.form.get("pm_overhead", "8") or 8),
-                0.0, 100.0)
-        except ValueError:
-            pm_percent = 8.0
-        pm_overhead = pm_percent / 100.0
-        try:
-            max_testing_stretch = _clamp(
-                float(request.form.get("max_testing_stretch", "1.5") or 1.5),
-                1.0, 10.0)
-        except ValueError:
-            max_testing_stretch = 1.5
-
-        primary_platform = request.form.get("primary_platform", "Windows 10").strip() or "Windows 10"
-        source_choice = request.form.get("source", "url")
-        url = request.form.get("url", "").strip()
-        text_input = request.form.get("text_input", "").strip()
-        figma_url = request.form.get("figma_url", "").strip()
-        mockup_context = request.form.get("mockup_context", "").strip()
-
-        session["estimation_form"] = {
-            "project_name": project_name, "rate_usd": rate_usd,
-            "additional_platforms": additional_platforms,
-            "minutes_per_tc": minutes_per_tc, "buffer_percent": int(buffer_percent),
-            "compatibility_rate": compat_percent,
-            "bug_report_rate": bug_percent,
-            "pm_overhead": pm_percent,
-            "max_testing_stretch": max_testing_stretch,
-            "primary_platform": primary_platform, "url": url, "text_input": text_input,
-            "figma_url": figma_url, "mockup_context": mockup_context,
-            "source": source_choice,
-        }
-
-        features: list = []
-        source = "manual"
-        source_ref = ""
-
-        # ── Tab 1 — Requirements text ───────────────────────────
-        # Combines pasted text + parsed-text-from-attachment so the
-        # tester can mix sources within one tab. Both `attachment`
-        # (legacy radio value) and `text` (new tab name) hit this
-        # branch — backwards-compat with bookmarks.
-        if source_choice in ("text", "attachment"):
-            collected_lines: list[str] = []
-            if text_input:
-                collected_lines.append(text_input)
-            up = request.files.get("attachment")
-            if up and up.filename and allowed_file(up.filename):
-                safe_name = secure_filename(up.filename) or "upload.bin"
-                save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], safe_name)
-                up.save(save_path)
-                lines, err = parse_file(save_path, safe_name)
-                if err:
-                    flash(f"Attachment parse warning: {err}", "warning")
-                if lines:
-                    collected_lines.extend(lines)
-                source_ref = safe_name
-            if collected_lines:
-                features = features_from_text("\n".join(collected_lines))
-                source = "text" if not source_ref else "attachment"
-                if not source_ref:
-                    source_ref = "pasted input"
-
-        # ── Tab 2 — Mockups (vision pipeline) ────────────────────
-        # Image / PDF uploads + optional Figma URL go through
-        # engine.mockup_vision which calls Claude vision and emits
-        # a feature-list bullet text consumed by features_from_text.
-        elif source_choice == "mockups":
-            try:
-                from engine.mockup_vision import analyse as _vision_analyse
-                saved_paths: list[str] = []
-                upload_dir = current_app.config["UPLOAD_FOLDER"]
-                for up in request.files.getlist("mockup_files"):
-                    if not up or not up.filename:
-                        continue
-                    if not allowed_file(up.filename):
-                        flash(f"Skipped unsupported file: {up.filename}",
-                              "warning")
-                        continue
-                    safe = secure_filename(up.filename) or "mockup.bin"
-                    p = os.path.join(upload_dir, safe)
-                    up.save(p)
-                    saved_paths.append(p)
-                vres = _vision_analyse(
-                    file_paths=saved_paths,
-                    figma_url=figma_url,
-                    context=mockup_context,
-                )
-                for w in (vres.warnings or []):
-                    flash(w, "warning")
-                if vres.error:
-                    flash(vres.error, "danger")
-                if vres.text:
-                    features = features_from_text(vres.text)
-                    source = "mockups"
-                    label_bits = []
-                    if saved_paths:
-                        label_bits.append(f"{len(saved_paths)} file(s)")
-                    if figma_url:
-                        label_bits.append("Figma URL")
-                    source_ref = (vres.source_label
-                                   or " + ".join(label_bits)
-                                   or "uploaded mockups")
-                    # Stash the raw bullet text so the operator can
-                    # review what the vision model extracted before
-                    # generating test cases.
-                    session["estimation_extracted_text"] = vres.text
-            except Exception as exc:
-                log.exception("mockup vision pipeline failed: %s", exc)
-                flash(f"Mockup analysis failed: {type(exc).__name__}", "danger")
-
-        # ── Tab 3 — URL crawl ────────────────────────────────────
-        elif source_choice == "url":
-            if not url:
-                flash(
-                    "URL tab is selected but no URL was provided.",
-                    "warning",
-                )
-            else:
-                try:
-                    analysis = crawl_site(url)
-                    features = features_from_site_analysis(analysis)
-                    if features:
-                        source, source_ref = "url", url
-                    else:
-                        flash(
-                            f"Crawled {url} but no testable features "
-                            f"were extracted. Try the Text or Mockups "
-                            f"tab, or check that the URL serves real "
-                            f"HTML content.",
-                            "warning",
-                        )
-                except Exception as exc:
-                    log.warning("estimation site crawl failed: %s", exc)
-                    flash(
-                        f"Could not crawl {url}: "
-                        f"{type(exc).__name__} — {str(exc)[:200]}. "
-                        "Switch to the Text tab and paste the spec, or "
-                        "try a different URL.",
-                        "warning",
-                    )
-
-        # ── Legacy fallback: try text_input regardless of tab ───
-        # If the chosen source produced nothing but the user ALSO
-        # pasted something into the text textarea, use that as a
-        # fallback. Restores the pre-3-tab-refactor behaviour
-        # operators relied on.
-        if not features and text_input:
-            try:
-                features = features_from_text(text_input)
-                if features:
-                    source = source or "text"
-                    source_ref = source_ref or "pasted input (fallback)"
-            except Exception as exc:
-                log.warning("text fallback features_from_text failed: %s",
-                            exc)
-
-        if not features:
-            flash(
-                "No features could be extracted from the selected "
-                "source. Pick a different tab, paste more detailed "
-                "content, or check the URL is reachable.",
-                "danger",
-            )
-            return redirect(url_for("estimation_page"))
-
-        # Optional team_size — drives Brooks's-Law overhead. Default 1.
-        try:
-            team_size = max(1, int(request.form.get("team_size", "1") or 1))
-        except (TypeError, ValueError):
-            team_size = 1
-
-        result = compute_estimation(
-            features=features,
+        return EstimationInput(
+            source_choice=request.form.get("source", "text"),
+            url=request.form.get("url", "").strip(),
+            text_input=request.form.get("text_input", "").strip(),
+            figma_url=request.form.get("figma_url", "").strip(),
+            mockup_context=request.form.get("mockup_context", "").strip(),
+            attachment_path=saved_attachment_path,
+            mockup_paths=list(saved_mockup_paths or []),
+            project_name=project_name,
             rate_usd=rate_usd,
             additional_platforms=additional_platforms,
             minutes_per_tc=minutes_per_tc,
-            buffer=buffer,
-            project_name=project_name,
+            buffer=1.0 + buffer_percent / 100.0,
             primary_platform=primary_platform,
-            platforms_list=_DEFAULT_COMPAT_PLATFORMS[:additional_platforms],
-            source=source,
-            source_ref=source_ref,
-            compatibility_rate=compatibility_rate,
-            bug_report_rate=bug_report_rate,
-            pm_overhead=pm_overhead,
+            compatibility_rate=compat_percent / 100.0,
+            bug_report_rate=bug_percent / 100.0,
+            pm_overhead=pm_percent / 100.0,
             max_testing_stretch=max_testing_stretch,
             team_size=team_size,
         )
 
-        # Historical calibration — soft hint based on past estimations
-        # for the current owner_sid. Never mutates the numbers.
+    def _snapshot_form(inp: EstimationInput) -> dict:
+        """Mirror EstimationInput back to the percent-shaped dict that
+        the template re-reads on the next GET (so the operator's last
+        values stick in the form)."""
+        return {
+            "project_name": inp.project_name, "rate_usd": inp.rate_usd,
+            "additional_platforms": inp.additional_platforms,
+            "minutes_per_tc": inp.minutes_per_tc,
+            "buffer_percent": int(round((inp.buffer - 1.0) * 100)),
+            "compatibility_rate": inp.compatibility_rate * 100.0,
+            "bug_report_rate": inp.bug_report_rate * 100.0,
+            "pm_overhead": inp.pm_overhead * 100.0,
+            "max_testing_stretch": inp.max_testing_stretch,
+            "team_size": inp.team_size,
+            "primary_platform": inp.primary_platform,
+            "url": inp.url, "text_input": inp.text_input,
+            "figma_url": inp.figma_url, "mockup_context": inp.mockup_context,
+            "source": inp.source_choice,
+        }
+
+    def _save_uploaded_attachment() -> str:
+        up = request.files.get("attachment")
+        if not (up and up.filename and allowed_file(up.filename)):
+            return ""
+        safe_name = secure_filename(up.filename) or "upload.bin"
+        save_path = os.path.join(
+            current_app.config["UPLOAD_FOLDER"], safe_name)
+        up.save(save_path)
+        return save_path
+
+    def _save_uploaded_mockups(flash_warnings: bool = False) -> list[str]:
+        out: list[str] = []
+        upload_dir = current_app.config["UPLOAD_FOLDER"]
+        for up in request.files.getlist("mockup_files"):
+            if not up or not up.filename:
+                continue
+            if not allowed_file(up.filename):
+                if flash_warnings:
+                    flash(f"Skipped unsupported file: {up.filename}",
+                          "warning")
+                continue
+            safe = secure_filename(up.filename) or "mockup.bin"
+            p = os.path.join(upload_dir, safe)
+            up.save(p)
+            out.append(p)
+        return out
+
+    def _estimation_run_inner():
+        source_choice = request.form.get("source", "text")
+        att_path = ""
+        mockup_paths: list[str] = []
+        if source_choice in ("text", "attachment"):
+            att_path = _save_uploaded_attachment()
+        elif source_choice == "mockups":
+            mockup_paths = _save_uploaded_mockups(flash_warnings=True)
+
+        inp = _build_input(
+            saved_attachment_path=att_path,
+            saved_mockup_paths=mockup_paths,
+        )
+        session["estimation_form"] = _snapshot_form(inp)
+
         try:
-            _historical_calibration(result, get_session_id())
-        except Exception as exc:  # pragma: no cover
+            out = run_estimation(inp)
+        except RuntimeError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("estimation_page"))
+        for w in out.warnings:
+            flash(w, "warning")
+
+        # Historical calibration — annotate the result dict with a
+        # ``history_hint`` comparing this project to past similar ones.
+        # _historical_calibration reads .features and .full_total_expected
+        # off an object; a tiny shim keeps it dict-driven without
+        # rebuilding the full EstimationResult.
+        try:
+            shim = _DictShim(out.result_dict)
+            _historical_calibration(shim, get_session_id())
+            for k in ("history_hint", "history_median_hours_per_feature",
+                      "history_sample_size"):
+                v = getattr(shim, k, None)
+                if v is not None:
+                    out.result_dict[k] = v
+        except Exception as exc:  # pragma: no cover — best-effort
             log.warning("history calibration skipped: %s", exc)
 
-        result_dict = asdict(result)
-        session["estimation_result"] = result_dict
+        session["estimation_result"] = out.result_dict
+        if out.extracted_text:
+            session["estimation_extracted_text"] = out.extracted_text
         _persist_estimation(
             input_payload={
-                "source": source,
-                "source_ref": source_ref,
-                "primary_platform": primary_platform,
-                "additional_platforms": additional_platforms,
-                "compatibility_rate": compatibility_rate,
-                "bug_report_rate": bug_report_rate,
-                "pm_overhead": pm_overhead,
-                "team_size": team_size,
-                "features_count": sum(1 for f in features if not f.is_section),
-                "max_testing_stretch": max_testing_stretch,
+                "source": out.source_label,
+                "source_ref": out.source_ref,
+                "primary_platform": inp.primary_platform,
+                "additional_platforms": inp.additional_platforms,
+                "compatibility_rate": inp.compatibility_rate,
+                "bug_report_rate": inp.bug_report_rate,
+                "pm_overhead": inp.pm_overhead,
+                "team_size": inp.team_size,
+                "features_count": out.features_count,
+                "max_testing_stretch": inp.max_testing_stretch,
             },
-            result_dict=result_dict,
+            result_dict=out.result_dict,
         )
+        rd = out.result_dict
         flash(
-            f"Estimation complete: {result.total_tc} test cases, "
-            f"{result.one_plat_total_expected:.1f}h (one platform), "
-            f"{result.full_total_expected:.1f}h (full compatibility).",
+            f"Estimation complete: {rd.get('total_tc', 0)} test cases, "
+            f"{rd.get('one_plat_total_expected', 0):.1f}h (one platform), "
+            f"{rd.get('full_total_expected', 0):.1f}h (full compatibility).",
             "success",
         )
         return redirect(url_for("estimation_page"))
@@ -557,30 +485,11 @@ def register(app: Flask) -> None:
         a ``job_id`` immediately so the UI can show a progress modal
         and poll ``/estimation/status/<id>`` until done.
 
-        Handles ALL three source types — Text (instant), Mockups
-        (vision API takes 5-30 s on Claude), and URL (site crawl can
-        stretch to many seconds). Operator-reported on 2026-05-04 that
-        the legacy sync /estimation/run path's result template never
-        rendered after the recent refactor; standardising on the
-        async pattern fixes that AND brings the same progress modal
-        the Test Cases / Checklist generators use.
-
         File uploads are saved to UPLOAD_FOLDER inside this request
         BEFORE the job is submitted — the worker thread has no access
         to ``request.files``.
         """
-        source_choice = request.form.get("source", "text").strip()
-        url = request.form.get("url", "").strip()
-        text_input = request.form.get("text_input", "").strip()
-        figma_url = request.form.get("figma_url", "").strip()
-        mockup_context = request.form.get("mockup_context", "").strip()
-
         # Per-session concurrency cap (shared threshold with automation).
-        # Sprint 1 Task 5 added the MAX_CONCURRENT_RUNS env knob — when
-        # present (and lower than the legacy MAX_CONCURRENT_JOBS_PER_SESSION),
-        # it tightens the gate so operators can ratchet the limit down
-        # without a code change. Both still ride the same kind+meta query
-        # so finished jobs roll off as soon as they complete.
         sid = get_session_id(session)
         active = get_queue().count_active_by_meta(
             "estimation", "session_id", sid)
@@ -598,38 +507,23 @@ def register(app: Flask) -> None:
                 "limit": limit,
             })
             resp.status_code = 429
-            # Site crawls are typically faster than automation runs, so
-            # a 15s hint is more than enough in practice.
             resp.headers["Retry-After"] = "15"
             return resp
 
-        # Pre-save uploaded files BEFORE dispatching to the worker,
-        # because the worker thread has no request context. Each path
-        # records the absolute file paths into ``saved_paths`` so the
-        # worker can re-open them via plain pathlib.
+        source_choice = request.form.get("source", "text").strip()
         saved_attachment_path = ""
         saved_mockup_paths: list[str] = []
-        upload_dir = current_app.config["UPLOAD_FOLDER"]
         if source_choice in ("text", "attachment"):
-            up = request.files.get("attachment")
-            if up and up.filename and allowed_file(up.filename):
-                safe_name = secure_filename(up.filename) or "upload.bin"
-                saved_attachment_path = os.path.join(upload_dir, safe_name)
-                up.save(saved_attachment_path)
+            saved_attachment_path = _save_uploaded_attachment()
         elif source_choice == "mockups":
-            for up in request.files.getlist("mockup_files"):
-                if not up or not up.filename:
-                    continue
-                if not allowed_file(up.filename):
-                    continue
-                safe = secure_filename(up.filename) or "mockup.bin"
-                p = os.path.join(upload_dir, safe)
-                up.save(p)
-                saved_mockup_paths.append(p)
+            saved_mockup_paths = _save_uploaded_mockups()
 
-        # Validation per source type. URL needs the URL; mockups
-        # needs at least one image OR a Figma URL; text needs at
-        # least pasted text or an attachment.
+        # Validation per source type. URL needs the URL; mockups needs
+        # at least one image OR a Figma URL; text needs pasted text or
+        # an attachment.
+        url = request.form.get("url", "").strip()
+        text_input = request.form.get("text_input", "").strip()
+        figma_url = request.form.get("figma_url", "").strip()
         if source_choice == "url" and not url:
             return jsonify({
                 "error": "no_url",
@@ -647,170 +541,19 @@ def register(app: Flask) -> None:
                 "message": "Paste requirements text or attach a document.",
             }), 400
 
-        # Same clamping as /estimation/run — keep numeric inputs sane.
-        def _clamp_int(name: str, default: int, lo: int, hi: int) -> int:
-            try:
-                return int(_clamp(int(request.form.get(name, str(default)) or default), lo, hi))
-            except ValueError:
-                return default
-
-        def _clamp_float(name: str, default: float, lo: float, hi: float) -> float:
-            try:
-                return _clamp(float(request.form.get(name, str(default)) or default), lo, hi)
-            except ValueError:
-                return default
-
-        project_name = (request.form.get("project_name", "").strip())[:120]
-        rate_usd = _clamp_float("rate_usd", 0.0, 0.0, 10_000.0)
-        additional_platforms = _clamp_int(
-            "additional_platforms", 9,
-            0, current_app.config["EST_MAX_ADDITIONAL_PLATFORMS"])
-        minutes_per_tc = _clamp_int(
-            "minutes_per_tc", 5,
-            1, current_app.config["EST_MAX_MINUTES_PER_TC"])
-        buffer_percent = _clamp_float(
-            "buffer_percent", 12.0,
-            0.0, float(current_app.config["EST_MAX_BUFFER_PERCENT"]))
-        buffer = 1.0 + buffer_percent / 100.0
-        compat_percent = _clamp_float("compatibility_rate", 0.3, 0.0, 100.0)
-        bug_percent = _clamp_float("bug_report_rate", 15.0, 0.0, 100.0)
-        pm_percent = _clamp_float("pm_overhead", 8.0, 0.0, 100.0)
-        max_testing_stretch = _clamp_float("max_testing_stretch", 1.5, 1.0, 10.0)
-        primary_platform = (request.form.get("primary_platform", "Windows 10").strip()
-                            or "Windows 10")
-
-        session["estimation_form"] = {
-            "project_name": project_name, "rate_usd": rate_usd,
-            "additional_platforms": additional_platforms,
-            "minutes_per_tc": minutes_per_tc, "buffer_percent": int(buffer_percent),
-            "compatibility_rate": compat_percent,
-            "bug_report_rate": bug_percent,
-            "pm_overhead": pm_percent,
-            "max_testing_stretch": max_testing_stretch,
-            "primary_platform": primary_platform,
-            "url": url, "text_input": text_input,
-            "figma_url": figma_url, "mockup_context": mockup_context,
-            "source": source_choice,
-        }
-
-        compat_rate = compat_percent / 100.0
-        bug_rate = bug_percent / 100.0
-        pm_ov = pm_percent / 100.0
-
-        # Capture every primitive the worker needs into closure-local
-        # variables — request.form / request.files don't exist in the
-        # background thread.
-        _src         = source_choice
-        _url         = url
-        _text_input  = text_input
-        _figma_url   = figma_url
-        _mockup_ctx  = mockup_context
-        _att_path    = saved_attachment_path
-        _mockup_paths = list(saved_mockup_paths)
+        inp = _build_input(
+            saved_attachment_path=saved_attachment_path,
+            saved_mockup_paths=saved_mockup_paths,
+        )
+        session["estimation_form"] = _snapshot_form(inp)
 
         def _worker():
-            """Dispatch by source type, return asdict(EstimationResult)."""
-            features: list = []
-            source = "manual"
-            source_ref = ""
-            extracted_text = ""
-
-            if _src in ("text", "attachment"):
-                lines: list[str] = []
-                if _text_input:
-                    lines.append(_text_input)
-                if _att_path:
-                    try:
-                        from os.path import basename
-                        parsed_lines, err = parse_file(_att_path,
-                                                        basename(_att_path))
-                        if parsed_lines:
-                            lines.extend(parsed_lines)
-                        source_ref = basename(_att_path)
-                    except Exception as exc:
-                        log.warning("worker parse_file failed: %s", exc)
-                if lines:
-                    features = features_from_text("\n".join(lines))
-                    source = "text" if not source_ref else "attachment"
-                    if not source_ref:
-                        source_ref = "pasted input"
-
-            elif _src == "mockups":
-                try:
-                    from engine.mockup_vision import analyse as _va
-                    vres = _va(file_paths=_mockup_paths,
-                               figma_url=_figma_url,
-                               context=_mockup_ctx)
-                    if vres.text:
-                        features = features_from_text(vres.text)
-                        source = "mockups"
-                        bits = []
-                        if _mockup_paths:
-                            bits.append(f"{len(_mockup_paths)} file(s)")
-                        if _figma_url:
-                            bits.append("Figma URL")
-                        source_ref = (vres.source_label
-                                       or " + ".join(bits)
-                                       or "uploaded mockups")
-                        extracted_text = vres.text
-                    elif vres.error:
-                        raise RuntimeError(
-                            f"Mockup analysis: {vres.error}")
-                except RuntimeError:
-                    raise
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Mockup analysis failed: "
-                        f"{type(exc).__name__} — {exc}") from exc
-
-            elif _src == "url":
-                try:
-                    analysis = crawl_site(_url)
-                    features = features_from_site_analysis(analysis)
-                    if features:
-                        source, source_ref = "url", _url
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Could not crawl {_url}: "
-                        f"{type(exc).__name__} — {exc}") from exc
-
-            # Legacy fallback — try pasted text regardless of tab.
-            if not features and _text_input:
-                try:
-                    features = features_from_text(_text_input)
-                    if features:
-                        source = source or "text"
-                        source_ref = source_ref or "pasted input (fallback)"
-                except Exception:
-                    pass
-
-            if not features:
-                raise RuntimeError(
-                    "No features could be extracted from the selected "
-                    "source. Pick a different tab, paste more detailed "
-                    "content, or check the URL is reachable.")
-
-            result = compute_estimation(
-                features=features,
-                rate_usd=rate_usd,
-                additional_platforms=additional_platforms,
-                minutes_per_tc=minutes_per_tc,
-                buffer=buffer,
-                project_name=project_name,
-                primary_platform=primary_platform,
-                platforms_list=_DEFAULT_COMPAT_PLATFORMS[:additional_platforms],
-                source=source,
-                source_ref=source_ref,
-                compatibility_rate=compat_rate,
-                bug_report_rate=bug_rate,
-                pm_overhead=pm_ov,
-                max_testing_stretch=max_testing_stretch,
-            )
-            payload = asdict(result)
-            if extracted_text:
+            out = run_estimation(inp)
+            payload = dict(out.result_dict)
+            if out.extracted_text:
                 # Carried back into session via /estimation/status so
                 # the "Generate test cases" CTA has the bullet text.
-                payload["_extracted_text"] = extracted_text
+                payload["_extracted_text"] = out.extracted_text
             return payload
 
         job_id = get_queue().submit(
@@ -818,8 +561,9 @@ def register(app: Flask) -> None:
             meta={
                 "source": source_choice,
                 "url": url,
-                "project_name": project_name,
+                "project_name": inp.project_name,
                 "session_id": sid,  # used by count_active_by_meta()
+                "team_size": inp.team_size,
             },
         )
         session["estimation_job_id"] = job_id

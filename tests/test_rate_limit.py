@@ -257,19 +257,24 @@ class TestEstimationRateLimit:
         monkeypatch.setattr(
             "routes.estimation.get_session_id", lambda s=None: sid)
 
-        # Stub crawl_site so we don't hit the network.
+        # Stub crawl_site so we don't hit the network. After the Task
+        # 2.3 refactor, these live in engine.estimation_service (the
+        # single source of truth) rather than being re-imported into
+        # routes.estimation.
         class _FakeAnalysis:
             features = []
             pages = []
         monkeypatch.setattr(
-            "routes.estimation.crawl_site", lambda u, **kw: _FakeAnalysis())
+            "engine.estimation_service.crawl_site",
+            lambda u, **kw: _FakeAnalysis())
         monkeypatch.setattr(
-            "routes.estimation.features_from_site_analysis",
+            "engine.estimation_service.features_from_site_analysis",
             lambda a: [{"name": "stub"}])
         # compute_estimation returns something asdict-able — easiest is
         # to let the worker raise inside the thread; the endpoint has
         # already returned 200 with the job_id by then.
 
         resp = client.post("/estimation/run-async",
-                           data={"url": "https://example.com"})
+                           data={"source": "url",
+                                 "url": "https://example.com"})
         assert resp.status_code == 200, resp.get_data(as_text=True)

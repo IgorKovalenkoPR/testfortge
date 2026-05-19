@@ -1,9 +1,12 @@
-"""End-to-end browser tests for the Test Execution upload + auto-run flow.
+"""End-to-end browser tests for the Test Execution upload flow.
 
 These spin up the real Flask app in a background thread on a random
 port and drive a headless Chromium via Playwright sync API. They are
 the closest proxy we have to "what a real tester sees" — every JS
-interception, drag-and-drop dispatch, auto-run click is exercised.
+interception and drag-and-drop dispatch is exercised. Note: an earlier
+"run immediately after upload" checkbox was reverted in 67a4373
+(Run stays manual, uniform with generated packs) — these tests cover
+the post-revert behaviour.
 
 Skipped automatically when:
     * the ``playwright`` package isn't importable, OR
@@ -107,29 +110,23 @@ def page(browser, live_server):
 class TestTeExecutionEmptyState:
     def test_empty_state_renders_upload_cards(self, page, live_server):
         """No pack in session — empty-state card + both upload forms
-        + the auto_run checkbox + DnD drop-zones must all render."""
+        + DnD drop-zones must all render. Run stays manual (auto-run
+        on upload reverted in 67a4373)."""
         page.goto(f"{live_server}/test-execution?lang=en", timeout=10_000)
         # Empty-state card
         page.wait_for_selector("text=Nothing to run yet", timeout=5_000)
         # Two drop-zones (TC + CL)
         zones = page.locator(".te-drop-zone")
         assert zones.count() == 2
-        # auto_run checkbox is checked by default
-        cb = page.locator('input[name="auto_run"]').first
-        assert cb.is_checked()
         # Watch live link visible
         assert page.locator("text=Watch live").count() >= 0  # only when has data
 
     def test_pack_badge_shown_after_upload(self, page, live_server):
-        """Upload a CSV via the file input + auto_run unchecked, then
-        verify the pack-status badge appears with the right count."""
+        """Upload a CSV via the file input, then verify the pack-status
+        badge appears with the right count. Upload lands the operator
+        back on /test-execution — Run is then manual."""
         page.goto(f"{live_server}/test-execution?lang=en", timeout=10_000)
         page.wait_for_selector('form[data-te-upload="tc"]', timeout=5_000)
-
-        # Disable auto_run for this case (we want to land on
-        # /test-execution and check the badge, not auto-run).
-        page.locator('form[data-te-upload="tc"] input[name="auto_run"]'
-                     ).first.uncheck()
 
         csv = (b"ID,Section,Summary,Steps,Expected\n"
                b"TC-1,A,One,1.x,2.y,Err\nTC-2,A,Two,1.x,2.y,Err\n"
@@ -147,57 +144,63 @@ class TestTeExecutionEmptyState:
         assert page.locator(".pack-status-badge strong").first.inner_text() == "3"
 
 
-class TestTeUploadAutoRun:
-    def test_upload_then_auto_run_creates_run_record(self, page, live_server):
-        """Full server-side path: upload with auto_run=1 ticked → upload
-        route 302 to /test-execution/auto-run → that route runs and
-        redirects to /test-execution. The page must show the run row
-        produced by the deterministic simulator."""
+class TestTeUploadLandsOnExecution:
+    def test_upload_returns_to_test_execution_with_pack_loaded(
+            self, page, live_server):
+        """After upload the operator must land back on /test-execution
+        with the uploaded pack visible — Run stays a manual click
+        (auto-run on upload was reverted in 67a4373, uniform with
+        generated packs). Regression target: re-introducing the
+        auto-run side-effect would silently dispatch runs."""
         page.goto(f"{live_server}/test-execution?lang=en", timeout=10_000)
         page.wait_for_selector('form[data-te-upload="tc"]', timeout=5_000)
-        # auto_run is checked by default; double-check.
-        cb = page.locator('form[data-te-upload="tc"] input[name="auto_run"]').first
-        assert cb.is_checked()
 
         csv = (b"ID,Section,Summary,Steps,Expected\n"
-               b"TC-AUTO-1,A,Smoke,1.x,Pass\n")
+               b"TC-MANUAL-1,A,Smoke,1.x,Pass\n")
         page.locator('form[data-te-upload="tc"] input[type="file"]'
                      ).first.set_input_files(
-            files=[{"name": "auto.csv",
+            files=[{"name": "manual.csv",
                     "mimeType": "text/csv",
                     "buffer": csv}])
-        # Submit triggers a chain of redirects: /test-cases/upload →
-        # /test-execution/auto-run → /test-execution. wait_for_url
-        # waits for the FINAL landing page.
         page.locator('form[data-te-upload="tc"] button[type="submit"]'
                      ).first.click()
         page.wait_for_url(lambda url: url.rstrip("/").endswith("/test-execution"),
                           timeout=10_000)
-        # A run row appears under the existing-runs section. We don\'t
-        # assert on Pass/Fail/Block split because deterministic
-        # statuses depend on the tester implementation — the presence
-        # of a "Run" cell + at least one result row is sufficient.
-        page.wait_for_selector(".run-card", timeout=5_000)
-        assert page.locator(".result-row").count() >= 1
+        # Pack badge is visible — proves upload landed.
+        page.wait_for_selector(".pack-status-badge", timeout=5_000)
+        # Critically: no run-card present — Run stays manual.
+        assert page.locator(".run-card").count() == 0
 
 
 class TestGenerationModalEsc:
     def test_esc_dismisses_progress_modal(self, page, live_server):
         """The /test-cases progress overlay must close on ESC and
         return focus to the Generate button. Regression target: a11y
-        polish committed earlier."""
+        polish committed earlier.
+
+        We open the overlay directly via JS rather than submitting the
+        form because the deterministic test runner finishes the job in
+        ~50ms — fast enough that the `done` callback can fire
+        `window.location.assign` before our ESC keypress lands, racing
+        the assertion. The ESC handler itself is what's under test, so
+        skipping the network round-trip is sound."""
         page.goto(f"{live_server}/test-cases?lang=en", timeout=10_000)
-        page.locator("textarea[name='input_text']").fill(
-            "User must be able to log in with email."
+        # Synthetically open the overlay and focus the button, mirroring
+        # what onSubmit does without any background polling.
+        page.evaluate(
+            "() => {"
+            "  const o = document.getElementById('tc-gen-overlay');"
+            "  o.hidden = false;"
+            "}"
         )
-        page.locator('button[type="submit"]#tc-gen-button').click()
-        # Overlay opens; ESC must close it. Don't wait for "done" —
-        # we just need the overlay visible, then send ESC.
         page.wait_for_selector("#tc-gen-overlay:not([hidden])",
-                               timeout=10_000)
+                               timeout=2_000)
         page.keyboard.press("Escape")
+        # `wait_for_selector` defaults to state="visible", but a
+        # `[hidden]` element is never visible — use "attached" to wait
+        # for the hidden attribute to land on the same element.
         page.wait_for_selector("#tc-gen-overlay[hidden]",
-                               timeout=5_000)
+                               state="attached", timeout=5_000)
         # Focus should be back on the Generate button.
         assert page.evaluate(
             "() => document.activeElement && document.activeElement.id"
