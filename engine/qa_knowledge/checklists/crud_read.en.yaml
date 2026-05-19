@@ -1,0 +1,34 @@
+version: 1
+area: crud_read
+locale: en
+sections:
+  - name: "View — Positive"
+    prefix: VIEW
+    items:
+      - objective: "Verify that the list/detail page shows the same values that were saved"
+        category: Positive
+        priority: High
+      - objective: "Verify that all data columns/fields are visible and formatted per the design spec (date format, currency symbol, thousands separator)"
+        category: Positive
+        priority: High
+      - objective: "Verify that pagination is producing the outcome defined in the design spec when records exceed page limit"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that sorting reorders rows in ascending/descending order of the selected column"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that detail view is visible and matches the design spec when a record is selected"
+        category: Positive
+        priority: High
+  - name: "View — Negative & Edge Cases"
+    prefix: VIEW
+    items:
+      - objective: "Verify that empty state is handled gracefully when no records exist"
+        category: Negative
+        priority: High
+      - objective: "Verify that the page returns the expected outcome per the spec when data loading fails"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that a large dataset (1000+ records) is loaded without performance issues"
+        category: "Edge Case"
+        priority: Medium

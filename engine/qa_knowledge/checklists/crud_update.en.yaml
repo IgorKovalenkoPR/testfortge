@@ -1,0 +1,43 @@
+version: 1
+area: crud_update
+locale: en
+sections:
+  - name: "Edit — Positive"
+    prefix: UPD
+    items:
+      - objective: "Verify that the edit form is pre-filled with current data"
+        category: Positive
+        priority: High
+      - objective: "Verify that the record is updated successfully with valid changes"
+        category: Positive
+        priority: High
+      - objective: "Verify that success confirmation is displayed after saving"
+        category: Positive
+        priority: High
+      - objective: "Verify that changes are persisted and reflected in list/detail view"
+        category: Positive
+        priority: High
+  - name: "Edit — Negative"
+    prefix: UPD
+    items:
+      - objective: "Verify that edit is rejected when required fields are cleared"
+        category: Negative
+        priority: High
+      - objective: "Verify that edit is rejected with invalid data format"
+        category: Negative
+        priority: High
+      - objective: "Verify that original data is preserved when validation error occurs"
+        category: Negative
+        priority: Medium
+  - name: "Edit — Edge Cases"
+    prefix: UPD
+    items:
+      - objective: "Verify that concurrent edits to the same record are returns the expected outcome per the spec"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that edit without any changes is handled gracefully"
+        category: "Edge Case"
+        priority: Low
+      - objective: "Verify that unsaved changes warning is displayed when navigating away"
+        category: "Edge Case"
+        priority: Medium

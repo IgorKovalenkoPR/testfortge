@@ -1,0 +1,40 @@
+version: 1
+area: navigation
+locale: en
+default_section: Navigation
+cases:
+  - summary: "Verify that every navigation menu item opens the URL that matches its label"
+    preconditions: "Application is accessible. Main page is loaded."
+    steps:
+      - "Identify all items in the navigation menu"
+      - "Click each menu item one by one"
+      - "Verify the destination URL matches the item label and the heading on the page matches"
+      - "Verify the browser URL changes to match the navigated route"
+    test_data: "All navigation menu items"
+    expected_result: "Every navigation item opens the URL that matches its label. The browser URL matches the route declared for that menu item."
+    category: Positive
+    priority: High
+    section: Navigation
+  - summary: "Verify that 404 page is displayed for non-existent URLs"
+    preconditions: "Application is accessible."
+    steps:
+      - "Enter a non-existent URL path in the browser address bar"
+      - "Observe the page that loads"
+    test_data: "Non-existent path: /this-page-does-not-exist-12345"
+    expected_result: "A 404 error page should be displayed. The page should be styled and user-friendly, not a raw server error."
+    category: Negative
+    priority: High
+    section: Navigation
+  - summary: "Verify that the browser Back button returns to the previous route and Forward restores the next one"
+    preconditions: "Application is accessible. User has navigated through several pages."
+    steps:
+      - "Navigate through 3-4 different pages"
+      - "Click the browser Back button"
+      - "Verify the URL returns to the previous route and the page renders the same layout it had before"
+      - "Click the browser Forward button"
+      - "Verify the URL returns to the most recent route and the page renders the same layout it had before"
+    test_data: ""
+    expected_result: "Browser Back and Forward restore the previous and next routes respectively. Each restored page renders without console errors or missing assets."
+    category: Positive
+    priority: Medium
+    section: Navigation

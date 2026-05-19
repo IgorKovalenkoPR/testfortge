@@ -1,0 +1,37 @@
+version: 1
+area: crud_delete
+locale: en
+sections:
+  - name: "Delete — Positive"
+    prefix: DEL
+    items:
+      - objective: "Verify that confirmation dialog is displayed before deletion"
+        category: Positive
+        priority: High
+      - objective: "Verify that the record is deleted successfully after confirmation"
+        category: Positive
+        priority: High
+      - objective: "Verify that the record is removed from the list view after deletion"
+        category: Positive
+        priority: High
+      - objective: "Verify that success message is displayed after deletion"
+        category: Positive
+        priority: High
+  - name: "Delete — Negative"
+    prefix: DEL
+    items:
+      - objective: "Verify that deletion is cancelled when 'Cancel' is clicked in confirmation"
+        category: Negative
+        priority: High
+      - objective: "Verify that related/dependent records are returns the expected outcome per the spec on deletion"
+        category: Negative
+        priority: Medium
+  - name: "Delete — Edge Cases"
+    prefix: DEL
+    items:
+      - objective: "Verify that deleting the last record returns the expected outcome per the spec"
+        category: "Edge Case"
+        priority: Medium
+      - objective: "Verify that bulk deletion is producing the outcome defined in the design spec (if supported)"
+        category: "Edge Case"
+        priority: Low

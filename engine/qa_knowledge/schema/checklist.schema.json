@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QA Checklist",
+  "type": "object",
+  "required": ["version", "area", "locale", "sections"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "area": {"type": "string", "minLength": 1},
+    "locale": {"type": "string", "minLength": 2},
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "items"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "prefix": {"type": "string"},
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["objective", "category", "priority"],
+              "properties": {
+                "objective": {"type": "string", "minLength": 1},
+                "category": {"type": "string", "enum": ["Positive", "Negative", "Edge Case", "Edge case", "Security", "Performance", "Accessibility"]},
+                "priority": {"type": "string", "enum": ["High", "Medium", "Low"]},
+                "testing_type": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

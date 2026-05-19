@@ -1,0 +1,28 @@
+version: 1
+area: navigation
+locale: en
+sections:
+  - name: "Navigation"
+    prefix: NAV
+    items:
+      - objective: "Verify that the main navigation menu is displayed on all pages"
+        category: Positive
+        priority: High
+      - objective: "Click every menu item and verify the destination URL matches the item label"
+        category: Positive
+        priority: High
+      - objective: "Verify that the current page is highlighted in the navigation"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that browser Back/Forward buttons are producing the outcome defined in the design spec"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the browser URL changes to match the destination route on every navigation"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that 404 page is displayed for non-existent URLs"
+        category: Negative
+        priority: High
+      - objective: "Verify that deep links (direct URL access) are producing the outcome defined in the design spec"
+        category: Positive
+        priority: Medium

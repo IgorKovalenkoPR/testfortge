@@ -1,0 +1,85 @@
+version: 1
+area: payment
+locale: en
+sections:
+  - name: "Cart"
+    prefix: CART
+    items:
+      - objective: "Verify that items are added to the cart successfully"
+        category: Positive
+        priority: High
+      - objective: "Verify that the cart is shows the item count and order total that match the sum of cart lines"
+        category: Positive
+        priority: High
+      - objective: "Verify that changing quantity updates the line subtotal and the cart total immediately"
+        category: Positive
+        priority: High
+      - objective: "Verify that items are removed from the cart successfully"
+        category: Positive
+        priority: High
+      - objective: "Verify that the cart is preserved after page refresh"
+        category: Positive
+        priority: Medium
+      - objective: "Verify that the empty cart state is displayed when all items are removed"
+        category: Negative
+        priority: Medium
+      - objective: "Verify that adding the same item twice is increased the quantity, not duplicated"
+        category: "Edge Case"
+        priority: Medium
+  - name: "Checkout — Positive"
+    prefix: CHK
+    items:
+      - objective: "Verify that the checkout page is displayed with order summary"
+        category: Positive
+        priority: High
+      - objective: "Verify that shipping address form is displayed and functional"
+        category: Positive
+        priority: High
+      - objective: "Verify that payment method selection is displayed"
+        category: Positive
+        priority: High
+      - objective: "Verify that the order is placed successfully with valid payment details"
+        category: Positive
+        priority: High
+      - objective: "Verify that order confirmation page/email is received after purchase"
+        category: Positive
+        priority: High
+      - objective: "Verify that the the order total equals sum(items) + tax + shipping, matching the backend calculation"
+        category: Positive
+        priority: High
+  - name: "Checkout — Negative"
+    prefix: CHK
+    items:
+      - objective: "Verify that checkout is rejected with invalid payment details"
+        category: Negative
+        priority: High
+      - objective: "Verify that checkout is rejected with expired credit card"
+        category: Negative
+        priority: High
+      - objective: "Verify that checkout is rejected when required shipping fields are empty"
+        category: Negative
+        priority: High
+      - objective: "Verify that a clear error message is displayed when payment is declined"
+        category: Negative
+        priority: High
+  - name: "Payment — Security & Edge Cases"
+    prefix: PAY
+    items:
+      - objective: "Verify that payment page is served over HTTPS"
+        category: Security
+        priority: High
+      - objective: "Verify that credit card number is masked in UI after entry"
+        category: Security
+        priority: High
+      - objective: "Verify that no payment data is stored in browser localStorage/cookies"
+        category: Security
+        priority: High
+      - objective: "Verify that double-charge is prevented on multiple submit clicks"
+        category: "Edge Case"
+        priority: High
+      - objective: "Verify that the order returns the expected outcome per the spec when payment gateway times out"
+        category: "Edge Case"
+        priority: High
+      - objective: "Verify that the cart is preserved when payment fails"
+        category: "Edge Case"
+        priority: Medium

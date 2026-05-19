@@ -1,0 +1,66 @@
+version: 1
+area: seo
+locale: en
+default_section: SEO
+cases:
+  - summary: "Verify that every public page has a unique, non-empty <title> under 60 characters"
+    preconditions: "The site is reachable and indexable."
+    steps:
+      - "Visit the homepage and at least 3 representative inner pages"
+      - "Inspect <head><title> via DevTools or `view-source:`"
+      - "Verify each title is non-empty, unique across pages, and <= 60 characters"
+    test_data: "Pages: /, /about, /contact, /<feature>"
+    expected_result: "Every audited page has its own descriptive <title>, none are duplicated, none exceed 60 chars."
+    category: Positive
+    priority: High
+    section: SEO
+    testing_type: SEO
+  - summary: "Verify that every page has a meta description (50-160 chars) and canonical URL"
+    preconditions: "Site is reachable."
+    steps:
+      - "View page source on the homepage and 3 representative inner pages"
+      - "Confirm <meta name=\"description\"> exists with 50-160 chars"
+      - "Confirm <link rel=\"canonical\"> points to the page's primary URL"
+    test_data: "HTML head of each audited page"
+    expected_result: "Each page declares a meaningful meta description in the 50-160-char range and a canonical link pointing to itself (or its preferred variant)."
+    category: Positive
+    priority: High
+    section: SEO
+    testing_type: SEO
+  - summary: "Verify that robots.txt and sitemap.xml are reachable and consistent"
+    preconditions: "Site is reachable."
+    steps:
+      - "Open /robots.txt — verify HTTP 200 and that it references a Sitemap directive"
+      - "Open the Sitemap URL — verify HTTP 200 and valid XML"
+      - "Spot-check 3 URLs from the sitemap return HTTP 200"
+    test_data: "/robots.txt, /sitemap.xml"
+    expected_result: "Both files return HTTP 200. robots.txt declares the sitemap. Sample sitemap URLs resolve without 4xx/5xx."
+    category: Positive
+    priority: Medium
+    section: SEO
+    testing_type: SEO
+  - summary: "Verify that Open Graph and Twitter Card meta tags are present on shareable pages"
+    preconditions: "Site is reachable."
+    steps:
+      - "Open the homepage and one content/article page"
+      - "Verify presence of og:title, og:description, og:image, og:url"
+      - "Verify presence of twitter:card, twitter:title, twitter:description"
+      - "Use a card validator (e.g. opengraph.xyz) and confirm preview renders"
+    test_data: "Homepage URL + one content URL"
+    expected_result: "Both pages render a clean Open Graph + Twitter Card preview when shared on Slack/Telegram/X. og:image loads and is at least 1200×630."
+    category: Positive
+    priority: Medium
+    section: SEO
+    testing_type: SEO
+  - summary: "Verify that all images on the homepage have meaningful alt attributes"
+    preconditions: "Homepage is reachable."
+    steps:
+      - "Open the homepage"
+      - "Run an a11y/SEO audit (Lighthouse or `document.querySelectorAll('img:not([alt]), img[alt=\"\"]')`)"
+      - "Inspect every <img> for an alt attribute"
+    test_data: "Homepage <img> elements"
+    expected_result: "Every <img> has an alt attribute. Decorative images may use alt=\"\" but the attribute itself is present. No img is missing alt."
+    category: Positive
+    priority: Medium
+    section: SEO
+    testing_type: SEO

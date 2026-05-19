@@ -21,3 +21,7 @@ anthropic==0.97.0
 # tenacity drives the retry/backoff policy in engine/llm_client.py
 # (3 attempts, exponential 1s→4s) around Anthropic API transient errors.
 tenacity>=9.0.0
+# engine/qa_knowledge_loader loads YAML checklist + test-case bundles
+# at boot and validates them against the schemas in engine/qa_knowledge/schema.
+PyYAML>=6.0
+jsonschema>=4.0
