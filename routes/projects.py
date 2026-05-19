@@ -41,6 +41,47 @@ def _is_valid_project_id(s: str | None) -> bool:
     return all(c in "0123456789abcdef" for c in s)
 
 
+def _require_project_owner(project_id: str) -> dict | None:
+    """Authorization gate for project-scoped routes.
+
+    Behaviour:
+      * Returns the project meta dict when the caller owns the project,
+        or when the project's ``owner_sid`` is NULL (legacy compat —
+        backfill is Sprint 2; we ``log.info`` the event so the gap is
+        visible in ops).
+      * Calls ``abort(400)`` on a malformed ``project_id``.
+      * Calls ``abort(403)`` when the project exists but is owned by a
+        different session (cross-tenant attempt).
+      * Returns ``None`` when the project simply doesn't exist; the
+        caller is responsible for the 404 / flash UX it wants there
+        (some routes redirect with a flash, others abort).
+
+    Uses :func:`engine.db.get_project_owner` first so we don't hydrate
+    the whole project meta just to fail the auth check.
+    """
+    if not _is_valid_project_id(project_id):
+        abort(400)
+    owner = _db.get_project_owner(project_id)
+    # owner is None either because the project is missing OR because
+    # owner_sid is NULL. Disambiguate via get_project — only do the
+    # second round-trip when we have to.
+    if owner is None:
+        meta = _db.get_project(project_id)
+        if not meta:
+            return None
+        # Project exists but has no owner — legacy public-ish row.
+        log.info("project pid=%s has NULL owner_sid — allowing (legacy)",
+                 project_id[:8])
+        return meta
+    sid = get_session_id()
+    if owner != sid:
+        log.warning(
+            "project access denied pid=%s owner=%s sid=%s",
+            project_id[:8], (owner or "")[:8], (sid or "")[:8])
+        abort(403)
+    return _db.get_project(project_id)
+
+
 def _set_active_project(project_id: str, name: str,
                         base_url: str | None = None) -> None:
     """Mirror the active project into the session so templates and
@@ -132,9 +173,7 @@ def register(app: Flask) -> None:
     @app.route("/load-project/<project_id>")
     def load_project(project_id):
         """Hydrate the current session from a stored project."""
-        if not _is_valid_project_id(project_id):
-            abort(400)
-        meta = _db.get_project(project_id)
+        meta = _require_project_owner(project_id)
         if not meta:
             flash("Project not found.", "error")
             return redirect(url_for("index"))
@@ -163,8 +202,11 @@ def register(app: Flask) -> None:
 
     @app.route("/delete-project/<project_id>", methods=["POST"])
     def delete_project(project_id):
-        if not _is_valid_project_id(project_id):
-            abort(400)
+        meta = _require_project_owner(project_id)
+        if not meta:
+            # Idempotent: deleting a missing project is a noop.
+            flash("Project deleted.", "success")
+            return redirect(url_for("index"))
         _db.delete_project(project_id)
         # If the active project was just deleted, clear the pointer too.
         if session.get("project_id") == project_id:
@@ -220,9 +262,7 @@ def register(app: Flask) -> None:
         Honours optional ``next`` form field for redirect target.
         """
         next_url = _safe_next_target("index")
-        if not _is_valid_project_id(project_id):
-            abort(400)
-        meta = _db.get_project(project_id)
+        meta = _require_project_owner(project_id)
         if not meta:
             flash("Project not found.", "error")
             return redirect(next_url)
@@ -334,8 +374,10 @@ def register(app: Flask) -> None:
     def db_rename_project(project_id):
         """Rename / re-tag a project. Useful for the auto-created
         'Untitled project YYYY-MM-DD HH:MM' rows."""
-        if not _is_valid_project_id(project_id):
-            abort(400)
+        meta = _require_project_owner(project_id)
+        if not meta:
+            flash("Project not found.", "error")
+            return redirect(url_for("index"))
         new_name = (request.form.get("project_name") or "").strip()
         if not new_name:
             flash("Project name cannot be empty.", "error")
@@ -381,6 +423,13 @@ def register(app: Flask) -> None:
             flash("No valid source project selected.", "error")
             return redirect(url_for("index"))
 
+        # Gate the source — the caller must own (or legacy-NULL) it
+        # before we let them shuffle artefacts out.
+        source_meta = _require_project_owner(source_pid)
+        if not source_meta:
+            flash("Source project not found.", "error")
+            return redirect(url_for("index"))
+
         target_pid = (request.form.get("target_project_id") or "").strip()
         new_name = (request.form.get("target_project_name") or "").strip()
 
@@ -398,6 +447,14 @@ def register(app: Flask) -> None:
                 )
             except ValueError as exc:
                 flash(str(exc), "error")
+                return redirect(url_for("index"))
+        else:
+            # Existing target — must also be owned by this session, or
+            # an attacker could shovel their own artefacts into a
+            # victim's project.
+            target_meta = _require_project_owner(target_pid)
+            if not target_meta:
+                flash("Target project not found.", "error")
                 return redirect(url_for("index"))
 
         if target_pid == source_pid:

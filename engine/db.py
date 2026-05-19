@@ -481,6 +481,26 @@ def get_project(project_id: str) -> dict | None:
         return _row_to_dict(p) if p else None
 
 
+def get_project_owner(project_id: str) -> str | None:
+    """Return the ``owner_sid`` for *project_id*, or ``None`` if the row
+    doesn't exist or has no owner recorded (legacy projects created
+    before owner_sid was wired up).
+
+    Thin accessor — avoids hydrating the full project dict just to
+    perform an authorization check on every project-scoped route.
+    Callers must distinguish "missing project" (404) from "NULL owner"
+    (allow with warning) on their own; both return ``None`` here.
+    """
+    if not project_id:
+        return None
+    try:
+        with session_scope() as sess:
+            return sess.query(Project.owner_sid).filter(
+                Project.id == project_id).scalar()
+    except Exception:
+        return None
+
+
 def touch_project(project_id: str) -> bool:
     """Bump ``updated_at`` on a project so list_projects() surfaces it
     at the top of the dropdown. Called by every persistence helper so
