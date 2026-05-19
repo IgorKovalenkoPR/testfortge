@@ -242,7 +242,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Async automation submit — intercepts the form, POSTs to /automation/run-async,
 // polls /automation/status/<id> every 2s, reloads the page on completion.
 // If JS is disabled or fetch fails, the native form POST to /automation/run

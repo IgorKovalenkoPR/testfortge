@@ -29,6 +29,8 @@ mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("image/svg+xml", ".svg")
 
 import markupsafe
+import secrets
+
 from flask import Flask, Response, g, request, session
 from flask_session import Session
 from flask_wtf import CSRFProtect
@@ -166,22 +168,29 @@ def bug_field_filter(s):
 
 # ── Security headers + session hygiene ───────────────────────────
 
+@app.before_request
+def _mint_csp_nonce():
+    # One nonce per request, exposed to templates via a context
+    # processor. Inline <script> blocks carry nonce="{{ csp_nonce }}"
+    # so script-src can drop 'unsafe-inline'.
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def _inject_csp_nonce():
+    return {"csp_nonce": getattr(g, "csp_nonce", "")}
+
+
 @app.after_request
 def _apply_security_headers(resp):
-    # CSP allows self + inline styles AND inline scripts. The templates rely
-    # on inline <script> blocks (drag-drop, tabs, run-detail toggles, the
-    # Lucide icon initialiser) and a number of inline ``onclick=`` handlers.
-    # Without 'unsafe-inline' on script-src those silently fail under modern
-    # browsers — leaving Drag & Drop / Upload / metric tabs / Test Execution
-    # toggles non-functional. Tighten with nonces once every inline script
-    # and onclick has been migrated to an external file.
+    nonce = getattr(g, "csp_nonce", "") or secrets.token_urlsafe(16)
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        f"script-src 'self' 'nonce-{nonce}' https://unpkg.com; "
         "connect-src 'self'; "
         "frame-ancestors 'none'",
     )

@@ -88,7 +88,7 @@
   </p>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 /* The select form's action varies per project_id, but we can't bake
    that into <form action> in Jinja. Instead we rewrite the action on
    submit using the dropdown's current value. Disabled when the

@@ -3,7 +3,7 @@
 
 {% block content %}
 {# Jinja → JS shuttle. Values that used to be interpolated inside inline
-   <script> blocks land here so static/js/test-execution.js can stay
+   script blocks land here so static/js/test-execution.js can stay
    nonce-friendly. #}
 <meta name="te-live-info-url" content="{{ url_for('test_execution_live_info') }}">
 <meta name="te-i18n-overlay-slow" content="{{ t.get('te_overlay_slow', 'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | e }}">
@@ -943,5 +943,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/test-execution.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/test-execution.js') }}" defer nonce="{{ csp_nonce }}"></script>
 {% endblock %}

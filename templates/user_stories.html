@@ -94,7 +94,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 function toggleCollapse(header) {
     const body = header.nextElementSibling;
     const icon = header.querySelector('.collapse-icon');

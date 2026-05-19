@@ -36,7 +36,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 /* Async test-case generation with a hardened polling loop.
  *
  * The original implementation used a fixed setInterval(1500ms) and a
@@ -472,7 +472,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 function showTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
