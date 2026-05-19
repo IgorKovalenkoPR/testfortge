@@ -210,6 +210,15 @@ class TestEditableCoefficients:
         assert r.pm_overhead == 0.10
         assert r.max_testing_stretch == 1.7
 
+    def test_team_size_drives_brooks_penalty(self):
+        solo = self._run(team_size=1)
+        team = self._run(team_size=4)
+        assert solo.brooks_overhead_hours == 0.0
+        assert team.brooks_overhead_hours > 0.0
+        assert team.team_size == 4
+        # PERT expected with team penalty should exceed the solo run.
+        assert team.pert_expected > solo.pert_expected
+
     def test_custom_rates_flow_to_xlsx_formulas(self, tmp_path):
         """Exported XLSX must embed the user-supplied rates in every formula
         that references them (PM, bug rate, compatibility, MAX stretch)."""

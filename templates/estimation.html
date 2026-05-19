@@ -91,6 +91,13 @@
                value="{{ last.max_testing_stretch if last.max_testing_stretch is defined else 1.5 }}">
         <small>{{ t.get('est_max_stretch_hint', 'How much MAX exceeds MIN (default 1.5×).') }}</small>
       </div>
+      <div class="form-group">
+        <label>{{ t.get('est_team_size', 'Team size') }}</label>
+        <input type="number" name="team_size" min="1" max="50" step="1"
+               value="{{ last.team_size or 1 }}">
+        <small>{{ t.get('est_team_size_hint',
+          'Number of testers — feeds Brooks\'s-law communication overhead. Default 1.') }}</small>
+      </div>
     </div>
 
     <h3 style="margin-top:1.25rem">{{ t.est_source }}</h3>
@@ -706,73 +713,4 @@
   </table>
 </div>
 
-<script>
-// Async estimation for URL source only — file upload and pasted text both
-// complete in milliseconds and go through the original synchronous POST.
-// JS-less users get the synchronous /estimation/run handler in all cases.
-(function () {
-  const form = document.getElementById('estimation-form');
-  if (!form || !window.fetch) return;
-
-  const banner = document.getElementById('est-progress');
-  const fill = document.getElementById('est-progress-fill');
-  const msg = document.getElementById('est-progress-message');
-  const label = document.getElementById('est-progress-label');
-  const asyncUrl = form.dataset.asyncUrl;
-  const statusBase = form.dataset.statusUrlBase;
-
-  function setProgress(pct, message) {
-    fill.style.width = Math.round(pct * 100) + '%';
-    if (message) msg.textContent = message;
-  }
-
-  function poll(jobId) {
-    const url = statusBase.replace('__ID__', jobId);
-    fetch(url, {credentials: 'same-origin'})
-      .then(r => r.json())
-      .then(payload => {
-        if (payload.error) {
-          label.textContent = 'Error: ' + payload.error;
-          banner.classList.remove('alert-info');
-          banner.classList.add('alert-danger');
-          return;
-        }
-        setProgress(payload.progress || 0.15, payload.message || '');
-        if (payload.status === 'done') {
-          setProgress(1, 'Complete — reloading…');
-          setTimeout(() => window.location.reload(), 400);
-        } else if (payload.status === 'failed') {
-          label.textContent = 'Estimation failed';
-          msg.textContent = payload.error || '';
-          banner.classList.remove('alert-info');
-          banner.classList.add('alert-danger');
-        } else {
-          setTimeout(() => poll(jobId), 2000);
-        }
-      })
-      .catch(() => setTimeout(() => poll(jobId), 3000));
-  }
-
-  form.addEventListener('submit', function (evt) {
-    const chosenSource = (form.querySelector('input[name="source"]:checked') || {}).value;
-    // Only the URL path is worth going async — attachments + pasted text
-    // are cheap and use the default sync form submit.
-    if (chosenSource !== 'url') return;
-    evt.preventDefault();
-    banner.style.display = 'block';
-    setProgress(0.05, 'Submitting…');
-    const fd = new FormData(form);
-    fetch(asyncUrl, {method: 'POST', body: fd, credentials: 'same-origin'})
-      .then(r => r.json())
-      .then(data => {
-        if (data.job_id) {
-          poll(data.job_id);
-        } else {
-          form.submit();
-        }
-      })
-      .catch(() => form.submit());
-  });
-})();
-</script>
 {% endblock %}

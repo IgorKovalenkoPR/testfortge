@@ -36,7 +36,10 @@ class TestAutomationAsyncWiring:
 
 class TestEstimationAsyncWiring:
     def test_run_async_requires_url(self, client):
-        resp = client.post("/estimation/run-async", data={})
+        # Explicit source=url branch — the route defaults source to
+        # "text", so an empty body would 400 with "no_text", not the
+        # behaviour this test is meant to exercise.
+        resp = client.post("/estimation/run-async", data={"source": "url"})
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "no_url"
 
