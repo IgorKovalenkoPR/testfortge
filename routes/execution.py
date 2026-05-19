@@ -1923,6 +1923,18 @@ def register(app: Flask) -> None:
         done_path = os.path.join(pending_dir, f"{run_id}.done.flag")
         result_path = os.path.join(pending_dir, f"{run_id}.result.json")
         started_path = os.path.join(pending_dir, f"{run_id}.started.flag")
+        error_path = os.path.join(pending_dir, f"{run_id}.error.flag")
+        # Detached worker writes ``error.flag`` from its SIGTERM/SIGINT
+        # handler before touching ``done.flag``. When both exist, the
+        # worker was killed mid-run — surface "terminated" so the UI
+        # stops spinning instead of waiting for the 120 s stall timer.
+        if os.path.isfile(error_path) and os.path.isfile(done_path):
+            try:
+                with open(error_path, "r", encoding="utf-8") as f:
+                    reason = f.read(512)[:500]
+            except Exception as exc:
+                reason = f"<unreadable error.flag: {exc}>"
+            return jsonify({"status": "terminated", "error": reason})
         if os.path.isfile(done_path) and os.path.isfile(result_path):
             try:
                 with open(result_path, "r", encoding="utf-8") as f:

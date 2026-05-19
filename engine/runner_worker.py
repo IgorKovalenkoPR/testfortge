@@ -207,6 +207,68 @@ def _build_automation_assets(report_dict: dict[str, Any],
     return assets
 
 
+def _write_terminated_artifacts(
+    *,
+    signum: int,
+    config_id: str,
+    error_path: str,
+    result_path: str,
+    done_path: str,
+) -> None:
+    """Write error.flag → result.json → done.flag (in that order) when
+    the worker is killed by SIGTERM/SIGINT. Pulled out of ``main()`` so
+    unit tests can exercise the exact body of the signal handler
+    without spawning a subprocess (a SIGTERM round-trip is unreliable
+    on Windows where ``os.kill(pid, SIGTERM)`` skips Python handlers).
+
+    Every write is wrapped in its own try/except — the handler is best-
+    effort: half-written artefacts are better than none, since the
+    UI's polling code only insists on done.flag.
+    """
+    # Close the live browser first; the kill is racy and any extra
+    # latency here delays the kernel cleaning up Chromium.
+    try:
+        from engine import automation_runner as _ar
+        b = getattr(_ar, "_CURRENT_BROWSER", None)
+        if b is not None:
+            try:
+                b.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # error.flag — concise human-readable reason.
+    try:
+        with open(error_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"terminated by signal {signum} at "
+                f"{datetime.now(timezone.utc).isoformat()}"
+            )
+    except Exception:
+        pass
+    # result.json — atomic write so the polling route never sees a
+    # partial file.
+    try:
+        payload = {
+            "status": "terminated",
+            "config_id": config_id,
+            "error": f"Worker killed by signal {signum}",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }
+        tmp = result_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, result_path)
+    except Exception:
+        pass
+    # done.flag LAST — that's the file the route polls.
+    try:
+        with open(done_path, "w", encoding="utf-8") as f:
+            f.write(datetime.now(timezone.utc).isoformat())
+    except Exception:
+        pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("config_path", help="Path to run config JSON")
@@ -241,6 +303,47 @@ def main() -> int:
         with open(started_path, "w", encoding="utf-8") as f:
             f.write(datetime.now(timezone.utc).isoformat())
     except Exception:
+        pass
+
+    # ── SIGTERM / SIGINT handler ───────────────────────────────────────
+    # Without this, gunicorn/host SIGTERM kills the worker mid-run; the
+    # `finally` below runs only on KeyboardInterrupt (SIGINT) — bare
+    # SIGTERM leaves no done.flag, the UI polls for 120 s before
+    # surfacing a confusing "stalled" message. We catch both signals,
+    # force-close the active Playwright browser (otherwise Chromium
+    # outlives us and holds ~250 MB), write an error.flag with the
+    # reason, write result.json with status="terminated", and finally
+    # touch done.flag so the polling route sees the failure on its
+    # next tick. POSIX exit codes 143 (SIGTERM) and 130 (SIGINT).
+    import signal as _signal
+
+    error_path = os.path.join(pending_dir, f"{config_id}.error.flag")
+
+    def _on_terminate(signum, _frame):  # noqa: D401 — signal handler
+        _write_terminated_artifacts(
+            signum=signum,
+            config_id=config_id,
+            error_path=error_path,
+            result_path=result_path,
+            done_path=done_path,
+        )
+        # 143 = 128 + SIGTERM(15); 130 = 128 + SIGINT(2).
+        if hasattr(_signal, "SIGTERM") and signum == _signal.SIGTERM:
+            sys.exit(143)
+        sys.exit(130)
+
+    # Windows Python has no SIGTERM in some builds — guard with
+    # hasattr. SIGINT exists on all platforms.
+    if hasattr(_signal, "SIGTERM"):
+        try:
+            _signal.signal(_signal.SIGTERM, _on_terminate)
+        except (ValueError, OSError):
+            # signal.signal raises if not called from the main thread,
+            # which happens under pytest-xdist worker processes.
+            pass
+    try:
+        _signal.signal(_signal.SIGINT, _on_terminate)
+    except (ValueError, OSError):
         pass
 
     try:

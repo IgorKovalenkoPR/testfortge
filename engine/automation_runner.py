@@ -30,6 +30,16 @@ _logger = get_logger(__name__)
 AUTOMATION_RUN_RETENTION_DAYS = int(os.environ.get("AUTOMATION_RUN_RETENTION_DAYS", "1"))
 AUTOMATION_RUN_MAX_KEPT = int(os.environ.get("AUTOMATION_RUN_MAX_KEPT", "5"))
 
+# Module-level handle to the currently-active Playwright browser. The
+# runner_worker SIGTERM/SIGINT handler grabs this so it can force-close
+# Chromium before the kernel reaps the worker; without it a SIGTERM
+# leaves a zombie chromium process holding 250 MB of RAM until the OS
+# OOM-kills it. Set inside ``AutomationRunner.run`` immediately after
+# each successful ``engine_obj.launch(...)`` (initial + rotation cycle)
+# and cleared in the matching ``finally`` once the browser has been
+# closed cleanly.
+_CURRENT_BROWSER = None
+
 
 def _purge_old_automation_runs(runs_root: str, max_age_days: int,
                                 max_kept: int = 0) -> int:
@@ -471,6 +481,11 @@ class AutomationRunner:
                     slow_mo=self.slow_mo_ms,
                     args=engine_args,
                 )
+                # Publish the live browser handle so the worker's signal
+                # handler can close Chromium on SIGTERM/SIGINT. Module
+                # globals avoid the runner-worker importing private
+                # attributes of this instance.
+                globals()["_CURRENT_BROWSER"] = browser
                 _logger.info("automation: %s launched OK", self.engine_kind)
                 self._write_phase(f"engine-launched:{self.engine_kind}")
             except Exception as launch_exc:
@@ -498,6 +513,7 @@ class AutomationRunner:
                         slow_mo=0,
                         args=extra_args,
                     )
+                    globals()["_CURRENT_BROWSER"] = browser
                 else:
                     raise
             # 2026-05-04 — operator reported 502/503 around case 17 on a
@@ -553,6 +569,7 @@ class AutomationRunner:
                             slow_mo=self.slow_mo_ms,
                             args=engine_args2,
                         )
+                        globals()["_CURRENT_BROWSER"] = browser
                         _logger.info("automation: %s relaunched OK",
                                      self.engine_kind)
                     else:
@@ -564,6 +581,10 @@ class AutomationRunner:
                     browser.close()
                 except Exception:
                     pass
+                # Clear the module handle so a stray SIGTERM arriving
+                # after the run completes doesn't try to .close() an
+                # already-dead browser object.
+                globals()["_CURRENT_BROWSER"] = None
 
         report.duration_ms = int((time.time() - t0) * 1000)
         report.finished_at = datetime.now().isoformat(timespec="seconds")
