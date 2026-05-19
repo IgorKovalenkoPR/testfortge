@@ -440,6 +440,26 @@ def main() -> int:
                 f.write(datetime.now(timezone.utc).isoformat())
         except Exception:
             pass
+        # S3.3: write a DashboardMetricSnapshot so the trend chart on
+        # /test-metrics gets a fresh data point on every completed run.
+        # Best-effort: a snapshot failure must not crash the worker —
+        # the run result is already on disk, the dashboard can recover
+        # on the next page load. Safe to call here because S3.4's WAL +
+        # busy_timeout pragmas (engine/db.py) prevent the detached
+        # subprocess from deadlocking with the gunicorn worker on
+        # concurrent writes.
+        try:
+            pid = (config.get("project_id") or "").strip()
+            if pid:
+                from engine.test_metrics_generator import snapshot_metrics_from_db
+                snapshot_metrics_from_db(pid)
+        except Exception as exc:  # pragma: no cover — best-effort
+            try:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "runner_worker: metric snapshot failed: %s", exc)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

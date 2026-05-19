@@ -3,113 +3,39 @@
 Renders the landing page with saved-project list and live session
 metrics (test cases, checklist, execution ratios, bug severity,
 environments covered).
+
+Also exposes the ``/metrics/history`` JSON endpoint that powers the
+trend chart on ``/test-metrics`` — see Sprint 3 task 3.3.
 """
 
 from __future__ import annotations
 
-from flask import Flask, render_template, session
+from datetime import datetime, timedelta, timezone
+
+from flask import Flask, jsonify, render_template, request, session
 
 from engine import db as _db
+from engine.test_metrics_generator import compute_session_metrics
 
-from ._shared import get_session_id
+from ._shared import get_session_id, kpi_value, kpi_defect_density
 
 
 def _compute_dashboard_metrics() -> dict:
-    """Compute test metrics from current session data for the dashboard.
+    """Backwards-compatible wrapper — delegates to the pure aggregator.
 
-    Aggregates:
-      - Test case / checklist counts + category breakdown
-      - Execution status ratios (Passed / Failed / Blocked)
-      - Bug severity and priority distributions
-      - Environments covered by test runs
+    The bulk of the logic lives in
+    ``engine.test_metrics_generator.compute_session_metrics`` so the
+    detached ``runner_worker`` subprocess (which has no Flask
+    ``session``) can reuse it via ``snapshot_metrics_from_db``. This
+    wrapper stays here so existing template renderers and the
+    opportunistic snapshot trigger below keep working untouched.
     """
-    tc_data = session.get("test_cases_data", [])
-    cl_data = session.get("checklist_data", [])
-    test_runs = session.get("test_runs", [])
-    bugs_data = session.get("bug_reports_data", [])
-
-    # ── Test cases breakdown ──────────────────────────────────
-    tc_total = len(tc_data)
-    tc_by_category: dict[str, int] = {}
-    tc_by_priority: dict[str, int] = {}
-    for tc in tc_data:
-        cat = tc.get("category", "Other")
-        tc_by_category[cat] = tc_by_category.get(cat, 0) + 1
-        pri = tc.get("priority", "Medium")
-        tc_by_priority[pri] = tc_by_priority.get(pri, 0) + 1
-
-    # ── Checklist breakdown ───────────────────────────────────
-    cl_total = len(cl_data)
-    cl_by_category: dict[str, int] = {}
-    cl_by_priority: dict[str, int] = {}
-    for cl in cl_data:
-        cat = cl.get("category", "Other")
-        cl_by_category[cat] = cl_by_category.get(cat, 0) + 1
-        pri = cl.get("priority", "Medium")
-        cl_by_priority[pri] = cl_by_priority.get(pri, 0) + 1
-
-    # ── Execution status ratios ───────────────────────────────
-    exec_passed = exec_failed = exec_blocked = 0
-    for run in test_runs:
-        stats = run.get("stats", {})
-        exec_passed += stats.get("passed", 0)
-        exec_failed += stats.get("failed", 0)
-        exec_blocked += stats.get("blocked", 0)
-    exec_total = exec_passed + exec_failed + exec_blocked
-    exec_pass_rate = round(exec_passed / exec_total * 100, 1) if exec_total else 0
-
-    # ── Bug severity distribution ─────────────────────────────
-    bug_total = len(bugs_data)
-    bug_by_severity: dict[str, int] = {}
-    bug_by_priority: dict[str, int] = {}
-    bug_by_status: dict[str, int] = {}
-    for bug in bugs_data:
-        sev = bug.get("severity", "Minor")
-        bug_by_severity[sev] = bug_by_severity.get(sev, 0) + 1
-        pri = bug.get("priority", "Medium")
-        bug_by_priority[pri] = bug_by_priority.get(pri, 0) + 1
-        st = bug.get("status", "Open")
-        bug_by_status[st] = bug_by_status.get(st, 0) + 1
-
-    # ── Environments covered ──────────────────────────────────
-    environments = []
-    seen_envs: set[str] = set()
-    for run in test_runs:
-        env = run.get("environment", "")
-        if env and env not in seen_envs:
-            seen_envs.add(env)
-            parts = [p.strip() for p in env.split("/")]
-            environments.append({
-                "full": env,
-                "platform": parts[0] if len(parts) > 0 else "",
-                "browser": parts[1] if len(parts) > 1 else "",
-                "device": parts[2] if len(parts) > 2 else "",
-                "screen": parts[3] if len(parts) > 3 else "",
-                "runs": sum(1 for r in test_runs if r.get("environment") == env),
-            })
-
-    has_data = bool(tc_total or cl_total or test_runs or bugs_data)
-
-    return {
-        "has_data": has_data,
-        "tc_total": tc_total,
-        "tc_by_category": tc_by_category,
-        "tc_by_priority": tc_by_priority,
-        "cl_total": cl_total,
-        "cl_by_category": cl_by_category,
-        "cl_by_priority": cl_by_priority,
-        "exec_total": exec_total,
-        "exec_passed": exec_passed,
-        "exec_failed": exec_failed,
-        "exec_blocked": exec_blocked,
-        "exec_pass_rate": exec_pass_rate,
-        "runs_count": len(test_runs),
-        "bug_total": bug_total,
-        "bug_by_severity": bug_by_severity,
-        "bug_by_priority": bug_by_priority,
-        "bug_by_status": bug_by_status,
-        "environments": environments,
-    }
+    return compute_session_metrics(
+        tc_data=session.get("test_cases_data", []),
+        cl_data=session.get("checklist_data", []),
+        test_runs=session.get("test_runs", []),
+        bugs_data=session.get("bug_reports_data", []),
+    )
 
 
 # Module-local cache so we don't pound DB every dashboard load.
@@ -153,6 +79,69 @@ def register(app: Flask) -> None:
                                projects=projects,
                                active_project_id=session.get("project_id"),
                                metrics=metrics)
+
+    @app.route("/metrics/history", methods=["GET"])
+    def metrics_history_route():
+        """Return a rolling window of ``DashboardMetricSnapshot`` rows.
+
+        Query params:
+          - ``project_id`` — defaults to ``session["project_id"]``.
+            When neither is set we return an empty list rather than 4xx,
+            because the trend chart's empty-state path is the
+            "anonymous visitor lands on /test-metrics" UX (no friction).
+          - ``days`` — clamped to [1, 365]. Default 30.
+
+        Response shape::
+
+            {
+              "snapshots": [
+                {"ts": "2026-05-19T12:00:00+00:00",
+                 "pass_rate": 0.92, "defect_density": 0.03,
+                 "tc_total": 120, "bug_total": 8, "exec_total": 35},
+                ...
+              ]
+            }
+
+        Order: ascending by ``ts`` so the chart can feed the array
+        straight into uPlot without re-sorting on the client.
+        """
+        pid = (request.args.get("project_id")
+               or session.get("project_id") or "").strip()
+        if not pid:
+            return jsonify({"snapshots": []})
+        # Clamp ``days`` to [1, 365]. A "?days=0" request defaults to
+        # 1 day — the chart never receives a zero-width window.
+        try:
+            days_raw = int(request.args.get("days", 30))
+        except (TypeError, ValueError):
+            days_raw = 30
+        days = max(1, min(days_raw, 365)) if days_raw > 0 else 1
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        # Pull a generous limit — 4× ``days`` covers up to ~4
+        # snapshots/day comfortably without ever truncating the visible
+        # window. The route filters by ``captured_at >= cutoff`` below.
+        try:
+            rows = _db.list_metric_snapshots(pid, limit=max(days * 4, 30))
+        except Exception:  # pragma: no cover — keep the page alive on DB hiccups
+            rows = []
+        cutoff_iso = cutoff.isoformat()
+        out: list[dict] = []
+        for r in rows:
+            ts = r.get("captured_at") or ""
+            if ts and ts < cutoff_iso:
+                continue
+            m = r.get("metrics") or {}
+            out.append({
+                "ts": ts,
+                "pass_rate": kpi_value(m, "exec_pass_rate"),
+                "defect_density": kpi_defect_density(m),
+                "tc_total": int(kpi_value(m, "tc_total")),
+                "bug_total": int(kpi_value(m, "bug_total")),
+                "exec_total": int(kpi_value(m, "exec_total")),
+            })
+        # list_metric_snapshots returns desc; the chart needs ascending.
+        out.reverse()
+        return jsonify({"snapshots": out})
 
 
 __all__ = ["register"]

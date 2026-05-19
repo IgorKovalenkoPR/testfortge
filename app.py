@@ -58,6 +58,90 @@ try:
 except Exception:  # pragma: no cover — surface DB outage at startup
     log.exception("Database initialisation failed")
     raise
+
+
+def _start_snapshot_catchup_thread() -> None:
+    """Daemon thread that fills gaps in ``DashboardMetricSnapshot``.
+
+    Once a day it iterates the project list and writes a snapshot for
+    every project that hasn't had one in the last 23 h. Keeps the
+    trend chart from going flat-line whenever a project is healthy
+    enough that nobody happens to load the dashboard.
+
+    Gated by ``TESTFORTGE_SNAPSHOT_WORKER`` (default ON). Setting it to
+    "0" disables the thread — the recommended posture when you've
+    scaled gunicorn beyond ``--workers 1`` so the snapshot pass runs
+    in a single external cron instead of N parallel times. See
+    ``README.md`` for the operations note.
+
+    Defensive: every failure path is swallowed and logged so this
+    daemon can never bring the Flask process down. The runner-worker
+    and dashboard-load triggers are the primary snapshot sources;
+    this thread only catches the long-tail "idle project" case.
+    """
+    import os as _os
+    if _os.environ.get("TESTFORTGE_SNAPSHOT_WORKER", "1") != "1":
+        log.info("Daily metric-snapshot thread disabled "
+                 "(TESTFORTGE_SNAPSHOT_WORKER != 1).")
+        return
+
+    import threading as _threading
+    import time as _time
+
+    def _loop() -> None:
+        # Sleep first — there's no point snapshotting right at boot
+        # when the dashboard-load + runner-worker paths already cover
+        # active projects. 24 h between passes is the dial.
+        SLEEP_SEC = 24 * 60 * 60
+        STALE_SEC = 23 * 60 * 60
+        while True:
+            try:
+                _time.sleep(SLEEP_SEC)
+            except Exception:
+                return
+            try:
+                projects = _db.list_projects()
+            except Exception as exc:  # pragma: no cover — DB hiccup
+                log.warning("snapshot catch-up: list_projects failed: %s", exc)
+                continue
+            from engine.test_metrics_generator import snapshot_metrics_from_db
+            now = _time.time()
+            for p in projects or []:
+                pid = p.get("id") if isinstance(p, dict) else None
+                if not pid:
+                    continue
+                try:
+                    recent = _db.list_metric_snapshots(pid, limit=1)
+                except Exception as exc:
+                    log.warning("snapshot catch-up: list_snapshots(%s) failed: %s",
+                                pid, exc)
+                    continue
+                # Skip if there's already a fresh snapshot. ``captured_at``
+                # is an ISO string in UTC — parse defensively.
+                if recent:
+                    ts_str = (recent[0].get("captured_at") or "") if isinstance(recent[0], dict) else ""
+                    try:
+                        from datetime import datetime as _dt
+                        ts = _dt.fromisoformat(ts_str)
+                        if (now - ts.timestamp()) < STALE_SEC:
+                            continue
+                    except Exception:
+                        # Unparseable timestamp — treat as stale and snapshot.
+                        pass
+                try:
+                    snapshot_metrics_from_db(pid)
+                except Exception as exc:
+                    log.warning("snapshot catch-up: snapshot(%s) failed: %s",
+                                pid, exc)
+
+    t = _threading.Thread(target=_loop, name="snapshot-catchup",
+                          daemon=True)
+    t.start()
+    log.info("Daily metric-snapshot thread started "
+             "(TESTFORTGE_SNAPSHOT_WORKER=1).")
+
+
+_start_snapshot_catchup_thread()
 Session(app)
 # Gzip/Brotli responses — static assets + JSON payloads benefit most.
 Compress(app)

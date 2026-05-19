@@ -261,6 +261,9 @@ TRANSLATIONS = {
     "tm_how_to_1": "Upload a test report file (CSV, XLSX, TXT) with execution data",
     "tm_how_to_2": "Leave fields empty to auto-populate from generated Test Cases in this project",
     "tm_how_to_3": "Add devices/browsers to see per-platform coverage breakdown",
+    "tm_history_title": "Metrics over time",
+    "tm_history_subtitle": "Pass rate (%) and defect density (×100) per snapshot. Activate a project and run something to start the timeline.",
+    "tm_history_empty": "No snapshots yet — they’re written automatically when you load the dashboard or finish an automation run.",
 
     # Techniques
     "tech_title": "Test Design Techniques",

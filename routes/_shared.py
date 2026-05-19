@@ -331,6 +331,46 @@ def get_picker_context(session_obj=None) -> dict:
     }
 
 
+# ── Metric snapshot helpers (Sprint 3 task 3.3) ──────────────────
+
+
+def kpi_value(metrics: dict | None, key: str, default: float = 0.0) -> float:
+    """Read a numeric KPI out of a stored ``DashboardMetricSnapshot``.
+
+    The dashboard metrics dict produced by
+    ``engine.test_metrics_generator.compute_session_metrics`` keeps
+    KPIs at the top level (``exec_pass_rate``, ``tc_total``,
+    ``bug_total``, ``exec_total``, ...) rather than nested in a list
+    of ``{name, value, formula}`` records — the ``KPI`` dataclass-
+    flavoured list lives on the *other* metrics object built for
+    ``/test-metrics``. So ``kpi_value`` is intentionally a thin
+    dict-getter with a defensive numeric coerce, not a list scanner.
+    """
+    if not isinstance(metrics, dict):
+        return default
+    val = metrics.get(key, default)
+    try:
+        return float(val) if val is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def kpi_defect_density(metrics: dict | None) -> float:
+    """Defect density = total bugs / max(total test cases, 1).
+
+    Matches the QA-standard formula but guards against an empty TC
+    pack producing a divide-by-zero spike when the first bug arrives.
+    Returns a float in [0, +inf); the trend chart multiplies by 100
+    for display.
+    """
+    if not isinstance(metrics, dict):
+        return 0.0
+    bugs = kpi_value(metrics, "bug_total")
+    tcs = kpi_value(metrics, "tc_total")
+    denom = tcs if tcs >= 1 else 1.0
+    return round(bugs / denom, 4)
+
+
 __all__ = [
     # constants
     "SAFE_FOLDER_RE", "SAFE_ASSET_RE", "URL_PATTERN", "GENERATED_KEYS",
@@ -347,4 +387,6 @@ __all__ = [
     # project picker
     "get_picker_context",
     "ensure_active_project",
+    # dashboard metric helpers
+    "kpi_value", "kpi_defect_density",
 ]
