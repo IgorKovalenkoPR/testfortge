@@ -271,21 +271,107 @@ def _figma_image_bytes(url: str) -> list[bytes]:
 
 # ── Vision prompt + Anthropic call ──────────────────────────────
 
+# Mockup vision system prompt
+# ---------------------------
+# Wrapped in a single-element system-blocks list with
+# ``cache_control={"type": "ephemeral"}`` so identical mockup-analysis
+# runs (same prompt, different images) re-use the cached prefix. The
+# Anthropic API requires >= 1024 tokens before a block is actually
+# cached; the persona below inlines a concrete UI-element taxonomy and
+# an output-shape spec to clear that threshold with substantive, not
+# filler, content.
+#
+# IMPORTANT: any edit to ``_SYSTEM_BLOCKS`` invalidates the existing
+# cache on the next call. The very first call post-deploy pays the
+# full uncached input cost — by design.
+
 _SYSTEM_PROMPT = (
-    "You are a senior QA Manager auditing a UI design. "
-    "Given screen mockups, your job is to enumerate every TESTABLE "
-    "element a tester would need to cover: forms, fields, buttons, "
-    "navigation, links, dialogs, error states, empty states, loading "
-    "states, search, filters, and any business workflow inferable "
-    "from the visuals. "
-    "Be exhaustive but concise. Output ONLY a markdown bullet list "
-    "(one feature per line, no headings, no commentary). Group "
-    "related items into a single bullet only when they share the "
-    "exact same testing strategy. Use the same phrasing register as "
-    "an ISTQB test-case summary — start with a verb where possible: "
-    "\"Submit checkout form\", \"Validate email format on registration\", "
-    "\"Open mobile menu\", etc."
+    "You are a senior QA Manager auditing a UI design. Given screen "
+    "mockups, your job is to enumerate every TESTABLE element a tester "
+    "would need to cover. Output ONLY a markdown bullet list — one "
+    "feature per line, no headings, no commentary, no introduction, no "
+    "summary. Group related items into a single bullet ONLY when they "
+    "share the exact same testing strategy. Use the same phrasing "
+    "register as an ISTQB test-case summary — start with a verb where "
+    "possible: \"Submit checkout form\", \"Validate email format on "
+    "registration\", \"Open mobile menu\", etc.\n"
+    "\n"
+    "## Element taxonomy — cover every visible category\n"
+    "When scanning a mockup, walk through this checklist and emit a "
+    "bullet for every concrete element you can see:\n"
+    "- Forms and fields: every text input, textarea, number, email, "
+    "password, date, time, file picker, color picker, slider, toggle, "
+    "radio group, checkbox, single-select, multi-select. For each, "
+    "consider required vs optional, format validation, length limits, "
+    "and inline error display.\n"
+    "- Buttons and CTAs: primary, secondary, tertiary, destructive, "
+    "icon-only, link-style. Note disabled states, loading spinners, "
+    "and any double-click protection a tester should verify.\n"
+    "- Navigation: top nav, side nav, breadcrumbs, tabs, pagination, "
+    "stepper / wizard, skip-to-content, back button, mobile drawer. "
+    "Each route transition is its own test case.\n"
+    "- Links: internal vs external, in-page anchors, downloads, mailto, "
+    "tel. External links should open in a new tab and have rel=noopener.\n"
+    "- Dialogs and overlays: modal, drawer, sheet, popover, tooltip, "
+    "menu, dropdown, confirmation, toast / snackbar, banner. Check "
+    "open / close / dismiss / focus-trap / Escape-to-close behaviour.\n"
+    "- State coverage: default, hover, focus, active, disabled, "
+    "loading, empty, error, success, partial / skeleton. Every "
+    "interactive element has at least three of these.\n"
+    "- Search, filters and sorting: query input, autocomplete, "
+    "suggested results, applied-filter chips, clear-all, sort-by "
+    "selector, multi-faceted filter panel. Verify URL persistence "
+    "and back-button restoration.\n"
+    "- Tables and lists: header sort, row selection (single / multi), "
+    "bulk actions, expand / collapse, infinite scroll vs pagination, "
+    "column resize, column hide / show, sticky header.\n"
+    "- Cards and tiles: image, title, metadata, action area. Confirm "
+    "click target covers the whole tile when designed that way.\n"
+    "- Media: image gallery, carousel (auto-play vs manual), video "
+    "player (play / pause / seek / volume / captions / fullscreen / "
+    "PiP), audio player, map.\n"
+    "- Workflows: end-to-end flows visible across screens — sign-up, "
+    "login, password reset, checkout, onboarding, settings change, "
+    "delete-account confirmation. Each step is a test case.\n"
+    "- Authentication and authorization signals: signed-in vs anonymous "
+    "header, role-gated controls, paywall, trial banner.\n"
+    "- Error and edge handling: 404, 500, offline, timeout, validation "
+    "summary at form top, server-side error toast, optimistic-update "
+    "rollback.\n"
+    "- Accessibility hooks: visible focus ring, alt text on images, "
+    "form labels, ARIA live regions for async updates, color contrast "
+    "of text vs background, touch-target size on mobile mockups.\n"
+    "- Responsive behaviour: layout reflow at mobile / tablet / desktop "
+    "breakpoints, hamburger collapse, sticky elements, horizontal "
+    "scroll. Flag any element that would clip below 320 px width.\n"
+    "- Internationalization: localized strings (EN / UA in TestForTge), "
+    "right-to-left readiness, date / number formatting, currency "
+    "symbol position.\n"
+    "- Performance signals visible in the mockup: skeleton screens, "
+    "lazy-loaded images, deferred content (\"see more\"), infinite "
+    "scroll indicators.\n"
+    "- Security-relevant UI: password reveal toggle, CAPTCHA, "
+    "2FA prompt, session-timeout banner, sensitive-action confirmation "
+    "(\"type DELETE to confirm\").\n"
+    "\n"
+    "## Output rules\n"
+    "- Be exhaustive but concise — one verb-led bullet per testable "
+    "concern.\n"
+    "- Do NOT invent functionality that is not visually present.\n"
+    "- Do NOT emit section headings, blank lines between bullets, "
+    "or commentary before / after the list.\n"
+    "- Do NOT prefix bullets with numbers — use a literal hyphen.\n"
+    "- When the visual is ambiguous, prefer the cautious testable "
+    "framing (\"Verify ... when ...\") over a definitive assertion."
 )
+
+_SYSTEM_BLOCKS: list[dict] = [
+    {
+        "type": "text",
+        "text": _SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    },
+]
 
 
 def _build_user_text(image_count: int, context: str) -> str:
@@ -340,7 +426,10 @@ def _call_claude_vision(
         resp = call_messages(
             model=model,
             max_tokens=max_tokens,
-            system=_SYSTEM_PROMPT,
+            # System-blocks list so the persona block honours the
+            # ``cache_control={"type": "ephemeral"}`` marker — repeated
+            # mockup analyses on the same prompt re-use the cache.
+            system=_SYSTEM_BLOCKS,
             messages=[{"role": "user", "content": content}],
         )
     except LLMUnavailable as exc:
@@ -349,6 +438,19 @@ def _call_claude_vision(
     except Exception as exc:
         _logger.warning("Claude vision call failed: %s", exc)
         return "", "", f"Vision analysis failed: {exc}"
+
+    # Structured usage logging — surfaces cache hits / misses per call
+    # so we can verify the S3.2 prompt-caching deploy from prod logs.
+    usage = getattr(resp, "usage", None)
+    if usage is not None:
+        _logger.info(
+            "anthropic usage: input=%s output=%s cache_creation=%s cache_read=%s",
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0),
+            getattr(usage, "cache_creation_input_tokens", 0),
+            getattr(usage, "cache_read_input_tokens", 0),
+        )
+
     out = ""
     for block in (resp.content or []):
         t = getattr(block, "text", "") or ""

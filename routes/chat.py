@@ -198,7 +198,10 @@ def register(app: Flask) -> None:
                 with client.messages.stream(
                     model=_chatbot_mod._ANTHROPIC_MODEL,
                     max_tokens=_chatbot_mod._ANTHROPIC_MAX_TOKENS,
-                    system=_chatbot_mod._ai_system_prompt(lang),
+                    # System-blocks list (not a string) so the cached
+                    # persona block actually hits Anthropic's ephemeral
+                    # cache. See engine/chatbot.py for the persona text.
+                    system=_chatbot_mod._ai_system_blocks(lang),
                     messages=[{"role": "user", "content": message}],
                 ) as stream:
                     for text in stream.text_stream:
@@ -229,7 +232,17 @@ def register(app: Flask) -> None:
                 if final is not None:
                     usage = getattr(final, "usage", None)
                     if usage is not None:
-                        _logger.info("anthropic stream usage: %s", usage)
+                        # Structured usage log — surfaces cache hits /
+                        # misses per request so we can verify the S3.2
+                        # prompt-caching deploy from production logs.
+                        _logger.info(
+                            "anthropic usage: input=%s output=%s "
+                            "cache_creation=%s cache_read=%s",
+                            getattr(usage, "input_tokens", 0),
+                            getattr(usage, "output_tokens", 0),
+                            getattr(usage, "cache_creation_input_tokens", 0),
+                            getattr(usage, "cache_read_input_tokens", 0),
+                        )
 
                 reply_dict = {
                     "text": full_text,
