@@ -1110,14 +1110,14 @@ def _ai_respond(message: str, lang: str) -> ChatReply | None:
     return ChatReply(text=text, intent=intent)
 
 
-def respond(message: str, lang: str = "en") -> ChatReply:
-    """Produce a :class:`ChatReply` for ``message``.
+def try_fast_path(message: str, lang: str = "en") -> ChatReply | None:
+    """Run the pre-LLM portion of :func:`respond`.
 
-    Dispatch order:
-      1. Empty / greeting / gratitude — cheap fast path.
-      2. Explicit bug-report trigger words — open the bug form.
-      3. Anthropic Claude (when ANTHROPIC_API_KEY is set).
-      4. Rule-based dispatcher (troubleshoot / module help / clarify).
+    Returns a :class:`ChatReply` if any of the cheap, deterministic
+    handlers matches (empty / greeting / gratitude / guide / ISTQB
+    glossary / ISTQB topic / explicit bug-form trigger). Returns
+    ``None`` when none of them match — meaning the caller should invoke
+    the LLM (or :func:`rule_based_fallback` when no LLM is available).
     """
     raw = (message or "").strip()
     low = _norm(raw)
@@ -1187,11 +1187,27 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     if _wants_bug_form(low):
         return _bug_form_reply(lang)
 
-    # AI-backed reply (Anthropic Claude). Falls through to rule-based on
-    # any failure.
-    ai = _ai_respond(raw, lang)
-    if ai is not None:
-        return ai
+    return None
+
+
+def rule_based_fallback(message: str, lang: str = "en") -> ChatReply:
+    """Run the post-LLM rule-based dispatcher portion of :func:`respond`.
+
+    This is what the legacy ``respond()`` falls through to when
+    ``_ai_respond`` returns ``None`` (no API key, transient failure,
+    empty response). The SSE streaming route uses it as the canned
+    reply when ``ANTHROPIC_API_KEY`` is missing.
+
+    Always returns a :class:`ChatReply` — the final ``_clarify_requirement``
+    branch is unconditional.
+    """
+    raw = (message or "").strip()
+    low = _norm(raw)
+    # The pre-LLM checks already covered the empty case via
+    # ``_default_help``; if a caller skips ``try_fast_path`` and lands
+    # here with an empty message we still want a sensible reply.
+    if not low:
+        return _default_help(lang)
 
     # Troubleshooting intent — anything that sounds like a failure.
     # Runs before module help so "Automation is broken" routes to the
@@ -1272,6 +1288,30 @@ def respond(message: str, lang: str = "en") -> ChatReply:
 
     # Last resort — treat as a requirement that needs clarification
     return _clarify_requirement(lang, raw)
+
+
+def respond(message: str, lang: str = "en") -> ChatReply:
+    """Produce a :class:`ChatReply` for ``message``.
+
+    Dispatch order:
+      1. Empty / greeting / gratitude — cheap fast path.
+      2. Explicit bug-report trigger words — open the bug form.
+      3. Anthropic Claude (when ANTHROPIC_API_KEY is set).
+      4. Rule-based dispatcher (troubleshoot / module help / clarify).
+    """
+    raw = (message or "").strip()
+
+    fast = try_fast_path(raw, lang)
+    if fast is not None:
+        return fast
+
+    # AI-backed reply (Anthropic Claude). Falls through to rule-based on
+    # any failure.
+    ai = _ai_respond(raw, lang)
+    if ai is not None:
+        return ai
+
+    return rule_based_fallback(raw, lang)
 
 
 def respond_dict(message: str, lang: str = "en") -> dict:

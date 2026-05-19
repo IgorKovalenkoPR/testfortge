@@ -372,12 +372,9 @@ function applyStatusColor(select) {
         });
     }
 
-    async function sendMessage(text) {
-        const msg = (text || '').trim();
-        if (!msg) return;
-        renderMessage('user', msg);
-        input.value = '';
-        sendBtn.disabled = true;
+    /* Legacy blocking POST path — also the fallback for browsers without
+       EventSource and for any SSE error before the first delta lands. */
+    async function sendMessagePost(msg) {
         try {
             const resp = await fetch('/chat', {
                 method: 'POST',
@@ -389,12 +386,146 @@ function applyStatusColor(select) {
                 ? data.follow_up
                 : (data.suggestions || []);
             renderMessage('bot', data.text || '...', chips);
-            // Open the structured bug form when the bot signals it.
             if (data.intent === 'bug_form') {
                 renderBugForm();
             }
         } catch (err) {
             renderMessage('bot', 'Network error. Please try again.');
+        }
+    }
+
+    /* SSE streaming path — same contract as /chat but tokens arrive
+       progressively. Frame protocol:
+         event: meta   {intent, lang}             — before first delta
+         event: delta  {text}                     — per token chunk
+         event: full   {text, intent, ...}        — fast-path single shot
+         event: done   {intent, suggestions, ...} — terminal frame
+         event: error  {message}                  — failure mid-stream
+    */
+    function sendMessageStream(msg) {
+        return new Promise((resolve) => {
+            let es;
+            try {
+                const qs = new URLSearchParams({ message: msg, lang });
+                es = new EventSource('/chat/stream?' + qs.toString());
+            } catch (e) {
+                resolve({ ok: false, reason: 'eventsource-construct' });
+                return;
+            }
+            let botEl = null;
+            let plainBuf = '';
+            let receivedAny = false;
+            let finalIntent = '';
+            let finalChips = [];
+
+            function ensureBotEl() {
+                if (botEl) return botEl;
+                botEl = document.createElement('div');
+                botEl.className = 'qa-chat-msg bot';
+                body.appendChild(botEl);
+                return botEl;
+            }
+            function applyText(text) {
+                ensureBotEl().innerHTML = mdToHtml(text);
+                scrollBottom();
+            }
+
+            es.addEventListener('meta', () => {
+                receivedAny = true;
+                // Show a placeholder bot bubble so the user gets immediate feedback.
+                ensureBotEl();
+            });
+
+            es.addEventListener('delta', (ev) => {
+                receivedAny = true;
+                try {
+                    const d = JSON.parse(ev.data);
+                    if (d && typeof d.text === 'string') {
+                        plainBuf += d.text;
+                        applyText(plainBuf);
+                    }
+                } catch (e) { /* malformed frame — ignore */ }
+            });
+
+            es.addEventListener('full', (ev) => {
+                receivedAny = true;
+                try {
+                    const d = JSON.parse(ev.data);
+                    plainBuf = d.text || '';
+                    applyText(plainBuf);
+                    if (d.intent) finalIntent = d.intent;
+                    const chips = (d.follow_up && d.follow_up.length)
+                        ? d.follow_up : (d.suggestions || []);
+                    if (chips && chips.length) finalChips = chips;
+                } catch (e) { /* ignore */ }
+            });
+
+            es.addEventListener('done', (ev) => {
+                try {
+                    const d = JSON.parse(ev.data);
+                    if (d && d.intent) finalIntent = finalIntent || d.intent;
+                    const chips = (d && d.follow_up && d.follow_up.length)
+                        ? d.follow_up
+                        : (d && d.suggestions) || [];
+                    if (chips && chips.length) finalChips = chips;
+                } catch (e) { /* tolerate empty done frame */ }
+                es.close();
+                // Render chip row (if any) attached after the streamed bubble.
+                if (finalChips.length && botEl) {
+                    const row = document.createElement('div');
+                    row.className = 'qa-chat-chips';
+                    finalChips.forEach(c => {
+                        const chip = document.createElement('button');
+                        chip.type = 'button';
+                        chip.className = 'qa-chat-chip';
+                        chip.textContent = c;
+                        chip.addEventListener('click', () => { sendMessage(c); });
+                        row.appendChild(chip);
+                    });
+                    body.appendChild(row);
+                    scrollBottom();
+                }
+                if (finalIntent === 'bug_form') {
+                    renderBugForm();
+                }
+                resolve({ ok: true });
+            });
+
+            es.addEventListener('error', (ev) => {
+                // Either an explicit `event: error` frame from the server
+                // or a transport-level failure (EventSource's default
+                // onerror also fires here). Close and let the caller
+                // decide whether to fall back to POST.
+                try { es.close(); } catch (e) { /* noop */ }
+                if (botEl && plainBuf) {
+                    // We already streamed something — keep what the user saw.
+                    resolve({ ok: true });
+                } else {
+                    // Drop the empty bubble so the POST fallback can render fresh.
+                    if (botEl && botEl.parentNode) {
+                        botEl.parentNode.removeChild(botEl);
+                    }
+                    resolve({ ok: false, reason: 'eventsource-error', receivedAny });
+                }
+            });
+        });
+    }
+
+    async function sendMessage(text) {
+        const msg = (text || '').trim();
+        if (!msg) return;
+        renderMessage('user', msg);
+        input.value = '';
+        sendBtn.disabled = true;
+        try {
+            if ('EventSource' in window) {
+                const result = await sendMessageStream(msg);
+                if (!result.ok) {
+                    await sendMessagePost(msg);
+                }
+            } else {
+                await sendMessagePost(msg);
+            }
         } finally {
             sendBtn.disabled = false;
             input.focus();

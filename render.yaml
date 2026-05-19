@@ -50,6 +50,9 @@ services:
     #    simulator path (no Base URL) and for the /test-execution/
     #    results/<id> endpoint that re-runs the per-env loop after the
     #    worker writes result.json. 7200 (2 h) is generous backstop.
+    # --worker-class gthread is required for SSE long-lived responses
+    # (GET /chat/stream); do not switch to sync or the streaming reply
+    # blocks the worker for the full Anthropic round-trip.
     dockerCommand: >-
       gunicorn
       --bind 0.0.0.0:$PORT
