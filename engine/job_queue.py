@@ -28,6 +28,7 @@ Scope & trade-offs
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import signal
 import threading
@@ -309,7 +310,61 @@ def _install_shutdown_hooks(queue: JobQueue) -> None:
             log.debug("could not install %s handler: %s", sig_name, exc)
 
 
+def count_active_subprocess_runs(pending_dir: str, session_id: str) -> int:
+    """Count detached subprocess runs still in flight for a session.
+
+    ``routes/execution.py`` dispatches Playwright passes as standalone
+    OS processes (so a gunicorn restart doesn't kill them). Those runs
+    live OUTSIDE the in-process :class:`JobQueue` — they only ever
+    surface on disk as ``<run_id>.json`` config files in
+    ``<storage>/automation_runs/_pending/``, plus a sibling
+    ``<run_id>.done.flag`` once the worker finishes.
+
+    A session is "active" for a given run when its config JSON exists,
+    no ``done.flag`` is sitting next to it, AND its ``session_id`` field
+    matches. That last check is what makes the cap per-session instead
+    of per-installation — multi-tenant on-prem deployments can have
+    several operators running passes simultaneously without blocking
+    each other.
+
+    Soft-fails on any IO error: a missing directory, an unreadable file,
+    or a truncated JSON entry returns 0 / skips that file rather than
+    propagating. The cap is a safety rail, not a security boundary, so
+    refusing to count is strictly safer than raising and breaking the
+    POST path.
+    """
+    if not pending_dir or not os.path.isdir(pending_dir):
+        return 0
+    n = 0
+    try:
+        names = os.listdir(pending_dir)
+    except OSError:
+        return 0
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        # Skip *.result.json files written when a run completes — those
+        # represent finished work, not pending dispatches.
+        if fn.endswith(".result.json"):
+            continue
+        rid = fn[:-5]  # strip ".json"
+        # If the matching done.flag exists the run is already complete,
+        # even though the config JSON lingers for the results endpoint
+        # to pick up.
+        if os.path.isfile(os.path.join(pending_dir, f"{rid}.done.flag")):
+            continue
+        try:
+            with open(os.path.join(pending_dir, fn),
+                      "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if cfg.get("session_id") == session_id:
+            n += 1
+    return n
+
+
 __all__ = [
     "PENDING", "RUNNING", "DONE", "FAILED",
-    "Job", "JobQueue", "get_queue",
+    "Job", "JobQueue", "get_queue", "count_active_subprocess_runs",
 ]

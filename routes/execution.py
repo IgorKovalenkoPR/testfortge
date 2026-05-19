@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from flask import (Flask, Response, flash, g, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (Flask, Response, current_app, flash, g, jsonify, redirect,
+                   render_template, request, session, url_for)
 
 from engine.log import get_logger
 from engine.qa_testers import (
@@ -885,6 +885,40 @@ def register(app: Flask) -> None:
                       "warning",
                   )
               if wants_automation:
+                  # ── PER-SESSION SUBPROCESS CONCURRENCY CAP ────────
+                  # Sprint 1 Task 5: a runaway tab can otherwise spam
+                  # /test-execution and bury _pending/ in unfinished
+                  # config JSONs, each spawning its own Chromium process.
+                  # Render free-tier (512 MB) OOMs at ~3 concurrent
+                  # browser contexts. We refuse the dispatch when the
+                  # active count for this session already meets the cap.
+                  # Subprocess runs live OUTSIDE JobQueue, so we count
+                  # by scanning the pending dir directly.
+                  try:
+                      import os as _os_cap
+                      from engine.job_queue import count_active_subprocess_runs as _cnt_sub
+                      from routes._shared import get_session_id as _gsid_cap
+                      from routes.automation import STORAGE_ROOT as _SR_CAP
+                      _pending_dir_cap = _os_cap.path.join(
+                          _SR_CAP, "automation_runs", "_pending")
+                      _sid_cap = _gsid_cap(session)
+                      _cap = int(current_app.config.get(
+                          "MAX_CONCURRENT_RUNS", 3) or 3)
+                      _active = _cnt_sub(_pending_dir_cap, _sid_cap)
+                      if _active >= _cap:
+                          flash(
+                              f"You already have {_active} test-execution "
+                              f"run(s) in flight (cap is {_cap}). Please "
+                              f"wait for them to finish before starting "
+                              f"another.",
+                              "warning",
+                          )
+                          return redirect(url_for("test_execution_page"))
+                  except Exception as _exc_cap:
+                      # Counting is best-effort; never let a stat failure
+                      # block the operator's run.
+                      log.debug("subprocess cap check skipped: %s", _exc_cap)
+
                   # ── DETACHED SUBPROCESS DISPATCH ──────────────────
                   # Operator hit 502/503 around case 37 of 62 at the
                   # ~12-13 min mark — well below gunicorn --timeout.

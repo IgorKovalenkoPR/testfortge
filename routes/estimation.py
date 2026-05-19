@@ -576,17 +576,26 @@ def register(app: Flask) -> None:
         mockup_context = request.form.get("mockup_context", "").strip()
 
         # Per-session concurrency cap (shared threshold with automation).
+        # Sprint 1 Task 5 added the MAX_CONCURRENT_RUNS env knob — when
+        # present (and lower than the legacy MAX_CONCURRENT_JOBS_PER_SESSION),
+        # it tightens the gate so operators can ratchet the limit down
+        # without a code change. Both still ride the same kind+meta query
+        # so finished jobs roll off as soon as they complete.
         sid = get_session_id(session)
         active = get_queue().count_active_by_meta(
             "estimation", "session_id", sid)
-        if active >= MAX_CONCURRENT_JOBS_PER_SESSION:
+        _runs_cap = int(current_app.config.get(
+            "MAX_CONCURRENT_RUNS", MAX_CONCURRENT_JOBS_PER_SESSION)
+            or MAX_CONCURRENT_JOBS_PER_SESSION)
+        limit = min(MAX_CONCURRENT_JOBS_PER_SESSION, _runs_cap)
+        if active >= limit:
             resp = jsonify({
                 "error": "rate_limited",
                 "message": (f"You already have {active} active estimation "
                             f"jobs. Wait for them to finish before starting "
                             f"another."),
                 "active": active,
-                "limit": MAX_CONCURRENT_JOBS_PER_SESSION,
+                "limit": limit,
             })
             resp.status_code = 429
             # Site crawls are typically faster than automation runs, so

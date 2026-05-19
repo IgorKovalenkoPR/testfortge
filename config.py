@@ -111,6 +111,19 @@ EST_MAX_ADDITIONAL_PLATFORMS = 30
 EST_MAX_MINUTES_PER_TC = 120
 EST_MAX_BUFFER_PERCENT = 200
 
+# Per-session concurrency cap — a single user can have at most this many
+# active (PENDING / RUNNING) background runs of a given kind (tc_gen,
+# cl_gen, estimation, automation subprocess). Beyond the cap the route
+# refuses the submit and surfaces a flash/JSON warning so a runaway tab
+# can't monopolise the small in-process thread-pool or saturate the
+# subprocess directory. Tuneable via the MAX_CONCURRENT_RUNS env var so
+# beefier hosts can lift it without a code change. Lives alongside the
+# pre-existing per-route caps (MAX_CONCURRENT_JOBS_PER_SESSION,
+# MAX_CONCURRENT_GEN_JOBS) — Sprint 1 Task 5 explicitly asks for a
+# single, env-driven knob that the rest of the cap-enforcing code
+# defers to.
+MAX_CONCURRENT_RUNS = int(os.environ.get("MAX_CONCURRENT_RUNS", "3"))
+
 
 # ── Applying to a Flask app ──────────────────────────────────────
 def apply(app) -> None:
@@ -148,4 +161,7 @@ def apply(app) -> None:
         EST_MAX_ADDITIONAL_PLATFORMS=EST_MAX_ADDITIONAL_PLATFORMS,
         EST_MAX_MINUTES_PER_TC=EST_MAX_MINUTES_PER_TC,
         EST_MAX_BUFFER_PERCENT=EST_MAX_BUFFER_PERCENT,
+
+        # Per-session concurrency cap shared by all background-run sites.
+        MAX_CONCURRENT_RUNS=MAX_CONCURRENT_RUNS,
     )

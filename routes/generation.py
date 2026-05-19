@@ -227,6 +227,26 @@ def register(app: Flask) -> None:
                         "trace": trc}
 
             sid = get_session_id(session)
+            # Per-session concurrency cap. Sprint 1 Task 5: a runaway tab
+            # can otherwise submit /test-cases over and over, fill the
+            # 2-worker thread pool with tc_gen jobs, and starve every
+            # other route for the duration. The async sibling
+            # /test-cases/run-async already enforces a sibling cap; this
+            # is the matching gate on the sync POST so neither path is
+            # a loophole.
+            from flask import current_app as _ca
+            _cap = int(_ca.config.get("MAX_CONCURRENT_RUNS", 3) or 3)
+            _active = get_queue().count_active_by_meta(
+                "tc_gen", "session_id", sid)
+            if _active >= _cap:
+                flash(
+                    f"You already have {_active} generation job(s) in "
+                    f"flight (cap is {_cap}). Please wait for them to "
+                    f"finish before starting another.",
+                    "warning",
+                )
+                return redirect(url_for("test_cases_page"))
+
             job_id = get_queue().submit("tc_gen", _sync_worker,
                                         meta={"session_id": sid})
             session["tc_gen_job_id"] = job_id
@@ -386,6 +406,22 @@ def register(app: Flask) -> None:
                         "raw_requirements": raw_for_persona}
 
             sid = get_session_id(session)
+            # Per-session concurrency cap — same rationale as the tc_gen
+            # gate above. Sprint 1 Task 5: prevent a single tab from
+            # monopolising the thread pool with checklist generations.
+            from flask import current_app as _ca
+            _cap = int(_ca.config.get("MAX_CONCURRENT_RUNS", 3) or 3)
+            _active = get_queue().count_active_by_meta(
+                "cl_gen", "session_id", sid)
+            if _active >= _cap:
+                flash(
+                    f"You already have {_active} checklist job(s) in "
+                    f"flight (cap is {_cap}). Please wait for them to "
+                    f"finish before starting another.",
+                    "warning",
+                )
+                return redirect(url_for("checklist_page"))
+
             job_id = get_queue().submit("cl_gen", _sync_worker,
                                         meta={"session_id": sid})
             session["cl_gen_job_id"] = job_id
