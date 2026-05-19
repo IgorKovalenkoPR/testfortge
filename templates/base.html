@@ -148,8 +148,8 @@
     </div>
 
     {# Lucide icon library (ISC licensed) — hydrates <i data-lucide="…"> nodes #}
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer nonce="{{ csp_nonce }}"></script>
+    <script nonce="{{ csp_nonce }}">
         document.addEventListener('DOMContentLoaded', function () {
             if (window.lucide && typeof window.lucide.createIcons === 'function') {
                 window.lucide.createIcons();
@@ -157,7 +157,7 @@
         });
     </script>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}" nonce="{{ csp_nonce }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

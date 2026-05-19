@@ -576,7 +576,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 /* Dashboard metric-tab switcher — delegated click handler on the selector
    so the binding survives even if this script evaluates before the buttons
    are parsed. Also exposes a global showMetric(id, btn) for legacy callers. */

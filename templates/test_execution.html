@@ -2,6 +2,11 @@
 {% block title %}{{ t.get('te_title', 'Test Execution') }}{% endblock %}
 
 {% block content %}
+{# Jinja → JS shuttle. Values that used to be interpolated inside inline
+   script blocks land here so static/js/test-execution.js can stay
+   nonce-friendly. #}
+<meta name="te-live-info-url" content="{{ url_for('test_execution_live_info') }}">
+<meta name="te-i18n-overlay-slow" content="{{ t.get('te_overlay_slow', 'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | e }}">
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
 <p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
 
@@ -87,7 +92,6 @@
     </form>
 </div>
 {% endif %}
-
 
 {# ── Empty state — no data yet ───────────────────────────────────
    The user lands here either fresh (nothing in the session) or after
@@ -273,7 +277,7 @@
 {% if test_runs %}
 {% for run in test_runs %}
 <div class="card run-card">
-    <div class="run-header" onclick="toggleRunDetails('run-{{ run.run_id }}')">
+    <div class="run-header" data-action="toggle-run" data-run-id="{{ run.run_id }}">
         <div class="run-title">
             <strong>Run {{ run.run_id }}</strong>
             <span class="run-meta">
@@ -383,13 +387,13 @@
         <div class="form-row">
             {% if has_tc_data %}
             <label class="radio-card">
-                <input type="radio" name="source" value="test_cases" checked onchange="toggleItemList()">
+                <input type="radio" name="source" value="test_cases" checked>
                 <span><i data-lucide="check-circle-2" class="icon-sm"></i> {{ t.get('te_source_tc', 'Test Cases') }} ({{ tc_count }})</span>
             </label>
             {% endif %}
             {% if has_cl_data %}
             <label class="radio-card">
-                <input type="radio" name="source" value="checklist" {% if not has_tc_data %}checked{% endif %} onchange="toggleItemList()">
+                <input type="radio" name="source" value="checklist" {% if not has_tc_data %}checked{% endif %}>
                 <span><i data-lucide="list-checks" class="icon-sm"></i> {{ t.get('te_source_cl', 'Checklist') }} ({{ cl_count }})</span>
             </label>
             {% endif %}
@@ -402,8 +406,8 @@
     <h3 class="card-title">{{ t.get('te_select_items', 'Select Items to Test') }}</h3>
     <p class="hint">{{ t.get('te_select_items_hint', 'Select specific items or leave all checked to test everything') }}</p>
     <div class="select-actions">
-        <a href="#" onclick="selectAll(); return false;" class="btn btn-sm">{{ t.get('all', 'All') }}</a>
-        <a href="#" onclick="selectNone(); return false;" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
+        <a href="#" data-action="select-all" class="btn btn-sm">{{ t.get('all', 'All') }}</a>
+        <a href="#" data-action="select-none" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
         <span id="te-selected-counter" class="te-counter" aria-live="polite">
             {{ t.get('te_selected_label', 'Selected') }}: <strong id="te-selected-now">0</strong>
             / <span id="te-selected-total">0</span>
@@ -551,81 +555,6 @@
             </a>
         </div>
     </div>
-    <script>
-    (function () {
-        var card = document.getElementById('te-active-run');
-        if (!card) return;
-        var runId = card.dataset.runId;
-        var total = parseInt(card.dataset.caseCount, 10) || 0;
-        var pill = document.getElementById('te-active-pill');
-        var prog = document.getElementById('te-active-progress');
-        var hint = document.getElementById('te-active-hint');
-        var btn  = document.getElementById('te-active-results-btn');
-        var statusUrl = "/test-execution/run-status/" + encodeURIComponent(runId);
-        var infoUrl  = "{{ url_for('test_execution_live_info') }}";
-        function paint(stat) {
-            var s = (stat && stat.status) || 'queued';
-            if (s === 'done') {
-                pill.textContent = '✓ done';
-                pill.style.background = '#e0e7ff';
-                pill.style.color = '#3730a3';
-                hint.textContent = 'Run finished. Importing results…';
-                if (btn) { btn.style.display = ''; }
-                // One-time auto-import; if it fails the user has the
-                // button. 1.5s delay so the user sees the success pill.
-                setTimeout(function () {
-                    window.location.href =
-                        "/test-execution/results/" + encodeURIComponent(runId);
-                }, 1500);
-            } else if (s === 'stalled' || s === 'failed') {
-                pill.textContent = (s === 'stalled') ? '⚠ stalled' : '✗ failed';
-                pill.style.background = '#fee2e2';
-                pill.style.color = '#991b1b';
-                hint.textContent = stat.error
-                    || 'Worker did not finish cleanly.';
-                if (btn) {
-                    btn.style.display = '';
-                    btn.textContent = 'Import partial results';
-                }
-            } else {
-                pill.textContent = '● running';
-                pill.style.background = '#dcfce7';
-                pill.style.color = '#166534';
-            }
-        }
-        function pollProgress() {
-            // Pull progress from live info.json — the worker writes
-            // cases_done there even when run-status hasn't flipped yet.
-            fetch(infoUrl, { cache: 'no-store' })
-                .then(function (r) { return r.json(); })
-                .then(function (info) {
-                    if (info && info.cases_done >= 0) {
-                        var done = info.cases_done || 0;
-                        var grand = info.cases_total || total || 1;
-                        prog.textContent = done + ' / ' + grand + ' cases';
-                    }
-                })
-                .catch(function () {});
-        }
-        function pollStatus() {
-            fetch(statusUrl, { cache: 'no-store' })
-                .then(function (r) { return r.json(); })
-                .then(paint)
-                .catch(function () {});
-        }
-        pollStatus();
-        pollProgress();
-        var iv = setInterval(function () {
-            pollStatus();
-            pollProgress();
-        }, 2000);
-        // Stop polling once we've redirected — defensive against
-        // memory leaks if the redirect is delayed.
-        window.addEventListener('beforeunload', function () {
-            clearInterval(iv);
-        });
-    })();
-    </script>
     {% endif %}
     <div class="form-grid">
         <div class="form-group">
@@ -797,32 +726,6 @@
     </div>
 </div>
 
-
-<script>
-/* Mirror the selected optgroup label (OS family) into the hidden
-   web_platform / mw_os fields so backward-compat callers — env-desc
-   builders, exports, history rows — keep seeing the coarse family
-   even though the user picked a specific OS version. Runs once on
-   load and on every change. */
-(function () {
-    function mirror(selectId, hiddenId) {
-        var sel = document.getElementById(selectId);
-        var hid = document.getElementById(hiddenId);
-        if (!sel || !hid) return;
-        function sync() {
-            var opt = sel.options[sel.selectedIndex];
-            if (opt && opt.parentNode && opt.parentNode.tagName === 'OPTGROUP') {
-                hid.value = opt.parentNode.label || hid.value;
-            }
-        }
-        sync();
-        sel.addEventListener('change', sync);
-    }
-    mirror('web_os_version', 'web_platform_hidden');
-    mirror('mw_os_version',  'mw_os_hidden');
-})();
-</script>
-
 {# ── Test Account / Credentials ────────────────────────────────
    Reinstated as part of the merger with Automation QA. When test
    cases require an authenticated session, the tester provides
@@ -950,323 +853,9 @@
 
 {% endif %}
 
-<script>
-function toggleItemList() {
-    var source = document.querySelector('input[name="source"]:checked');
-    if (!source) return;
-    var tcList = document.getElementById('items-tc');
-    var clList = document.getElementById('items-cl');
-    if (source.value === 'test_cases') {
-        if (tcList) tcList.style.display = 'block';
-        if (clList) clList.style.display = 'none';
-        // Enable TC checkboxes, disable CL
-        document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = false; });
-        document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = true; });
-    } else {
-        if (tcList) tcList.style.display = 'none';
-        if (clList) clList.style.display = 'block';
-        document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = true; });
-        document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = false; });
-    }
-    if (typeof teUpdateCounter === 'function') {
-        teSyncSectionCheckboxes();
-        teUpdateCounter();
-    }
-}
-
-function selectAll() {
-    var source = document.querySelector('input[name="source"]:checked');
-    var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
-    document.querySelectorAll(cls).forEach(function(cb) { cb.checked = true; });
-    teSyncSectionCheckboxes();
-    teUpdateCounter();
-}
-
-function selectNone() {
-    var source = document.querySelector('input[name="source"]:checked');
-    var cls = source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
-    document.querySelectorAll(cls).forEach(function(cb) { cb.checked = false; });
-    teSyncSectionCheckboxes();
-    teUpdateCounter();
-}
-
-// ── Selected-counter + section-level toggles ────────────────────
-function teActiveItemSelector() {
-    var source = document.querySelector('input[name="source"]:checked');
-    return source && source.value === 'checklist' ? '.item-cb-cl' : '.item-cb-tc';
-}
-
-function teUpdateCounter() {
-    var sel = teActiveItemSelector();
-    var nodes = document.querySelectorAll(sel);
-    var checked = 0;
-    nodes.forEach(function(cb) { if (cb.checked && !cb.disabled) checked++; });
-    var nowEl = document.getElementById('te-selected-now');
-    var totalEl = document.getElementById('te-selected-total');
-    if (nowEl) nowEl.textContent = checked;
-    if (totalEl) totalEl.textContent = nodes.length;
-}
-
-function teSyncSectionCheckboxes() {
-    document.querySelectorAll('.section-cb').forEach(function(secCb) {
-        var target = secCb.dataset.target;
-        if (!target) return;
-        var children = document.querySelectorAll(target);
-        if (!children.length) return;
-        var on = 0, off = 0;
-        children.forEach(function(c) { if (c.checked) on++; else off++; });
-        secCb.checked = on > 0 && off === 0;
-        secCb.indeterminate = on > 0 && off > 0;
-    });
-}
-
-// Delegated listeners — one for the whole card so dynamically-loaded
-// content (rare here, but keeps it future-proof) keeps working.
-(function teBindSelection(){
-    var card = document.getElementById('items-tc');
-    var card2 = document.getElementById('items-cl');
-    function onChange(ev) {
-        var t = ev.target;
-        if (t.classList.contains('section-cb')) {
-            var sel = t.dataset.target;
-            if (sel) {
-                document.querySelectorAll(sel).forEach(function(c) {
-                    if (!c.disabled) c.checked = t.checked;
-                });
-            }
-            t.indeterminate = false;
-            teUpdateCounter();
-            return;
-        }
-        if (t.classList.contains('item-cb')) {
-            teSyncSectionCheckboxes();
-            teUpdateCounter();
-        }
-    }
-    [card, card2].forEach(function(el) {
-        if (el) el.addEventListener('change', onChange);
-    });
-    // Initial paint after DOM ready (template renders all checked).
-    document.addEventListener('DOMContentLoaded', function() {
-        teSyncSectionCheckboxes();
-        teUpdateCounter();
-    });
-})();
-
-// ── Test Environment: multi-checkbox panel switcher ──────────
-// User may pick one or more environments. We show the panel for
-// every checked env_type, hide the rest. Hidden panels still post
-// their default values; the route only honours fields whose
-// env_type checkbox is in the request.
-(function te_envSwitch() {
-    var boxes = document.querySelectorAll('input[name="env_type"]');
-    var panels = document.querySelectorAll('.te-env-panel');
-    function syncPanels() {
-        var active = new Set();
-        boxes.forEach(function (b) { if (b.checked) active.add(b.value); });
-        panels.forEach(function (p) {
-            p.hidden = !active.has(p.getAttribute('data-env'));
-        });
-    }
-    boxes.forEach(function (b) { b.addEventListener('change', syncPanels); });
-    syncPanels();
-})();
-
-// "Custom..." -> reveal the matching free-text input. Looks for any
-// <select> with sibling <input type=text> whose value flips to
-// "__custom".
-(function te_customSelectToggle() {
-    var pairs = [
-        ['select[name="mw_resolution"]', 'input[name="mw_resolution_custom"]'],
-        ['select[name="ios_device"]',     'input[name="ios_device_custom"]'],
-        ['select[name="android_device"]', 'input[name="android_device_custom"]'],
-    ];
-    pairs.forEach(function (pair) {
-        var sel = document.querySelector(pair[0]);
-        var inp = document.querySelector(pair[1]);
-        if (!sel || !inp) return;
-        sel.addEventListener('change', function () {
-            inp.style.display = sel.value === '__custom' ? 'block' : 'none';
-        });
-    });
-})();
-
-// Toggle run details
-function toggleRunDetails(id) {
-    var el = document.getElementById(id);
-    var toggle = document.getElementById('toggle-' + id);
-    if (el.style.display === 'none') {
-        el.style.display = 'block';
-        if (toggle) {
-            toggle.innerHTML = '<i data-lucide="chevron-up" class="icon-sm"></i>';
-            if (window.lucide) window.lucide.createIcons();
-        }
-    } else {
-        el.style.display = 'none';
-        if (toggle) {
-            toggle.innerHTML = '<i data-lucide="chevron-down" class="icon-sm"></i>';
-            if (window.lucide) window.lucide.createIcons();
-        }
-    }
-}
-
-// Auto-expand the latest test run
-(function() {
-    var runs = document.querySelectorAll('.run-details');
-    if (runs.length > 0) {
-        var last = runs[runs.length - 1];
-        last.style.display = 'block';
-        var toggleId = 'toggle-' + last.id;
-        var toggle = document.getElementById(toggleId);
-        if (toggle) {
-            toggle.innerHTML = '<i data-lucide="chevron-up" class="icon-sm"></i>';
-            if (window.lucide) window.lucide.createIcons();
-        }
-    }
-})();
-
-// Init
-toggleItemList();
-
-// ── Run progress overlay ─────────────────────────────────────
-(function teRunOverlay(){
-  var form     = document.getElementById('exec-config-form');
-  var overlay  = document.getElementById('te-run-overlay');
-  var etaEl    = document.getElementById('te-overlay-eta');
-  var elapsedEl= document.getElementById('te-overlay-elapsed');
-  var liveBox  = document.getElementById('te-overlay-live');
-  var liveTc   = document.getElementById('te-overlay-tc');
-  var liveProg = document.getElementById('te-overlay-progress');
-  if (!form || !overlay) return;
-
-  function fmtSec(s) {
-    s = Math.max(0, Math.round(s));
-    var m = Math.floor(s / 60);
-    var r = s % 60;
-    return (m > 0 ? m + 'm ' : '') + r + 's';
-  }
-
-  function computeEta() {
-    // Initial estimate only — once exceeded, the modal switches to the
-    // open-ended "still running" message instead of pretending to know.
-    var sel = (typeof teActiveItemSelector === 'function') ? teActiveItemSelector() : '.item-cb-tc';
-    var nodes = document.querySelectorAll(sel);
-    var n = 0;
-    nodes.forEach(function(c) { if (c.checked && !c.disabled) n++; });
-    var envs = document.querySelectorAll('input[name="env_type"]:checked').length || 1;
-    var baseUrl = (document.querySelector('input[name="base_url"]') || {}).value || '';
-    var perCase = baseUrl ? 3.5 : 1.6;
-    return Math.max(2, Math.round(n * envs * perCase));
-  }
-
-  var runStart = 0;
-  var etaSec = 0;
-  var tickHandle = null;
-  var pollHandle = null;
-
-  function tick() {
-    var elapsedSec = Math.round((Date.now() - runStart) / 1000);
-    // Static ETA was based on a guess that drifted within seconds and
-    // mis-informed operators on long runs. Show only the actual elapsed
-    // time — the inline live status row below shows real cases-done /
-    // cases-total which is the only reliable progress signal.
-    if (etaEl) etaEl.textContent = '';
-    if (elapsedEl) elapsedEl.textContent = 'Elapsed: ' + fmtSec(elapsedSec);
-  }
-
-  function pollLive() {
-    fetch("{{ url_for('test_execution_live_info') }}", { cache: 'no-store' })
-      .then(function(r) { return r.json(); })
-      .then(function(info) {
-        if (!info || info.status === 'idle') return;
-        if (liveBox) liveBox.style.display = 'block';
-        if (liveTc) {
-          liveTc.textContent = info.current_tc
-            ? ('Test case: ' + info.current_tc)
-            : (info.status === 'starting' ? 'Browser launching…' : 'Run finished');
-        }
-        if (liveProg) {
-          if (info.status === 'done') {
-            liveProg.textContent = (info.cases_total || 0) + ' / '
-                                 + (info.cases_total || 0) + ' cases · finished';
-          } else {
-            liveProg.textContent = (info.cases_done || 0) + ' / '
-                                 + (info.cases_total || 0) + ' cases';
-          }
-        }
-      })
-      .catch(function() { /* keep polling on error */ });
-  }
-
-  form.addEventListener('submit', function(ev) {
-    // Only show overlay for the main Run button — auxiliary buttons
-    // (e.g. "Generate test account") use formaction and shouldn't trigger
-    // a long progress bar.
-    var submitter = ev.submitter || document.activeElement;
-    if (submitter && submitter.id !== 'te-run-button') return;
-    runStart = Date.now();
-    etaSec = computeEta();
-    tick();
-    if (tickHandle) clearInterval(tickHandle);
-    tickHandle = setInterval(tick, 1000);
-    if (pollHandle) clearInterval(pollHandle);
-    pollHandle = setInterval(pollLive, 1500);
-    pollLive();
-    overlay.hidden = false;
-  });
-  // Manual close — the synchronous POST may outlive gunicorn's
-  // 300-second ceiling on cold-start runs and the page never reloads.
-  // The X button gives the operator a way out without losing access
-  // to results that may have already landed in the session.
-  var closeBtn = document.getElementById('te-overlay-close');
-  if (closeBtn) {
-      closeBtn.addEventListener('click', function() {
-          overlay.hidden = true;
-          if (tickHandle) clearInterval(tickHandle);
-          if (pollHandle) clearInterval(pollHandle);
-      });
-  }
-  document.addEventListener('keydown', function(ev) {
-      if (ev.key === 'Escape' && !overlay.hidden) {
-          ev.preventDefault();
-          overlay.hidden = true;
-          if (tickHandle) clearInterval(tickHandle);
-          if (pollHandle) clearInterval(pollHandle);
-      }
-  });
-  // 5-minute watchdog: if the page hasn't navigated away by then,
-  // surface a "this is taking longer than expected" message and stop
-  // pretending we know the run state. The actual run continues in the
-  // background; the user can refresh to see results.
-  var watchdog = null;
-  var origSubmit = form.querySelector('button#te-run-button');
-  form.addEventListener('submit', function(ev) {
-      var sm = ev.submitter || document.activeElement;
-      if (sm && sm.id !== 'te-run-button') return;
-      if (watchdog) clearTimeout(watchdog);
-      watchdog = setTimeout(function() {
-          if (overlay.hidden) return;
-          var card = overlay.querySelector('.te-run-card');
-          if (!card) return;
-          var notice = document.createElement('p');
-          notice.style.cssText = 'margin-top:14px;padding:10px;'
-                              + 'background:#fef3c7;color:#92400e;'
-                              + 'border:1px solid #fbbf24;'
-                              + 'border-radius:6px;font-size:0.88em;';
-          notice.innerHTML = "{{ t.get('te_overlay_slow',
-              'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | safe }}";
-          card.appendChild(notice);
-      }, 5 * 60 * 1000);
-  }, false);
-
-  window.addEventListener('pageshow', function() {
-    overlay.hidden = true;
-    if (tickHandle) clearInterval(tickHandle);
-    if (pollHandle) clearInterval(pollHandle);
-    if (watchdog) clearTimeout(watchdog);
-  });
-})();
-</script>
+{# Selection / env switcher / run overlay moved to
+   static/js/test-execution.js. Original inline block kept commented
+   for diff bisecting; removed in commit 2. #}
 
 <style>
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -1351,87 +940,8 @@ toggleItemList();
 @media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
 </style>
 
-<script>
-/* TestExecution upload helpers — Feature #15.
- *  - Drag-and-drop on the upload cards (mirrors _input_block.html).
- *  - "Run immediately after upload" checkbox: append `auto_run=1` to
- *    the upload action URL so the upload route knows to redirect to
- *    /test-execution?auto_run=1; we then auto-click Run on arrival.
- *  - On /test-execution?auto_run=1 the run-form's submit button is
- *    clicked once after a short delay so the operator sees the page
- *    paint before the Run modal opens. */
-(function () {
-    /* DnD wiring — for every form data-te-upload="..." block. */
-    document.querySelectorAll('form[data-te-upload]').forEach(function (form) {
-        var zone   = form.querySelector('.te-drop-zone');
-        var input  = zone && zone.querySelector('input[type="file"]');
-        var summary = zone && zone.querySelector('.te-drop-summary');
-        if (!zone || !input) return;
+{% endblock %}
 
-        function humanSize(bytes) {
-            return bytes < 1024 * 1024
-                ? (bytes / 1024).toFixed(1) + ' KB'
-                : (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        }
-        function render() {
-            if (!summary) return;
-            summary.innerHTML = '';
-            Array.from(input.files).forEach(function (f) {
-                var row = document.createElement('div');
-                row.className = 'file-item';
-                row.style.cssText = 'display:flex;justify-content:space-between;'
-                                  + 'padding:4px 8px;background:#f1f5f9;'
-                                  + 'border-radius:4px;margin-top:4px;'
-                                  + 'font-size:0.85em;';
-                row.innerHTML = '<span></span><span></span>';
-                row.children[0].textContent = f.name;
-                row.children[1].textContent = humanSize(f.size);
-                summary.appendChild(row);
-            });
-        }
-        zone.addEventListener('click', function (ev) {
-            if (ev.target === input) return;
-            ev.preventDefault();
-            input.click();
-        });
-        zone.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Enter' || ev.key === ' ') {
-                ev.preventDefault();
-                input.click();
-            }
-        });
-        ['dragenter', 'dragover'].forEach(function (n) {
-            zone.addEventListener(n, function (ev) {
-                ev.preventDefault();
-                ev.stopPropagation();
-                if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
-                zone.classList.add('drag-over');
-            });
-        });
-        zone.addEventListener('dragleave', function (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            zone.classList.remove('drag-over');
-        });
-        zone.addEventListener('drop', function (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            zone.classList.remove('drag-over');
-            var dt = ev.dataTransfer;
-            if (!dt || !dt.files || !dt.files.length) return;
-            try { input.files = dt.files; }
-            catch (_) {
-                var t = new DataTransfer();
-                Array.from(dt.files).forEach(function (f) { t.items.add(f); });
-                input.files = t.files;
-            }
-            render();
-        });
-        input.addEventListener('change', render);
-
-    });
-
-})();
-</script>
-
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/test-execution.js') }}" defer nonce="{{ csp_nonce }}"></script>
 {% endblock %}

@@ -58,7 +58,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 /* Same hardened drag-and-drop pattern as templates/_input_block.html.
    See that file for the why — summary:
      1. Block the browser's default file-drop behaviour at the window

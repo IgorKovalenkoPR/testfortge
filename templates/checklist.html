@@ -34,7 +34,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 /* Async checklist generation — same hardened polling loop as
  * /test-cases. See templates/test_cases.html for the full rationale. */
 (function () {
@@ -388,7 +388,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 function filterCL(category, btn) {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
