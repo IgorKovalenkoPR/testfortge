@@ -205,17 +205,6 @@
         }
     }
 
-    // Expose so legacy inline handlers keep working during the
-    // commit-1 transition; the data-action delegation in commit 2
-    // takes over after the inline onclick= attributes are removed.
-    window.toggleItemList = toggleItemList;
-    window.selectAll = selectAll;
-    window.selectNone = selectNone;
-    window.toggleRunDetails = toggleRunDetails;
-    window.teUpdateCounter = teUpdateCounter;
-    window.teSyncSectionCheckboxes = teSyncSectionCheckboxes;
-    window.teActiveItemSelector = teActiveItemSelector;
-
     // Delegated change listener — one per item list so dynamic content
     // (rare here, but future-proof) keeps working.
     (function teBindSelection(){
