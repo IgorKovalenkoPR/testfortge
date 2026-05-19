@@ -2,6 +2,11 @@
 {% block title %}{{ t.get('te_title', 'Test Execution') }}{% endblock %}
 
 {% block content %}
+{# Jinja → JS shuttle. Values that used to be interpolated inside inline
+   <script> blocks land here so static/js/test-execution.js can stay
+   nonce-friendly. #}
+<meta name="te-live-info-url" content="{{ url_for('test_execution_live_info') }}">
+<meta name="te-i18n-overlay-slow" content="{{ t.get('te_overlay_slow', 'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | e }}">
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
 <p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
 
@@ -551,7 +556,10 @@
             </a>
         </div>
     </div>
-    <script>
+    {# Active-run progress widget moved to static/js/test-execution.js.
+       Original inline block kept commented for diff bisecting; will be
+       removed in commit 2. #}
+    {# <script>
     (function () {
         var card = document.getElementById('te-active-run');
         if (!card) return;
@@ -625,7 +633,7 @@
             clearInterval(iv);
         });
     })();
-    </script>
+    </script> #}
     {% endif %}
     <div class="form-grid">
         <div class="form-group">
@@ -798,12 +806,9 @@
 </div>
 
 
-<script>
-/* Mirror the selected optgroup label (OS family) into the hidden
-   web_platform / mw_os fields so backward-compat callers — env-desc
-   builders, exports, history rows — keep seeing the coarse family
-   even though the user picked a specific OS version. Runs once on
-   load and on every change. */
+{# OS family mirror moved to static/js/test-execution.js. Original
+   inline block kept commented for diff bisecting; removed in commit 2. #}
+{# <script>
 (function () {
     function mirror(selectId, hiddenId) {
         var sel = document.getElementById(selectId);
@@ -821,7 +826,7 @@
     mirror('web_os_version', 'web_platform_hidden');
     mirror('mw_os_version',  'mw_os_hidden');
 })();
-</script>
+</script> #}
 
 {# ── Test Account / Credentials ────────────────────────────────
    Reinstated as part of the merger with Automation QA. When test
@@ -950,7 +955,10 @@
 
 {% endif %}
 
-<script>
+{# Selection / env switcher / run overlay moved to
+   static/js/test-execution.js. Original inline block kept commented
+   for diff bisecting; removed in commit 2. #}
+{# <script>
 function toggleItemList() {
     var source = document.querySelector('input[name="source"]:checked');
     if (!source) return;
@@ -1266,7 +1274,7 @@ toggleItemList();
     if (watchdog) clearTimeout(watchdog);
   });
 })();
-</script>
+</script> #}
 
 <style>
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -1351,15 +1359,9 @@ toggleItemList();
 @media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
 </style>
 
-<script>
-/* TestExecution upload helpers — Feature #15.
- *  - Drag-and-drop on the upload cards (mirrors _input_block.html).
- *  - "Run immediately after upload" checkbox: append `auto_run=1` to
- *    the upload action URL so the upload route knows to redirect to
- *    /test-execution?auto_run=1; we then auto-click Run on arrival.
- *  - On /test-execution?auto_run=1 the run-form's submit button is
- *    clicked once after a short delay so the operator sees the page
- *    paint before the Run modal opens. */
+{# Upload DnD + auto-run moved to static/js/test-execution.js. Original
+   inline block kept commented for diff bisecting; removed in commit 2. #}
+{# <script>
 (function () {
     /* DnD wiring — for every form data-te-upload="..." block. */
     document.querySelectorAll('form[data-te-upload]').forEach(function (form) {
@@ -1432,6 +1434,10 @@ toggleItemList();
     });
 
 })();
-</script>
+</script> #}
 
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/test-execution.js') }}" defer></script>
 {% endblock %}
