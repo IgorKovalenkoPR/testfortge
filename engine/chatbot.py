@@ -38,11 +38,13 @@ _logger = get_logger(__name__)
 # import / network / quota failure falls back to the rule-based reply.
 # ────────────────────────────────────────────────────────────────────
 try:
-    from anthropic import Anthropic  # type: ignore
+    from anthropic import Anthropic  # type: ignore  # noqa: F401
     _ANTHROPIC_OK = True
 except Exception as _exc:  # pragma: no cover — import-time defensive
     _ANTHROPIC_OK = False
     _logger.debug("anthropic SDK not importable: %s", _exc)
+
+from engine.llm_client import LLMUnavailable, call_messages
 
 _ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 _ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "600"))
@@ -1070,37 +1072,42 @@ def _istqb_reply(topic: str, lang: str) -> ChatReply | None:
 
 def _ai_respond(message: str, lang: str) -> ChatReply | None:
     """Try an Anthropic-backed reply. Returns None on any failure so the
-    rule-based dispatcher can take over without the user noticing."""
+    rule-based dispatcher can take over without the user noticing.
+
+    The actual SDK call goes through :func:`engine.llm_client.call_messages`
+    which adds a 60 s per-attempt timeout and a 3-attempt exponential
+    backoff retry. Any terminal failure surfaces as
+    :class:`engine.llm_client.LLMUnavailable` and we fall through.
+    """
     if not _ANTHROPIC_OK:
         return None
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        return None
     try:
-        client = Anthropic(api_key=api_key)
-        resp = client.messages.create(
+        resp = call_messages(
             model=_ANTHROPIC_MODEL,
             max_tokens=_ANTHROPIC_MAX_TOKENS,
             system=_ai_system_prompt(lang),
             messages=[{"role": "user", "content": message}],
         )
-        # Concatenate all text blocks in the response.
-        chunks: list[str] = []
-        for block in getattr(resp, "content", []) or []:
-            text = getattr(block, "text", None)
-            if text:
-                chunks.append(text)
-        text = "\n".join(chunks).strip()
-        if not text:
-            return None
-        intent = "ai_generic"
-        if "<BUG_FORM/>" in text:
-            text = text.replace("<BUG_FORM/>", "").strip()
-            intent = "bug_form"
-        return ChatReply(text=text, intent=intent)
-    except Exception as exc:
+    except LLMUnavailable as exc:
+        _logger.warning("AI chatbot call unavailable, falling back to rules: %s", exc)
+        return None
+    except Exception as exc:  # pragma: no cover — defensive
         _logger.warning("AI chatbot call failed, falling back to rules: %s", exc)
         return None
+    # Concatenate all text blocks in the response.
+    chunks: list[str] = []
+    for block in getattr(resp, "content", []) or []:
+        text = getattr(block, "text", None)
+        if text:
+            chunks.append(text)
+    text = "\n".join(chunks).strip()
+    if not text:
+        return None
+    intent = "ai_generic"
+    if "<BUG_FORM/>" in text:
+        text = text.replace("<BUG_FORM/>", "").strip()
+        intent = "bug_form"
+    return ChatReply(text=text, intent=intent)
 
 
 def respond(message: str, lang: str = "en") -> ChatReply:

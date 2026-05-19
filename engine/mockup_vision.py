@@ -41,6 +41,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from engine.llm_client import LLMUnavailable, call_messages
+
 _logger = logging.getLogger(__name__)
 
 # Hard limits — vision calls are expensive and the model context is
@@ -275,24 +277,30 @@ def _build_user_text(image_count: int, context: str) -> str:
     return "\n\n".join(parts)
 
 
-def _call_claude_vision(images: list[bytes], context: str) -> tuple[str, str]:
+def _call_claude_vision(
+    images: list[bytes], context: str
+) -> tuple[str, str, str]:
     """Call Anthropic with image content blocks. Returns
-    (feature_list_text, raw_response). Empty strings on failure."""
+    ``(feature_list_text, raw_response, error)`` — ``error`` is empty
+    on success, populated when the LLM is unavailable or returned an
+    unexpected error so the caller can surface it to the user.
+
+    The actual SDK call routes through
+    :func:`engine.llm_client.call_messages` which adds a 60 s
+    per-attempt timeout and a 3-attempt exponential-backoff retry on
+    transient errors. Terminal failures raise
+    :class:`engine.llm_client.LLMUnavailable` which we convert into the
+    ``error`` field of the return tuple.
+    """
     if not images:
-        return "", ""
-    try:
-        from anthropic import Anthropic
-    except Exception as exc:
-        _logger.warning("anthropic SDK missing: %s", exc)
-        return "", ""
+        return "", "", ""
     api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not api_key:
         _logger.info("ANTHROPIC_API_KEY not set or empty; skipping vision "
                      "call. Set it in Render env vars to enable Mockups.")
-        return "", ""
+        return "", "", "ANTHROPIC_API_KEY is not set on the server."
     model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
     max_tokens = int(os.environ.get("ANTHROPIC_VISION_MAX_TOKENS", "2000"))
-    client = Anthropic()
     content: list[dict] = []
     for img in images:
         b64 = base64.standard_b64encode(img).decode("ascii")
@@ -306,21 +314,24 @@ def _call_claude_vision(images: list[bytes], context: str) -> tuple[str, str]:
         })
     content.append({"type": "text", "text": _build_user_text(len(images), context)})
     try:
-        resp = client.messages.create(
+        resp = call_messages(
             model=model,
             max_tokens=max_tokens,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
-        out = ""
-        for block in (resp.content or []):
-            t = getattr(block, "text", "") or ""
-            if t:
-                out += t + "\n"
-        return out.strip(), out.strip()
+    except LLMUnavailable as exc:
+        _logger.warning("Claude vision call unavailable: %s", exc)
+        return "", "", f"Vision analysis is temporarily unavailable: {exc}"
     except Exception as exc:
         _logger.warning("Claude vision call failed: %s", exc)
-        return "", ""
+        return "", "", f"Vision analysis failed: {exc}"
+    out = ""
+    for block in (resp.content or []):
+        t = getattr(block, "text", "") or ""
+        if t:
+            out += t + "\n"
+    return out.strip(), out.strip(), ""
 
 
 def _normalise_to_bullets(raw: str) -> str:
@@ -428,7 +439,12 @@ def analyse(*,
         )
         images = images[:MAX_IMAGES]
 
-    raw, raw_full = _call_claude_vision(images, context)
+    raw, raw_full, llm_error = _call_claude_vision(images, context)
+    if llm_error:
+        res.error = llm_error
+        res.image_count = len(images)
+        res.source_label = " + ".join(sources)
+        return res
     if not raw:
         res.error = (
             "Vision analysis returned no output. "
