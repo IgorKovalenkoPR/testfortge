@@ -26,6 +26,11 @@ import time
 from dataclasses import dataclass, field, asdict
 from urllib.parse import urljoin, urlparse
 
+# SSRF guard — every page.goto in this module routes operator-supplied
+# URLs (the crawled site's pages) into Chromium. Blocks 127.0.0.1,
+# RFC1918, link-local, and cloud-metadata addresses. See engine.security.
+from engine.security import require_safe_url, UnsafeUrlError
+
 # ── Data structures ─────────────────────────────────────────────
 
 @dataclass
@@ -150,6 +155,10 @@ class BrowserTestRunner:
     def _safe_goto(self, page, url: str) -> bool:
         """Navigate to URL with timeout handling. Returns True on success."""
         try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return False
+        try:
             resp = page.goto(url, wait_until="domcontentloaded",
                              timeout=self.timeout_ms)
             return resp is not None and resp.status < 400
@@ -161,6 +170,19 @@ class BrowserTestRunner:
     def _check_page_load(self, page, url: str) -> BrowserPageReport:
         """Load page, measure timing, collect basic data."""
         report = BrowserPageReport(url=url)
+
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError as exc:
+            report.findings.append(BrowserFinding(
+                check_id=f"page_blocked_{urlparse(url).path or '/'}",
+                category="Security",
+                severity="Critical",
+                status="Failed",
+                page_url=url,
+                description=f"Page blocked by SSRF policy: {exc}",
+            ))
+            return report
 
         try:
             start = time.monotonic()
@@ -222,6 +244,11 @@ class BrowserTestRunner:
             if msg.type == "error":
                 js_errors.append(msg.text)
 
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
+
         page.on("console", on_console)
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -265,6 +292,11 @@ class BrowserTestRunner:
         Links already visited during crawling are considered valid.
         """
         findings: list[BrowserFinding] = []
+
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
 
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -354,6 +386,11 @@ class BrowserTestRunner:
         findings: list[BrowserFinding] = []
 
         try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
+
+        try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         except Exception:
             return findings
@@ -411,6 +448,11 @@ class BrowserTestRunner:
     def _check_dropdowns(self, page, url: str) -> list[BrowserFinding]:
         """Check dropdown menus in navigation."""
         findings: list[BrowserFinding] = []
+
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
 
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -490,6 +532,11 @@ class BrowserTestRunner:
     def _check_forms(self, page, url: str) -> list[BrowserFinding]:
         """Check form fields: focus, tab order, required field validation."""
         findings: list[BrowserFinding] = []
+
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
 
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -598,6 +645,11 @@ class BrowserTestRunner:
         findings: list[BrowserFinding] = []
 
         try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
+
+        try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         except Exception:
             return findings
@@ -671,6 +723,11 @@ class BrowserTestRunner:
     def _check_responsive(self, page) -> list[BrowserFinding]:
         """Check responsive layout at mobile/tablet/desktop viewports."""
         findings: list[BrowserFinding] = []
+
+        try:
+            require_safe_url(self.base_url)
+        except UnsafeUrlError:
+            return findings
 
         for width, height, label in self.VIEWPORTS:
             try:
@@ -750,6 +807,11 @@ class BrowserTestRunner:
         findings: list[BrowserFinding] = []
 
         try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
+
+        try:
             page.goto(url, wait_until="load", timeout=self.timeout_ms)
             timing = page.evaluate("""() => {
                 const t = performance.timing;
@@ -787,6 +849,11 @@ class BrowserTestRunner:
     def _check_visual_issues(self, page, url: str) -> list[BrowserFinding]:
         """Check for common visual issues like overlapping text or tiny click targets."""
         findings: list[BrowserFinding] = []
+
+        try:
+            require_safe_url(url)
+        except UnsafeUrlError:
+            return findings
 
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)

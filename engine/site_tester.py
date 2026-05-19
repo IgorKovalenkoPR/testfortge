@@ -396,6 +396,15 @@ _SKIP_EXT = frozenset([
 def _fetch_test_page(url: str, timeout: int = 8) -> TestPageData:
     """Fetch a URL, parse HTML, return structured TestPageData."""
     page = TestPageData(url=url, status_code=0, response_time_ms=0)
+    # SSRF guard — operator-controlled URL flowing into urlopen could
+    # otherwise hit 127.0.0.1 / RFC1918 / 169.254.169.254. Honors
+    # ``SSRF_ALLOWLIST_BYPASS=1`` for explicit staging-box deployments.
+    from engine.security import require_safe_url, UnsafeUrlError
+    try:
+        require_safe_url(url)
+    except UnsafeUrlError as _ssrf_exc:
+        page.error = f"blocked by SSRF policy: {str(_ssrf_exc)[:160]}"
+        return page
     try:
         req = urllib.request.Request(url, headers=_HEADERS)
         start = time.monotonic()
@@ -474,6 +483,12 @@ def _check_url_status(url: str, timeout: int = 5) -> tuple[int, float]:
 
     Returns (-1, 0) on connection error.
     """
+    # SSRF guard — see _fetch_test_page.
+    from engine.security import require_safe_url, UnsafeUrlError
+    try:
+        require_safe_url(url)
+    except UnsafeUrlError:
+        return -1, 0
     for method in ("HEAD", "GET"):
         try:
             req = urllib.request.Request(url, method=method, headers=_HEADERS)

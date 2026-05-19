@@ -73,35 +73,18 @@ def _is_public_ip(ip_str: str) -> bool:
 def _assert_safe_url(url: str) -> None:
     """Raise :class:`UnsafeURLError` if ``url`` points at a private host.
 
-    Resolves every A/AAAA record for the hostname; if *any* record is
-    internal we refuse, so an attacker can't bypass us with a DNS record
-    that mixes public + private answers.
+    Delegates to :func:`engine.security.require_safe_url` which is the
+    single source of truth for SSRF policy — same DNS-rebinding-resistant
+    check, plus honors the ``SSRF_ALLOWLIST_BYPASS=1`` env opt-out.
+    Re-raises the central :class:`engine.security.UnsafeUrlError` as the
+    local :class:`UnsafeURLError` for backward compatibility with the
+    caller's existing ``except UnsafeURLError`` handler.
     """
-    parsed = urlparse(url)
-    if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
-        raise UnsafeURLError(f"scheme not allowed: {parsed.scheme!r}")
-    host = parsed.hostname
-    if not host:
-        raise UnsafeURLError("URL has no host")
-
-    # Reject numeric literals that are already internal — skip DNS.
+    from engine.security import require_safe_url, UnsafeUrlError as _UU
     try:
-        ipaddress.ip_address(host)
-        if not _is_public_ip(host):
-            raise UnsafeURLError(f"non-public IP: {host}")
-        return
-    except ValueError:
-        pass  # it's a hostname; resolve
-
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as e:
-        raise UnsafeURLError(f"DNS failure for {host}: {e}") from e
-    for info in infos:
-        ip_str = info[4][0]
-        if not _is_public_ip(ip_str):
-            raise UnsafeURLError(
-                f"host {host} resolves to non-public address {ip_str}")
+        require_safe_url(url)
+    except _UU as exc:
+        raise UnsafeURLError(str(exc)) from exc
 
 
 # ── Data structures ──────────────────────────────────────────────

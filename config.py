@@ -48,6 +48,17 @@ for _p in (UPLOAD_FOLDER, STORAGE_FOLDER, SESSION_DIR):
 DEBUG = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
 BEHIND_HTTPS = os.environ.get("BEHIND_HTTPS", "").lower() in {"1", "true", "yes"}
 
+# SSRF allowlist opt-out. When ``SSRF_ALLOWLIST_BYPASS=1`` is set in the
+# environment, :func:`engine.security.require_safe_url` becomes a no-op
+# so the engine can target operator-controlled staging boxes on
+# RFC1918 / loopback addresses (e.g. ``http://192.168.1.10:3000``).
+# Default is OFF — production deploys keep the allowlist active to
+# prevent SSRF to cloud metadata / internal services. Read fresh from
+# the env at each guard call (see engine.security), so we don't capture
+# the value here; this constant just exists for ops visibility.
+SSRF_ALLOWLIST_BYPASS = os.environ.get(
+    "SSRF_ALLOWLIST_BYPASS", "").strip() == "1"
+
 
 # ── Secrets ───────────────────────────────────────────────────────
 def _resolve_secret_key() -> str:

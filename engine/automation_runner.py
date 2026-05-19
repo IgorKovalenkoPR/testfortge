@@ -754,6 +754,17 @@ class AutomationRunner:
                 if cur and want and cur == want:
                     self._live_pump(page, tc_dir, idx, "nav_skip")
                 else:
+                    # SSRF guard — operator-controlled URL flowing into
+                    # page.goto could otherwise hit 127.0.0.1 admin
+                    # endpoints, RFC1918 internal services, or cloud
+                    # metadata at 169.254.169.254. See engine.security.
+                    from engine.security import require_safe_url, UnsafeUrlError
+                    try:
+                        require_safe_url(target_url)
+                    except UnsafeUrlError as _ssrf_exc:
+                        # Surfaces as a failed step with a clear
+                        # comment so the operator knows what happened.
+                        raise AssertionError(str(_ssrf_exc))
                     page.goto(target_url, wait_until="domcontentloaded")
                     # Intermediate live frame so the operator sees the
                     # page arrive on the live tab, not just after the
@@ -1456,6 +1467,19 @@ class AutomationRunner:
 
             # Step 2 — login
             login_target = cred.login_url or self.base_url
+            # SSRF guard — login_url from operator config could point at
+            # an internal service. Mark the auth step "blocked" rather
+            # than raising so the run continues with a clear reason.
+            from engine.security import require_safe_url, UnsafeUrlError
+            try:
+                require_safe_url(login_target)
+            except UnsafeUrlError as _ssrf_exc:
+                sr.status = "blocked"
+                sr.comment = (
+                    f"Login URL blocked by SSRF policy: {str(_ssrf_exc)[:200]}"
+                )
+                sr.duration_ms = int((time.time() - t0) * 1000)
+                return sr
             page.goto(login_target, wait_until="domcontentloaded")
             self._visible_scroll(page)
 
@@ -1517,6 +1541,13 @@ class AutomationRunner:
         the account manually using the generated credentials.
         """
         try:
+            # SSRF guard — best-effort, just log and bail if blocked.
+            from engine.security import require_safe_url, UnsafeUrlError
+            try:
+                require_safe_url(cred.register_url)
+            except UnsafeUrlError as _ssrf_exc:
+                _logger.warning("register skipped — %s", _ssrf_exc)
+                return
             page.goto(cred.register_url, wait_until="domcontentloaded")
             page.wait_for_timeout(150)
             # Email / username

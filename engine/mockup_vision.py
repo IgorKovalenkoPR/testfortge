@@ -176,13 +176,21 @@ def _figma_image_bytes(url: str) -> list[bytes]:
     except Exception as exc:
         _logger.warning("requests missing for figma fetch: %s", exc)
         return out
+    # SSRF guard — every requests.get below routes operator-controlled
+    # input (the pasted Figma URL, or img_url / og:image values pulled
+    # from the response HTML). Without this an attacker could supply
+    # an URL whose og:image points at http://127.0.0.1 and exfiltrate
+    # internal images through our vision pipeline.
+    from engine.security import require_safe_url, UnsafeUrlError
     # Path 1 — REST API with PAT.
     if pat:
         try:
             headers = {"X-Figma-Token": pat}
             # Get the file's children so we know what to render.
+            files_url = f"https://api.figma.com/v1/files/{file_key}"
+            require_safe_url(files_url)
             r = requests.get(
-                f"https://api.figma.com/v1/files/{file_key}",
+                files_url,
                 headers=headers, timeout=8,
             )
             r.raise_for_status()
@@ -200,8 +208,10 @@ def _figma_image_bytes(url: str) -> list[bytes]:
                         break
             ids = ids[:MAX_IMAGES]
             if ids:
+                images_url = f"https://api.figma.com/v1/images/{file_key}"
+                require_safe_url(images_url)
                 rr = requests.get(
-                    f"https://api.figma.com/v1/images/{file_key}",
+                    images_url,
                     headers=headers,
                     params={"ids": ",".join(ids), "format": "png", "scale": 1},
                     timeout=10,
@@ -213,6 +223,12 @@ def _figma_image_bytes(url: str) -> list[bytes]:
                     if not img_url:
                         continue
                     try:
+                        require_safe_url(img_url)
+                    except UnsafeUrlError as _ssrf_exc:
+                        _logger.warning("figma image %s blocked: %s",
+                                          nid, _ssrf_exc)
+                        continue
+                    try:
                         ir = requests.get(img_url, timeout=10)
                         ir.raise_for_status()
                         from PIL import Image
@@ -221,12 +237,15 @@ def _figma_image_bytes(url: str) -> list[bytes]:
                     except Exception as exc:
                         _logger.debug("figma image fetch failed (%s): %s",
                                       nid, exc)
+        except UnsafeUrlError as exc:
+            _logger.warning("figma REST fetch blocked: %s", exc)
         except Exception as exc:
             _logger.warning("figma REST fetch failed: %s", exc)
     # Path 2 — Public OG image. Always try as a fallback so we have at
     # least one frame to analyse.
     if not out:
         try:
+            require_safe_url(url)
             page = requests.get(url, timeout=8,
                                  headers={"User-Agent": "TestForTge/1.0"})
             page.raise_for_status()
@@ -236,11 +255,15 @@ def _figma_image_bytes(url: str) -> list[bytes]:
                 html, re.I,
             )
             if og:
-                ir = requests.get(og.group(1), timeout=8)
+                og_target = og.group(1)
+                require_safe_url(og_target)
+                ir = requests.get(og_target, timeout=8)
                 ir.raise_for_status()
                 from PIL import Image
                 with Image.open(io.BytesIO(ir.content)) as im:
                     out.append(_resize_to_budget(im))
+        except UnsafeUrlError as exc:
+            _logger.warning("figma OG fetch blocked: %s", exc)
         except Exception as exc:
             _logger.warning("figma OG fetch failed: %s", exc)
     return out[:MAX_IMAGES]
