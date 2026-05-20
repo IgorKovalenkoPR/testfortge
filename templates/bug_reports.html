@@ -38,7 +38,7 @@
 <div class="bug-card severity-{{ bug.severity | lower }}">
     <div class="bug-header">
         <span class="bug-id">{{ bug.id }}</span>
-        <span class="bug-title-text">{{ bug.title }}</span>
+        <span class="bug-title-text">{{ bug.title | safe_display }}</span>
         <div class="bug-badges">
             <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug.severity }}</span>
             <span class="badge priority-badge">{{ bug.priority }}</span>

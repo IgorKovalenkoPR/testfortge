@@ -203,6 +203,19 @@ def nl2br_filter(s):
     return markupsafe.Markup(str(markupsafe.escape(s)).replace('\n', '<br>\n'))
 
 
+@app.template_filter('safe_display')
+def safe_display_filter(s):
+    """Strip prompt-injection-style lines from text rendered to other
+    operators. Sprint 4 task 4.4 — see :mod:`engine.sanitize`.
+
+    The DB keeps the original verbatim; only the display surface is
+    filtered so a bug title pasted by one operator cannot smuggle an
+    instruction line into another operator's view.
+    """
+    from engine.sanitize import strip_display
+    return strip_display(s)
+
+
 @app.template_filter('bug_field')
 def bug_field_filter(s):
     """Render a free-text bug-report field, auto-splitting numbered lists.
