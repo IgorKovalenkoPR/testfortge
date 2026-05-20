@@ -95,6 +95,15 @@ def _spawn_worker(config_path: str) -> subprocess.Popen:
                           + env.get("PYTHONPATH", ""))
     # Suppress automation noise — keeps test output readable.
     env.setdefault("AUTOMATION_RUN_RETENTION_DAYS", "0")
+    # Park the worker right after signal handlers register so the
+    # SIGTERM/SIGINT we deliver from the parent reliably lands while
+    # the worker is alive with handlers armed. Without this, fast CI
+    # runners finish the empty-items_data path (or fail Playwright
+    # launch with no browser binary) in under ~300 ms — faster than
+    # the parent can deliver the signal — and error.flag never gets
+    # written. Production deploys never set this env var so the hold
+    # is a no-op in every real deploy.
+    env["RUNNER_WORKER_TEST_HOLD_SEC"] = "5"
     return subprocess.Popen(
         [sys.executable, "-m", "engine.runner_worker", config_path],
         cwd=_ROOT,

@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 from typing import Any
@@ -346,6 +347,24 @@ def main() -> int:
     except (ValueError, OSError):
         pass
 
+    # Test-only affordance: tests/test_runner_worker.py's subprocess
+    # tests need the worker to be alive when SIGTERM/SIGINT lands. With
+    # empty items_data and no Chromium on CI runners, the success or
+    # exception path completes in <300 ms — faster than the test can
+    # deliver the signal — and started.flag is the only checkpoint the
+    # parent waits on. Honouring this env var lets the parent guarantee
+    # the worker is parked here with handlers armed when the signal
+    # arrives. Production never sets this variable; the read is a
+    # no-op in every real deploy.
+    _hold_raw = os.environ.get("RUNNER_WORKER_TEST_HOLD_SEC")
+    if _hold_raw:
+        try:
+            _hold_sec = float(_hold_raw)
+        except (TypeError, ValueError):
+            _hold_sec = 0.0
+        if _hold_sec > 0:
+            time.sleep(_hold_sec)
+
     try:
         from engine.automation_runner import AutomationRunner
         from engine.automation_qa import scripts_from_session
@@ -482,10 +501,21 @@ def main() -> int:
             json.dump(payload, f)
         os.replace(tmp, result_path)
         return 0
+    except SystemExit:
+        # The SIGTERM/SIGINT handler above (``_on_terminate``) calls
+        # ``sys.exit(143)`` / ``sys.exit(130)`` after already writing
+        # error.flag + a status="terminated" result.json. Re-raise so
+        # (a) the worker exit code matches the signal and (b) the
+        # except-BaseException branch below does NOT overwrite the
+        # terminated result.json with status="failed". The finally
+        # block still runs to refresh done.flag, which is correct.
+        raise
     except BaseException as exc:
-        # Capture any failure (KeyboardInterrupt, SystemExit included)
-        # so the operator sees a useful error in the results page rather
-        # than a stuck "running" status forever.
+        # Capture any failure (KeyboardInterrupt included) so the
+        # operator sees a useful error in the results page rather than
+        # a stuck "running" status forever. SystemExit is handled
+        # above — it means the signal handler already wrote a clean
+        # "terminated" payload and we should not clobber it.
         tb = traceback.format_exc()
         try:
             payload = {
