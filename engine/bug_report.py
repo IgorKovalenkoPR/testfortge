@@ -179,6 +179,135 @@ def create_bug_from_failed_item(
     )
 
 
+# ── Factory: create bug from a walkthrough finding ─────────────────
+
+
+def create_bug_from_walkthrough_finding(
+    finding: dict,
+    *,
+    environment_str: str = "",
+    tester_name: str = "",
+    base_url: str = "",
+) -> BugReport:
+    """Synthesise a :class:`BugReport` from a walkthrough finding dict.
+
+    Walkthrough mode runs without test cases — the heuristics emit
+    free-text findings (see :mod:`engine.walkthrough_runner` module
+    docstring for the schema). This factory converts each finding into
+    a bug record:
+
+    * ``linked_item_type = "walkthrough"`` so the bug-listing UI can
+      filter the audit trail by source
+    * ``linked_item_id``  = the synthetic ``WALK-NNN`` id the runner
+      attached (stable across reruns of the same walkthrough)
+    * ``severity`` / ``priority`` come from
+      :func:`engine.bug_template.severity_priority` with the area name
+      + url joined as the area-hint blob, so weighted priority still
+      kicks in (auth/checkout urls → Highest priority)
+    * ``steps_to_reproduce`` is synthesised from the URL: "1. Open URL.
+      2. Observe the defect on the page" — adequate for cosmetic and
+      a11y findings, augmented with the finding's ``fix_hint`` for
+      interaction-shape findings (hamburger / search / form)
+    * ``labels`` carries ``defect:<class>`` + ``source:walkthrough`` so
+      backlog filtering by failure mode works the same as for the
+      TC-driven path
+
+    The bug returned has ``id=""`` — callers assign the next id via
+    :func:`generate_bug_id` exactly like the TC-driven factory.
+    """
+    # Local import keeps the cross-module dependency at the call site
+    # instead of the file header; bug_template imports bug_report-side
+    # constants in a future revision and we want the import graph to
+    # stay acyclic.
+    from engine.bug_template import severity_priority
+
+    area     = str(finding.get("area") or "")
+    message  = str(finding.get("message") or "")
+    cls      = str(finding.get("defect_class") or "unknown")
+    sev_from_finding = str(finding.get("severity") or "")
+    url      = str(finding.get("url") or "")
+    element  = str(finding.get("element") or "")
+    fix_hint = str(finding.get("fix_hint") or "")
+    user_impact = str(finding.get("user_impact") or "")
+    dev_detail  = str(finding.get("dev_detail") or "")
+    screenshot  = str(finding.get("screenshot") or "")
+    tc_id    = str(finding.get("tc_id") or "")
+
+    sev_computed, pri_computed = severity_priority(cls, area, url)
+    # Prefer the finding's explicit severity when it lines up with the
+    # ladder (Critical/Major/Minor/Trivial); fall back to the computed
+    # one otherwise. The heuristics already set severity per defect
+    # class so this normally short-circuits to ``sev_from_finding``.
+    severity = sev_from_finding if sev_from_finding in (
+        "Critical", "Major", "Minor", "Trivial",
+    ) else sev_computed
+
+    title_area = area or "Page"
+    title = (
+        f"[{title_area}] {message}"
+        if message else f"[{title_area}] Walkthrough finding"
+    )
+
+    str_lines = [f"1. Open {url or base_url or '<application URL>'}."]
+    if element:
+        str_lines.append(f"2. Locate the element matching: {element}")
+        observe_idx = 3
+    else:
+        observe_idx = 2
+    str_lines.append(
+        f"{observe_idx}. Observe the defect described in the actual "
+        "result."
+    )
+    steps_to_reproduce = "\n".join(str_lines)
+
+    actual_lines = [message] if message else []
+    if user_impact:
+        actual_lines.append(f"User impact: {user_impact}")
+    if dev_detail:
+        actual_lines.append(f"Developer detail: {dev_detail}")
+    actual_result = "\n\n".join(actual_lines) or "Walkthrough finding"
+
+    expected_lines = [
+        "The element should render and behave correctly according to "
+        "the design and accessibility expectations."
+    ]
+    if fix_hint:
+        expected_lines.append(f"Suggested fix direction: {fix_hint}")
+    expected_result = "\n\n".join(expected_lines)
+
+    labels = [f"defect:{cls}", "source:walkthrough"]
+    if area:
+        labels.append(f"area:{area.lower().replace(' ', '_')}")
+
+    attachments = [screenshot] if screenshot else []
+
+    return BugReport(
+        id="",
+        title=title,
+        severity=severity,
+        priority=pri_computed,
+        status="Open",
+        environment=environment_str,
+        preconditions=(
+            f"Walkthrough run starting at {base_url}."
+            if base_url else "Walkthrough run."
+        ),
+        steps_to_reproduce=steps_to_reproduce,
+        actual_result=actual_result,
+        expected_result=expected_result,
+        frequency="Always",
+        attachments=attachments,
+        linked_item_id=tc_id,
+        linked_item_type="walkthrough",
+        reporter=tester_name,
+        assignee="",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        component=area,
+        labels=labels,
+        comment="",
+    )
+
+
 # ── Serialisation helpers ──────────────────────────────────────────
 
 def bug_to_dict(bug: BugReport) -> dict:

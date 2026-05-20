@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from sqlalchemy import (DateTime, Float, ForeignKey, Integer, String, Text,
-                        create_engine, event, func, select)
+                        create_engine, event, func, select, text)
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, declared_attr,
@@ -170,6 +170,67 @@ def init_db() -> None:
     _engine = _build_engine(url)
     _Session = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     Base.metadata.create_all(_engine)
+    _ensure_walkthrough_columns(_engine)
+
+
+def _ensure_walkthrough_columns(engine: Engine) -> None:
+    """Idempotent ALTER TABLE for the walkthrough fields added by the
+    TFWefloLab integration (PR-2).
+
+    ``Base.metadata.create_all`` only creates *missing* tables — it does
+    not touch the schema of existing ones. Projects that booted before
+    PR-2 already have a ``test_case`` table without ``url_pattern`` or
+    ``trigger`` columns, so reading TestCase rows via the ORM would raise
+    ``OperationalError: no such column``. This helper inspects the live
+    schema, issues ``ALTER TABLE ADD COLUMN`` for whichever column is
+    absent, and exits quietly when everything is already there.
+
+    Safe to run on every boot — both SQLite and Postgres support
+    ``ALTER TABLE ADD COLUMN ... DEFAULT '' NOT NULL`` and the operation
+    is no-op once the column exists.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        insp = _inspect(engine)
+        existing = {c["name"] for c in insp.get_columns("test_case")}
+    except SQLAlchemyError as exc:
+        # Table doesn't exist yet (first-time install) — create_all
+        # above will have made it with the columns already present.
+        log.debug("walkthrough column probe skipped: %s", exc)
+        return
+
+    additions: list[tuple[str, str]] = []
+    if "url_pattern" not in existing:
+        additions.append((
+            "url_pattern",
+            "ALTER TABLE test_case ADD COLUMN url_pattern "
+            "VARCHAR(200) NOT NULL DEFAULT ''",
+        ))
+    if "trigger" not in existing:
+        # ``trigger`` is a reserved word in Postgres (and a keyword in
+        # SQLite) — double-quote the identifier in the literal SQL we
+        # issue here. SQLAlchemy's ORM layer already quotes the column
+        # automatically when it generates SELECTs, but the manual ALTER
+        # below has to quote explicitly.
+        additions.append((
+            "trigger",
+            'ALTER TABLE test_case ADD COLUMN "trigger" '
+            "VARCHAR(40) NOT NULL DEFAULT 'manual'",
+        ))
+    if not additions:
+        return
+
+    try:
+        with engine.begin() as conn:
+            for col_name, sql in additions:
+                log.info("walkthrough migration: adding test_case.%s",
+                         col_name)
+                conn.execute(text(sql))
+    except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+        # If the ALTER fails (concurrent boot race, unsupported dialect)
+        # the worker process keeps running; reads via the ORM will then
+        # surface a clear OperationalError the operator can act on.
+        log.warning("walkthrough migration ALTER failed: %s", exc)
 
 
 def get_engine() -> Engine:
@@ -274,6 +335,22 @@ class TestCase(Base):
     priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     testing_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # TFWefloLab walkthrough integration (PR-2): regex/glob URL pattern
+    # that lets the walkthrough mode opportunistically fire this TC when
+    # it lands on a matching page. Empty string preserves today's
+    # behaviour — only the TC-driven runner consults this field, and only
+    # when ``trigger`` is set to a walkthrough mode.
+    url_pattern: Mapped[str] = mapped_column(String(200), nullable=False,
+                                              default="", server_default="")
+    # How this TC is fired: ``manual`` (default — only user-driven runs
+    # exercise it, byte-identical to today), ``walkthrough_url_match``
+    # (walkthrough mode runs it when the current URL matches
+    # ``url_pattern``), or ``always`` (walkthrough mode always runs it,
+    # regardless of URL match). Default ``manual`` so existing projects
+    # never see walkthrough side-effects when the feature flag flips on.
+    trigger: Mapped[str] = mapped_column(String(40), nullable=False,
+                                          default="manual",
+                                          server_default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)

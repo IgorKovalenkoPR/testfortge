@@ -121,6 +121,41 @@ CLASS_SEVERITY: dict[str, str] = {
     # Server returned 4xx/5xx — system-level failure regardless of
     # which screen the user was on.
     "server_error":         "Critical",
+    # ── TFWefloLab walkthrough defect classes ─────────────────────
+    # Map TFWefloLab's `findings[].severity` strings ("Critical" /
+    # "High" / "Medium" / "Low") to TestForTge's testsigma-aligned
+    # severity ladder. The walkthrough emits these via
+    # walkthrough_runner heuristics; severity here is the SYSTEM
+    # impact regardless of where the defect surfaces (priority then
+    # folds in area weight via severity_priority()).
+    "broken_image":         "Major",     # marketing pages: empty slot
+                                          # tanks perceived credibility
+    "hamburger_dead":       "Critical",  # mobile nav unreachable =
+                                          # whole site blocked on phones
+    "dropdown_dead":        "Major",     # one nav sub-menu won't open
+    "homepage_no_title":    "Minor",     # SEO/cosmetic, page still works
+    "homepage_no_h1":       "Minor",
+    "footer_dead_page":     "Major",     # near-empty inner page
+    "placeholder_social":   "Major",     # footer points at example.com
+    "social_no_noopener":   "Minor",     # security-hygiene, not blocking
+    "malformed_link":       "Minor",
+    "search_no_results":    "Major",
+    "search_broken":        "Major",
+    "form_unfillable":      "Major",     # form input that rejects input
+    "cta_no_destination":   "Major",     # button that does nothing
+    "cta_tiny_tap_target":  "Minor",     # <24px hit area, hard to tap
+    "cta_disabled":         "Minor",
+    "axe_critical":         "Critical",  # axe-core impact=critical
+    "axe_serious":          "Major",     # axe-core impact=serious
+    "clipped_text":         "Minor",     # overflow:hidden truncates label
+    "icon_fallback":        "Minor",     # tofu/PUA char where icon
+                                          # should render
+    "modal_overflow":       "Minor",     # modal mis-sized for viewport
+    "console_js_error":     "Major",     # uncaught exception during walk
+    "page_error":           "Major",     # window.onerror caught a throw
+    "walk_step_failed":     "Minor",     # interaction (scroll, etc.)
+                                          # raised but didn't block run
+    # ──────────────────────────────────────────────────────────────
     "unknown":              "Major",
 }
 
@@ -316,7 +351,62 @@ DEFECT_PHRASES: dict[str, str] = {
     "url_assertion_fail":  "URL does not match the expected destination",
     "selector_ambiguous":  "multiple elements match the same selector",
     "server_error":        "server returns an HTTP error response",
+    # Walkthrough phrases — match TFWefloLab's user-facing wording so
+    # operators see the same headline whether the run came from
+    # walkthrough mode or TC-driven mode.
+    "broken_image":        "image fails to load (broken-image icon visible to visitors)",
+    "hamburger_dead":      "mobile hamburger menu does not open when tapped",
+    "dropdown_dead":       "header dropdown menu does not open on hover/click",
+    "homepage_no_title":   "homepage is missing a <title> element",
+    "homepage_no_h1":      "homepage has no visible <h1> heading",
+    "footer_dead_page":    "inner page renders near-empty content",
+    "placeholder_social":  "footer social link points to a placeholder host",
+    "social_no_noopener":  "external link opens in new tab without rel=\"noopener\"",
+    "malformed_link":      "link href is malformed and cannot be parsed",
+    "search_no_results":   "search field accepts input but returns no results",
+    "search_broken":       "search field interaction fails",
+    "form_unfillable":     "form input field rejects keyboard input",
+    "cta_no_destination":  "call-to-action button has no destination (href=\"#\" or empty)",
+    "cta_tiny_tap_target": "tap target is smaller than the 24x24 px minimum",
+    "cta_disabled":        "call-to-action is rendered disabled on the page",
+    "axe_critical":        "accessibility rule violation (axe-core impact=critical)",
+    "axe_serious":         "accessibility rule violation (axe-core impact=serious)",
+    "clipped_text":        "text content is clipped by its container's overflow",
+    "icon_fallback":       "icon font failed to load; fallback character is shown",
+    "modal_overflow":      "modal dialog does not fit the viewport correctly",
+    "console_js_error":    "uncaught JavaScript error in the browser console",
+    "page_error":          "uncaught page-level exception during the walkthrough",
+    "walk_step_failed":    "walkthrough interaction step raised an exception",
     "unknown":             "unexpected behaviour during execution",
+}
+
+
+# Walkthrough findings carry a free-text ``area`` label
+# ("Images", "Navigation", "Footer", "Accessibility", "CTAs", ...)
+# that maps 1:1 to a defect class. Used by walkthrough_runner to label
+# a finding without the heuristic having to know about CLASS_SEVERITY.
+# Multiple areas may resolve to the same class when the system impact
+# is identical (e.g. "Console" + "JS" → console_js_error).
+WALKTHROUGH_AREA_TO_CLASS: dict[str, str] = {
+    "Images":               "broken_image",
+    "Navigation":           "hamburger_dead",  # override in note() when
+                                                # the cause is a dropdown
+    "Layout":               "modal_overflow",
+    "Footer":               "placeholder_social",
+    "Security":             "social_no_noopener",
+    "Search":               "search_broken",
+    "Forms":                "form_unfillable",
+    "CTAs":                 "cta_no_destination",
+    "Accessibility":        "axe_serious",
+    "Text clipping":        "clipped_text",
+    "Icon fallback":        "icon_fallback",
+    "Modal layout":         "modal_overflow",
+    "JS":                   "page_error",
+    "Console":              "console_js_error",
+    "Loading":              "navigation_timeout",
+    "HTTP":                 "server_error",
+    "SEO":                  "homepage_no_title",
+    "Content":              "homepage_no_h1",
 }
 
 
@@ -523,6 +613,82 @@ def build_expected_result(*, defect_class: str,
             "for the request triggered by this step.",
         "dns_error":
             "The host should resolve and serve a valid response.",
+        # ── Walkthrough fallbacks ─────────────────────────────────
+        "broken_image":
+            "The image should load successfully and render at its "
+            "designed size so visitors see the intended content.",
+        "hamburger_dead":
+            "Tapping the hamburger icon on mobile/tablet should open "
+            "the navigation menu and reveal every top-level link.",
+        "dropdown_dead":
+            "Hovering or clicking the dropdown trigger should open its "
+            "sub-menu and let the visitor reach the nested pages.",
+        "homepage_no_title":
+            "The homepage should expose a non-empty <title> so the "
+            "browser tab, search results, and history entries are "
+            "meaningful.",
+        "homepage_no_h1":
+            "The homepage should expose a single visible <h1> "
+            "describing the page's primary topic.",
+        "footer_dead_page":
+            "Linked inner pages should render their full content "
+            "rather than a near-empty body.",
+        "placeholder_social":
+            "Footer social links should point to the brand's real "
+            "social media profiles, not placeholder hosts.",
+        "social_no_noopener":
+            "External links that open in a new tab should include "
+            'rel="noopener" so window.opener leaks are prevented.',
+        "malformed_link":
+            "Every link's href should be a valid URL that the browser "
+            "can resolve and follow.",
+        "search_no_results":
+            "Submitting a query through the site search should return "
+            "matching results or a friendly empty-state message within "
+            "a few seconds.",
+        "search_broken":
+            "The site search should accept keyboard input and return a "
+            "result or empty-state panel after the query is submitted.",
+        "form_unfillable":
+            "Each visible form input should accept keyboard input and "
+            "display the typed value as it is entered.",
+        "cta_no_destination":
+            "Every visible call-to-action should have a destination "
+            "(href, click handler, or modal trigger) so visitors know "
+            "what tapping it will do.",
+        "cta_tiny_tap_target":
+            "Interactive elements should expose at least a 24x24 px "
+            "hit area (WCAG 2.5.5) so touch users can tap them "
+            "reliably.",
+        "cta_disabled":
+            "Calls-to-action that the visitor is meant to interact "
+            "with should not be rendered as disabled on the published "
+            "page.",
+        "axe_critical":
+            "The page should pass the axe-core WCAG 2.1 AA ruleset "
+            "without any critical-impact violations.",
+        "axe_serious":
+            "The page should pass the axe-core WCAG 2.1 AA ruleset "
+            "without any serious-impact violations.",
+        "clipped_text":
+            "Container styles should accommodate the rendered text "
+            "without clipping it with overflow:hidden or fixed widths.",
+        "icon_fallback":
+            "Icon fonts should load successfully so visitors see the "
+            "designed glyph rather than a fallback character.",
+        "modal_overflow":
+            "Modal dialogs should size themselves to fit every "
+            "supported viewport without overflowing or under-filling.",
+        "console_js_error":
+            "The page session should complete without emitting any "
+            "JavaScript console errors that affect user-visible "
+            "behaviour.",
+        "page_error":
+            "The page should not emit uncaught page-level exceptions "
+            "during a typical user journey.",
+        "walk_step_failed":
+            "The walkthrough interaction (scroll, hover, navigation) "
+            "should complete without raising an exception.",
     }
     return fallback.get(
         defect_class,
@@ -616,7 +782,9 @@ def rewrite_bug_from_automation(bug_dict: dict[str, Any], *,
 __all__ = [
     "BANNED_TITLE_PHRASES",
     "ERROR_CLASS_PATTERNS",
-    "CLASS_DEFAULTS",
+    "CLASS_SEVERITY",
+    "DEFECT_PHRASES",
+    "WALKTHROUGH_AREA_TO_CLASS",
     "classify_error",
     "is_core_area",
     "severity_priority",

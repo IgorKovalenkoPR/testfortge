@@ -116,6 +116,34 @@ def register(app: Flask) -> None:
         config_path = os.path.join(pending_dir, f"{config_id}.json")
         worker_log = os.path.join(pending_dir, f"{config_id}.log")
 
+        # PR-2 knobs — both default-conservative so a curl invocation
+        # with only ``base_url`` keeps producing the same scaffold-shape
+        # output PR-1 documented. ``axe_enabled`` defaults TRUE because
+        # axe-core CDN is reachable in every supported deploy target;
+        # operators running offline or behind strict egress firewalls
+        # pass ``"axe_enabled": false`` to skip the a11y step.
+        axe_raw = payload.get("axe_enabled")
+        if isinstance(axe_raw, bool):
+            axe_enabled = axe_raw
+        elif isinstance(axe_raw, str):
+            axe_enabled = axe_raw.strip().lower() not in ("0", "false", "no")
+        else:
+            axe_enabled = True
+        try:
+            max_form_fills = int(payload.get("max_form_fills") or 5)
+        except (TypeError, ValueError):
+            max_form_fills = 5
+        # ``test_cases`` is an optional list of TC dicts with at minimum
+        # ``id``, ``url_pattern``, ``trigger``. Used to exercise the
+        # URL-pattern matcher end-to-end via the debug endpoint without
+        # needing the PR-3 DB-hydration flow. Anything that doesn't
+        # look like a dict is silently dropped.
+        raw_tcs = payload.get("test_cases") or []
+        if isinstance(raw_tcs, list):
+            test_cases = [tc for tc in raw_tcs if isinstance(tc, dict)]
+        else:
+            test_cases = []
+
         config_payload = {
             "config_id": config_id,
             "storage_root": storage_root,
@@ -124,9 +152,12 @@ def register(app: Flask) -> None:
             "headless": headless,
             "runner_kwargs": {"headless": headless},
             "walkthrough": {
-                "start_urls": start_urls,
-                "max_pages": max_pages,
+                "start_urls":      start_urls,
+                "max_pages":       max_pages,
                 "device_timeout_ms": device_timeout_ms,
+                "max_form_fills":  max_form_fills,
+                "axe_enabled":     axe_enabled,
+                "test_cases":      test_cases,
             },
         }
         with open(config_path, "w", encoding="utf-8") as f:

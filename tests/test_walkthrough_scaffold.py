@@ -35,14 +35,86 @@ import pytest
 # ── Playwright stubs ──────────────────────────────────────────────
 
 
+class _FakeLocator:
+    """Default-empty locator stub used by heuristic scans.
+
+    All locator-shaped methods return safe defaults (``count() == 0``,
+    ``is_visible() == False``) so the heuristic battery added in PR-2
+    treats every page as "nothing matched" and emits no findings. Tests
+    that exercise specific heuristics pass a richer custom locator via
+    ``_FakePage.set_locator_table``.
+    """
+
+    def __init__(self, items: list[Any] | None = None):
+        self._items = list(items or [])
+
+    @property
+    def first(self):
+        return self._items[0] if self._items else self
+
+    def nth(self, i: int):
+        if 0 <= i < len(self._items):
+            return self._items[i]
+        return _FakeLocator()
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def is_visible(self) -> bool:
+        return False
+
+    def is_disabled(self) -> bool:
+        return False
+
+    def get_attribute(self, _name: str) -> str:
+        return ""
+
+    def click(self, **_kw) -> None:
+        return None
+
+    def fill(self, _value: str, **_kw) -> None:
+        return None
+
+
+class _FakeKeyboard:
+    def press(self, _key: str) -> None:
+        return None
+
+
+class _FakeMouse:
+    def move(self, *_a, **_kw) -> None:
+        return None
+
+
 class _FakePage:
-    """Recorded calls let assertions about goto/screenshot/close order."""
+    """Recorded calls let assertions about goto/screenshot/close order.
+
+    PR-2 added the heuristic battery (broken images, dropdowns, forms,
+    CTAs, axe, console errors), so the page surface this fake must
+    cover grew to include ``evaluate``, ``locator``, ``add_script_tag``,
+    ``on``, ``keyboard``, ``mouse``, ``wait_for_timeout``. All default
+    to empty / no-op behaviour so the scaffold tests still see the
+    "navigate + screenshot, no findings" contract — PR-2's heuristic-
+    focused tests live in ``test_walkthrough_heuristics.py`` and stub
+    individual page methods to return real-looking data.
+    """
 
     def __init__(self, *, fail_on: set[str] | None = None,
-                 final_url: str = "") -> None:
+                 final_url: str = "",
+                 evaluate_results: dict[str, Any] | None = None) -> None:
         self.fail_on = fail_on or set()
         self.calls: list[tuple[str, Any]] = []
         self._url = final_url
+        # When evaluate() is invoked with a JS string, look up a
+        # matching key (substring) in this table and return that.
+        # Tests inject custom values; default empty list keeps
+        # heuristics quiet.
+        self._evaluate_results = dict(evaluate_results or {})
+        # Locator table — maps a selector substring to the canned
+        # _FakeLocator that locator(sel) should return.
+        self._locator_table: dict[str, _FakeLocator] = {}
+        self.keyboard = _FakeKeyboard()
+        self.mouse = _FakeMouse()
 
     @property
     def url(self) -> str:
@@ -70,6 +142,33 @@ class _FakePage:
 
     def close(self) -> None:
         self.calls.append(("close", None))
+
+    # ── PR-2 heuristic-surface stubs ────────────────────────────────
+
+    def evaluate(self, expression: str, *_args, **_kw):
+        """Match the JS expression against substrings in the test
+        table; return the canned result, else ``[]`` / ``{}``. Falls
+        back to ``[]`` for unknown expressions because the heuristic
+        battery is permissive with empty results."""
+        for key, value in self._evaluate_results.items():
+            if key in expression:
+                return value
+        return []
+
+    def locator(self, selector: str):
+        for key, value in self._locator_table.items():
+            if key in selector:
+                return value
+        return _FakeLocator()
+
+    def add_script_tag(self, *, url: str = "", **_kw) -> None:
+        self.calls.append(("add_script_tag", url))
+
+    def on(self, _event: str, _handler) -> None:
+        return None
+
+    def wait_for_timeout(self, _ms: int) -> None:
+        return None
 
 
 class _FakeContext:
@@ -174,11 +273,12 @@ class TestWalkthroughHappyPath:
         assert report.passed == 2
         assert report.failed == 0
         assert report.blocked == 0
-        # Each script has one passed goto step.
+        # First step is always goto; PR-2 may emit further
+        # heuristic-driven steps, but a stub page with no defects
+        # produces only the navigation row.
         for s in report.scripts:
             assert s.status == "passed"
             assert s.tc_id.startswith("WALK-")
-            assert len(s.steps) == 1
             assert s.steps[0].action == "goto"
             assert s.steps[0].status == "passed"
         # First URL's screenshot path is exposed so the asset
@@ -186,9 +286,12 @@ class TestWalkthroughHappyPath:
         assert report.scripts[0].steps[0].screenshot_after.endswith(
             "page.png")
 
-    def test_findings_attribute_is_empty_in_scaffold(self, fake_pw, tmp_storage):
-        """Contract: PR-1's run() must leave the ``findings`` list
-        empty. PR-2 is where heuristics start populating it."""
+    def test_findings_empty_when_heuristics_find_nothing(
+            self, fake_pw, tmp_storage):
+        """Contract: a stub page with no broken images / forms / etc.
+        leaves ``findings`` empty even with PR-2's heuristic battery
+        wired in. Real heuristics tests live in
+        ``test_walkthrough_heuristics.py``."""
         fake_pw()
         from engine.walkthrough_runner import WalkthroughRunner
 

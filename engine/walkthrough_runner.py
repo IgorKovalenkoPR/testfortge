@@ -1,24 +1,43 @@
-"""TestForTge — Autonomous QA walkthrough runner (TFWefloLab port, PR-1 scaffold).
+"""TestForTge — Autonomous QA walkthrough runner (TFWefloLab port).
 
-This module is the **plumbing** half of the
-``docs/plans/tfweflo_walkthrough_integration.md`` integration. It
-mirrors :mod:`engine.automation_runner`'s public surface
+This module mirrors :mod:`engine.automation_runner`'s public surface
 (``run() -> RunReport``) so :mod:`engine.runner_worker` can dispatch
 to it via a ``mode="walkthrough"`` config field without touching the
 existing TC-driven code path.
 
-PR-1 explicitly carries **no exploration heuristics yet** — it
-navigates each start URL, captures one screenshot per page, and
-returns a :class:`RunReport` with a ``ScriptResult`` per URL. The
-broken-image / dropdown / form / CTA / axe / search heuristics land
-in PR-2, and the cross-env dedup + UI in PR-3.
+PR-1 landed the scaffold (navigate + screenshot, empty ``findings``).
+PR-2 (this revision) adds the exploration heuristic battery ported
+from ``F:/ClaudeProjects/Webflow/Testing/tests/walkthrough.spec.js``:
 
-Why a scaffold-only first PR: the TC-driven runner is the product's
-audit-trail backbone. Landing the plumbing (mode dispatch, run dirs,
-serialisation, retention purge, live-frame feed) on its own — behind
-a default-off feature flag — gives us a tiny, reviewable diff that
-de-risks every later change. Once this is on ``main``, PR-2 adds
-heuristics with no schema or dispatch churn.
+* Broken-image scan      — ``naturalWidth === 0`` per visible ``<img>``
+* Hamburger / dropdown   — mobile menu open-check + desktop dropdown
+                            hover/click probe
+* Footer + social-link   — placeholder hosts + missing ``rel=noopener``
+* Search-field probe     — open trigger, fill "test", poll for results
+* Form auto-fill         — type-aware sample data, **no submit**
+* CTA / tap-target audit — buttons with no destination, sub-24 px hit
+                            areas, disabled CTAs
+* axe-core a11y          — ``add_script_tag`` loads the script over CDN
+                            then ``page.evaluate("axe.run(...)")``
+* Console / page errors  — noise-filtered, humanised headlines
+
+Every heuristic emits ``dict`` findings into ``self.findings`` with a
+shape compatible with :func:`engine.walkthrough_dedup.fingerprint` and
+:func:`engine.bug_report.create_bug_from_walkthrough_finding`:
+
+    {
+        "severity":    "Critical | Major | Minor | Trivial",
+        "defect_class": str,       # bug_template.CLASS_SEVERITY key
+        "area":        "Images | Navigation | Footer | ...",
+        "message":     "Human-friendly headline",
+        "url":         "https://...",          # page where defect surfaced
+        "element":     "img[src=...]",         # selector / hint (optional)
+        "screenshot":  "automation_runs/.../img-broken-1.png",
+        "fix_hint":    "Open the URL in a new tab; if 404 ...",  # opt
+        "dev_detail":  "naturalWidth=0\\nparent .hero",            # opt
+        "tc_id":       "WALK-IMG-001",         # synthesised, stable
+        "console_errors": [...],
+    }
 
 Reuses dataclasses from :mod:`engine.automation_runner` so the
 existing :func:`engine.runner_worker._serialise_report` writer
@@ -29,6 +48,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 import uuid
@@ -43,7 +63,10 @@ from .automation_runner import (
     StepResult,
     _purge_old_automation_runs,
 )
+from .bug_template import CLASS_SEVERITY
 from .log import get_logger
+from .walkthrough_dedup import dedupe as _dedupe_findings
+from .walkthrough_tc_match import match_tcs_for_url
 
 _logger = get_logger(__name__)
 
@@ -52,6 +75,43 @@ _logger = get_logger(__name__)
 # dispatching to a walkthrough run. Default OFF so existing deployments
 # never see a behaviour change from this PR landing.
 WALKTHROUGH_FLAG_ENV = "WALKTHROUGH_MODE_ENABLED"
+
+# Severity hierarchy used in findings — matches CLASS_SEVERITY values
+# so the bug-template ladder lines up. ``Trivial`` is reserved for
+# cosmetic-only defects the heuristics don't currently emit.
+_SEV_CRITICAL = "Critical"
+_SEV_MAJOR    = "Major"
+_SEV_MINOR    = "Minor"
+
+# Browser-noise filter (ported from walkthrough.spec.js:49–:57). Errors
+# whose URL matches these schemes come from the browser / DevTools /
+# extensions, NOT the site under test. Operators reported false-positive
+# "site bugs" pointing at ``web-inspector://bootstrap.js`` before this
+# guard.
+_NOISE_URL_RE = re.compile(
+    r"\b(web-inspector|chrome-extension|chrome|devtools|edge-extension|"
+    r"moz-extension|safari-extension|safari-web-extension|extension|"
+    r"webkit-masked-url):", re.I)
+_NOISE_MSG_RE = re.compile(
+    r"\bResizeObserver loop|\bNon-Error promise rejection captured|"
+    r"\bScript error\.?$", re.I)
+# Third-party services that habitually log errors that aren't site bugs.
+_IGNORABLE_CONSOLE_RE = re.compile(
+    r"favicon|google-analytics|googletagmanager|facebook\.net|hotjar|"
+    r"hubspot|intercom|net::ERR_BLOCKED_BY_CLIENT", re.I)
+
+# Webflow / generic "bad" placeholder hosts that signal an unconfigured
+# footer social link (`example.com`, `localhost`, `change-me`, ...).
+_BAD_SOCIAL_HOST_RE = re.compile(
+    r"(localhost|127\.0\.0\.1|example\.com|placeholder|tbd|"
+    r"change[-_ ]?me)", re.I)
+
+# axe-core script loaded over CDN. We use ``page.add_script_tag`` rather
+# than carrying a binary copy in-tree — the CDN URL is pinned to a
+# specific minor version so the result is reproducible. The CDN reach
+# is best-effort; on failure the a11y step silently no-ops (the rest of
+# the walkthrough still runs and produces findings).
+_AXE_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.8.4/axe.min.js"
 
 
 def feature_enabled() -> bool:
@@ -86,7 +146,10 @@ class WalkthroughRunner:
         navigation_timeout_ms: int = 45000,
         device_timeout_ms: int = 480000,
         max_pages: int = 6,
+        max_form_fills: int = 5,
+        axe_enabled: bool = True,
         record_video: bool = False,
+        test_cases: list[dict[str, Any]] | None = None,
         **_ignored: Any,
     ):
         self.storage_root = storage_root
@@ -105,11 +168,88 @@ class WalkthroughRunner:
         self.navigation_timeout_ms = int(navigation_timeout_ms)
         self.device_timeout_ms = int(device_timeout_ms)
         self.max_pages = max(1, int(max_pages))
+        # Soft cap on forms to fill per page. Five matches the upstream
+        # spec; production sites with many disjoint forms (search +
+        # newsletter + contact + login + custom Webflow form) can still
+        # all be covered, but a CMS-driven page with N+ identical reply
+        # forms doesn't blow the per-device budget.
+        self.max_form_fills = max(1, int(max_form_fills))
+        # Whether to inject axe-core and run the a11y scan. Off-line
+        # environments (CI without external network) flip this off so
+        # the CDN ``page.add_script_tag`` never times out the run.
+        self.axe_enabled = bool(axe_enabled)
         self.record_video = bool(record_video)
-        # Findings ring — populated by PR-2 heuristics. Kept here in
-        # PR-1 so the public attribute exists and tests can assert
-        # against an empty list as a contract.
+        # Findings ring — appended to by the heuristic battery in
+        # ``_walk_one``. Each dict has the shape documented in the
+        # module docstring. The ring is per-runner, not per-page: a
+        # single walkthrough that visits 6 pages accumulates findings
+        # from every page in one list, ordered by emit time.
         self.findings: list[dict] = []
+        # Project's TestCases as plain dicts. Empty list = no TC binding
+        # (walkthrough only runs the heuristic battery). PR-2 uses this
+        # to surface URL-pattern matches via the new ``tc_bindings``
+        # field on each per-URL ScriptResult — actual TC script
+        # execution (running the parsed steps through the existing
+        # _run_script pipeline) lands in PR-3 along with the UI radio,
+        # where the route layer wires in credentials + env metadata.
+        self.test_cases: list[dict[str, Any]] = list(test_cases or [])
+        # Recorded TC bindings per URL, populated by ``_walk_one`` so
+        # the debug endpoint + future PR-3 UI can render which TCs
+        # would have fired without yet running them.
+        self.tc_bindings: list[dict[str, Any]] = []
+
+    # ── device classification ───────────────────────────────────────
+
+    @property
+    def device_kind(self) -> str:
+        """``mobile`` / ``tablet`` / ``desktop`` derived from viewport.
+
+        Used by the heuristic battery to decide which probes apply at
+        the current breakpoint (hamburger vs. dropdown, tap-target size
+        threshold). Mirrors TFWefloLab's :func:`classifyDevice`.
+        """
+        w = self.viewport[0]
+        if w <= 480:
+            return "mobile"
+        if w <= 1024:
+            return "tablet"
+        return "desktop"
+
+    # ── findings emitter ────────────────────────────────────────────
+
+    def _note(self, severity: str, area: str, defect_class: str,
+              message: str, *, url: str, tc_id: str,
+              element: str = "", screenshot: str = "",
+              fix_hint: str = "", dev_detail: str = "",
+              user_impact: str = "") -> None:
+        """Append a structured finding to ``self.findings``.
+
+        Keeps the per-heuristic call-site terse — one ``self._note(...)``
+        per detected defect, no manual dict construction. Severity must
+        match ``CLASS_SEVERITY``'s ladder; an unknown ``defect_class``
+        is logged but still recorded so operators can see it in
+        ``findings.json`` even when the bug-template doesn't know about
+        it yet.
+        """
+        if defect_class not in CLASS_SEVERITY:
+            _logger.debug("walkthrough: unknown defect_class %r — "
+                          "still recording but bug-template won't "
+                          "produce a customised template",
+                          defect_class)
+        self.findings.append({
+            "severity":     severity,
+            "area":         area,
+            "defect_class": defect_class,
+            "message":      message,
+            "url":          url,
+            "element":      element,
+            "screenshot":   screenshot,
+            "fix_hint":     fix_hint,
+            "dev_detail":   dev_detail,
+            "user_impact":  user_impact,
+            "tc_id":        tc_id,
+            "console_errors": [],
+        })
 
     # ── live-feed helpers ─────────────────────────────────────────
 
@@ -304,16 +444,31 @@ class WalkthroughRunner:
 
     def _walk_one(self, context, idx: int, url: str,
                   run_dir: str, live_dir: str) -> ScriptResult:
-        """Visit ``url`` and capture one screenshot. PR-2 will replace
-        this body with the full heuristic battery (broken-image scan,
-        dropdown probe, form auto-fill, CTA audit, axe scan, ...);
-        for PR-1 the contract is "navigate + screenshot, no findings".
+        """Visit ``url``, screenshot, run the heuristic battery, and
+        return a :class:`ScriptResult` aggregating navigation + the
+        per-heuristic step entries.
+
+        Each heuristic appends to ``self.findings`` for downstream bug
+        emission, and also emits a corresponding :class:`StepResult`
+        with ``status="failed"`` so the existing per-TC results UI
+        renders the walkthrough output without any template changes —
+        operators can scroll a walkthrough run the same way they scroll
+        a TC-driven run.
         """
         tc_id = f"WALK-{idx:03d}"
         page = context.new_page()
         page.set_default_navigation_timeout(self.navigation_timeout_ms)
         steps: list[StepResult] = []
+        # Console / page error listeners installed BEFORE navigation
+        # so we capture errors thrown during page load (very common
+        # for IX2 init failures and other Webflow custom-code bugs).
+        console_errors: list[dict[str, Any]] = []
+        page_errors: list[dict[str, Any]] = []
+        self._install_error_listeners(page, console_errors, page_errors)
+
         t0 = time.time()
+
+        # ── Step 1: navigation ─────────────────────────────────────
         try:
             page.goto(url, wait_until="domcontentloaded",
                       timeout=self.navigation_timeout_ms)
@@ -327,9 +482,7 @@ class WalkthroughRunner:
                 duration_ms=int((time.time() - t0) * 1000),
                 screenshot_after=shot_path,
             ))
-            final_url = page.url or url
-            status = "passed"
-            comment = ""
+            final_url = (page.url if hasattr(page, "url") else "") or url
         except Exception as exc:
             steps.append(StepResult(
                 index=1,
@@ -339,14 +492,123 @@ class WalkthroughRunner:
                 duration_ms=int((time.time() - t0) * 1000),
                 comment=f"{type(exc).__name__}: {exc}"[:500],
             ))
-            final_url = url
-            status = "failed"
-            comment = f"navigation failed: {type(exc).__name__}"
-        finally:
+            self._note(
+                _SEV_CRITICAL, "Loading", "navigation_timeout",
+                f"Page failed to load within "
+                f"{self.navigation_timeout_ms} ms: "
+                f"{type(exc).__name__}",
+                url=url, tc_id=tc_id,
+                fix_hint=(
+                    "Verify the URL is publicly reachable; check the "
+                    "hosting status and DNS. Heavy hero videos can "
+                    "blow past the default 45s budget — raise "
+                    "navigation_timeout_ms if the site is intentionally "
+                    "slow to first-paint."
+                ),
+            )
             try:
                 page.close()
             except Exception:
                 pass
+            return ScriptResult(
+                tc_id=tc_id,
+                summary=f"Walkthrough: {url}",
+                status="failed",
+                duration_ms=int((time.time() - t0) * 1000),
+                steps=steps,
+                comment=f"navigation failed: {type(exc).__name__}",
+                final_url=url,
+            )
+
+        # ── TC binding (record only — execution lands in PR-3) ─────
+        # Walkthrough mode uses URL patterns to decide which project
+        # TCs are eligible to run on each visited page. PR-2 records
+        # the binding so the debug endpoint + result.json carry an
+        # auditable trail; PR-3 wires the actual script execution
+        # through ``AutomationRunner._run_script``.
+        if self.test_cases:
+            matched_tcs = match_tcs_for_url(self.test_cases, final_url)
+            if matched_tcs:
+                self.tc_bindings.append({
+                    "tc_id":   tc_id,
+                    "url":     final_url,
+                    "matches": [
+                        {
+                            "id":          t.get("id"),
+                            "external_id": t.get("external_id")
+                                            or t.get("id"),
+                            "summary":     t.get("summary", "")[:120],
+                            "url_pattern": t.get("url_pattern", ""),
+                            "trigger":     t.get("trigger", ""),
+                        }
+                        for t in matched_tcs
+                    ],
+                })
+
+        # ── Steps 2–N: heuristic battery ───────────────────────────
+        # Each helper is best-effort: a failure inside one heuristic
+        # must NOT abort the rest of the walk, so we wrap each call.
+        # The helpers themselves swallow Playwright element-timeouts
+        # internally and only re-raise on programmer errors.
+        before_count = len(self.findings)
+        for label, fn in (
+            ("broken_images",    self._scan_broken_images),
+            ("navigation_menu",  self._scan_navigation_menu),
+            ("footer_social",    self._scan_footer_social),
+            ("search_field",     self._scan_search_field),
+            ("forms",            self._scan_forms),
+            ("ctas",             self._scan_ctas),
+            ("axe",              self._scan_axe),
+        ):
+            try:
+                fn(page, final_url, tc_id)
+            except Exception as exc:
+                _logger.debug("walkthrough heuristic %s raised: %s",
+                              label, exc)
+                self._note(
+                    _SEV_MINOR, "Walkthrough", "walk_step_failed",
+                    f"Heuristic {label!r} raised "
+                    f"{type(exc).__name__}: "
+                    f"{str(exc)[:160]}",
+                    url=final_url, tc_id=tc_id,
+                )
+
+        # ── Console / page-error sweep ─────────────────────────────
+        self._collect_console_errors(console_errors, page_errors,
+                                      final_url, tc_id)
+
+        # Synthesise StepResults from the new findings so the existing
+        # UI gallery shows one row per defect. Status is "failed" so
+        # the per-TC card visibly flags the walkthrough output even
+        # though the run itself is a "report, don't block" exercise.
+        for offset, finding in enumerate(self.findings[before_count:],
+                                          start=2):
+            steps.append(StepResult(
+                index=offset,
+                action="walkthrough_check",
+                raw=f"{finding['area']}: {finding['message'][:120]}",
+                status="failed",
+                duration_ms=0,
+                comment=finding.get("dev_detail", "") or
+                        finding.get("message", ""),
+                screenshot_after=finding.get("screenshot", "") or "",
+                console_errors=list(finding.get("console_errors")
+                                     or []),
+            ))
+
+        try:
+            page.close()
+        except Exception:
+            pass
+
+        # Pass/fail policy matches TFWefloLab: only Critical findings
+        # fail the script. High/Medium/Minor surface but don't block.
+        page_findings = self.findings[before_count:]
+        any_critical = any(f.get("severity") == _SEV_CRITICAL
+                            for f in page_findings)
+        status = "failed" if any_critical else "passed"
+        comment = (f"{len(page_findings)} finding(s) on this page"
+                    if page_findings else "")
         return ScriptResult(
             tc_id=tc_id,
             summary=f"Walkthrough: {url}",
@@ -404,6 +666,799 @@ class WalkthroughRunner:
             except OSError:
                 pass
         return rel_path
+
+
+    # ── error listeners ─────────────────────────────────────────────
+
+    def _install_error_listeners(self, page,
+                                  console_errors: list[dict[str, Any]],
+                                  page_errors: list[dict[str, Any]]) -> None:
+        """Wire ``page.on("console")`` + ``page.on("pageerror")`` so the
+        walkthrough captures every browser-side error fired during the
+        session. Mirrors walkthrough.spec.js:188–:214. Best-effort —
+        Playwright stubs that don't expose ``page.on`` simply skip.
+        """
+        if not hasattr(page, "on"):
+            return
+
+        def _on_console(msg):
+            try:
+                if getattr(msg, "type", lambda: "")() != "error":
+                    return
+                loc = {}
+                try:
+                    loc = msg.location() or {}
+                except Exception:
+                    loc = {}
+                console_errors.append({
+                    "text":     getattr(msg, "text", lambda: "")(),
+                    "url":      loc.get("url") or page.url,
+                    "line":     loc.get("lineNumber"),
+                    "col":      loc.get("columnNumber"),
+                    "page_url": page.url,
+                })
+            except Exception:
+                pass
+
+        def _on_pageerror(err):
+            try:
+                stack = str(getattr(err, "stack", "") or "")
+                # Pull "file.js:42:17" out of the first ``at fn (...)``
+                # frame for the dev-detail report.
+                m = re.search(r"\bat\s+.+?\(([^)]+)\)", stack)
+                first_frame = m.group(1) if m else ""
+                if not first_frame:
+                    for line in stack.split("\n"):
+                        if re.search(r"\.js:\d+", line):
+                            first_frame = line.strip()
+                            break
+                page_errors.append({
+                    "message":     str(getattr(err, "message", err) or ""),
+                    "stack":       stack,
+                    "first_frame": first_frame,
+                    "page_url":    page.url,
+                })
+            except Exception:
+                pass
+
+        try:
+            page.on("console",   _on_console)
+            page.on("pageerror", _on_pageerror)
+        except Exception as exc:
+            _logger.debug("walkthrough: page.on hook failed: %s", exc)
+
+    # ── heuristic: broken images ────────────────────────────────────
+
+    _JS_FIND_BROKEN_IMAGES = """
+    () => {
+        return Array.from(document.images)
+            .filter(img => img.src && !img.src.startsWith('data:')
+                          && img.naturalWidth === 0)
+            .map(img => ({
+                src:      img.src,
+                alt:      img.alt || '',
+                cls:      img.className || '',
+                parentCls: (img.parentElement && img.parentElement.className) || ''
+            }))
+            .slice(0, 25);
+    }
+    """
+
+    def _scan_broken_images(self, page, url: str, tc_id: str) -> None:
+        """Walk ``document.images``; flag any whose ``naturalWidth`` is
+        zero (the network request failed — 404 / CORS / wrong format).
+
+        One finding per broken image. ``element`` carries the
+        ``img[src=...]`` selector so the dedup pass can collapse the
+        same defect across environments.
+        """
+        broken = page.evaluate(self._JS_FIND_BROKEN_IMAGES) or []
+        for img in broken:
+            src = img.get("src") or ""
+            alt = img.get("alt") or ""
+            try:
+                from urllib.parse import urlparse
+                filename = urlparse(src).path.rsplit("/", 1)[-1] or src
+            except Exception:
+                filename = src.rsplit("/", 1)[-1] if "/" in src else src
+            headline = (
+                f'"{alt}" did not load' if alt
+                else f'{filename} did not load'
+            )
+            self._note(
+                _SEV_MAJOR, "Images", "broken_image",
+                f"Broken image on the page — {headline} "
+                f"(visitors see an empty slot or a broken-image icon)",
+                url=url, tc_id=tc_id,
+                element=f'img[src="{src}"]',
+                fix_hint=(
+                    "Open the URL in a new tab. If 404, re-upload the "
+                    "asset and re-bind in the page. If it loads in a "
+                    "tab but not on the page, check CORS / hotlink "
+                    "protection and that the path uses HTTPS."
+                ),
+                dev_detail=(
+                    f"<img src='{src}'{' alt=' + repr(alt) if alt else ''}> "
+                    f"· naturalWidth = 0\n"
+                    f"parent .{(img.get('parentCls') or '').split()[0] if img.get('parentCls') else 'unknown'}"
+                ),
+                user_impact=(
+                    "Visitors see a broken-image icon, an empty white "
+                    "box, or a layout that jumps when the image fails. "
+                    "On marketing pages this directly impacts perceived "
+                    "credibility and conversion."
+                ),
+            )
+
+    # ── heuristic: navigation menu (hamburger / dropdowns) ─────────
+
+    _JS_COUNT_VISIBLE_NAV = """
+    () => {
+        const els = document.querySelectorAll(
+            '.w-nav-menu a, nav a, [role="navigation"] a');
+        return Array.from(els).filter(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        }).length;
+    }
+    """
+
+    _JS_PROBE_DROPDOWNS = """
+    () => {
+        const out = [];
+        const triggers = document.querySelectorAll(
+            '.w-dropdown-toggle, [aria-haspopup="true"], [aria-haspopup="menu"]');
+        Array.from(triggers).slice(0, 6).forEach((tr, i) => {
+            const label = (tr.textContent || '').trim().slice(0, 30);
+            const dd    = tr.closest('.w-dropdown') || tr.parentElement;
+            const list  = dd && dd.querySelector(
+                '.w-dropdown-list, [role="menu"], .dropdown-menu');
+            let popupVisible = false;
+            if (list) {
+                const r  = list.getBoundingClientRect();
+                const cs = getComputedStyle(list);
+                popupVisible = r.width > 0 && r.height > 0
+                            && cs.display !== 'none'
+                            && cs.visibility !== 'hidden';
+            }
+            out.push({ index: i, label, hasList: !!list,
+                       popupVisible });
+        });
+        return out;
+    }
+    """
+
+    def _scan_navigation_menu(self, page, url: str, tc_id: str) -> None:
+        """Mobile: tap hamburger, verify visible nav-link count rises.
+        Tablet: same as mobile.
+        Desktop: hover each dropdown trigger, verify popup renders.
+
+        The mobile probe deliberately uses ``locator.click`` so the
+        usual "dropdown opens on click" interaction model is exercised.
+        The desktop probe is read-only (no clicks) so it doesn't change
+        page state going into subsequent heuristics.
+        """
+        if self.device_kind in ("mobile", "tablet"):
+            burger_sel = (
+                '.w-nav-button, [aria-label*="menu" i], '
+                'button[class*="menu" i], button[class*="hamburger" i]')
+            burger = page.locator(burger_sel).first
+            try:
+                if not burger.count():
+                    return
+            except Exception:
+                return
+            try:
+                before = page.evaluate(self._JS_COUNT_VISIBLE_NAV) or 0
+                burger.click(timeout=5000)
+                page.wait_for_timeout(700)
+                after = page.evaluate(self._JS_COUNT_VISIBLE_NAV) or 0
+            except Exception as exc:
+                self._note(
+                    _SEV_MINOR, "Navigation", "dropdown_dead",
+                    f"Hamburger trigger threw on click: "
+                    f"{type(exc).__name__}",
+                    url=url, tc_id=tc_id, element=burger_sel,
+                    fix_hint=(
+                        "The button may be obscured by another element "
+                        "or its click handler throws. Check the on-click "
+                        "interaction in the page builder."
+                    ),
+                )
+                return
+            if after <= before:
+                self._note(
+                    _SEV_CRITICAL, "Navigation", "hamburger_dead",
+                    "The hamburger / mobile menu does not open "
+                    "when tapped",
+                    url=url, tc_id=tc_id, element=burger_sel,
+                    user_impact=(
+                        f"Mobile and tablet visitors cannot reach any "
+                        f"page other than this one. Visible nav links: "
+                        f"{before} before tap, {after} after."
+                    ),
+                    fix_hint=(
+                        "Either the on-click interaction is unbound, or "
+                        "the menu element has a CSS override keeping it "
+                        "hidden at this breakpoint (display:none, "
+                        "visibility:hidden, off-screen transform)."
+                    ),
+                )
+        else:
+            try:
+                probes = page.evaluate(self._JS_PROBE_DROPDOWNS) or []
+            except Exception:
+                return
+            for p in probes:
+                if not p.get("hasList"):
+                    continue
+                # The JS probe captures the dropdown state without
+                # interaction; if the popup is rendered hidden by
+                # default that's correct (only opens on hover/click).
+                # Heuristic: a dropdown WITH a list element that never
+                # reports popupVisible across our probe window is the
+                # likely-dead case. We rely on visibility AFTER a
+                # subsequent hover, which is out of scope for the
+                # pure-eval probe — so PR-2 only emits when the JS
+                # tells us the popup is wired to an element that
+                # ``display: none`` keeps invisible even at our probe
+                # moment. False-positive prone; matched on the upstream
+                # spec's behaviour, and the operator can suppress via
+                # the per-class severity ladder.
+                if not p.get("popupVisible"):
+                    self._note(
+                        _SEV_MINOR, "Navigation", "dropdown_dead",
+                        f'Dropdown "{p.get("label")}" did not render '
+                        "an open sub-menu during the probe",
+                        url=url, tc_id=tc_id,
+                        element=".w-dropdown-toggle",
+                    )
+
+    # ── heuristic: footer + social links ───────────────────────────
+
+    _JS_FOOTER_SOCIALS = """
+    () => {
+        const out = [];
+        const re = /(facebook|twitter|x\\.com|instagram|linkedin|youtube|youtu\\.be|tiktok|github|pinterest|threads|t\\.me|telegram|wa\\.me|discord|medium|vimeo|reddit)/i;
+        const links = document.querySelectorAll(
+            'footer a[href], [role="contentinfo"] a[href]');
+        Array.from(links).forEach(a => {
+            if (!re.test(a.href || '')) return;
+            out.push({
+                href:   a.href,
+                target: a.getAttribute('target') || '',
+                rel:    a.getAttribute('rel') || '',
+                label:  (a.getAttribute('aria-label')
+                         || a.textContent || '').trim().slice(0, 30)
+            });
+        });
+        return out;
+    }
+    """
+
+    def _scan_footer_social(self, page, url: str, tc_id: str) -> None:
+        """Scroll to the footer; check every social-domain link for
+        placeholder hosts (``example.com``, ``localhost``, ...) and
+        missing ``rel="noopener"`` on ``target="_blank"`` links.
+        """
+        try:
+            page.evaluate(
+                "() => window.scrollTo({top: document.body.scrollHeight,"
+                " behavior: 'smooth'})")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+        socials = page.evaluate(self._JS_FOOTER_SOCIALS) or []
+        from urllib.parse import urlparse
+        for s in socials:
+            href = (s.get("href") or "").strip()
+            label = s.get("label") or ""
+            if not href:
+                continue
+            try:
+                host = urlparse(href).hostname or ""
+            except Exception:
+                self._note(
+                    _SEV_MINOR, "Footer", "malformed_link",
+                    f"Malformed social link: {href}",
+                    url=url, tc_id=tc_id, element=href,
+                )
+                continue
+            if _BAD_SOCIAL_HOST_RE.search(host):
+                self._note(
+                    _SEV_MAJOR, "Footer", "placeholder_social",
+                    f"Social link points to placeholder host: {host}",
+                    url=url, tc_id=tc_id, element=href,
+                    user_impact=(
+                        "Visitors clicking the social icon land on a "
+                        "broken or unrelated page; perceived credibility "
+                        "drops on a marketing site."
+                    ),
+                    fix_hint=(
+                        "Update the link href to the brand's real "
+                        "social profile, or remove the icon until it "
+                        "has a destination."
+                    ),
+                )
+            elif (s.get("target") == "_blank"
+                    and "noopener" not in (s.get("rel") or "")):
+                self._note(
+                    _SEV_MINOR, "Security", "social_no_noopener",
+                    "External social link opens in a new tab without "
+                    'rel="noopener"',
+                    url=url, tc_id=tc_id, element=href,
+                    fix_hint=(
+                        'Add rel="noopener noreferrer" so window.opener '
+                        "leaks are prevented and link rel security is "
+                        "consistent."
+                    ),
+                )
+
+    # ── heuristic: search field ─────────────────────────────────────
+
+    _JS_OBSERVE_SEARCH_RESULTS = """
+    () => {
+        const sels = [
+            '[role="listbox"]', '[role="search"] ul',
+            '[role="search"] [aria-label*="result" i]',
+            '.search-results', '.search-suggestions',
+            '.search-autocomplete', '.autocomplete',
+            '.suggestions', '[aria-expanded="true"] + *',
+            '.search-dropdown', '.results-dropdown'
+        ];
+        for (const sel of sels) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+            const r  = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            if (r.width > 0 && r.height > 0
+                && cs.display !== 'none'
+                && cs.visibility !== 'hidden') {
+                return { found: true, sel,
+                         count: el.querySelectorAll(
+                             'li, a, [role="option"]').length };
+            }
+        }
+        return { found: false };
+    }
+    """
+
+    def _scan_search_field(self, page, url: str, tc_id: str) -> None:
+        """Find a visible search input (or its toggle), type ``test``,
+        wait 1.2 s, and check whether a results/suggestion panel
+        appeared. Emits a ``search_no_results`` finding when input is
+        accepted but nothing renders, or ``search_broken`` when the
+        interaction itself raises.
+        """
+        # Try to open the search if it's behind a magnifier trigger.
+        for sel in (
+            'button[aria-label*="search" i]',
+            '[role="button"][aria-label*="search" i]',
+            'a[aria-label*="search" i]',
+            '.search-toggle, .nav-search, .search-icon, .search-button',
+        ):
+            t = page.locator(sel).first
+            try:
+                if not t.count():
+                    continue
+                if not t.is_visible():
+                    continue
+                t.click(timeout=2500)
+                page.wait_for_timeout(400)
+                break
+            except Exception:
+                continue
+        # Locate a visible input.
+        input_cands = page.locator(
+            'input[type="search"], input[role="searchbox"], '
+            'input[aria-label*="search" i], '
+            'input[placeholder*="search" i], '
+            '[role="search"] input[type="text"], '
+            '[role="search"] input:not([type])')
+        try:
+            n = input_cands.count()
+        except Exception:
+            return
+        search_input = None
+        for i in range(n):
+            c = input_cands.nth(i)
+            try:
+                if c.is_visible():
+                    search_input = c
+                    break
+            except Exception:
+                continue
+        if search_input is None:
+            return  # no search on this page — not a defect
+        try:
+            search_input.click(timeout=2500)
+            search_input.fill("test")
+            page.wait_for_timeout(1200)
+            observed = page.evaluate(self._JS_OBSERVE_SEARCH_RESULTS) or {}
+        except Exception as exc:
+            self._note(
+                _SEV_MAJOR, "Search", "search_broken",
+                f"Search field interaction failed: "
+                f"{type(exc).__name__}",
+                url=url, tc_id=tc_id,
+                fix_hint=(
+                    "Verify the search input is focusable and accepts "
+                    "keyboard input on this device."
+                ),
+            )
+            return
+        if not observed.get("found"):
+            self._note(
+                _SEV_MAJOR, "Search", "search_no_results",
+                'The search field accepts the query "test" but no '
+                "suggestions or results appear within 1.2 s",
+                url=url, tc_id=tc_id, element='input[type="search"]',
+                fix_hint=(
+                    "Confirm the search submits to a working endpoint "
+                    "(Site Search / Algolia / etc.); verify the "
+                    "dropdown isn't hidden by overflow or z-index."
+                ),
+            )
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
+        except Exception:
+            pass
+
+    # ── heuristic: forms (auto-fill, no submit) ────────────────────
+
+    def _scan_forms(self, page, url: str, tc_id: str) -> None:
+        """Auto-fill every visible ``<input>`` / ``<textarea>`` in up to
+        5 forms with type-aware sample data. **Never submits** — the
+        contract from walkthrough.spec.js is "fill, don't submit" so
+        production forms never produce stray leads.
+        """
+        forms = page.locator("form")
+        try:
+            form_count = forms.count()
+        except Exception:
+            return
+        for fi in range(min(form_count, self.max_form_fills)):
+            form = forms.nth(fi)
+            try:
+                if not form.is_visible():
+                    continue
+            except Exception:
+                continue
+            inputs = form.locator(
+                'input[type=text], input[type=email], '
+                'input[type=tel], input[type=url], '
+                'input[type=number], input:not([type]), textarea')
+            try:
+                n = inputs.count()
+            except Exception:
+                continue
+            for k in range(min(n, 8)):
+                inp = inputs.nth(k)
+                try:
+                    if not inp.is_visible():
+                        continue
+                    if inp.is_disabled():
+                        continue
+                    itype = inp.get_attribute("type") or ""
+                    sample = (
+                        "qa+test@example.com" if itype == "email" else
+                        "+10000000000"        if itype == "tel"   else
+                        "https://example.com" if itype == "url"   else
+                        "42"                  if itype == "number" else
+                        "QA test"
+                    )
+                    inp.fill(sample, timeout=2500)
+                except Exception as exc:
+                    self._note(
+                        _SEV_MAJOR, "Forms", "form_unfillable",
+                        f"Could not fill input #{k + 1} in form #"
+                        f"{fi + 1}: {type(exc).__name__}",
+                        url=url, tc_id=tc_id,
+                        fix_hint=(
+                            "Check that the input is not covered by "
+                            "an overlay and accepts keyboard input; "
+                            "remove any readonly/disabled attribute "
+                            "that's left over from prototype state."
+                        ),
+                    )
+
+    # ── heuristic: CTA / tap-target audit ──────────────────────────
+
+    _JS_CTA_AUDIT = """
+    () => {
+        const out = [];
+        const els = document.querySelectorAll(
+            'button:not([type=hidden]), .w-button, a.button, '
+            '[role="button"], input[type=submit]');
+        Array.from(els).slice(0, 60).forEach(el => {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return;
+            const cs = getComputedStyle(el);
+            if (cs.visibility === 'hidden' || cs.display === 'none') return;
+            const txt = (el.textContent || el.getAttribute('value')
+                         || '').trim().slice(0, 30);
+            if (el.disabled
+                    || el.getAttribute('aria-disabled') === 'true') {
+                out.push({text: txt, reason: 'disabled', sel: el.tagName});
+                return;
+            }
+            if (el.tagName === 'A') {
+                const href    = el.getAttribute('href');
+                const hasHook = el.hasAttribute('data-w-id')
+                             || el.hasAttribute('onclick')
+                             || el.hasAttribute('data-modal');
+                if ((!href || href === '#'
+                        || href === 'javascript:void(0)') && !hasHook) {
+                    out.push({text: txt, reason: 'no destination',
+                              sel: 'a'});
+                    return;
+                }
+            }
+            if (r.width < 24 || r.height < 24) {
+                out.push({
+                    text: txt,
+                    reason: `tap target ${Math.round(r.width)}x${Math.round(r.height)}px`,
+                    sel: el.tagName.toLowerCase()
+                });
+            }
+        });
+        return out.slice(0, 20);
+    }
+    """
+
+    def _scan_ctas(self, page, url: str, tc_id: str) -> None:
+        """Audit every visible button / link.button / role=button:
+
+        * ``disabled``       → ``cta_disabled`` (Minor)
+        * ``no destination`` → ``cta_no_destination`` (Major)
+        * ``< 24x24 px``     → ``cta_tiny_tap_target`` (Minor)
+        """
+        issues = page.evaluate(self._JS_CTA_AUDIT) or []
+        for it in issues:
+            reason = it.get("reason") or ""
+            text   = it.get("text") or "(no text)"
+            sel    = it.get("sel") or ""
+            if reason == "no destination":
+                self._note(
+                    _SEV_MAJOR, "CTAs", "cta_no_destination",
+                    f'"{text}" — link has no destination '
+                    "(href empty, href=\"#\", or no click handler)",
+                    url=url, tc_id=tc_id, element=sel,
+                    fix_hint=(
+                        "Either set a real href on the link, or remove "
+                        "the call-to-action if there's nothing for it "
+                        "to do yet."
+                    ),
+                )
+            elif reason.startswith("tap target"):
+                self._note(
+                    _SEV_MINOR, "CTAs", "cta_tiny_tap_target",
+                    f'"{text}" — {reason}',
+                    url=url, tc_id=tc_id, element=sel,
+                    fix_hint=(
+                        "Increase the minimum hit area to 24x24 px "
+                        "(WCAG 2.5.5). Padding around the element "
+                        "counts."
+                    ),
+                )
+            elif reason == "disabled":
+                self._note(
+                    _SEV_MINOR, "CTAs", "cta_disabled",
+                    f'"{text}" — rendered as disabled on the published '
+                    "page",
+                    url=url, tc_id=tc_id, element=sel,
+                )
+
+    # ── heuristic: axe-core a11y scan ──────────────────────────────
+
+    _JS_RUN_AXE = """
+    () => {
+        if (typeof window.axe === 'undefined') {
+            return { error: 'axe-not-loaded', violations: [] };
+        }
+        return window.axe.run(document, {
+            runOnly: { type: 'tag',
+                       values: ['wcag2a','wcag2aa','wcag21a','wcag21aa'] }
+        }).then(res => ({
+            error: null,
+            violations: (res.violations || []).map(v => ({
+                id:       v.id,
+                impact:   v.impact,
+                help:     v.help,
+                helpUrl:  v.helpUrl,
+                description: v.description,
+                tags:     v.tags || [],
+                nodes:    (v.nodes || []).slice(0, 3).map(n => ({
+                    target:         (n.target || [])[0] || '',
+                    html:           (n.html || '').slice(0, 220),
+                    failureSummary: n.failureSummary || ''
+                }))
+            }))
+        })).catch(err => ({ error: String(err), violations: [] }));
+    }
+    """
+
+    def _scan_axe(self, page, url: str, tc_id: str) -> None:
+        """Inject axe-core via CDN and run it. Violations with
+        ``impact in {critical, serious}`` become walkthrough findings;
+        moderate / minor are summarised only (not emitted as findings)
+        so the bug backlog doesn't drown in legitimate but low-priority
+        a11y noise.
+
+        Pinned to a specific axe-core minor (see ``_AXE_CDN_URL``) so
+        rule IDs are stable across runs. CDN unreachable → silently
+        skip the a11y step.
+        """
+        if not self.axe_enabled:
+            return
+        try:
+            page.add_script_tag(url=_AXE_CDN_URL)
+        except Exception as exc:
+            _logger.debug("walkthrough: axe CDN unreachable: %s", exc)
+            return
+        try:
+            result = page.evaluate(self._JS_RUN_AXE) or {}
+        except Exception as exc:
+            _logger.debug("walkthrough: axe.run failed: %s", exc)
+            return
+        if result.get("error"):
+            _logger.debug("walkthrough: axe error: %s", result["error"])
+            return
+        for v in (result.get("violations") or []):
+            impact = v.get("impact") or ""
+            if impact not in ("critical", "serious"):
+                continue
+            nodes = v.get("nodes") or []
+            node0 = nodes[0] if nodes else {}
+            tags  = v.get("tags") or []
+            wcag_tag = next(
+                (t for t in tags if t.startswith("wcag")), "")
+            help_text = (v.get("help") or "").strip()
+            headline = (
+                f"{help_text} — affects {len(nodes)} element"
+                f"{'' if len(nodes) == 1 else 's'} on this page"
+            )
+            self._note(
+                _SEV_CRITICAL if impact == "critical" else _SEV_MAJOR,
+                "Accessibility",
+                "axe_critical" if impact == "critical" else "axe_serious",
+                headline,
+                url=url, tc_id=tc_id,
+                element=node0.get("target") or "",
+                fix_hint=(
+                    (node0.get("failureSummary") or "")
+                    + (f"\nWCAG: {wcag_tag}" if wcag_tag else "")
+                    + (f"\nDocs: {v.get('helpUrl')}"
+                        if v.get("helpUrl") else "")
+                ).strip(),
+                dev_detail=(
+                    f"axe rule: {v.get('id')}\n"
+                    f"impact: {impact}\n"
+                    f"nodes affected: {len(nodes)}\n"
+                    f"first node selector: {node0.get('target') or '?'}\n"
+                    f"first node HTML: {node0.get('html') or ''}"
+                ),
+            )
+
+    # ── post-walk: console / page error sweep ──────────────────────
+
+    def _collect_console_errors(self,
+                                 console_errors: list[dict[str, Any]],
+                                 page_errors: list[dict[str, Any]],
+                                 url: str, tc_id: str) -> None:
+        """Emit one finding per UNIQUE error, deduped by message head.
+
+        Page errors (uncaught throws) → ``page_error`` / Major.
+        Console errors (``console.error()``) → ``console_js_error`` /
+        Major, with third-party noise (favicon, GA, Hotjar, ...)
+        filtered out.
+        """
+        seen_page: set[str] = set()
+        for err in page_errors:
+            msg = err.get("message") or ""
+            # Combine message + first-frame + stack head before
+            # matching the noise URL pattern — DevTools / extension
+            # errors typically leak through their stack frames, not
+            # through the public-facing ``message``. Mirrors
+            # walkthrough.spec.js::isErrorNoise.
+            combined = " ".join(filter(None, (
+                msg,
+                err.get("first_frame") or "",
+                (err.get("stack") or "")[:400],
+            )))
+            if _NOISE_URL_RE.search(combined) or _NOISE_MSG_RE.search(msg):
+                continue
+            key = msg[:200]
+            if key in seen_page:
+                continue
+            seen_page.add(key)
+            self._note(
+                _SEV_MAJOR, "JS", "page_error",
+                _humanize_js_error(msg),
+                url=url, tc_id=tc_id,
+                element=err.get("first_frame") or "",
+                dev_detail=(
+                    f"{msg}\n  at {err.get('first_frame') or ''}\n\n"
+                    + "\n".join((err.get("stack") or "").split("\n")[:6])
+                ).strip(),
+            )
+
+        seen_con: set[str] = set()
+        for err in console_errors:
+            text = err.get("text") or ""
+            if _IGNORABLE_CONSOLE_RE.search(text):
+                continue
+            if _NOISE_URL_RE.search(text + " " + (err.get("url") or "")):
+                continue
+            key = text[:200]
+            if key in seen_con:
+                continue
+            seen_con.add(key)
+            where = ""
+            if err.get("url") and ".js" in (err.get("url") or ""):
+                where = (
+                    f"{err.get('url')}"
+                    f"{':' + str(err.get('line')) if err.get('line') else ''}"
+                    f"{':' + str(err.get('col'))  if err.get('col')  else ''}"
+                )
+            self._note(
+                _SEV_MAJOR, "Console", "console_js_error",
+                _humanize_js_error(text),
+                url=url, tc_id=tc_id,
+                element=where,
+                dev_detail=f"console.error: {text}"
+                            + (f"\n  at {where}" if where else ""),
+            )
+
+    # ── post-run dedup ──────────────────────────────────────────────
+
+    def dedupe_findings(self) -> list[dict[str, Any]]:
+        """Return ``self.findings`` collapsed via
+        :func:`engine.walkthrough_dedup.dedupe`.
+
+        Useful for callers (debug endpoint / future PR-3 UI) that want
+        the deduped view without mutating the raw findings ring. Does
+        not modify ``self.findings``.
+        """
+        return _dedupe_findings(list(self.findings))
+
+
+# ── module-level helpers ──────────────────────────────────────────
+
+
+def _humanize_js_error(raw: str) -> str:
+    """Map a technical JS error to a plain-language headline.
+
+    Ported from walkthrough.spec.js:64–:128. Operators consume the
+    walkthrough output as a triage queue, not a developer console —
+    "A script tried to use a page element that does not exist" beats
+    ``Cannot read properties of null`` when the reviewer is a PM.
+    """
+    m = raw or ""
+    if re.search(r"Cannot read prop(erties)?|of (null|undefined)",
+                  m, re.I):
+        return "A script tried to use a page element that does not exist"
+    if re.search(r"MutationObserver|IntersectionObserver|ResizeObserver",
+                  m, re.I):
+        return ("A script tried to monitor a page element that was "
+                "not found")
+    if re.search(r"addEventListener|removeEventListener", m, re.I) \
+            and re.search(r"null|undefined", m, re.I):
+        return ("A click / scroll handler could not attach — its "
+                "target element is missing")
+    if re.search(r"is not a function", m, re.I):
+        return "A script called something that does not exist"
+    if re.search(r"Failed to fetch|NetworkError|Load failed|ERR_",
+                  m, re.I):
+        return "A network request failed during the page session"
+    if re.search(r"Unexpected token|SyntaxError", m, re.I):
+        return "A script could not be parsed — broken JavaScript file"
+    if re.search(r"CORS|Cross-Origin", m, re.I):
+        return "A cross-origin request was blocked by the browser"
+    if re.search(r"quota|QuotaExceeded", m, re.I):
+        return "Browser storage is full — the page could not save state"
+    return "A JavaScript error happened during the user journey"
 
 
 __all__ = [

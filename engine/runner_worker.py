@@ -397,6 +397,14 @@ def main() -> int:
                                                       480000)),
                 "navigation_timeout_ms": int(
                     wt_cfg.get("navigation_timeout_ms", 45000)),
+                "max_form_fills": int(wt_cfg.get("max_form_fills", 5)),
+                "axe_enabled": bool(wt_cfg.get("axe_enabled", True)),
+                # PR-2: project TestCases as plain dicts so the runner
+                # can record URL-pattern bindings per visited page.
+                # The route layer materialises these from the DB in
+                # PR-3; for now the debug endpoint can supply them
+                # directly in the config JSON.
+                "test_cases": list(wt_cfg.get("test_cases") or []),
             })
             runner = WalkthroughRunner(
                 storage_root=storage_root,
@@ -406,12 +414,32 @@ def main() -> int:
             start_urls = wt_cfg.get("start_urls") or [config.get("base_url", "")]
             report = runner.run(start_urls=start_urls)
             items_data: list = []
+            # PR-2: surface the heuristic findings to the route layer.
+            # The result.json now carries two parallel views — raw, in
+            # the order the runner emitted them, plus a deduped view
+            # collapsed by ``walkthrough_dedup.fingerprint``. The route
+            # picks whichever fits the rendering target; PR-3's findings
+            # subtab will read the deduped one to mirror TFWefloLab's
+            # cross-device collapsing.
+            walkthrough_findings = list(runner.findings)
+            try:
+                walkthrough_findings_deduped = runner.dedupe_findings()
+            except Exception as exc:  # pragma: no cover — defensive
+                print(f"runner_worker: dedupe failed: {exc}",
+                      file=sys.stderr)
+                walkthrough_findings_deduped = walkthrough_findings
+            walkthrough_tc_bindings = list(
+                getattr(runner, "tc_bindings", []) or []
+            )
         else:
             runner = AutomationRunner(storage_root=storage_root, **runner_kwargs)
             items_data = config.get("items_data") or []
             scripts = scripts_from_session(items_data, config.get("base_url", ""))
 
             report = runner.run(scripts)
+            walkthrough_findings = []
+            walkthrough_findings_deduped = []
+            walkthrough_tc_bindings = []
         rep_dict = _serialise_report(report)
         assets = _build_automation_assets(rep_dict, storage_root)
 
@@ -420,6 +448,13 @@ def main() -> int:
             "config_id": config_id,
             "report": rep_dict,
             "automation_assets": assets,
+            # PR-2: empty lists for tc_driven mode keep the result.json
+            # schema stable across modes — the route layer can read
+            # ``walkthrough_findings`` unconditionally and just iterate
+            # an empty list in the TC-driven branch.
+            "walkthrough_findings":         walkthrough_findings,
+            "walkthrough_findings_deduped": walkthrough_findings_deduped,
+            "walkthrough_tc_bindings":      walkthrough_tc_bindings,
             "config_echo": {
                 "base_url": config.get("base_url", ""),
                 "items_data": items_data,
