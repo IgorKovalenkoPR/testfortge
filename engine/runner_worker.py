@@ -368,11 +368,50 @@ def main() -> int:
                 print(f"runner_worker: cred reconstruction failed: {exc}",
                       file=sys.stderr)
 
-        runner = AutomationRunner(storage_root=storage_root, **runner_kwargs)
-        items_data = config.get("items_data") or []
-        scripts = scripts_from_session(items_data, config.get("base_url", ""))
+        # TFWefloLab integration PR-1: dispatch on ``mode``. Default
+        # ``"tc_driven"`` keeps every existing run path byte-identical;
+        # ``"walkthrough"`` only fires when the WALKTHROUGH_MODE_ENABLED
+        # env var is set, so the scaffold lands safely on prod.
+        mode = (config.get("mode") or "tc_driven").strip().lower()
+        if mode == "walkthrough":
+            from engine.walkthrough_runner import (
+                WalkthroughRunner, feature_enabled as _wt_enabled,
+            )
+            if not _wt_enabled():
+                raise RuntimeError(
+                    "walkthrough mode requested but "
+                    "WALKTHROUGH_MODE_ENABLED is not set"
+                )
+            wt_cfg = config.get("walkthrough") or {}
+            # AutomationRunner-shaped kwargs that the scaffold also
+            # accepts (headless, viewport, record_video). Unknown keys
+            # are dropped by WalkthroughRunner.__init__'s ``**_ignored``.
+            wt_kwargs = {
+                k: runner_kwargs.get(k)
+                for k in ("headless", "viewport", "record_video")
+                if k in runner_kwargs
+            }
+            wt_kwargs.update({
+                "max_pages": int(wt_cfg.get("max_pages", 6)),
+                "device_timeout_ms": int(wt_cfg.get("device_timeout_ms",
+                                                      480000)),
+                "navigation_timeout_ms": int(
+                    wt_cfg.get("navigation_timeout_ms", 45000)),
+            })
+            runner = WalkthroughRunner(
+                storage_root=storage_root,
+                base_url=config.get("base_url", ""),
+                **wt_kwargs,
+            )
+            start_urls = wt_cfg.get("start_urls") or [config.get("base_url", "")]
+            report = runner.run(start_urls=start_urls)
+            items_data: list = []
+        else:
+            runner = AutomationRunner(storage_root=storage_root, **runner_kwargs)
+            items_data = config.get("items_data") or []
+            scripts = scripts_from_session(items_data, config.get("base_url", ""))
 
-        report = runner.run(scripts)
+            report = runner.run(scripts)
         rep_dict = _serialise_report(report)
         assets = _build_automation_assets(rep_dict, storage_root)
 

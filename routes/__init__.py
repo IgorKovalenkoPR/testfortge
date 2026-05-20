@@ -11,7 +11,8 @@ from __future__ import annotations
 from flask import Flask
 
 from . import (dashboard, projects, generation, execution,
-               automation, estimation, chat, ops, guide, test_plan)
+               automation, estimation, chat, ops, guide, test_plan,
+               debug)
 
 
 def register_all(app: Flask) -> None:
@@ -26,6 +27,7 @@ def register_all(app: Flask) -> None:
     ops.register(app)
     guide.register(app)
     test_plan.register(app)
+    debug.register(app)
 
     # Global context processor — exposes ``projects`` (the user's
     # owned project list) and ``active_project_id`` to EVERY template
