@@ -160,6 +160,25 @@ if basic_auth.is_enabled():
     log.info("HTTP Basic Auth gate is active.")
 
 
+# ── /metrics exposure warning (Sprint 4 task 4.5) ─────────────────
+#
+# When the deployment is fronted by HTTPS (``BEHIND_HTTPS=1``) but
+# neither Basic Auth nor the ops-endpoint token is set, ``/metrics``
+# is publicly reachable. The endpoint exposes infrastructure-level
+# counts only (no user data), but it is still operator-grade telemetry
+# we do not want indexed. Emit a single warning at boot so the issue
+# surfaces in container logs before the first scrape.
+if (os.environ.get("BEHIND_HTTPS") == "1"
+        and not os.environ.get("TESTFORTGE_BASIC_USER")
+        and not (os.environ.get("OPS_ENDPOINTS_TOKEN") or "").strip()):
+    log.warning(
+        "SECURITY: BEHIND_HTTPS=1 but no Basic Auth user and no "
+        "OPS_ENDPOINTS_TOKEN — /metrics is publicly reachable. "
+        "Set TESTFORTGE_BASIC_USER+PASSWORD or OPS_ENDPOINTS_TOKEN, "
+        "or restrict /metrics at the reverse proxy."
+    )
+
+
 # ── Error handlers ───────────────────────────────────────────────
 
 @app.errorhandler(CSRFError)
@@ -201,6 +220,19 @@ def nl2br_filter(s):
     if not s:
         return s
     return markupsafe.Markup(str(markupsafe.escape(s)).replace('\n', '<br>\n'))
+
+
+@app.template_filter('safe_display')
+def safe_display_filter(s):
+    """Strip prompt-injection-style lines from text rendered to other
+    operators. Sprint 4 task 4.4 — see :mod:`engine.sanitize`.
+
+    The DB keeps the original verbatim; only the display surface is
+    filtered so a bug title pasted by one operator cannot smuggle an
+    instruction line into another operator's view.
+    """
+    from engine.sanitize import strip_display
+    return strip_display(s)
 
 
 @app.template_filter('bug_field')

@@ -27,6 +27,7 @@ from engine.chatbot import respond_dict as _chatbot_respond
 from engine.bug_report import (
     BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
 )
+from engine.llm_safety import wrap_user_input
 from engine.log import get_logger
 
 _logger = get_logger(__name__)
@@ -202,7 +203,10 @@ def register(app: Flask) -> None:
                     # persona block actually hits Anthropic's ephemeral
                     # cache. See engine/chatbot.py for the persona text.
                     system=_chatbot_mod._ai_system_blocks(lang),
-                    messages=[{"role": "user", "content": message}],
+                    # Sprint 4 task 4.4: wrap the user-controlled
+                    # message in <user_input> so the persona's
+                    # untrusted-input clause can disarm directives.
+                    messages=[{"role": "user", "content": wrap_user_input(message)}],
                 ) as stream:
                     for text in stream.text_stream:
                         # Heartbeat if the upstream went quiet — Render's

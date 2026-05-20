@@ -21,6 +21,7 @@ from flask import current_app, request, session
 from werkzeug.utils import secure_filename
 
 from engine.file_parser import parse_file, split_into_requirements, allowed_file  # noqa: F401 re-exported
+from engine.llm_safety import MAX_CUSTOM_PROMPT_CHARS, cap as _cap_prompt
 from engine.qa_persona import is_instruction
 from engine.user_story_generator import UserStory
 from engine.testcase_generator import TestCase, ChecklistItem
@@ -169,6 +170,11 @@ def parse_page_input(file_field: str = "input_files",
         extra = "\n".join(instruction_lines)
         custom_prompt = f"{custom_prompt}\n{extra}".strip() if custom_prompt else extra
         raw_lines = actual_lines
+
+    # Sprint 4 task 4.4: cap the live value that flows into the generator
+    # so an adversarially long custom_prompt cannot expand procedurally
+    # nor leak into LLM calls beyond the documented limit.
+    custom_prompt = _cap_prompt(custom_prompt, MAX_CUSTOM_PROMPT_CHARS)
 
     return raw_lines, errors, custom_prompt
 

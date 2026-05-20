@@ -853,6 +853,99 @@ def list_bugs(project_id: str | None = None,
         return [_row_to_dict(r) for r in rows]
 
 
+# ── Bulk bug operations (Sprint 4 task 4.2) ───────────────────────
+
+# Whitelist of action names accepted by :func:`bulk_update_bugs`. Each
+# action maps to either a direct column update, an ``extra`` JSON write
+# (``assign``), or a row delete. Keeping this list closed means the
+# route layer can reject unknown actions with a simple membership test
+# before hitting the DB.
+ALLOWED_BULK_ACTIONS = (
+    "close", "delete", "assign",
+    "status", "severity", "priority", "fix_version",
+)
+
+# Column map for the four "single-field set" actions. ``fix_version``
+# is exposed under that operator-friendly name but stored in the
+# ``version`` column to match the existing schema and exporter.
+_BULK_COLUMN_MAP = {
+    "status":      "status",
+    "severity":    "severity",
+    "priority":    "priority",
+    "fix_version": "version",
+}
+
+
+def _append_audit(prev: str | None, actor: str, msg: str) -> str:
+    """Return ``prev`` with one extra audit line appended.
+
+    Format: ``[YYYY-MM-DD HH:MM] actor: msg``. Empty / missing
+    ``prev`` produces just the new line so first-ever audits don't
+    leak a leading newline.
+    """
+    stamp = _utcnow().strftime("%Y-%m-%d %H:%M")
+    line = f"[{stamp}] {actor or 'unknown'}: {msg}"
+    base = (prev or "").rstrip()
+    return f"{base}\n{line}" if base else line
+
+
+def bulk_update_bugs(project_id: str, bug_ids: list[int], *,
+                     action: str, value: str | None,
+                     actor: str) -> int:
+    """Apply ``action`` to every bug in ``bug_ids`` that belongs to
+    ``project_id``. Returns the number of rows actually touched.
+
+    Cross-project safety: the ``project_id`` filter is applied to the
+    underlying ``DELETE`` / ``UPDATE`` so a stale checkbox value from
+    another project cannot leak into the result.
+
+    ``action`` must be in :data:`ALLOWED_BULK_ACTIONS`. ``value`` is
+    optional for ``close`` and ``delete``; required for the rest (an
+    empty string is allowed for the "clear field" use case). ``actor``
+    appears in the audit-trail line appended to each row's ``comment``
+    column on non-delete actions.
+    """
+    if not project_id or not bug_ids or action not in ALLOWED_BULK_ACTIONS:
+        return 0
+    with session_scope() as sess:
+        q = (sess.query(BugReport)
+                 .filter(BugReport.project_id == project_id,
+                         BugReport.id.in_(bug_ids)))
+        if action == "delete":
+            return int(q.delete(synchronize_session=False) or 0)
+
+        rows = q.all()
+        if not rows:
+            return 0
+
+        if action == "close":
+            payload = {"status": "Closed"}
+            audit_msg = "status -> Closed"
+        elif action == "assign":
+            payload = None
+            audit_msg = f"assignee -> {value or ''}"
+        else:
+            column = _BULK_COLUMN_MAP[action]
+            payload = {column: value}
+            audit_msg = f"{action} -> {value}"
+
+        for r in rows:
+            if action == "assign":
+                # Assignee lives in the JSON ``extra`` column because the
+                # SQLAlchemy model doesn't expose it as a first-class
+                # field — keeps schema flat while still letting the UI
+                # render it. Re-bind the dict so JSON-mutation detection
+                # in SQLAlchemy fires reliably across backends.
+                extra = dict(r.extra or {})
+                extra["assignee"] = value or ""
+                r.extra = extra
+            elif payload:
+                for col, val in payload.items():
+                    setattr(r, col, val)
+            r.comment = _append_audit(r.comment, actor, audit_msg)
+        return len(rows)
+
+
 # ── Estimation ─────────────────────────────────────────────────────
 
 def save_estimation(project_id: str, input_payload: dict,

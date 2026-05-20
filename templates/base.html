@@ -50,6 +50,12 @@
                     {{ t.nav_checklist }}
                 </a>
             </li>
+            <li class="{% if request.endpoint == 'test_plan_page' %}active{% endif %}">
+                <a href="{{ url_for('test_plan_page') }}">
+                    <span class="step-icon"><i data-lucide="file-text" class="icon-sm"></i></span>
+                    {{ t.get('nav_test_plan', 'Test Plan') }}
+                </a>
+            </li>
             <li class="nav-divider"></li>
             <li class="nav-section-label">{{ t.get('sidebar_execute', 'Execute:') }}</li>
             <li class="{% if request.endpoint == 'test_execution_page' %}active{% endif %}">

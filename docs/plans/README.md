@@ -10,6 +10,7 @@ references, code sketches, tests, risks, and an estimate.
 | [sprint_2_refactoring.md](sprint_2_refactoring.md) | S2 | Split monoliths: `routes/execution.py`, `engine/qa_persona.py`; unify estimation; extract inline JS + CSP nonce | ~42 h |
 | [sprint_3_performance.md](sprint_3_performance.md) | S3 | SSE streaming, Anthropic prompt caching, metrics history, SQLite WAL + Postgres prod check | ~26 h |
 | [sprint_4_polish.md](sprint_4_polish.md) | S4 | Prompt-injection guards, /healthz hardening, test plan UI, bulk bug ops, roles (deferred to S5) | ~43 h |
+| [identity_model_spike.md](identity_model_spike.md) | S5 pre-spike | Email-vs-sid identifier model design; locks the open questions blocking Sprint 4.1 (Roles) | 1 day |
 | [tfweflo_walkthrough_integration.md](tfweflo_walkthrough_integration.md) | TFWefloLab | Port QA walkthrough heuristics from Node into Python; URL-pattern TC binding; cross-env bug dedup | ~52 h |
 
 ## Recommended sequencing

@@ -31,14 +31,30 @@
 {# ── Export ── #}
 <div class="bug-actions">
     <a href="{{ url_for('export_bug_reports') }}" class="btn btn-secondary"><i data-lucide="file-text" class="icon-sm"></i> {{ t.get('bug_export', 'Export Bug Reports') }}</a>
+    <label class="bug-select-all">
+        <input type="checkbox" id="bug-select-all">
+        {{ t.get('bug_select_all', 'Select all') }}
+    </label>
 </div>
+
+{# ── Bulk-action form (Sprint 4 task 4.2) ── #}
+{# The form wraps every card so checkboxes inside `<label>`s submit
+   here. The sticky toolbar at the bottom is shown by JS once at least
+   one bug is selected. #}
+<form method="POST" action="{{ url_for('bugs_bulk') }}" id="bug-bulk-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
 {# ── Bug Cards ── #}
 {% for bug in bugs %}
-<div class="bug-card severity-{{ bug.severity | lower }}">
+<div class="bug-card severity-{{ bug.severity | lower }}" data-bug-id="{{ bug.db_id }}">
     <div class="bug-header">
+        {% if bug.db_id %}
+        <label class="bug-checkbox-label" title="{{ t.get('bug_select_one', 'Select for bulk action') }}">
+            <input type="checkbox" name="bug_ids" value="{{ bug.db_id }}" class="bug-checkbox">
+        </label>
+        {% endif %}
         <span class="bug-id">{{ bug.id }}</span>
-        <span class="bug-title-text">{{ bug.title }}</span>
+        <span class="bug-title-text">{{ bug.title | safe_display }}</span>
         <div class="bug-badges">
             <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug.severity }}</span>
             <span class="badge priority-badge">{{ bug.priority }}</span>
@@ -133,6 +149,42 @@
 </div>
 {% endfor %}
 
+{# ── Sticky bulk-action toolbar (shown by JS when any bug is selected) ── #}
+<div id="bulk-toolbar" class="bulk-toolbar" hidden>
+    <span class="bulk-count">
+        <strong id="bulk-count-number">0</strong> {{ t.get('bug_bulk_selected', 'selected') }}
+    </span>
+    <select name="action" id="bulk-action" required>
+        <option value="">{{ t.get('bug_bulk_pick_action', '— action —') }}</option>
+        <option value="close">{{ t.get('bug_bulk_close', 'Close') }}</option>
+        <option value="status">{{ t.get('bug_bulk_status', 'Set status') }}</option>
+        <option value="severity">{{ t.get('bug_bulk_severity', 'Set severity') }}</option>
+        <option value="priority">{{ t.get('bug_bulk_priority', 'Set priority') }}</option>
+        <option value="fix_version">{{ t.get('bug_bulk_fix_version', 'Set fix version') }}</option>
+        <option value="assign">{{ t.get('bug_bulk_assign', 'Assign to') }}</option>
+        <option value="delete">{{ t.get('bug_bulk_delete', 'Delete') }}</option>
+    </select>
+
+    {# Per-action value field; JS toggles which is visible based on the
+       selected action so each one keeps its own ``<action>_value`` name
+       and the server picks the right one. #}
+    <select name="status_value" data-bulk-value-for="status" hidden>
+        {% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+    <select name="severity_value" data-bulk-value-for="severity" hidden>
+        {% for s in severities %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+    <select name="priority_value" data-bulk-value-for="priority" hidden>
+        {% for p in priorities %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    </select>
+    <input type="text" name="fix_version_value" placeholder="{{ t.get('bug_bulk_fix_version_ph', 'e.g. 2.4.0') }}" data-bulk-value-for="fix_version" hidden>
+    <input type="text" name="assign_value" placeholder="{{ t.get('bug_bulk_assign_ph', 'assignee name or email') }}" data-bulk-value-for="assign" hidden>
+
+    <button type="submit" class="btn btn-primary">{{ t.get('bug_bulk_apply', 'Apply') }}</button>
+    <button type="button" id="bulk-clear" class="btn btn-secondary">{{ t.get('bug_bulk_clear', 'Clear') }}</button>
+</div>
+</form>
+
 {% else %}
 <div class="card">
     <p>{{ t.get('bug_no_bugs', 'No bug reports created yet.') }}</p>
@@ -184,5 +236,92 @@ pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consola
 .bug-details-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 
 @media (max-width: 768px) { .bug-stats-row { flex-direction: column; } }
+
+/* Sprint 4 task 4.2 — bulk-edit checkbox + sticky toolbar */
+.bug-checkbox-label { display: inline-flex; align-items: center; cursor: pointer; padding: 2px 4px; }
+.bug-checkbox { width: 18px; height: 18px; cursor: pointer; }
+.bug-select-all { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 0.9em; color: #475569; cursor: pointer; }
+
+.bulk-toolbar {
+    position: sticky;
+    bottom: 12px;
+    z-index: 30;
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border: 2px solid var(--primary);
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+    flex-wrap: wrap;
+}
+.bulk-toolbar .bulk-count { font-size: 0.95em; color: #1e293b; }
+.bulk-toolbar .bulk-count strong { color: var(--primary); font-size: 1.05em; }
+.bulk-toolbar select, .bulk-toolbar input[type="text"] {
+    padding: 6px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.9em;
+    background: #fff;
+}
 </style>
+
+<script>
+(function () {
+    const form = document.getElementById('bug-bulk-form');
+    if (!form) return;
+    const toolbar = document.getElementById('bulk-toolbar');
+    const countEl = document.getElementById('bulk-count-number');
+    const actionSel = document.getElementById('bulk-action');
+    const clearBtn = document.getElementById('bulk-clear');
+    const selectAll = document.getElementById('bug-select-all');
+    const checkboxes = form.querySelectorAll('.bug-checkbox');
+    const valueFields = form.querySelectorAll('[data-bulk-value-for]');
+
+    function refresh() {
+        const selected = form.querySelectorAll('.bug-checkbox:checked').length;
+        countEl.textContent = String(selected);
+        toolbar.hidden = selected === 0;
+    }
+
+    function showValueFor(action) {
+        valueFields.forEach(function (el) {
+            const match = el.getAttribute('data-bulk-value-for') === action;
+            el.hidden = !match;
+            // Disabling unmatched fields keeps them out of the form
+            // submission so the server only sees one *_value field.
+            el.disabled = !match;
+        });
+    }
+
+    checkboxes.forEach(function (cb) {
+        cb.addEventListener('change', refresh);
+    });
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function () {
+            checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+            refresh();
+        });
+    }
+
+    actionSel.addEventListener('change', function () {
+        showValueFor(actionSel.value);
+    });
+
+    clearBtn.addEventListener('click', function () {
+        checkboxes.forEach(function (cb) { cb.checked = false; });
+        if (selectAll) selectAll.checked = false;
+        actionSel.value = '';
+        showValueFor('');
+        refresh();
+    });
+
+    // Initial sync (browser may restore checkbox state on reload).
+    showValueFor('');
+    refresh();
+})();
+</script>
 {% endblock %}
