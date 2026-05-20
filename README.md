@@ -54,3 +54,56 @@ FLASK_DEBUG=1 python tools/backfill_metric_snapshots.py
 ```
 
 prints one line per project. Idempotent and safe to re-run.
+
+## Production hardening
+
+TestForTge ships two operations endpoints — `/healthz` (liveness probe)
+and `/metrics` (job-queue + DB counts). `/healthz` is **always open** so
+container orchestrators (k8s, Docker healthcheck, uptime pingers) can
+reach it without secrets. `/metrics` is open by default too, but should
+be locked down on any deployment reachable from the public internet.
+
+There are three ways to lock it down — pick at least one:
+
+### Option 1 — Ops token (lightest)
+
+```bash
+export OPS_ENDPOINTS_TOKEN="$(openssl rand -hex 32)"
+```
+
+`/metrics` then requires the matching header:
+
+```bash
+curl -H "X-Ops-Token: $OPS_ENDPOINTS_TOKEN" https://your.host/metrics
+```
+
+`/healthz` is intentionally not gated by this token — probes stay
+secret-free. Constant-time comparison (`hmac.compare_digest`) is used.
+
+### Option 2 — HTTP Basic Auth (covers the whole app)
+
+```bash
+export TESTFORTGE_BASIC_USER=ops
+export TESTFORTGE_BASIC_PASSWORD="$(openssl rand -hex 24)"
+```
+
+This puts every route — `/`, `/test-cases`, `/metrics`, etc. — behind a
+Basic Auth gate before any other middleware runs. Use this when the
+deployment is on the public internet and you want a single password
+in front of everything.
+
+### Option 3 — Reverse-proxy IP allowlist
+
+If `/metrics` is scraped by an internal Prometheus / Datadog agent on a
+known IP range, the cleanest answer is to allowlist it at the proxy
+(nginx `allow` / k8s `NetworkPolicy`) and reject everyone else.
+TestForTge itself doesn't do source-IP filtering — that's the proxy's
+job.
+
+### Boot warning
+
+When `BEHIND_HTTPS=1` is set but **neither** `TESTFORTGE_BASIC_USER`
+**nor** `OPS_ENDPOINTS_TOKEN` is configured, the app logs a single
+`SECURITY:` warning at boot. That's the signal that `/metrics` is
+publicly reachable — fix one of the three options above or take the
+proxy approach.

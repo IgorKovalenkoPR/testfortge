@@ -16,16 +16,29 @@ fine.
 
 from __future__ import annotations
 
+import hmac
 import os
 import time
 
-from flask import Flask, current_app, jsonify
+from flask import Flask, Response, current_app, jsonify, request
 
 from engine import db as _db
 from engine.job_queue import DONE, FAILED, PENDING, RUNNING, get_queue
 from engine.log import get_logger
 
 log = get_logger(__name__)
+
+
+def _ops_token() -> str:
+    """Read ``OPS_ENDPOINTS_TOKEN`` fresh on each request.
+
+    Reading at request time (instead of caching the module-load value)
+    lets tests flip the env var with ``monkeypatch.setenv`` without
+    restarting the app. The empty-string default means the gate stays
+    disabled by default — existing deployments are not surprised by a
+    sudden 401 after upgrading.
+    """
+    return (os.environ.get("OPS_ENDPOINTS_TOKEN") or "").strip()
 
 
 def _check_writable(path: str) -> bool:
@@ -87,7 +100,19 @@ def register(app: Flask) -> None:
         expect the classic text format can be added later via a thin
         ``prometheus_client`` shim; the underlying counters here are
         the same.
+
+        Sprint 4 task 4.5: when ``OPS_ENDPOINTS_TOKEN`` is set in the
+        env, callers must present a matching ``X-Ops-Token`` header.
+        When unset, the endpoint stays open (existing deployments are
+        unaffected). ``/healthz`` is intentionally not gated — k8s /
+        Docker probes need it unauthenticated.
         """
+        token = _ops_token()
+        if token:
+            header = request.headers.get("X-Ops-Token", "")
+            if not hmac.compare_digest(
+                    header.encode("utf-8"), token.encode("utf-8")):
+                return Response("Forbidden", status=401)
         q = get_queue()
         jobs = q.list_kind("automation") + q.list_kind("estimation")
 
