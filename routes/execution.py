@@ -37,9 +37,77 @@ from engine.test_credentials import (
 
 from engine import db as _db
 
-from ._shared import extract_resource_urls, ensure_active_project
+from ._shared import extract_resource_urls, ensure_active_project, get_session_id
+from .projects import _require_project_owner
 
 log = get_logger(__name__)
+
+
+def _bug_row_to_session_dict(row: dict) -> dict:
+    """Convert a row returned by :func:`engine.db.list_bugs` into the
+    session-flat shape :func:`dict_to_bug` consumes.
+
+    Three notable mappings:
+      * ``row.id`` (int DB row id) → ``db_id`` on the session BugReport
+      * ``row.external_id`` (e.g. ``"BUG-001"``) → display ``id``
+      * ``row.extra.assignee`` → first-class ``assignee`` field so the
+        existing template renders it without an attribute lookup hack
+
+    Anything in ``row.extra`` that ``BugReport`` already knows about
+    (``frequency``, ``component``, etc.) is unpacked too so the JSON
+    blob doesn't shadow first-class fields after a re-render.
+    """
+    extra = row.get("extra") or {}
+    out = {
+        "id":                 row.get("external_id") or f"BUG-{int(row.get('id') or 0):03d}",
+        "db_id":              int(row.get("id") or 0),
+        "title":              row.get("title") or "",
+        "severity":           row.get("severity") or "Minor",
+        "priority":           row.get("priority") or "Medium",
+        "status":             row.get("status") or "Open",
+        "environment":        row.get("environment") or "",
+        "preconditions":      extra.get("preconditions", ""),
+        "steps_to_reproduce": row.get("steps_to_reproduce") or "",
+        "actual_result":      row.get("actual_result") or "",
+        "expected_result":    row.get("expected_result") or "",
+        "frequency":          extra.get("frequency", "Always"),
+        "affects_version":    row.get("version") or "",
+        "found_in_build":     extra.get("found_in_build", ""),
+        "attachments":        extra.get("attachments") or [],
+        "linked_item_id":     extra.get("linked_item_id", ""),
+        "linked_item_type":   extra.get("linked_item_type", ""),
+        "reporter":           row.get("reporter") or "",
+        "assignee":           extra.get("assignee", ""),
+        "created_at":         (row.get("created_at") or "")
+                                if isinstance(row.get("created_at"), str)
+                                else (row.get("created_at").isoformat()
+                                      if row.get("created_at") else ""),
+        "component":          extra.get("component", ""),
+        "labels":             extra.get("labels") or [],
+        "comment":            row.get("comment") or "",
+    }
+    return out
+
+
+def _hydrate_bugs(project_id: str | None) -> list:
+    """Return the list of ``BugReport`` dataclass instances to render
+    on ``/bug-reports``. DB-first so ``db_id`` is populated; falls
+    back to session ``bug_reports_data`` only when the DB read fails
+    or no project is active yet (legacy / pre-project flow).
+    """
+    if project_id:
+        try:
+            rows = _db.list_bugs(project_id) or []
+        except Exception as exc:  # pragma: no cover — DB outage shouldn't 500
+            log.warning("hydrate_bugs: list_bugs failed: %s", exc)
+            rows = []
+        if rows:
+            # DB list_bugs is ordered desc by created_at; the template
+            # has always shown newest-first, so we keep that order.
+            return [dict_to_bug(_bug_row_to_session_dict(r)) for r in rows]
+    # Session fallback — older flow that wrote bug_reports_data directly.
+    bugs_data = session.get("bug_reports_data", []) or []
+    return [dict_to_bug(b) for b in bugs_data]
 
 
 def _bug_dict_to_db_row(bug_dict: dict) -> dict:
@@ -2467,8 +2535,12 @@ def register(app: Flask) -> None:
 
     @app.route("/bug-reports")
     def bug_reports_page():
-        bugs_data = session.get("bug_reports_data", [])
-        bugs = [dict_to_bug(b) for b in bugs_data]
+        # Sprint 4 task 4.2: prefer the DB as source of truth so the
+        # ``db_id`` field is populated on every rendered card (the
+        # bulk-edit checkboxes need it). Session ``bug_reports_data``
+        # stays as the fallback for the legacy / pre-project flow.
+        pid = ensure_active_project()
+        bugs = _hydrate_bugs(pid)
 
         stats = {
             "total": len(bugs),
@@ -2480,6 +2552,77 @@ def register(app: Flask) -> None:
         return render_template("bug_reports.html", bugs=bugs, stats=stats,
                                severities=BUG_SEVERITIES, priorities=BUG_PRIORITIES,
                                statuses=BUG_STATUSES, frequencies=BUG_FREQUENCIES)
+
+    @app.route("/bugs/bulk", methods=["POST"])
+    def bugs_bulk():
+        """Apply ``action`` to every bug whose ``db_id`` is in the
+        ``bug_ids[]`` form list. Sprint 4 task 4.2.
+
+        Auth: today this is a project-owner gate (Sprint 1 ``owner_sid``
+        check). Once Sprint 5 lands the role system, this swaps to
+        ``_require_project_role(pid, "tester")`` for non-destructive
+        actions and ``_require_project_role(pid, "admin")`` for
+        ``delete``. The audit trail already records the ``actor`` so
+        the upgrade is purely a permission tightening.
+        """
+        pid = ensure_active_project()
+        if not pid:
+            flash(g.t.get("bug_bulk_no_project",
+                          "Pick or create a project before bulk editing."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+
+        # Same ownership gate every other write route honours. Returns
+        # the project meta on success and ``abort(403)`` otherwise.
+        if _require_project_owner(pid) is None:
+            flash(g.t.get("bug_bulk_no_project",
+                          "Project not found."), "error")
+            return redirect(url_for("bug_reports_page"))
+
+        raw_ids = request.form.getlist("bug_ids")
+        ids = sorted({int(x) for x in raw_ids if x.isdigit() and int(x) > 0})
+        action = (request.form.get("action") or "").strip()
+        # The toolbar uses ``<action>_value`` (e.g. ``status_value``) so
+        # each action keeps its own input field; legacy callers can also
+        # send ``value=`` unscoped.
+        value = (request.form.get(f"{action}_value")
+                 or request.form.get("value")
+                 or "").strip() or None
+
+        if action not in _db.ALLOWED_BULK_ACTIONS or not ids:
+            flash(g.t.get("bug_bulk_invalid",
+                          "Pick at least one bug and a valid action."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+
+        actor = get_session_id(session)[:8]
+        try:
+            n = _db.bulk_update_bugs(
+                pid, ids, action=action, value=value, actor=actor,
+            )
+        except Exception as exc:
+            log.warning("bulk_update_bugs failed: %s", exc)
+            flash(g.t.get("bug_bulk_failed",
+                          "Bulk update failed — see server logs."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+
+        # Refresh the session cache so the next render shows the new
+        # values without forcing a hard reload of the session pickle.
+        try:
+            rows = _db.list_bugs(pid) or []
+            session["bug_reports_data"] = [
+                _bug_row_to_session_dict(r) for r in rows
+            ]
+            session.modified = True
+        except Exception:  # pragma: no cover — best-effort cache refresh
+            pass
+
+        suffix = "s" if n != 1 else ""
+        flash(g.t.get("bug_bulk_ok",
+                      "Updated {n} bug{s}.").format(n=n, s=suffix),
+              "success")
+        return redirect(url_for("bug_reports_page"))
 
     @app.route("/export-bug-reports")
     def export_bug_reports():

@@ -77,6 +77,12 @@ class BugReport:
     component: str = ""        # e.g. "Authentication", "Search", "UI"
     labels: list[str] = field(default_factory=list)
     comment: str = ""
+    # Optional int row id from the DB (engine.db.BugReport.id). Used by
+    # the bulk-edit toolbar on /bug-reports — checkboxes carry this so
+    # POST /bugs/bulk can address rows without dragging the slug-style
+    # external id through SQL. Defaults to 0 so older sessions and the
+    # auto-bug factory don't have to pass it explicitly.
+    db_id: int = 0
 
 
 # ── ID generation ──────────────────────────────────────────────────
@@ -200,6 +206,7 @@ def bug_to_dict(bug: BugReport) -> dict:
         "component": bug.component,
         "labels": list(bug.labels),
         "comment": bug.comment,
+        "db_id": bug.db_id,
     }
 
 
@@ -234,6 +241,7 @@ def dict_to_bug(d: dict) -> BugReport:
         component=d.get("component", ""),
         labels=d.get("labels", []),
         comment=d.get("comment", ""),
+        db_id=int(d.get("db_id") or 0),
     )
 
 
