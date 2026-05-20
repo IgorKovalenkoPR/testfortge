@@ -12,37 +12,48 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestE2EChecklistGeneration:
-    """User journey: generate checklist from URL → switch lang → export."""
+    """User journey: generate checklist → switch lang → export."""
 
     def test_full_checklist_journey(self, client):
         # Step 1: User opens checklist page (should be empty)
         resp = client.get("/checklist")
         assert resp.status_code == 200
-        assert b"HDR_001" not in resp.data
+        assert b"LGN_001" not in resp.data
 
-        # Step 2: User generates a checklist from URL
+        # Step 2: User generates a checklist from plain-text requirements.
+        # The previous version of this step posted an external URL and
+        # let routes.generation drive site_crawler. That made the journey
+        # depend on (a) external HTTPS reachability from CI runners and
+        # (b) the crawl finishing inside the 60 s sync deadline the
+        # /checklist handler enforces. Both failure modes redirected
+        # (302) with a "still running" flash and turned this test into a
+        # permanent CI red — the actual journey under test (POST →
+        # render → switch lang → export) does not require the URL path.
+        # URL-driven crawl coverage stays in tests/test_site_crawler.py.
         resp = client.post("/checklist", data={
-            "input_text": "https://testfort.com/software-testing-services",
+            "input_text": ("User can log in with email and password\n"
+                           "User can search products\n"
+                           "User can complete checkout"),
         })
         assert resp.status_code == 200
-        assert b"HDR_001" in resp.data
+        assert b"LGN_001" in resp.data
         assert b"Verify that" in resp.data
 
         # Step 3: User switches language to UA
         resp = client.get("/checklist?lang=ua")
         assert resp.status_code == 200
-        assert b"HDR_001" in resp.data  # Data preserved
+        assert b"LGN_001" in resp.data  # Data preserved
 
         # Step 4: User switches back to EN
         resp = client.get("/checklist?lang=en")
         assert resp.status_code == 200
-        assert b"HDR_001" in resp.data  # Still there
+        assert b"LGN_001" in resp.data  # Still there
 
         # Step 5: User exports to CSV
         resp = client.get("/export/csv-checklist")
         assert resp.status_code == 200
         csv_text = resp.data.decode("utf-8")
-        assert "HDR_001" in csv_text
+        assert "LGN_001" in csv_text
         assert "Verify that" in csv_text
 
 
