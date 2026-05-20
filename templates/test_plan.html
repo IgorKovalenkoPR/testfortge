@@ -86,14 +86,13 @@
 <div class="card card-export">
     <h2>{{ t.nav_export }}</h2>
     <div class="export-buttons">
-        <a href="{{ url_for('export', fmt='markdown') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
-        <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>
+        <a href="{{ url_for('test_plan_export') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
     </div>
 </div>
 {% endif %}
 
 <div class="form-actions">
     <a href="{{ url_for('checklist_page') }}" class="btn btn-secondary">&larr; {{ t.nav_checklist }}</a>
-    <a href="{{ url_for('status_report_page') }}" class="btn btn-primary">{{ t.nav_status_report }} &rarr;</a>
+    <a href="{{ url_for('test_execution_page') }}" class="btn btn-primary">{{ t.get('nav_test_execution', 'Test Execution') }} &rarr;</a>
 </div>
 {% endblock %}
