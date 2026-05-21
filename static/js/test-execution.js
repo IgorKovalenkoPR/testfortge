@@ -528,3 +528,78 @@
         input.addEventListener('change', render);
     });
 })();
+
+
+/* ── 5. PR-3: Run-mode toggle (TC/CL ↔ QA walkthrough) ────────────────
+ *
+ * Two pieces of behaviour:
+ *   a) When run_mode=walkthrough, the source-picker and item-selection
+ *      cards become inert — walkthrough mode doesn't use them. We hide
+ *      them and disable their inputs (form submission still posts the
+ *      hidden defaults, the route layer ignores them).
+ *   b) The Run-mode options <details> auto-opens when walkthrough is
+ *      picked so the operator sees the knobs.
+ */
+(function teRunModeToggle() {
+    var inputs = document.querySelectorAll('[data-te-run-mode-input]');
+    if (!inputs.length) return;
+    var sourceCard = document.querySelector('[data-te-source-card]');
+    var itemsCard  = document.querySelector('[data-te-items-card]');
+    var optsPanel  = document.querySelector('[data-te-walkthrough-panel]');
+
+    function apply() {
+        var picked = 'tc_driven';
+        for (var i = 0; i < inputs.length; i++) {
+            if (inputs[i].checked) { picked = inputs[i].value; break; }
+        }
+        var isWalk = (picked === 'walkthrough');
+        [sourceCard, itemsCard].forEach(function (el) {
+            if (!el) return;
+            el.style.display = isWalk ? 'none' : '';
+            // Disable inputs while hidden so the form's required-field
+            // validation doesn't trip on hidden but empty checkboxes
+            // (selected_items isn't required but radios on source might
+            // become empty if both packs are gone).
+            el.querySelectorAll('input,select,textarea').forEach(function (inp) {
+                inp.disabled = isWalk;
+            });
+        });
+        if (optsPanel && isWalk && !optsPanel.open) {
+            optsPanel.open = true;
+        }
+    }
+    inputs.forEach(function (inp) {
+        inp.addEventListener('change', apply);
+    });
+    apply();  // honour server-rendered initial state
+})();
+
+
+/* ── 6. PR-3: Findings sub-tab toggle inside run-card ─────────────────
+ *
+ * When a walkthrough run produced findings, the run-card renders a
+ * Results | Findings strip + two te-subtab-panel blocks. Clicking a
+ * button shows its panel, hides siblings. No router needed — state is
+ * local to each run-card.
+ */
+(function teSubtabs() {
+    document.querySelectorAll('[data-te-subtabs]').forEach(function (strip) {
+        var card = strip.closest('.run-details') || strip.parentNode;
+        var buttons = strip.querySelectorAll('.te-subtab');
+        if (!card || !buttons.length) return;
+        function activate(targetId) {
+            buttons.forEach(function (b) {
+                var on = (b.getAttribute('data-subtab-target') === targetId);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            card.querySelectorAll('[data-subtab-id]').forEach(function (p) {
+                p.hidden = (p.getAttribute('data-subtab-id') !== targetId);
+            });
+        }
+        buttons.forEach(function (b) {
+            b.addEventListener('click', function () {
+                activate(b.getAttribute('data-subtab-target'));
+            });
+        });
+    });
+})();

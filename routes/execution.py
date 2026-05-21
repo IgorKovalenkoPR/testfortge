@@ -670,6 +670,39 @@ def register(app: Flask) -> None:
         if request.method == "POST":
           try:
               source = request.form.get("source", "test_cases")
+              # PR-3: orthogonal Run Mode — "tc_driven" (default) keeps
+              # every existing path byte-identical; "walkthrough" hands
+              # the run to ``engine/walkthrough_runner.py`` so the QA
+              # walkthrough's 8 heuristics + axe-core sweep produce
+              # findings that get persisted as bugs (see results
+              # endpoint below). The radio lives at the top of the form
+              # so the field always posts; missing/invalid values fall
+              # back to "tc_driven" for safety.
+              run_mode = (request.form.get("run_mode") or "tc_driven").strip().lower()
+              if run_mode not in ("tc_driven", "walkthrough"):
+                  run_mode = "tc_driven"
+              # Walkthrough sub-config — only consulted when run_mode ==
+              # "walkthrough". Numeric coercion is permissive so a
+              # missing/empty field falls back to the conservative
+              # defaults that PR-1/PR-2 already exercise via the debug
+              # endpoint.
+              def _wt_int(field: str, default: int, lo: int = 0) -> int:
+                  try:
+                      v = int(request.form.get(field, default))
+                  except (TypeError, ValueError):
+                      v = default
+                  return max(lo, v)
+              walkthrough_cfg = {
+                  "max_pages":         _wt_int("walkthrough_max_pages",         6,      1),
+                  "max_form_fills":    _wt_int("walkthrough_max_form_fills",    5,      0),
+                  "device_timeout_ms": _wt_int("walkthrough_device_timeout_ms", 480000, 60000),
+                  "axe_enabled":       (request.form.get("walkthrough_axe_enabled", "1")
+                                         not in ("0", "false", "no", "")),
+              }
+              tc_binding = (request.form.get("walkthrough_tc_binding")
+                            or "url_pattern").strip().lower()
+              if tc_binding not in ("url_pattern", "ignore"):
+                  tc_binding = "url_pattern"
               # The Testing Types / Assigned Tester / Test Account UI was
               # removed — testing scope is now driven by the prompt that
               # produced the test cases (see Test Cases / Checklist pages).
@@ -678,6 +711,13 @@ def register(app: Flask) -> None:
               tester_id = request.form.get("tester_id", "mid_1")
               testing_types = request.form.getlist("testing_types") or ["Regression"]
               selected_ids = request.form.getlist("selected_items")
+              # PR-3: walkthrough mode doesn't pick TCs via checkboxes —
+              # binding is driven by ``url_pattern`` on TC records (or
+              # "ignore" to run heuristics only). Force-clear so the
+              # rest of the handler stops treating the missing
+              # selection as an empty filter.
+              if run_mode == "walkthrough":
+                  selected_ids = []
 
               credentials = credentials_from_form(request.form)
               session["test_execution_credentials"] = credentials_to_session(credentials)
@@ -888,15 +928,22 @@ def register(app: Flask) -> None:
               # Playwright + a single decision log makes server-side
               # debugging much easier.
               automation_assets: dict[str, dict] = {}
+              # PR-3: walkthrough mode dispatches into the same detached
+              # worker as the TC-driven path but skips the source-pack
+              # check — there is no checklist or test-cases pack to
+              # "run", the runner walks the URL autonomously.
               wants_automation = (
                   bool(base_url)
-                  and source in ("test_cases", "checklist")
                   and any(et in ("web", "mobile_web") for et in env_types)
+                  and (
+                      run_mode == "walkthrough"
+                      or source in ("test_cases", "checklist")
+                  )
               )
               log.info(
-                  "automation-decision: wants=%s base_url=%r source=%r "
+                  "automation-decision: wants=%s mode=%s base_url=%r source=%r "
                   "env_types=%r selected=%d",
-                  wants_automation, base_url, source, env_types,
+                  wants_automation, run_mode, base_url, source, env_types,
                   len(selected_ids or []),
               )
               # Pre-flight live-info write: even if the runner fails
@@ -1080,6 +1127,33 @@ def register(app: Flask) -> None:
                       worker_log = _os.path.join(pending_dir,
                                                   f"{config_id}.log")
 
+                      # PR-3: project tc_data into the walkthrough.test_cases
+                      # list when ``tc_binding == "url_pattern"`` so the
+                      # runner's per-page TC-match step (see
+                      # ``walkthrough_tc_match.select_tcs_for_url``) has
+                      # something to chew on. Pre-PR-2 TCs default to
+                      # ``trigger="manual"`` so they're filtered out
+                      # here — only TCs explicitly opted-in (always /
+                      # walkthrough_url_match) become candidates. With
+                      # ``tc_binding == "ignore"`` we never pass any TC
+                      # through, so the walkthrough runs heuristics-only
+                      # regardless of what's in the pack.
+                      walkthrough_tcs: list = []
+                      if run_mode == "walkthrough" and tc_binding == "url_pattern":
+                          for _tc in tc_data:
+                              if not isinstance(_tc, dict):
+                                  continue
+                              _trig = (str(_tc.get("trigger") or "manual")
+                                       .strip().lower())
+                              if _trig in ("always", "walkthrough_url_match"):
+                                  walkthrough_tcs.append(_tc)
+                      walkthrough_block: dict = {}
+                      if run_mode == "walkthrough":
+                          walkthrough_block = {
+                              "start_urls":         [base_url] if base_url else [],
+                              "test_cases":         walkthrough_tcs,
+                              **walkthrough_cfg,
+                          }
                       config_payload = {
                           "config_id": config_id,
                           "storage_root": STORAGE_ROOT,
@@ -1109,6 +1183,15 @@ def register(app: Flask) -> None:
                           "envs": envs_meta,
                           "runner_kwargs": runner_kwargs,
                           "credentials": cred_payload,
+                          # PR-3: orthogonal Run Mode + walkthrough config.
+                          # ``mode`` is read by ``runner_worker.py:394``;
+                          # ``walkthrough`` is read by the same dispatch
+                          # block. ``tc_binding`` is echoed to the
+                          # results endpoint so the post-run page knows
+                          # whether to surface the TC-match panel.
+                          "mode": run_mode,
+                          "tc_binding": tc_binding,
+                          "walkthrough": walkthrough_block,
                       }
                       with open(config_path, "w", encoding="utf-8") as _f:
                           _json.dump(config_payload, _f)
@@ -2174,6 +2257,18 @@ def register(app: Flask) -> None:
         report = payload.get("report") or {}
         automation_assets = payload.get("automation_assets") or {}
         cfg = payload.get("config_echo") or {}
+        # PR-3: walkthrough findings ride alongside automation_assets.
+        # The worker emits two parallel views — raw + deduped (per
+        # ``walkthrough_dedup.fingerprint``); the deduped one is what
+        # the operator sees in the UI and what gets converted to bugs.
+        run_mode = (payload.get("mode") or cfg.get("mode") or "tc_driven")
+        run_mode = str(run_mode).strip().lower() or "tc_driven"
+        walkthrough_findings = list(
+            payload.get("walkthrough_findings_deduped")
+            or payload.get("walkthrough_findings")
+            or []
+        )
+        walkthrough_tc_bindings = list(payload.get("walkthrough_tc_bindings") or [])
 
         # Re-run the post-processing using the same logic the synchronous
         # path used to run inline. Most fields come from the worker's
@@ -2208,6 +2303,14 @@ def register(app: Flask) -> None:
         run_summaries = []
         bug_total = 0
         envs_meta = cfg.get("envs") or {}
+        # PR-3: the walkthrough runner runs once at a single viewport,
+        # so its findings + bugs should be attached to exactly one
+        # run_record — the first env in the iteration. Subsequent envs
+        # get an empty findings list. This avoids inflating bug counts
+        # when the operator ticks multiple env checkboxes for a
+        # walkthrough run (which the UI warns against but doesn't
+        # forbid).
+        walkthrough_attached = False
         for et in env_types:
             environment = (envs_meta.get(et, {}) or {}).get("environment") \
                 or et.title()
@@ -2345,6 +2448,55 @@ def register(app: Flask) -> None:
                         dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
                     ]
 
+            # PR-3: convert walkthrough findings into bugs the same way
+            # the TC-driven loop above converts ``execution["bugs"]``.
+            # Findings live on ``payload`` (not in ``execution``) because
+            # the walkthrough runner doesn't drive the simulator. Each
+            # finding becomes a bug via
+            # ``bug_report.create_bug_from_walkthrough_finding`` —
+            # synthetic ``WALK-...`` TC-id, ``defect:<class>`` +
+            # ``source:walkthrough`` labels — and gets persisted through
+            # the same ``_persist_bug`` path so bug-reports listing and
+            # /bug-reports filtering still work.
+            walkthrough_bugs_count = 0
+            if (run_mode == "walkthrough"
+                    and walkthrough_findings
+                    and not walkthrough_attached):
+                from engine.bug_report import (
+                    create_bug_from_walkthrough_finding as _create_wt_bug,
+                )
+                for finding in walkthrough_findings:
+                    if not isinstance(finding, dict):
+                        continue
+                    try:
+                        bug = _create_wt_bug(
+                            finding,
+                            environment_str=environment,
+                            tester_name=tester_name,
+                            base_url=base_url,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "walkthrough: bug conversion skipped: %s", exc)
+                        continue
+                    bug_dict = bug_to_dict(bug)
+                    new_id = generate_bug_id(running_bugs)
+                    bug_dict["id"] = new_id
+                    if not bug_dict.get("affects_version"):
+                        bug_dict["affects_version"] = affects_version
+                    _persist_bug(bug_dict, source="walkthrough",
+                                 run_id=db_run_id)
+                    all_bugs.append(bug_dict)
+                    try:
+                        running_bugs.append(dict_to_bug(bug_dict))
+                    except Exception:
+                        running_bugs = list(existing_bugs) + [
+                            dict_to_bug(b) for b
+                            in all_bugs[len(existing_bugs):]
+                        ]
+                    walkthrough_bugs_count += 1
+                walkthrough_attached = True
+
             for r in execution["results"]:
                 if r["bug_id"].startswith("__pending_"):
                     r["bug_id"] = bug_id_map.get(r["item_id"], r["bug_id"])
@@ -2411,10 +2563,31 @@ def register(app: Flask) -> None:
                  "screenshots": (r.get("screenshots") or [])[:6]}
                 for r in (execution.get("results") or [])
             ]
+            # PR-3: walkthrough findings + TC bindings live on the
+            # first env's run_record so the template's findings subtab
+            # has somewhere to read from. ``walkthrough_bugs_count``
+            # already counts the bugs created above (zero for envs
+            # past the first).
+            attached_findings = (
+                walkthrough_findings
+                if (run_mode == "walkthrough"
+                    and walkthrough_attached
+                    and walkthrough_bugs_count)
+                else []
+            )
+            attached_bindings = (
+                walkthrough_tc_bindings
+                if (run_mode == "walkthrough"
+                    and walkthrough_attached
+                    and walkthrough_bugs_count)
+                else []
+            )
+            run_bug_count = len(execution["bugs"]) + walkthrough_bugs_count
             run_record = {
                 "run_id": len(test_runs) + 1,
                 "db_run_id": db_run_id,
                 "source": source,
+                "mode": run_mode,
                 "tester_id": tester_id,
                 "tester_name": tester_name,
                 "environment": environment,
@@ -2422,18 +2595,22 @@ def register(app: Flask) -> None:
                 "testing_types": ", ".join(testing_types),
                 "results": results_summary,
                 "stats": execution["stats"],
-                "bug_count": len(execution["bugs"]),
+                "bug_count": run_bug_count,
                 "site_url": site_url,
                 "base_url": base_url,
                 "headless": headless,
                 "record_video": record_video,
                 "automation_used": (et in ("web", "mobile_web")),
                 "created_at": datetime.now().isoformat(),
+                # PR-3 fields — empty lists for TC-driven runs and
+                # envs past the first in a walkthrough run.
+                "walkthrough_findings": attached_findings,
+                "walkthrough_tc_bindings": attached_bindings,
             }
             test_runs.append(run_record)
             run_summaries.append(
-                (environment, execution["stats"], len(execution["bugs"])))
-            bug_total += len(execution["bugs"])
+                (environment, execution["stats"], run_bug_count))
+            bug_total += run_bug_count
 
         test_runs = test_runs[-20:]
         session["bug_reports_data"] = all_bugs
