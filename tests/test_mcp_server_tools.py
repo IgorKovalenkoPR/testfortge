@@ -1,5 +1,5 @@
-"""MCP server tool tests — both the v1 read surface and the v1.5
-``create_bug_report`` / ``trigger_test_execution`` write tools.
+"""MCP server tool tests — v1 read surface, v1.5 write tools, and
+the v1.6 ``tedgie_ask`` chat tool.
 
 We import the tool functions directly from :mod:`mcp_server.server`.
 The functions are wrapped by FastMCP's ``@mcp.tool()`` decorator but
@@ -312,3 +312,66 @@ class TestTriggerTestExecution:
             )
         # And no subprocess was spawned because the cap fired first.
         assert popen_mock.call_count == 0
+
+
+# ── tedgie_ask ──────────────────────────────────────────────────
+
+
+class TestTedgieAsk:
+    """The chatbot is its own well-tested module; here we only assert
+    the MCP wrapper passes the question through, returns the dict
+    shape the Flask /chat endpoint also uses, and applies the same
+    input validation the rest of the write/read surface does."""
+
+    def test_empty_question_raises(self):
+        with pytest.raises(ValueError, match="question.*required"):
+            mcp_server.tedgie_ask(question="")
+        with pytest.raises(ValueError, match="question.*required"):
+            mcp_server.tedgie_ask(question="   ")
+
+    def test_returns_chat_reply_dict_shape(self):
+        out = mcp_server.tedgie_ask(question="hello", lang="en")
+        # respond_dict produces these four keys; the MCP tool must
+        # surface them verbatim so the client sees the same envelope
+        # the Flask UI does.
+        assert set(out.keys()) >= {"text", "intent", "suggestions", "follow_up"}
+        assert isinstance(out["text"], str) and out["text"]
+        assert isinstance(out["intent"], str)
+        assert isinstance(out["suggestions"], list)
+        assert isinstance(out["follow_up"], list)
+
+    def test_lang_routes_to_correct_persona(self, monkeypatch):
+        # The fast-path greeting reply ships in both languages; we
+        # patch try_fast_path to record what lang the wrapper passed.
+        captured = {}
+
+        def fake(message, lang="en"):
+            captured["lang"] = lang
+            captured["message"] = message
+            from engine.chatbot import ChatReply
+            return ChatReply(text="hi", intent="greeting")
+
+        monkeypatch.setattr(mcp_server.chatbot, "try_fast_path", fake)
+
+        mcp_server.tedgie_ask(question="hi there", lang="ua")
+        assert captured == {"lang": "ua", "message": "hi there"}
+
+    def test_project_id_is_accepted_but_ignored(self, monkeypatch):
+        # project_id is reserved (see docstring); current chatbot
+        # persona is project-agnostic. The tool must accept it
+        # without raising and not corrupt the question payload.
+        captured = {}
+
+        def fake(message, lang="en"):
+            captured["message"] = message
+            from engine.chatbot import ChatReply
+            return ChatReply(text="ok", intent="generic")
+
+        monkeypatch.setattr(mcp_server.chatbot, "try_fast_path", fake)
+
+        out = mcp_server.tedgie_ask(
+            question="how do I file a bug?",
+            project_id="abc123",
+        )
+        assert out["text"] == "ok"
+        assert captured["message"] == "how do I file a bug?"
