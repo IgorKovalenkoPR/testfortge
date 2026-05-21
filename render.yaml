@@ -144,7 +144,12 @@ services:
     # refuses to boot without MCP_BEARER_TOKEN set, so no
     # accidentally-public deploys.
     dockerCommand: python -m mcp_server.http_server
-    healthCheckPath: /mcp
+    # /healthz is the one path mcp_server.http_server lets through
+    # without a Bearer token — exactly because Render's platform
+    # healthcheck doesn't send Authorization headers. Pointing this
+    # at /mcp would 401 every probe and leave the service in a
+    # permanent "Failed" state. See mcp_server/http_server.py _PUBLIC_PATHS.
+    healthCheckPath: /healthz
     envVars:
       # Share the same Postgres as the main service so MCP reads/writes
       # land in the operator-visible DB.
