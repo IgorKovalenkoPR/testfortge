@@ -28,6 +28,43 @@
     </div>
 </div>
 
+{# ── Source filter (Sprint 5 follow-up) ──────────────────────────
+   Plain-anchor toolbar so an operator can scope the listing to
+   walkthrough-only / TC-only findings. The active state is rendered
+   server-side (no JS); aria-current marks the selected option for
+   assistive tech. Filter combines with the existing project picker
+   above — both narrow the bug set on the same render. #}
+<div class="bug-source-filter"
+     style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;
+            padding:6px 10px;border:1px solid #e2e8f0;
+            border-radius:8px;background:#f8fafc;align-items:center;">
+    <span style="font-size:0.85em;color:#475569;font-weight:600;">
+        {{ t.get('bug_source_filter_label', 'Source:') }}
+    </span>
+    <a href="{{ url_for('bug_reports_page') }}"
+       class="btn btn-sm {% if not source_filter %}btn-primary{% else %}btn-secondary{% endif %}"
+       {% if not source_filter %}aria-current="page"{% endif %}>
+        {{ t.get('bug_source_all', 'All') }}
+    </a>
+    <a href="{{ url_for('bug_reports_page', source='walkthrough') }}"
+       class="btn btn-sm {% if source_filter == 'walkthrough' %}btn-primary{% else %}btn-secondary{% endif %}"
+       {% if source_filter == 'walkthrough' %}aria-current="page"{% endif %}>
+        🧭 {{ t.get('bug_source_walkthrough', 'Walkthrough only') }}
+    </a>
+    <a href="{{ url_for('bug_reports_page', source='manual_tc') }}"
+       class="btn btn-sm {% if source_filter == 'manual_tc' %}btn-primary{% else %}btn-secondary{% endif %}"
+       {% if source_filter == 'manual_tc' %}aria-current="page"{% endif %}>
+        📝 {{ t.get('bug_source_manual_tc', 'TC / manual only') }}
+    </a>
+    {% if source_filter %}
+    <span style="font-size:0.78em;color:#64748b;margin-left:auto;">
+        {{ t.get('bug_source_filtered_count', 'showing') }}
+        <strong>{{ stats.total }}</strong>
+        {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
+    </span>
+    {% endif %}
+</div>
+
 {# ── Export ── #}
 <div class="bug-actions">
     <a href="{{ url_for('export_bug_reports') }}" class="btn btn-secondary"><i data-lucide="file-text" class="icon-sm"></i> {{ t.get('bug_export', 'Export Bug Reports') }}</a>
@@ -187,9 +224,20 @@
 
 {% else %}
 <div class="card">
+    {% if source_filter %}
+    {# Filter narrowed the listing to zero — disambiguate from the
+       "nothing reported yet" baseline so the operator doesn't think
+       the pack is empty. #}
+    <p>{{ t.get('bug_no_bugs_for_filter',
+                 'No bug reports match the current source filter.') }}</p>
+    <a href="{{ url_for('bug_reports_page') }}" class="btn btn-secondary">
+        {{ t.get('bug_clear_source_filter', 'Clear filter') }}
+    </a>
+    {% else %}
     <p>{{ t.get('bug_no_bugs', 'No bug reports created yet.') }}</p>
     <p>{{ t.get('te_no_data', 'Run test execution to report bugs from failed test cases.') }}</p>
     <a href="{{ url_for('test_execution_page') }}" class="btn btn-primary"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('nav_test_execution', 'Test Execution') }}</a>
+    {% endif %}
 </div>
 {% endif %}
 
