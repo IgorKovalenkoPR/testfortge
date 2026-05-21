@@ -43,9 +43,15 @@ WORKDIR /app
 # Install Python deps first so layer caching survives source edits.
 # gunicorn is added only in the container runtime; local dev still uses
 # `python app.py` (Flask's built-in server) via requirements.txt.
+#
+# The MCP server reqs (`mcp` + `uvicorn`) install alongside so the same
+# image can boot either the Flask service or the MCP HTTP service. The
+# choice is made by the Render service's start command (see render.yaml).
 COPY requirements.txt ./
+COPY mcp_server/requirements.txt ./mcp_server_requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
- && pip install --no-cache-dir "gunicorn==23.0.0"
+ && pip install --no-cache-dir "gunicorn==23.0.0" \
+ && pip install --no-cache-dir -r ./mcp_server_requirements.txt
 
 # Copy the application. .dockerignore filters caches, tests, VCS, etc.
 COPY . .

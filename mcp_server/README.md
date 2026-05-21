@@ -117,11 +117,63 @@ internal one) and the server will connect to it directly. Treat that as
 read-only operationally even though nothing in the code enforces it —
 v1 has no write tools.
 
+## Run it over HTTP (Streamable-HTTP transport)
+
+The stdio entrypoint above is fine for a desktop-paired MCP client.
+For a remote agent (Claude Code running on a teammate's box, a CI job,
+etc.), boot the HTTP entrypoint instead:
+
+```powershell
+$env:MCP_BEARER_TOKEN = "sk-mcp-<32 random chars>"
+python -m mcp_server.http_server
+```
+
+Defaults: binds to `0.0.0.0:8765`, MCP protocol at `/mcp`, public
+health probe at `/healthz`. Override via `PORT` (or `MCP_HTTP_PORT`)
+and `MCP_HTTP_HOST`.
+
+Auth is a single shared bearer token. Every request to anything except
+`/healthz` must carry:
+
+```
+Authorization: Bearer <MCP_BEARER_TOKEN>
+```
+
+Boot refuses to start if `MCP_BEARER_TOKEN` is unset — there is no
+open-by-default mode because the surface includes write tools.
+
+To register the HTTP server with an MCP client (Claude Desktop, Claude
+Code), point it at the URL:
+
+```json
+{
+  "mcpServers": {
+    "testfortge-remote": {
+      "url": "https://testfortge-mcp.onrender.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <paste-token-here>"
+      }
+    }
+  }
+}
+```
+
+## Hosted on Render
+
+The repo's `render.yaml` declares a second service `testfortge-mcp`
+that uses the same Dockerfile as the Flask app — different start
+command (`python -m mcp_server.http_server`), different env vars. On
+`render blueprint apply` Render auto-generates `MCP_BEARER_TOKEN` and
+binds the service at `testfortge-mcp.onrender.com`. Copy the token
+from the Render dashboard into your MCP client config; rotate by
+regenerating the value in Render and updating the client side.
+
+The service shares the production Postgres (`DATABASE_URL`), so bugs
+created via MCP appear in `/bug-reports` on the main service and runs
+triggered via MCP show up in the operator's execution-runs list.
+
 ## Roadmap (not in v1.5)
 
-* **HTTP/SSE transport** — host the same server on Render so the tools
-  are reachable from any machine. Requires a token-auth layer (TestFortge
-  is currently Basic Auth, not suitable for MCP clients).
 * **Tedgie chat tool** — `tedgie_ask(project_id, question)`. Plumbs
   through the chatbot's prompt-cached system blocks. Belongs in v3 once
   the read + write surfaces stabilise.
