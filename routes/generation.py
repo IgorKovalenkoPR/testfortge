@@ -590,6 +590,68 @@ def register(app: Flask) -> None:
         # behaviour with the generation flow.
         return redirect(_back_to_caller(default="test_cases_page"))
 
+    # ── Inline TC editor: walkthrough binding ────────────────────
+    # Sprint 5 follow-up to the merged PR-3 (#12). The walkthrough
+    # runner's URL-pattern TC matcher (see
+    # ``engine.walkthrough_tc_match.select_tcs_for_url``) reads two
+    # per-TC fields, ``url_pattern`` and ``trigger``, that the
+    # PR-2 schema migration added to the DB but no UI ever set. This
+    # endpoint exposes a minimal in-place editor: PATCH-style POST
+    # from the /test-cases card, pure form-encoded body (no JSON →
+    # works with progressive-enhancement, no fetch needed), updates
+    # the session list AND the DB row atomically. Returns either a
+    # JSON ack (when the client sends Accept: application/json from
+    # fetch) or a redirect back to /test-cases (for noscript posts).
+    @app.route("/test-cases/<tc_id>/walkthrough-meta", methods=["POST"])
+    def test_cases_update_walkthrough_meta(tc_id: str):
+        tc_data = session.get("test_cases_data", []) or []
+        target = None
+        for tc in tc_data:
+            if tc.get("id") == tc_id:
+                target = tc
+                break
+        if target is None:
+            msg = f"Test case {tc_id!r} not found in the active pack."
+            if request.accept_mimetypes.best == "application/json":
+                return jsonify({"error": "not_found", "message": msg}), 404
+            flash(msg, "error")
+            return redirect(url_for("test_cases_page"))
+
+        # Sanitise inputs. ``url_pattern`` is a free-form fnmatch glob
+        # capped at 200 chars (matches the DB column width); ``trigger``
+        # is one of three enum values, anything else falls back to the
+        # safe default "manual" so a typo never silently opts a TC into
+        # the walkthrough firing path.
+        url_pattern = (request.form.get("url_pattern") or "").strip()[:200]
+        trigger = (request.form.get("trigger") or "manual").strip().lower()
+        if trigger not in ("manual", "walkthrough_url_match", "always"):
+            trigger = "manual"
+
+        target["url_pattern"] = url_pattern
+        target["trigger"] = trigger
+        # Persist the whole pack — the DB save_test_cases path does
+        # wipe-and-replace which is fine here because session_data is
+        # always the source of truth for the *current* pack.
+        session["test_cases_data"] = tc_data
+        try:
+            _persist_test_cases(tc_data)
+        except Exception as exc:
+            log.warning("walkthrough-meta: persist failed for %s: %s",
+                         tc_id, exc)
+
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify({
+                "id": tc_id,
+                "url_pattern": url_pattern,
+                "trigger": trigger,
+            })
+        flash(
+            g.t.get("tc_walkthrough_meta_saved",
+                    f"Walkthrough binding for {tc_id} saved."),
+            "success",
+        )
+        return redirect(url_for("test_cases_page") + f"#{tc_id}")
+
     # ── Async generation pipeline ────────────────────────────────
     # The sync /test-cases and /checklist POST handlers can block for
     # 30–90 s on a busy LLM, which surfaces in the UI as a frozen page.

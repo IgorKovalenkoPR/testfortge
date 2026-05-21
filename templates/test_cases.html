@@ -380,13 +380,19 @@
     <h2 class="section-header">{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
     {% endif %}
 
-    <div class="card tc-card" data-category="{{ tc.category }}">
+    <div class="card tc-card" data-category="{{ tc.category }}" id="{{ tc.id }}">
         <div class="card-header-row">
             <h3>{{ tc.id }}: {{ tc.summary }}</h3>
             <div class="badge-group">
                 <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc.category }}</span>
                 <span class="badge badge-{{ tc.priority|lower }}">{{ tc.priority }}</span>
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
+                {% if tc.trigger and tc.trigger != 'manual' %}
+                <span class="badge badge-outline" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3;"
+                      title="Walkthrough mode will fire this TC according to its trigger.">
+                    🧭 {{ tc.trigger }}
+                </span>
+                {% endif %}
             </div>
         </div>
 
@@ -409,6 +415,62 @@
                 <option value="Blocked">{{ t.blocked }}</option>
             </select>
         </div>
+
+        {# Sprint 5 follow-up: walkthrough binding editor. Collapsed
+           by default so the per-TC card stays scannable. Power users
+           who run QA Walkthrough at /test-execution open this to
+           pin a URL pattern to the TC + pick a trigger that decides
+           when the walkthrough fires it. Plain HTML form so it
+           gracefully degrades without JS. #}
+        <details class="tc-walkthrough-edit" style="margin-top:10px;
+                    border:1px dashed #cbd5e1;border-radius:6px;
+                    padding:8px 12px;background:#fafbfc;">
+            <summary style="cursor:pointer;font-weight:600;color:#475569;font-size:0.9em;">
+                🧭 {{ t.get('tc_walkthrough_meta_title', 'Walkthrough binding') }}
+                {% if tc.url_pattern %}<small style="color:#6b7280;font-weight:400;">— <code>{{ tc.url_pattern }}</code></small>{% endif %}
+            </summary>
+            <form method="POST"
+                  action="{{ url_for('test_cases_update_walkthrough_meta', tc_id=tc.id) }}"
+                  class="tc-walkthrough-form"
+                  style="margin-top:8px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group" style="flex:1 1 220px;margin:0;">
+                    <label for="url_pattern_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                        {{ t.get('tc_url_pattern_label', 'URL pattern (fnmatch glob)') }}
+                    </label>
+                    <input type="text" id="url_pattern_{{ tc.id }}" name="url_pattern"
+                           value="{{ tc.url_pattern or '' }}" maxlength="200"
+                           placeholder="*/checkout/*"
+                           style="width:100%;font-family:monospace;font-size:0.9em;">
+                </div>
+                <div class="form-group" style="flex:1 1 220px;margin:0;">
+                    <label for="trigger_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                        {{ t.get('tc_trigger_label', 'Trigger') }}
+                    </label>
+                    <select id="trigger_{{ tc.id }}" name="trigger" style="width:100%;">
+                        <option value="manual" {% if (tc.trigger or 'manual') == 'manual' %}selected{% endif %}>
+                            {{ t.get('tc_trigger_manual', 'manual — only user-driven runs') }}
+                        </option>
+                        <option value="walkthrough_url_match" {% if tc.trigger == 'walkthrough_url_match' %}selected{% endif %}>
+                            {{ t.get('tc_trigger_url_match', 'walkthrough_url_match — fires on matching pages') }}
+                        </option>
+                        <option value="always" {% if tc.trigger == 'always' %}selected{% endif %}>
+                            {{ t.get('tc_trigger_always', 'always — fires on every walkthrough page') }}
+                        </option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <button type="submit" class="btn btn-secondary"
+                            style="font-size:0.85em;padding:6px 14px;">
+                        {{ t.get('save', 'Save') }}
+                    </button>
+                </div>
+            </form>
+            <p class="hint" style="font-size:0.78em;color:#6b7280;margin:6px 0 0 0;">
+                {{ t.get('tc_walkthrough_meta_hint',
+                    'Empty URL pattern + trigger "always" makes the walkthrough fire this TC on every visited page. trigger="manual" disables walkthrough firing entirely.') }}
+            </p>
+        </details>
     </div>
     {% endfor %}
 </div>
