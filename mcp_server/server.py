@@ -1,6 +1,6 @@
-"""TestFortge MCP tools — read-only v1.
+"""TestFortge MCP tools — read + minimal write surface (v1.5).
 
-Six tools, all backed by :mod:`engine.db`:
+Read tools (v1):
 
 * :func:`list_projects` — every project the DB knows about
 * :func:`list_test_cases` — TCs for a project (filterable by status / trigger)
@@ -9,12 +9,24 @@ Six tools, all backed by :mod:`engine.db`:
 * :func:`get_execution_run` — one run plus its per-case results
 * :func:`walkthrough_findings_stats` — summary of one or more result.json files
 
+Write tools (v1.5):
+
+* :func:`create_bug_report` — persist a bug row via :func:`engine.db.save_bug`
+* :func:`trigger_test_execution` — spawn a detached ``runner_worker``
+  subprocess, mirroring the Flask ``/test-execution`` dispatch path
+
 The tools return plain JSON-serialisable dicts/lists so the MCP layer
 ships them to the client without further conversion. Datetime columns
 arrive already ISO-formatted (see :func:`engine.db._row_to_dict`).
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +35,19 @@ from sqlalchemy import select
 
 from engine import db
 from engine import walkthrough_stats
+from engine.automation_paths import STORAGE_ROOT
+from engine.job_queue import count_active_subprocess_runs
+
+# A stable session_id for the per-session concurrency cap that
+# routes/execution.py also uses. All MCP-triggered runs share this
+# label so a runaway agent can't outrun the cap by varying ids.
+MCP_SESSION_ID = "mcp-server"
+
+# Hard ceiling on how many subprocess runs the MCP surface may have in
+# flight at once. Matches the Flask default (``MAX_CONCURRENT_RUNS=3``)
+# but lives here as a constant so it works even when the MCP server
+# boots without Flask config loaded.
+MCP_MAX_CONCURRENT_RUNS = 3
 
 mcp = FastMCP("testfortge")
 
@@ -195,6 +220,257 @@ def walkthrough_findings_stats(paths: list[str] | None = None) -> dict:
         }
     summary["by_class"] = cleaned_by_class
     return summary
+
+
+# ── Write tools ────────────────────────────────────────────────────
+
+@mcp.tool()
+def create_bug_report(
+    title: str,
+    severity: str = "Major",
+    priority: str = "High",
+    status: str = "Open",
+    environment: str = "Web",
+    steps_to_reproduce: str = "",
+    actual_result: str = "",
+    expected_result: str = "",
+    project_id: str | None = None,
+    source: str = "manual",
+    related_case_id: str | None = None,
+    run_id: int | None = None,
+    reporter: str | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """Persist a bug report. Returns the new row's db_id plus an echo
+    of the key fields so the caller can confirm what landed.
+
+    Wraps :func:`engine.db.save_bug` — same call the Flask
+    ``/create-bug-report`` route uses under the hood, minus the
+    session-bound bug-id generator (the DB row's auto id is returned
+    instead of an external "BUG-NNN" label).
+
+    Args:
+        title: Bug summary. Required and trimmed; empty raises.
+        severity: ``Critical`` / ``Major`` / ``Minor`` / ``Trivial``.
+            Free-form string — TestFortge does not validate, but the
+            listing UI groups by these exact labels.
+        priority: ``Highest`` / ``High`` / ``Medium`` / ``Low``.
+        status: Defaults ``Open``.
+        environment: Free-form env tag (``Web``, ``iOS 17``, ``API``).
+        steps_to_reproduce / actual_result / expected_result: Free-form
+            multiline text. Mirror the manual bug-report form.
+        project_id: 32-char project id from :func:`list_projects`.
+            Omit for a project-less bug (e.g. the Tedgie chat path).
+        source: One of ``tedgie`` / ``execution`` / ``manual`` /
+            ``import``. Invalid values fall back to ``manual``.
+        related_case_id: External TC id this bug is tied to.
+        run_id: ``execution_run.id`` if the bug came from a run.
+        reporter: Free-form reporter name.
+        extra: Arbitrary dict — assignee, labels, frequency,
+            found_in_build, etc. Anything not a first-class column is
+            stored in the JSON ``extra`` field.
+
+    Raises:
+        ValueError: when ``title`` is missing / blank.
+    """
+    if not title or not str(title).strip():
+        raise ValueError("create_bug_report: 'title' is required")
+
+    bug_dict: dict[str, Any] = {
+        "title": str(title).strip(),
+        "severity": severity,
+        "priority": priority,
+        "status": status,
+        "environment": environment,
+        "steps_to_reproduce": steps_to_reproduce,
+        "actual_result": actual_result,
+        "expected_result": expected_result,
+    }
+    if related_case_id:
+        bug_dict["related_case_id"] = related_case_id
+    if run_id:
+        bug_dict["run_id"] = int(run_id)
+    if reporter:
+        bug_dict["reporter"] = reporter
+    if extra:
+        for k, v in extra.items():
+            bug_dict.setdefault(k, v)
+
+    effective_source = source if source in db.VALID_BUG_SOURCES else "manual"
+    row_id = db.save_bug(project_id or None, bug_dict, source=effective_source)
+    return {
+        "db_id": row_id,
+        "title": bug_dict["title"],
+        "severity": bug_dict["severity"],
+        "priority": bug_dict["priority"],
+        "status": bug_dict["status"],
+        "project_id": project_id or None,
+        "source": effective_source,
+    }
+
+
+@mcp.tool()
+def trigger_test_execution(
+    project_id: str,
+    base_url: str = "",
+    test_case_ids: list[str] | None = None,
+    env_types: list[str] | None = None,
+    mode: str = "tc_driven",
+    headless: bool = True,
+    walkthrough_config: dict | None = None,
+) -> dict:
+    """Spawn a detached test-execution run for ``project_id``.
+
+    Mirrors the same subprocess dispatch the Flask
+    ``/test-execution`` POST handler uses (see
+    ``routes/execution.py``). Returns immediately with the
+    ``config_id``; poll via :func:`list_execution_runs` /
+    :func:`get_execution_run` once the worker writes the run row.
+
+    Args:
+        project_id: 32-char project id. Required.
+        base_url: Site the runner points Playwright at. Required for
+            ``tc_driven`` mode. Walkthrough mode falls back to
+            ``walkthrough_config["start_urls"]`` if ``base_url`` is
+            absent.
+        test_case_ids: Subset of TC external_ids (``TC-001`` style).
+            Omit / empty to run every TC in the project.
+        env_types: Like ``["web"]`` or ``["mobile_web"]``. Defaults
+            ``["web"]``.
+        mode: ``tc_driven`` (default) or ``walkthrough``. Walkthrough
+            also requires ``WALKTHROUGH_MODE_ENABLED`` in the host's
+            environment — the worker raises otherwise.
+        headless: Default ``True``. Production on Render always runs
+            headless; an MCP client on a desktop can flip this off.
+        walkthrough_config: Optional dict spliced into
+            ``config_payload["walkthrough"]``: ``start_urls``,
+            ``max_pages``, ``device_timeout_ms``, etc. See
+            :class:`engine.walkthrough_runner.WalkthroughRunner`.
+
+    Returns the ``config_id``, the worker PID, the resolved mode,
+    item count, and the paths to the on-disk config + log files.
+
+    Raises:
+        ValueError: missing project_id, unknown mode, no matching TCs,
+            or missing base_url / start_urls.
+        RuntimeError: when the per-session concurrency cap
+            (:data:`MCP_MAX_CONCURRENT_RUNS`) is already saturated.
+    """
+    if not project_id:
+        raise ValueError("trigger_test_execution: project_id is required")
+    mode = (mode or "tc_driven").strip().lower()
+    if mode not in ("tc_driven", "walkthrough"):
+        raise ValueError(
+            f"trigger_test_execution: unknown mode '{mode}' — "
+            "expected 'tc_driven' or 'walkthrough'"
+        )
+    env_types = list(env_types or ["web"])
+
+    pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
+    active = count_active_subprocess_runs(pending_dir, MCP_SESSION_ID)
+    if active >= MCP_MAX_CONCURRENT_RUNS:
+        raise RuntimeError(
+            f"trigger_test_execution: {active} MCP run(s) already in "
+            f"flight (cap is {MCP_MAX_CONCURRENT_RUNS}). Wait for them "
+            "to finish, or check the _pending/ directory for stuck configs."
+        )
+
+    items_data: list[dict] = []
+    if mode == "tc_driven":
+        all_tcs = db.load_test_cases(project_id) or []
+        if test_case_ids:
+            wanted = {str(x) for x in test_case_ids}
+            items_data = [t for t in all_tcs if str(t.get("id")) in wanted]
+        else:
+            items_data = list(all_tcs)
+        if not items_data:
+            raise ValueError(
+                "trigger_test_execution: no test cases matched the request "
+                "— check project_id / test_case_ids"
+            )
+        if not base_url:
+            raise ValueError(
+                "trigger_test_execution: base_url is required for tc_driven mode"
+            )
+
+    walkthrough_block: dict = {}
+    if mode == "walkthrough":
+        cfg = dict(walkthrough_config or {})
+        start_urls = list(cfg.get("start_urls") or
+                          ([base_url] if base_url else []))
+        if not start_urls:
+            raise ValueError(
+                "trigger_test_execution: walkthrough mode requires "
+                "base_url or walkthrough_config.start_urls"
+            )
+        cfg["start_urls"] = start_urls
+        cfg.setdefault("test_cases", [])
+        walkthrough_block = cfg
+
+    os.makedirs(pending_dir, exist_ok=True)
+    config_id = (datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_")
+                 + uuid.uuid4().hex[:6])
+    config_path = os.path.join(pending_dir, f"{config_id}.json")
+    worker_log = os.path.join(pending_dir, f"{config_id}.log")
+
+    selected_ids = [it.get("id") for it in items_data] if items_data else []
+    config_payload = {
+        "config_id": config_id,
+        "storage_root": STORAGE_ROOT,
+        "base_url": base_url,
+        "site_url": base_url,
+        "items_data": items_data,
+        "selected_ids": selected_ids,
+        "env_types": env_types,
+        "manual_statuses": {},
+        "manual_bug_refs": {},
+        "session_id": MCP_SESSION_ID,
+        "project_id": project_id,
+        "tester_id": "mcp",
+        "tester_name": "MCP Client",
+        "testing_types": [],
+        "headless": bool(headless),
+        "record_video": False,
+        "affects_version": "",
+        "source": "test_cases",
+        "item_type": "test_cases",
+        "envs": {et: {"environment": et} for et in env_types},
+        "runner_kwargs": {
+            "base_url": base_url,
+            "headless": bool(headless),
+            "record_video": False,
+        },
+        "credentials": None,
+        "mode": mode,
+        "tc_binding": "ignore",
+        "walkthrough": walkthrough_block,
+    }
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_payload, f)
+
+    log_fh = open(worker_log, "w", encoding="utf-8")
+    # ``start_new_session=True`` is the same flag the Flask dispatcher
+    # uses to detach the worker on Linux. On Windows it's a no-op flag
+    # for Popen — the subprocess still runs, just without POSIX session
+    # detach semantics. Either way the worker survives this caller.
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "engine.runner_worker", config_path],
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+        cwd=os.path.dirname(STORAGE_ROOT) or None,
+    )
+    return {
+        "config_id": config_id,
+        "pid": proc.pid,
+        "mode": mode,
+        "project_id": project_id,
+        "items": len(items_data),
+        "env_types": env_types,
+        "config_path": config_path,
+        "log_path": worker_log,
+    }
 
 
 # ── Entry ──────────────────────────────────────────────────────────

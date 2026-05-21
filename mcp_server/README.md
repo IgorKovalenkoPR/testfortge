@@ -1,8 +1,10 @@
-# TestFortge MCP Server (v1, read-only)
+# TestFortge MCP Server (v1.5 — read + minimal writes)
 
 Local stdio MCP server that exposes TestFortge data — projects, test
 cases, bug reports, execution runs, walkthrough findings — to MCP-aware
-LLM clients (Claude Desktop, Claude Code, etc.).
+LLM clients (Claude Desktop, Claude Code, etc.). The v1.5 surface adds
+two write tools so an agent can file bugs and kick off runs without a
+human at the Flask UI.
 
 The server reuses `engine.db` for all DB access, so it sees whatever
 DB the main Flask app would see (local SQLite by default, Postgres if
@@ -19,7 +21,7 @@ python -m pip install -r mcp_server/requirements.txt
 Adds only `mcp>=1.2.0` (FastMCP). Not added to the top-level
 `requirements.txt` so the Render web-app image stays lean.
 
-## Tools
+## Read tools
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -30,8 +32,26 @@ Adds only `mcp>=1.2.0` (FastMCP). Not added to the top-level
 | `get_execution_run` | `run_id` | one run plus its `case_results` (per-TC outcomes + screenshots) |
 | `walkthrough_findings_stats` | optional `paths[]` | per-defect-class summary; auto-globs `automation_runs/*.result.json` if `paths` omitted |
 
-All write operations (creating bugs, triggering test runs, mutating
-projects) are intentionally **out of scope for v1**. See "Roadmap" below.
+## Write tools (v1.5)
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `create_bug_report` | `title` (required), optional `severity`/`priority`/`status`/`environment`/`steps_to_reproduce`/`actual_result`/`expected_result`/`project_id`/`source`/`related_case_id`/`run_id`/`reporter`/`extra` | new bug's `db_id` + an echo of the persisted fields |
+| `trigger_test_execution` | `project_id` (required), optional `base_url`/`test_case_ids`/`env_types`/`mode`/`headless`/`walkthrough_config` | `config_id` + worker PID + the config + log paths |
+
+`trigger_test_execution` writes the same config JSON shape the Flask
+`/test-execution` route uses (under `<storage>/automation_runs/_pending/`)
+and spawns `engine.runner_worker` as a detached subprocess
+(`start_new_session=True`). The tool returns immediately; poll the run
+state with `list_execution_runs` / `get_execution_run` or watch for
+`<run_id>.done.flag` next to the config file. The tool shares a global
+per-session concurrency cap of **3** with the Flask app's MCP-triggered
+runs — saturating it raises `RuntimeError` rather than silently
+queueing.
+
+`create_bug_report` is project-agnostic: omit `project_id` for a
+Tedgie-style bug that hasn't been bound to a project yet (the
+`bug_report.project_id` column is nullable).
 
 ## Run it manually
 
@@ -97,11 +117,8 @@ internal one) and the server will connect to it directly. Treat that as
 read-only operationally even though nothing in the code enforces it —
 v1 has no write tools.
 
-## Roadmap (not in v1)
+## Roadmap (not in v1.5)
 
-* **Write tools** — `create_bug_report`, `trigger_test_execution`,
-  `trigger_walkthrough`. Higher blast radius; needs a confirmation
-  pattern on the client side.
 * **HTTP/SSE transport** — host the same server on Render so the tools
   are reachable from any machine. Requires a token-auth layer (TestFortge
   is currently Basic Auth, not suitable for MCP clients).
