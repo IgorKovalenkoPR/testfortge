@@ -177,3 +177,12 @@ services:
       # that knows how to handle it.
       - key: WALKTHROUGH_MODE_ENABLED
         value: "1"
+      # FastMCP's DNS-rebinding protection defaults to a localhost-only
+      # allowlist. Without this env var the prod Host header
+      # (``testfortge-mcp.onrender.com``) is rejected with
+      # ``Invalid Host header`` BEFORE the bearer-auth middleware sees
+      # the request — MCP clients then get a cryptic 421 instead of
+      # 200. Comma-separated list parsed in
+      # mcp_server.server._build_transport_security.
+      - key: MCP_ALLOWED_HOSTS
+        value: "testfortge-mcp.onrender.com"
