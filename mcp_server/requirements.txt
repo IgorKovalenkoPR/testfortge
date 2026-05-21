@@ -1,0 +1,8 @@
+# MCP server runtime — install only on machines that host the
+# TestFortge MCP bridge (NOT in the Render web-app image; the Dockerfile
+# uses the top-level requirements.txt).
+#
+# Pin to the modern FastMCP API (>=1.2). The SDK is pure-Python and
+# brings in pydantic, anyio, httpx — all already transitive deps of
+# anthropic + flask, so the install footprint here is small.
+mcp>=1.2.0
