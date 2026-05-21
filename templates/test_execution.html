@@ -300,6 +300,32 @@
         </div>
     </div>
     <div class="run-details" id="run-{{ run.run_id }}" style="display:none">
+        {# PR-3: When this run is a walkthrough that produced findings,
+           expose a Results | Findings sub-tab strip. TC-driven runs and
+           walkthrough runs whose findings list was empty fall through
+           to the existing results table directly (no subtab needed). #}
+        {% set wt_findings = run.walkthrough_findings or [] %}
+        {% set wt_bindings = run.walkthrough_tc_bindings or [] %}
+        {% set has_wt = (run.mode == 'walkthrough') and (wt_findings | length > 0) %}
+        {% if has_wt %}
+        <div class="te-subtabs" role="tablist" data-te-subtabs>
+            <button type="button" class="te-subtab"
+                    data-subtab-target="results-{{ run.run_id }}"
+                    {% if not run.results %}aria-selected="false"{% else %}aria-selected="true"{% endif %}>
+                {{ t.get('te_subtab_results', 'Results') }}
+                ({{ run.results | length }})
+            </button>
+            <button type="button" class="te-subtab"
+                    data-subtab-target="findings-{{ run.run_id }}"
+                    {% if not run.results %}aria-selected="true"{% else %}aria-selected="false"{% endif %}>
+                {{ t.get('te_subtab_findings', 'Findings') }}
+                ({{ wt_findings | length }})
+            </button>
+        </div>
+        {% endif %}
+
+        <div class="te-subtab-panel" data-subtab-id="results-{{ run.run_id }}"
+             {% if has_wt and not run.results %}hidden{% endif %}>
         <table class="results-table">
             <thead>
                 <tr>
@@ -370,6 +396,128 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
+
+        {% if has_wt %}
+        {# Findings panel — mirrors TFWefloLab's renderWalkthroughCard
+           shape: severity badge, area + headline, URL, element hint,
+           collapsible dev_detail + console_errors, optional screenshot
+           thumb. Linked bugs are looked up from session['bug_reports_data']
+           by linked_item_id (synthetic WALK-... id from the runner). #}
+        <div class="te-subtab-panel" data-subtab-id="findings-{{ run.run_id }}"
+             {% if run.results %}hidden{% endif %}>
+            {% if wt_bindings %}
+            <p class="hint" style="margin:6px 0 10px 0;">
+                <i data-lucide="link" class="icon-sm"></i>
+                {{ t.get('te_wt_bindings_label',
+                    'URL-pattern matched these test cases during the walkthrough:') }}
+                {% for b in wt_bindings %}
+                    <code style="margin-right:6px;">{{ b.tc_id }}</code>
+                {% endfor %}
+            </p>
+            {% endif %}
+            <table class="results-table findings-table">
+                <thead>
+                    <tr>
+                        <th width="80">{{ t.get('te_wt_sev', 'Severity') }}</th>
+                        <th width="120">{{ t.get('te_wt_area', 'Area') }}</th>
+                        <th>{{ t.get('te_wt_message', 'Finding') }}</th>
+                        <th width="90">{{ t.get('te_wt_bug', 'Bug') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for f in wt_findings %}
+                    {% set sev = f.severity or 'Minor' %}
+                    {% set sev_cls = sev | lower %}
+                    <tr class="result-row result-failed">
+                        <td>
+                            <span class="status-badge status-{{ sev_cls }}"
+                                  title="defect_class: {{ f.defect_class or 'unknown' }}">
+                                {{ sev }}
+                            </span>
+                        </td>
+                        <td>{{ f.area or '—' }}</td>
+                        <td>
+                            <strong>{{ f.message or 'Walkthrough finding' }}</strong>
+                            {% if f.element %}<br>
+                            <code style="font-size:0.78em;color:#475569;">{{ f.element }}</code>
+                            {% endif %}
+                            {% if f.url %}<br>
+                            <a href="{{ f.url }}" target="_blank" rel="noopener"
+                               style="font-size:0.78em;">{{ f.url }}</a>
+                            {% endif %}
+                            {% if f.user_impact or f.fix_hint or f.dev_detail or f.console_errors %}
+                            <details style="margin-top:6px;">
+                                <summary style="font-size:0.82em;cursor:pointer;color:#475569;">
+                                    {{ t.get('te_wt_more', 'Details') }}
+                                </summary>
+                                <div style="margin-top:6px;font-size:0.82em;line-height:1.4;">
+                                    {% if f.user_impact %}
+                                    <div><strong>{{ t.get('te_wt_user_impact', 'User impact:') }}</strong>
+                                         {{ f.user_impact }}</div>
+                                    {% endif %}
+                                    {% if f.fix_hint %}
+                                    <div style="margin-top:4px;">
+                                        <strong>{{ t.get('te_wt_fix_hint', 'Fix hint:') }}</strong>
+                                        {{ f.fix_hint }}
+                                    </div>
+                                    {% endif %}
+                                    {% if f.dev_detail %}
+                                    <div style="margin-top:4px;">
+                                        <strong>{{ t.get('te_wt_dev_detail', 'Dev detail:') }}</strong>
+                                        <pre style="white-space:pre-wrap;margin:2px 0;
+                                                    background:#f8fafc;padding:6px;
+                                                    border-radius:4px;font-size:0.85em;">{{ f.dev_detail }}</pre>
+                                    </div>
+                                    {% endif %}
+                                    {% if f.console_errors %}
+                                    <div style="margin-top:4px;">
+                                        <strong>{{ t.get('te_wt_console', 'Console errors:') }}</strong>
+                                        <ul style="margin:2px 0 0 18px;">
+                                        {% for c in f.console_errors %}
+                                            <li><code>{{ c }}</code></li>
+                                        {% endfor %}
+                                        </ul>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </details>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set wt_bug = None %}
+                            {% for b in all_bugs %}
+                              {% if b.linked_item_type == 'walkthrough'
+                                    and b.linked_item_id == f.tc_id %}
+                                {% set wt_bug = b %}
+                              {% endif %}
+                            {% endfor %}
+                            {% if wt_bug %}
+                            <a href="{{ url_for('bug_reports_page') }}"
+                               class="bug-link">{{ wt_bug.id }}</a>
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if f.screenshot %}
+                    <tr class="evidence-row result-failed">
+                        <td colspan="4" style="padding:8px 12px;background:#fafafa;border-top:0;">
+                            <a href="{{ url_for('automation_asset', path=f.screenshot) }}"
+                               target="_blank" rel="noopener" style="display:inline-block;">
+                                <img src="{{ url_for('automation_asset', path=f.screenshot) }}"
+                                     alt="finding screenshot"
+                                     style="width:240px;max-height:160px;object-fit:cover;
+                                            border:1px solid #cbd5e1;border-radius:4px;background:#fff;">
+                            </a>
+                        </td>
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endfor %}
@@ -378,7 +526,111 @@
 {# ── New Test Run Configuration ── #}
 <form method="POST" id="exec-config-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div class="card">
+
+{# ── PR-3: Run Mode (orthogonal to env & source) ─────────────────────
+   TC-driven runs the existing TC/CL → Playwright pipeline byte-identically.
+   QA walkthrough hands the run to engine/walkthrough_runner.py, which
+   walks the URL autonomously, fires 8 heuristics + axe-core, and
+   produces findings persisted as bugs. The walkthrough section is
+   collapsed by default; expanding it surfaces the tuning knobs the
+   debug endpoint already exposes (max_pages, max_form_fills,
+   device_timeout_ms, axe_enabled, tc_binding). #}
+<div class="card te-runmode-card">
+    <h3 class="card-title">
+        <i data-lucide="route" class="icon-sm"></i>
+        {{ t.get('te_run_mode_title', 'Run Mode') }}
+    </h3>
+    <p class="hint">{{ t.get('te_run_mode_hint',
+        'TC/Checklist-driven runs the items you selected below. QA walkthrough ignores selection and explores the URL autonomously, raising findings for broken images, accessibility issues, dead navigation, and more.') }}</p>
+    <div class="form-row" data-te-run-mode>
+        <label class="radio-card">
+            <input type="radio" name="run_mode" value="tc_driven" checked
+                   data-te-run-mode-input>
+            <span>
+                <i data-lucide="list-checks" class="icon-sm"></i>
+                <strong>{{ t.get('te_mode_tc', 'TC / Checklist-driven') }}</strong>
+                <small>{{ t.get('te_mode_tc_help', 'Run the items you select below (default).') }}</small>
+            </span>
+        </label>
+        <label class="radio-card">
+            <input type="radio" name="run_mode" value="walkthrough"
+                   data-te-run-mode-input>
+            <span>
+                <i data-lucide="compass" class="icon-sm"></i>
+                <strong>{{ t.get('te_mode_walkthrough', 'QA walkthrough') }}</strong>
+                <small>{{ t.get('te_mode_walkthrough_help', 'Autonomous exploration + opportunistic TC matching by URL.') }}</small>
+            </span>
+        </label>
+    </div>
+
+    {# ── Walkthrough options — only relevant when mode=walkthrough.
+       Stays in the DOM so JS can show/hide without re-render; backend
+       reads these inputs regardless. #}
+    <details class="te-walkthrough-panel" data-te-walkthrough-panel>
+        <summary>
+            <i data-lucide="sliders-horizontal" class="icon-sm"></i>
+            {{ t.get('te_wt_options', 'Walkthrough options') }}
+        </summary>
+        <div class="form-grid" style="margin-top:10px;">
+            <div class="form-group">
+                <label for="walkthrough_max_pages">
+                    {{ t.get('te_wt_max_pages', 'Max pages to visit') }}
+                </label>
+                <input type="number" id="walkthrough_max_pages"
+                       name="walkthrough_max_pages"
+                       min="1" max="50" value="6">
+                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_max_pages_hint',
+                    'Including the entry URL. Each page runs the full heuristic battery.') }}</p>
+            </div>
+            <div class="form-group">
+                <label for="walkthrough_max_form_fills">
+                    {{ t.get('te_wt_max_form_fills', 'Max forms to fill') }}
+                </label>
+                <input type="number" id="walkthrough_max_form_fills"
+                       name="walkthrough_max_form_fills"
+                       min="0" max="20" value="5">
+                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_max_form_fills_hint',
+                    'Forms are filled with sample data; they are NOT submitted.') }}</p>
+            </div>
+            <div class="form-group">
+                <label for="walkthrough_device_timeout_ms">
+                    {{ t.get('te_wt_device_timeout', 'Device timeout (ms)') }}
+                </label>
+                <input type="number" id="walkthrough_device_timeout_ms"
+                       name="walkthrough_device_timeout_ms"
+                       min="60000" step="30000" value="480000">
+                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_device_timeout_hint',
+                    'Hard wall-clock kill per device. Default 8 min matches TFWefloLab.') }}</p>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="walkthrough_axe_enabled"
+                           value="1" checked>
+                    {{ t.get('te_wt_axe', 'Run axe-core accessibility scan') }}
+                </label>
+                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_axe_hint',
+                    'Loads axe-core from CDN, then evaluates axe.run() per page. Disable for offline / strict egress environments.') }}</p>
+            </div>
+            <div class="form-group">
+                <label for="walkthrough_tc_binding">
+                    {{ t.get('te_wt_tc_binding', 'Test Case binding') }}
+                </label>
+                <select id="walkthrough_tc_binding" name="walkthrough_tc_binding">
+                    <option value="url_pattern" selected>
+                        {{ t.get('te_wt_binding_url', 'URL pattern (fire TCs whose url_pattern matches the visited page)') }}
+                    </option>
+                    <option value="ignore">
+                        {{ t.get('te_wt_binding_ignore', 'Ignore TCs (heuristics only)') }}
+                    </option>
+                </select>
+                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_tc_binding_hint',
+                    'When binding is on, TCs marked trigger=walkthrough_url_match / always become candidates. Pre-PR-2 TCs default to trigger=manual and are not fired.') }}</p>
+            </div>
+        </div>
+    </details>
+</div>
+
+<div class="card" data-te-source-card>
     <h3 class="card-title">{{ t.get('te_new_run', 'New Test Run') }}</h3>
 
     {# Source selection #}
@@ -402,7 +654,7 @@
 </div>
 
 {# ── Item Selection ── #}
-<div class="card">
+<div class="card" data-te-items-card>
     <h3 class="card-title">{{ t.get('te_select_items', 'Select Items to Test') }}</h3>
     <p class="hint">{{ t.get('te_select_items_hint', 'Select specific items or leave all checked to test everything') }}</p>
     <div class="select-actions">

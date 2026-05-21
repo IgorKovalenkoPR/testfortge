@@ -340,6 +340,52 @@
           adds up. Split into batches of ≤62 or upgrade to a
           Render Background Worker.</li>
     </ul>
+    <h3>QA Walkthrough mode</h3>
+    <p>An orthogonal Run Mode at the top of the form. Choose
+       <strong>QA walkthrough</strong> to skip the TC/CL picker and let
+       the runner explore the page itself. It runs eight heuristic
+       passes plus an accessibility scan on every page it visits:</p>
+    <ul>
+      <li><strong>Broken images</strong> — flags any <code>&lt;img&gt;</code>
+          that loads with <code>naturalWidth=0</code>.</li>
+      <li><strong>Hamburger / dropdown probe</strong> — on mobile and
+          tablet sizes, taps the hamburger and counts nav links before
+          and after; on desktop hovers each dropdown trigger.</li>
+      <li><strong>Search field probe</strong> — opens the search
+          trigger, fills "test", polls for a result/suggestion
+          container.</li>
+      <li><strong>Form auto-fill</strong> — fills every visible input
+          in up to five forms with type-aware sample data. <em>Forms
+          are NOT submitted.</em></li>
+      <li><strong>Footer + social-link sanity</strong> — flags
+          placeholder hosts (<code>example.com</code>, …) and
+          missing <code>rel="noopener"</code> on external links.</li>
+      <li><strong>CTA / tap-target audit</strong> — buttons without
+          a destination, <code>href="#"</code>, sub-24-pixel hit
+          areas.</li>
+      <li><strong>axe-core accessibility</strong> — loads axe over
+          CDN and reports Critical / Serious / Moderate issues with
+          plain-language impact.</li>
+      <li><strong>Landscape rotation</strong> — on mobile/tablet,
+          flips the viewport and re-checks the page.</li>
+    </ul>
+    <p>Each finding becomes a bug in <em>Bug Reports</em> with
+       <code>source:walkthrough</code> and <code>defect:&lt;class&gt;</code>
+       labels. Cross-environment duplicates are collapsed by the
+       walkthrough deduper before bug creation.</p>
+    <p><strong>Opportunistic TC matching:</strong> when
+       <em>TC binding = URL pattern</em>, every test case whose
+       <code>trigger</code> is <code>walkthrough_url_match</code> or
+       <code>always</code> and whose <code>url_pattern</code> matches
+       the current page is fired through the regular TC runner. Pre-PR-2
+       test cases default to <code>trigger=manual</code> and are
+       skipped — set the trigger explicitly when authoring TCs you
+       want the walkthrough to fire.</p>
+    <p><strong>When to use it:</strong> smoke runs on a new build,
+       link-rot checks after content migrations, accessibility
+       baselines, exploratory pre-release sweeps. Not a substitute
+       for scripted regression — heuristics catch defect <em>classes</em>,
+       not your specific business flows.</p>
   </template>
 
   <template data-content="bug-reports">

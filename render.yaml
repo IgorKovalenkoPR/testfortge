@@ -112,6 +112,16 @@ services:
       # Mockups tab will fail.
       - key: ANTHROPIC_MODEL
         sync: false
+      # Sprint 5 PR-3: flip the QA Walkthrough mode ON for the live
+      # deploy. Reading is centralised in
+      # ``engine/walkthrough_runner.py::feature_enabled``; an
+      # unset/empty value would make the runner refuse the mode and
+      # the UI radio would still post but the worker would error.
+      # Setting "1" here exposes the new heuristic battery + findings
+      # subtab to operators on prod. Removing the variable reverts the
+      # build to TC-driven-only without any code change.
+      - key: WALKTHROUGH_MODE_ENABLED
+        value: "1"
       # Optional: turn on Tedgie AI mode by setting an Anthropic API key.
       # Leave empty for rule-based fallback.
       - key: ANTHROPIC_API_KEY

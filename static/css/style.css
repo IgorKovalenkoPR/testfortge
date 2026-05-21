@@ -1912,6 +1912,80 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .te-env-panel[hidden] { display: none; }
 .te-env-card .muted { color: var(--tf-mute, #8C94A6); font-weight: normal; font-size: 12px; }
 
+/* ── PR-3: Run-mode + walkthrough options + findings subtab ─────── */
+.te-runmode-card .radio-card {
+    flex: 1 1 240px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--tf-border, #E5E7EB);
+    border-radius: 10px;
+    cursor: pointer;
+    background: #fff;
+    transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.te-runmode-card .radio-card:has(input:checked) {
+    border-color: var(--tf-coral, #FF865C);
+    background: rgba(255, 134, 92, .07);
+    box-shadow: 0 2px 8px rgba(255, 134, 92, .15);
+}
+.te-runmode-card .radio-card span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.92em;
+}
+.te-runmode-card .radio-card span small {
+    font-weight: 400;
+    color: var(--tf-mute, #8C94A6);
+    font-size: 0.85em;
+}
+.te-walkthrough-panel {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px dashed var(--tf-border, #E5E7EB);
+    border-radius: 8px;
+    background: #fafbfc;
+}
+.te-walkthrough-panel summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+/* Sub-tabs inside a run-details panel (Results | Findings) */
+.te-subtabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--tf-border, #E5E7EB);
+    margin-bottom: 10px;
+}
+.te-subtab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: var(--tf-mute, #6B7280);
+    border-radius: 6px 6px 0 0;
+}
+.te-subtab[aria-selected="true"] {
+    background: #fff;
+    border-color: var(--tf-border, #E5E7EB);
+    color: #0f172a;
+    font-weight: 600;
+    margin-bottom: -1px;
+}
+.te-subtab-panel[hidden] { display: none; }
+
+/* Findings table — reuse status-* badges for severity colouring */
+.findings-table .status-major { background: #fef3c7; color: #92400e; }
+.findings-table .status-critical { background: #fee2e2; color: #991b1b; }
+.findings-table .status-minor { background: #e0e7ff; color: #3730a3; }
+.findings-table .status-trivial { background: #f1f5f9; color: #475569; }
+
 /* ── Active-project picker (Dashboard) ────────────────────────── */
 .project-picker .picker-status {
     margin: 12px 0 16px;
