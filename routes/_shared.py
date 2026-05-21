@@ -86,6 +86,11 @@ def tc_to_dict(tc: TestCase) -> dict:
         "comment": tc.comment, "user_story_id": tc.user_story_id,
         "category": tc.category, "priority": tc.priority, "status": tc.status,
         "testing_type": getattr(tc, "testing_type", "Functional"),
+        # Sprint 5 walkthrough binding (read via getattr so old session
+        # blobs deserialised before these fields existed still round-
+        # trip cleanly).
+        "url_pattern":  getattr(tc, "url_pattern", "") or "",
+        "trigger":      getattr(tc, "trigger", "manual") or "manual",
     }
 
 

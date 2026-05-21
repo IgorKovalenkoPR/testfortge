@@ -776,6 +776,11 @@ def save_test_cases(project_id: str, test_cases: list) -> int:
                 priority=d.get("priority"),
                 status=d.get("status"),
                 testing_type=d.get("testing_type", "Functional"),
+                # Sprint 5: round-trip the walkthrough binding fields.
+                # PR-2 added the columns; this is the save side wiring
+                # so the editor UI's writes actually persist.
+                url_pattern=d.get("url_pattern", "") or "",
+                trigger=d.get("trigger", "manual") or "manual",
             ))
             written += 1
     return written
@@ -785,6 +790,9 @@ _TC_DATACLASS_FIELDS = (
     "id", "section", "section_num", "summary", "preconditions",
     "test_steps", "test_data", "expected_result", "issues", "comment",
     "user_story_id", "category", "priority", "status", "testing_type",
+    # Sprint 5: walkthrough binding metadata. Listed last so callers
+    # that unpack-by-position keep their existing column order.
+    "url_pattern", "trigger",
 )
 
 
