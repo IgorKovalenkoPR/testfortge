@@ -2719,6 +2719,28 @@ def register(app: Flask) -> None:
         pid = ensure_active_project()
         bugs = _hydrate_bugs(pid)
 
+        # Sprint 5 follow-up: filter by bug source. PR #12 started
+        # writing walkthrough findings as bugs with
+        # ``linked_item_type="walkthrough"`` + a ``source:walkthrough``
+        # label; the operator who runs both modes wants to filter the
+        # listing between "what the walkthrough caught" and "what the
+        # TC pack caught" without having to grep labels by eye. The
+        # filter is a single query-string param so the operator can
+        # bookmark / share a filtered URL.
+        source_filter = (request.args.get("source") or "").strip().lower()
+        if source_filter not in ("walkthrough", "manual_tc", ""):
+            source_filter = ""
+        if source_filter:
+            def _is_walkthrough(bug) -> bool:
+                if (getattr(bug, "linked_item_type", "") or "").lower() == "walkthrough":
+                    return True
+                labels = getattr(bug, "labels", None) or []
+                return "source:walkthrough" in [str(lbl).lower() for lbl in labels]
+            if source_filter == "walkthrough":
+                bugs = [b for b in bugs if _is_walkthrough(b)]
+            else:  # manual_tc
+                bugs = [b for b in bugs if not _is_walkthrough(b)]
+
         stats = {
             "total": len(bugs),
             "open": sum(1 for b in bugs if b.status == "Open"),
@@ -2728,7 +2750,8 @@ def register(app: Flask) -> None:
 
         return render_template("bug_reports.html", bugs=bugs, stats=stats,
                                severities=BUG_SEVERITIES, priorities=BUG_PRIORITIES,
-                               statuses=BUG_STATUSES, frequencies=BUG_FREQUENCIES)
+                               statuses=BUG_STATUSES, frequencies=BUG_FREQUENCIES,
+                               source_filter=source_filter)
 
     @app.route("/bugs/bulk", methods=["POST"])
     def bugs_bulk():
