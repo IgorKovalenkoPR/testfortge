@@ -1,10 +1,11 @@
-# TestFortge MCP Server (v1.5 — read + minimal writes)
+# TestFortge MCP Server (v1.6 — read + writes + Tedgie chat)
 
 Local stdio MCP server that exposes TestFortge data — projects, test
 cases, bug reports, execution runs, walkthrough findings — to MCP-aware
-LLM clients (Claude Desktop, Claude Code, etc.). The v1.5 surface adds
+LLM clients (Claude Desktop, Claude Code, etc.). The v1.5 surface added
 two write tools so an agent can file bugs and kick off runs without a
-human at the Flask UI.
+human at the Flask UI; v1.6 adds one chat tool that proxies to Tedgie's
+QA persona.
 
 The server reuses `engine.db` for all DB access, so it sees whatever
 DB the main Flask app would see (local SQLite by default, Postgres if
@@ -52,6 +53,21 @@ queueing.
 `create_bug_report` is project-agnostic: omit `project_id` for a
 Tedgie-style bug that hasn't been bound to a project yet (the
 `bug_report.project_id` column is nullable).
+
+## Chat tool (v1.6)
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `tedgie_ask` | `question` (required), optional `lang` (`en` / `ua`), optional `project_id` (reserved) | `{text, intent, suggestions, follow_up}` — same envelope the Flask `/chat` endpoint returns |
+
+Stateless — every call is a fresh request, no conversation history.
+The MCP client owns the multi-turn loop. If the host has
+`ANTHROPIC_API_KEY` set, Tedgie uses the AI path with prompt-cached
+system blocks (see `engine.chatbot._ai_system_blocks`); otherwise it
+falls back to the rule-based dispatcher.
+
+`project_id` is accepted on the signature but ignored by the current
+persona — kept future-proof for project-aware prompts.
 
 ## Run it manually
 
@@ -172,8 +188,11 @@ The service shares the production Postgres (`DATABASE_URL`), so bugs
 created via MCP appear in `/bug-reports` on the main service and runs
 triggered via MCP show up in the operator's execution-runs list.
 
-## Roadmap (not in v1.5)
+## Roadmap (not in v1.6)
 
-* **Tedgie chat tool** — `tedgie_ask(project_id, question)`. Plumbs
-  through the chatbot's prompt-cached system blocks. Belongs in v3 once
-  the read + write surfaces stabilise.
+* **Project-aware Tedgie prompts** — wire the optional `project_id`
+  arg of `tedgie_ask` into the persona builder so it can reference
+  the project's TC pack / current bug pile.
+* **Conversation persistence** — opt-in `conversation_id` so the
+  server holds the last N turns. Useful for thin clients that can't
+  keep history on their side.

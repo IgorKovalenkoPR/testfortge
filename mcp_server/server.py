@@ -33,6 +33,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
 
+from engine import chatbot
 from engine import db
 from engine import walkthrough_stats
 from engine.automation_paths import STORAGE_ROOT
@@ -471,6 +472,42 @@ def trigger_test_execution(
         "config_path": config_path,
         "log_path": worker_log,
     }
+
+
+# ── Tedgie chat tool ───────────────────────────────────────────────
+
+@mcp.tool()
+def tedgie_ask(
+    question: str,
+    lang: str = "en",
+    project_id: str | None = None,
+) -> dict:
+    """Ask the Tedgie QA assistant a question and get a single reply.
+
+    Stateless — every call is a fresh request. The MCP client owns
+    the conversation history; we do not retain anything between
+    invocations. If the host has ``ANTHROPIC_API_KEY`` set the AI
+    path is used (with the prompt-cached Tedgie persona system blocks
+    from :mod:`engine.chatbot`); otherwise the rule-based dispatcher
+    answers.
+
+    Args:
+        question: Free-form text. Empty / whitespace-only raises.
+        lang: ``en`` or ``ua`` — the Tedgie persona ships both. Other
+            values fall back to ``en`` inside the chatbot.
+        project_id: Reserved for future project-aware prompts. The
+            current chatbot persona is project-agnostic so this value
+            is accepted but does not change the answer yet — kept on
+            the signature so a future PR can wire it without a
+            breaking API change.
+
+    Returns the same dict the Flask ``/chat`` endpoint produces:
+    ``{text, intent, suggestions, follow_up}``.
+    """
+    if not question or not str(question).strip():
+        raise ValueError("tedgie_ask: 'question' is required")
+    _ = project_id  # reserved (see docstring)
+    return chatbot.respond_dict(str(question).strip(), lang or "en")
 
 
 # ── Entry ──────────────────────────────────────────────────────────
