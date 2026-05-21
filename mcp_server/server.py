@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select
 
 from engine import chatbot
@@ -50,7 +51,37 @@ MCP_SESSION_ID = "mcp-server"
 # boots without Flask config loaded.
 MCP_MAX_CONCURRENT_RUNS = 3
 
-mcp = FastMCP("testfortge")
+
+def _build_transport_security() -> TransportSecuritySettings:
+    """Return the DNS-rebinding allowlist for the HTTP transport.
+
+    FastMCP enables DNS-rebinding protection by default and ships an
+    empty ``allowed_hosts`` list, which silently translates to
+    "only ``127.0.0.1`` and ``localhost``". On Render, the Host header
+    is the public hostname (``testfortge-mcp.onrender.com``), so the
+    default rejects every prod request with ``Invalid Host header``
+    BEFORE the bearer-auth middleware gets a chance to validate the
+    token — leaving an MCP client with a cryptic 421 instead of 200.
+
+    Read the allowlist from ``MCP_ALLOWED_HOSTS`` (comma-separated).
+    When unset, fall back to localhost so a stdio dev loop and a local
+    HTTP boot still work without ceremony. The bearer middleware is the
+    real auth boundary; this check is belt-and-suspenders against DNS
+    rebinding (irrelevant against an authenticated API anyway, but
+    upstream defaults the way it does, so we configure it explicitly).
+    """
+    raw = os.environ.get("MCP_ALLOWED_HOSTS", "") or ""
+    hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    if not hosts:
+        hosts = ["127.0.0.1", "localhost",
+                  "127.0.0.1:8765", "localhost:8765"]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+    )
+
+
+mcp = FastMCP("testfortge", transport_security=_build_transport_security())
 
 
 # ── Read tools ─────────────────────────────────────────────────────

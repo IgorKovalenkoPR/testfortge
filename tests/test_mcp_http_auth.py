@@ -124,3 +124,55 @@ class TestBearerAuthMiddleware:
         client = TestClient(app)
         resp = client.get("/mcp")
         assert resp.status_code == 401
+
+
+class TestAllowedHostsConfig:
+    """``MCP_ALLOWED_HOSTS`` populates FastMCP's DNS-rebinding allowlist.
+    Without the right values, the public hostname is rejected with
+    ``Invalid Host header`` before the bearer middleware even sees the
+    request — that's what bit us right after PR #18 shipped on Render.
+    Pin the parser behaviour."""
+
+    def _reload(self):
+        # The settings are read at import time of mcp_server.server, so
+        # we re-import to pick up patched env vars. Each test isolates
+        # itself via monkeypatch.delenv + this reload helper.
+        import importlib
+        from mcp_server import server as srv
+        importlib.reload(srv)
+        return srv
+
+    def test_defaults_to_localhost_only(self, monkeypatch):
+        monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+        srv = self._reload()
+        hosts = srv._build_transport_security().allowed_hosts
+        assert "127.0.0.1" in hosts and "localhost" in hosts
+        # No public hostname leaks into the fallback.
+        assert not any("onrender.com" in h for h in hosts)
+
+    def test_env_var_single_host(self, monkeypatch):
+        monkeypatch.setenv(
+            "MCP_ALLOWED_HOSTS", "testfortge-mcp.onrender.com"
+        )
+        srv = self._reload()
+        hosts = srv._build_transport_security().allowed_hosts
+        assert hosts == ["testfortge-mcp.onrender.com"]
+
+    def test_env_var_comma_separated(self, monkeypatch):
+        monkeypatch.setenv(
+            "MCP_ALLOWED_HOSTS",
+            "testfortge-mcp.onrender.com, localhost ,127.0.0.1:8765",
+        )
+        srv = self._reload()
+        hosts = srv._build_transport_security().allowed_hosts
+        assert hosts == [
+            "testfortge-mcp.onrender.com",
+            "localhost",
+            "127.0.0.1:8765",
+        ]
+
+    def test_empty_env_var_falls_back_to_defaults(self, monkeypatch):
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", "   ,  ,")
+        srv = self._reload()
+        hosts = srv._build_transport_security().allowed_hosts
+        assert "localhost" in hosts
