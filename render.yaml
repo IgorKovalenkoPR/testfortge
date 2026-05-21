@@ -126,3 +126,49 @@ services:
       # Leave empty for rule-based fallback.
       - key: ANTHROPIC_API_KEY
         sync: false
+
+  # ── MCP HTTP service ──────────────────────────────────────────────
+  # Same container image as the Flask app (the Dockerfile installs both
+  # the web reqs and mcp_server/requirements.txt), different start
+  # command: boot the Streamable-HTTP MCP server under uvicorn instead
+  # of the Flask app under gunicorn. Reachable at
+  # ``testfortge-mcp.onrender.com/mcp`` once deployed; MCP clients pass
+  # ``Authorization: Bearer <MCP_BEARER_TOKEN>``.
+  - type: web
+    name: testfortge-mcp
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    # uvicorn binds to $PORT (Render injects it). The HTTP entrypoint
+    # refuses to boot without MCP_BEARER_TOKEN set, so no
+    # accidentally-public deploys.
+    dockerCommand: python -m mcp_server.http_server
+    healthCheckPath: /mcp
+    envVars:
+      # Share the same Postgres as the main service so MCP reads/writes
+      # land in the operator-visible DB.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: testfortge-db
+          property: connectionString
+      # The shared secret MCP clients use in the Authorization header.
+      # Render auto-generates a 32-char random value the first time you
+      # apply this blueprint — copy it from the dashboard into your
+      # client config (Claude Desktop / Claude Code mcpServers entry).
+      - key: MCP_BEARER_TOKEN
+        generateValue: true
+      # Boot uvicorn on the port Render injects. The http_server module
+      # reads PORT first, then MCP_HTTP_PORT, then defaults to 8765.
+      - key: LOG_LEVEL
+        value: INFO
+      # The MCP server connects to Postgres (DATABASE_URL above) so the
+      # SQLite-prod safety check never trips. Leaving FLASK_DEBUG unset
+      # keeps prod behaviour identical to the Flask service.
+      - key: FLASK_DEBUG
+        value: "0"
+      # Walkthrough trigger needs the same gate as the web service so
+      # ``trigger_test_execution(mode="walkthrough")`` reaches a runner
+      # that knows how to handle it.
+      - key: WALKTHROUGH_MODE_ENABLED
+        value: "1"
