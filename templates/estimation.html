@@ -91,13 +91,56 @@
                value="{{ last.max_testing_stretch if last.max_testing_stretch is defined else 1.5 }}">
         <small>{{ t.get('est_max_stretch_hint', 'How much MAX exceeds MIN (default 1.5×).') }}</small>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="team-size-group">
         <label>{{ t.get('est_team_size', 'Team size') }}</label>
-        <input type="number" name="team_size" min="1" max="50" step="1"
-               value="{{ last.team_size or 1 }}">
+        {# Show the system suggestion as a read-only badge by default.
+           When the user clicks "Override" we swap to the editable input
+           so a manual team_size still flows through the form POST. The
+           input's value attribute is pre-filled with the suggestion so
+           a no-op override behaves exactly as picking the suggestion. #}
+        <div id="ts-suggested-view"
+             style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span id="ts-badge"
+                style="display:inline-flex;align-items:center;gap:6px;
+                       padding:6px 12px;background:#fef3c7;color:#92400e;
+                       border:1px solid #fcd34d;border-radius:14px;
+                       font-weight:600;font-size:.9em;">
+            <i data-lucide="lightbulb" style="width:14px;height:14px;"></i>
+            {{ t.get('est_team_suggested', 'Suggested') }}:
+            <strong id="ts-value">{{ last.suggested_team_size or last.team_size or 1 }}</strong>
+          </span>
+          <button type="button" id="ts-override-btn"
+                  style="padding:5px 12px;border:1px solid #cbd5e1;
+                         background:#fff;border-radius:6px;cursor:pointer;
+                         font-size:.85em;color:#475569;">
+            {{ t.get('est_team_override', 'Override') }}
+          </button>
+        </div>
+        <input type="number" name="team_size" id="ts-input"
+               min="1" max="50" step="1"
+               value="{{ last.team_size or last.suggested_team_size or 1 }}"
+               style="display:none;">
         <small>{{ t.get('est_team_size_hint',
-          'Number of testers — feeds Brooks\'s-law communication overhead. Default 1.') }}</small>
+          'TestForTge suggests a headcount from the estimate. Override only if you have a fixed team — it feeds Brooks\'s-law communication overhead.') }}</small>
       </div>
+      <script>
+        // Toggle from "Suggested" badge to a manual input. Vanilla JS so
+        // this works regardless of any bundler/CSP rules. The hidden
+        // input is still submitted on POST — its value attribute is the
+        // suggestion, so a no-op override === picking the suggestion.
+        (function () {
+          var btn = document.getElementById('ts-override-btn');
+          var view = document.getElementById('ts-suggested-view');
+          var inp  = document.getElementById('ts-input');
+          if (!btn || !view || !inp) return;
+          btn.addEventListener('click', function () {
+            view.style.display = 'none';
+            inp.style.display = '';
+            inp.focus();
+            inp.select();
+          });
+        })();
+      </script>
     </div>
 
     <h3 style="margin-top:1.25rem">{{ t.est_source }}</h3>

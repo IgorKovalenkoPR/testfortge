@@ -143,6 +143,12 @@ class EstimationResult:
     # are independent — sqrt(sum of variances). Confidence bands follow
     # the 68-95-99.7 rule for a normal approximation of Beta-PERT.
     team_size: int = 1
+    # System-suggested team size derived from the computed effort and
+    # complexity tier. Shown in the UI as a "Suggested: N" badge — the
+    # user can still Override to a manual value before re-running the
+    # estimation. Default 1 keeps legacy behaviour for callers that
+    # don't recompute it after construction.
+    suggested_team_size: int = 1
     pert_expected: float = 0.0
     pert_sigma: float = 0.0
     band_68_low: float = 0.0
@@ -238,6 +244,32 @@ def compute_features_hours(total_tc: int, minutes_per_tc: int = 5,
 
 def _avg(a: float, b: float) -> float:
     return (a + b) / 2.0
+
+
+def suggest_team_size(total_hours: float, complexity_tier: str = "simple") -> int:
+    """Recommend a tester headcount from the computed effort and tier.
+
+    The heuristic mirrors how a QA Lead sizes a team in practice: small
+    projects get a solo tester, mid-sized projects a pair, and only
+    multi-hundred-hour engagements warrant 3+. Adds +1 for the "complex"
+    tier so payment/security-heavy work isn't shoehorned into the same
+    headcount as a brochure site of identical hour count. Hard-capped
+    at 12 so absurd inputs don't break the UI badge.
+    """
+    h = float(total_hours or 0)
+    if h < 50:
+        base = 1
+    elif h < 200:
+        base = 2
+    elif h < 500:
+        base = 3
+    elif h < 1000:
+        base = 5
+    else:
+        base = 7
+    if complexity_tier == "complex":
+        base += 1
+    return min(base, 12)
 
 
 def compute_estimation(
@@ -367,6 +399,14 @@ def compute_estimation(
     res.one_plat_total_min = res.one_plat_min + res.one_plat_pm_min
     res.one_plat_total_max = res.one_plat_max + res.one_plat_pm_max
     res.one_plat_total_expected = res.one_plat_expected + res.one_plat_pm_expected
+
+    # System suggestion for tester headcount, derived from one-platform
+    # expected hours and the complexity tier. Stored alongside the
+    # user-set team_size so the UI can render "Suggested: N" while still
+    # accepting an override on the next form submit.
+    res.suggested_team_size = suggest_team_size(
+        res.one_plat_total_expected, res.complexity_tier,
+    )
 
     # Full Compatibility: SUM(rows 11..17) + compatibility * N
     n = res.additional_platforms

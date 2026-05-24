@@ -878,13 +878,17 @@ def _generate_per_field_cases(analysis, *, next_section: int,
 
 
 def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
-                        raw_requirements: list[dict] | None = None) -> list[TestCase]:
+                        raw_requirements: list[dict] | None = None,
+                        crawl_errors_out: list | None = None) -> list[TestCase]:
     """Generate professional test cases using QA persona.
 
     The Senior QA Engineer persona analyzes input to determine testing areas
     and generates domain-specific test cases from the ISTQB knowledge base,
     then supplements with story-specific cases for any requirements not
     covered by the knowledge base.
+
+    When ``crawl_errors_out`` is provided, any URL-crawler partial failures
+    are appended to it so the calling route can surface them via flash().
     """
     from .qa_persona import (analyze_input, generate_professional_test_cases,
                              is_instruction)
@@ -898,6 +902,8 @@ def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
     reqs = [r for r in reqs if not is_instruction(r.get("text", ""))]
 
     analysis = analyze_input(reqs, custom_prompt)
+    if crawl_errors_out is not None and analysis.crawl_errors:
+        crawl_errors_out.extend(analysis.crawl_errors)
     pro_templates = generate_professional_test_cases(analysis, stories, custom_prompt)
 
     # Convert TCTemplate → TestCase with TestFort IDs
@@ -1007,11 +1013,15 @@ def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
 
 
 def generate_checklist(stories: list[UserStory], custom_prompt: str = "",
-                       raw_requirements: list[dict] | None = None) -> list[ChecklistItem]:
+                       raw_requirements: list[dict] | None = None,
+                       crawl_errors_out: list | None = None) -> list[ChecklistItem]:
     """Generate a professional low-level checklist using QA persona.
 
     The Senior QA Engineer persona analyzes input to determine testing areas
     and generates domain-specific checks from the ISTQB knowledge base.
+
+    When ``crawl_errors_out`` is provided, any URL-crawler partial failures
+    are appended to it so the calling route can surface them via flash().
     """
     from .qa_persona import analyze_input, generate_professional_checklist, is_instruction
 
@@ -1024,6 +1034,8 @@ def generate_checklist(stories: list[UserStory], custom_prompt: str = "",
     reqs = [r for r in reqs if not is_instruction(r.get("text", ""))]
 
     analysis = analyze_input(reqs, custom_prompt)
+    if crawl_errors_out is not None and analysis.crawl_errors:
+        crawl_errors_out.extend(analysis.crawl_errors)
     pro_items = generate_professional_checklist(analysis, custom_prompt)
 
     # Convert to ChecklistItem with TestFort IDs

@@ -453,6 +453,16 @@ def register(app: Flask) -> None:
             log.warning("history calibration skipped: %s", exc)
 
         session["estimation_result"] = out.result_dict
+        # Mirror the system-suggested team size back into the form
+        # snapshot so the next GET render shows the badge with the
+        # fresh recommendation rather than the user's last manual
+        # value. The hidden override input is still pre-filled with
+        # the suggestion, so a no-op submit keeps it stable.
+        sug = out.result_dict.get("suggested_team_size")
+        if sug:
+            form_snapshot = session.get("estimation_form") or {}
+            form_snapshot["suggested_team_size"] = int(sug)
+            session["estimation_form"] = form_snapshot
         if out.extracted_text:
             session["estimation_extracted_text"] = out.extracted_text
         _persist_estimation(
