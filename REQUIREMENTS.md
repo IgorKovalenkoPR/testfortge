@@ -92,7 +92,7 @@
 Підтримувані мови: **en** (default), **ua**. Перемикач через `?lang=en|ua` — зберігається у сесії. Некоректні коди → fallback до `en`.
 
 ### 1.12. Допоміжні сторінки (docs / static)
-`/guide`, `/techniques`, `/tools`, `/requirements`, `/test_plan`, `/recommendations`, `/status_report`, `/test_metrics` — статичні/шаблонні освітні сторінки з методологіями QA.
+`/guide`, `/techniques`, `/tools`, `/requirements`, `/recommendations`, `/status_report`, `/test_metrics` — статичні/шаблонні освітні сторінки з методологіями QA.
 
 ---
 
