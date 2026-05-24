@@ -47,6 +47,15 @@
         <small style="color:#64748b;">ISTQB-shaped TC pack from requirements</small>
     </button>
 
+    <button type="button" class="guide-card" data-section="test-plan"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">📄</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Plan</strong>
+        <small style="color:#64748b;">IEEE-829 13-section plan from URL · files · text</small>
+    </button>
+
     <button type="button" class="guide-card" data-section="checklist"
             style="text-align:left;padding:18px;border:1px solid #e2e8f0;
                    background:white;border-radius:8px;cursor:pointer;
@@ -195,6 +204,15 @@
           drop the extracted feature list into the Test Cases
           generator.</li>
     </ul>
+    <h3>Suggested team size</h3>
+    <p>TestForTge picks a tester headcount for you based on the
+       one-platform expected hours and complexity tier. You see it
+       as a yellow <em>Suggested: N</em> badge above the Team-size
+       coefficient. Click <strong>Override</strong> only when you
+       have a fixed staffing constraint — the suggestion is what
+       drives Brooks's-law communication overhead, and a manual
+       override past 5 can inflate the estimate without reflecting
+       reality.</p>
     <h3>Common mistakes</h3>
     <ul>
       <li>Switching tabs but leaving content in the previous tab
@@ -206,6 +224,58 @@
       <li>Figma URLs without <code>FIGMA_PAT</code> — only the
           cover image is fetched; set the env var for per-frame
           renders.</li>
+      <li>Overriding Team size on every run — the suggestion is
+          deterministic given the same estimate, so an override
+          you keep clicking is a signal to fix the input, not
+          the headcount.</li>
+    </ul>
+  </template>
+
+  <template data-content="test-plan">
+    <h3>What it is</h3>
+    <p>A 13-section IEEE-829 / TestFort-shaped Test Plan generated
+       from your project context plus any input you provide:
+       requirements text, an attached file, or a live URL. The
+       Features and Scope sections adapt to the site / file you
+       give it — empty input still produces a valid domain-default
+       scaffold so you can use it for kickoff before TCs exist.</p>
+    <h3>Inputs</h3>
+    <ul>
+      <li><strong>URL</strong> — the crawler walks the site, and
+          its detected features + navigation feed Section 4.1
+          (Scope) and Section 6 (Features to be tested).</li>
+      <li><strong>Files / text</strong> — bullet-style lines from
+          .docx / .pdf / .xlsx / .csv or the textarea are converted
+          to Features rows. Lines that look like URLs are routed
+          to the crawler, not the bullet list.</li>
+      <li><strong>Empty</strong> — the generator falls back to
+          domain-default modules (auth / cart / checkout / etc.
+          for ecommerce, posts / search / etc. for a content site)
+          so you always get a complete plan.</li>
+      <li><strong>Existing TC sections</strong> — if Test Cases
+          have already been generated for this project, their
+          section names auto-populate as features. Generate the
+          plan <em>after</em> Test Cases when possible.</li>
+    </ul>
+    <h3>Output</h3>
+    <ul>
+      <li>13 sections: Identifier · References · Introduction ·
+          Scope · Assumptions/Risks · Features · Features NOT to
+          be tested · Test Approach · Pass/Fail Criteria ·
+          Environmental Needs · Staffing · Milestones ·
+          Approvals.</li>
+      <li>Export to Markdown — drop into Confluence / Notion /
+          a stakeholder doc as-is.</li>
+    </ul>
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Submitting a URL the crawler can't reach (SSRF block,
+          404, slow upstream) — a yellow warning banner explains;
+          the plan still renders with whatever the crawler got
+          and the domain defaults.</li>
+      <li>Skipping TCs first — the Features section reads better
+          when it pulls from your real TC sections instead of
+          domain defaults.</li>
     </ul>
   </template>
 
@@ -228,6 +298,28 @@
       <li>Review. Cases group by section. Use Export for
           .xlsx / .csv / .docx / Jira-XML.</li>
     </ol>
+    <h3>URL-based generation</h3>
+    <p>Paste a URL on its own line — the crawler walks the site,
+       detects forms / auth / navigation, and the generator
+       produces site-specific cases instead of generic web
+       templates. Partial crawler failures (a 503 page, an
+       SSRF-blocked host) flash a yellow banner; generation
+       continues on whatever pages succeeded plus generic
+       ISTQB-knowledge fallback.</p>
+    <h3>TC editor — walkthrough binding</h3>
+    <p>Each card on /test-cases has an inline editor for two
+       fields that drive the walkthrough mode in Test Execution:</p>
+    <ul>
+      <li><strong>url_pattern</strong> — a glob like
+          <code>/checkout/*</code>. When walkthrough mode is on,
+          this TC fires on every page whose URL matches the
+          pattern, without you wiring it manually.</li>
+      <li><strong>trigger</strong> — when the TC should run:
+          <code>manual</code> (default; runs only in tc_driven
+          mode), <code>walkthrough_url_match</code> (fires only
+          where the pattern matches), or <code>always</code> (runs
+          on every visited page in a walkthrough run).</li>
+    </ul>
     <h3>Common mistakes</h3>
     <ul>
       <li>Vague input → vague output. Give the generator
@@ -236,6 +328,11 @@
       <li>Re-running the same input expecting identical output —
           LLM generation is non-deterministic by design. Seed
           with the custom prompt for reproducibility.</li>
+      <li>Submitting only a URL and expecting many specific
+          cases — supplement with a sentence or two of context
+          ("focus on checkout edge cases", "negative scenarios
+          for the contact form") so the crawler's findings get
+          shaped into the right test scope.</li>
     </ul>
   </template>
 
@@ -695,6 +792,15 @@
       <li><strong>Ask Tedgie when you're stuck.</strong> The
           ISTQB-trained assistant knows the test-design
           techniques and the app's diag flow.</li>
+      <li><strong>Generate Test Cases before Test Plan.</strong>
+          The plan's Features section pulls from real TC
+          sections when they exist — otherwise it falls back to
+          domain defaults. Same input, more specific plan.</li>
+      <li><strong>Override Team-size sparingly.</strong> The
+          system suggestion is a function of your estimate; a
+          manual override that you repeat every run is a hint
+          to fix the estimate's complexity tier or hour budget,
+          not the headcount.</li>
     </ul>
   </template>
 

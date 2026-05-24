@@ -16,6 +16,9 @@ prompt is already capped to 1000 chars by :func:`parse_page_input`
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import re
+import time
 
 from flask import (Flask, Response, flash, g, redirect, render_template,
                    request, session, url_for)
@@ -28,6 +31,14 @@ from engine.test_plan_generator import (TestPlan, TestPlanSection,
                                         generate_test_plan)
 
 from ._shared import ensure_active_project, parse_page_input
+
+# In-memory crawl cache keyed by (project_id, url). Test Plan re-renders
+# on every POST; without this, hitting Generate twice in 30 s re-crawls
+# the same site (10-30 s of latency for nothing). TTL 5 min — short
+# enough that operator-driven re-crawls still happen.
+_CRAWL_CACHE: dict[str, tuple[float, object]] = {}
+_CRAWL_CACHE_TTL = 300.0
+_URL_LINE = re.compile(r"^https?://", re.IGNORECASE)
 
 _log = get_logger(__name__)
 
@@ -60,6 +71,30 @@ def _dict_to_plan(data: dict | None) -> TestPlan | None:
         date=data.get("date", ""),
         sections=sections,
     )
+
+
+def _crawl_cached(project_id: str, url: str):
+    """Crawl ``url`` and cache the SiteAnalysis per project for ~5 min.
+
+    Returns ``None`` on any crawler exception — Test Plan should never
+    500 because of a network hiccup; instead the generator falls back
+    to the domain-default scaffold and the caller flashes a warning.
+    """
+    if not url:
+        return None
+    key = hashlib.md5(f"{project_id}:{url}".encode("utf-8")).hexdigest()
+    now = time.time()
+    hit = _CRAWL_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        from engine.site_crawler import crawl_site
+        analysis = crawl_site(url)
+    except Exception as exc:
+        _log.warning("test plan: crawl_site(%s) failed: %s", url, exc)
+        return None
+    _CRAWL_CACHE[key] = (now + _CRAWL_CACHE_TTL, analysis)
+    return analysis
 
 
 def _project_features(project_id: str) -> list[str]:
@@ -111,17 +146,41 @@ def register(app: Flask) -> None:
         setup = session.get("project_setup") or {}
 
         if request.method == "POST":
-            # ``custom_prompt`` is the only field the generator actually
-            # consumes from the form; raw_lines / errors are ignored
-            # here, but we still call parse_page_input so the 1000-char
-            # cap (Sprint 4 task 4.4) is applied identically to the
-            # other generation endpoints.
-            _raw, _errors, custom_prompt = parse_page_input()
+            # Pull the full input block so we can feed URLs / file
+            # content / text bullets into the generator. Empty input is
+            # still valid — the generator falls back to the domain-
+            # default scaffold so kickoff plans stay possible.
+            raw_lines, _errors, custom_prompt = parse_page_input()
+
+            # Detect a URL among the raw lines (text input + file
+            # content are merged here). First match wins; the crawler
+            # follows internal links on its own.
+            url = next(
+                (ln.strip() for ln in raw_lines if _URL_LINE.match(ln or "")),
+                None,
+            )
+            site_analysis = _crawl_cached(pid, url) if url else None
+            if site_analysis is not None:
+                errs = list(getattr(site_analysis, "crawl_errors", []) or [])
+                if errs:
+                    flash(
+                        g.t.get(
+                            "crawl_partial",
+                            "Some pages could not be crawled — plan "
+                            "generated on available data: "
+                        ) + "; ".join(errs[:3]),
+                        "warning",
+                    )
 
             ctx = _build_context(setup, name_fallback=pid)
             features = _project_features(pid)
-            plan = generate_test_plan(ctx, features=features,
-                                      custom_prompt=custom_prompt)
+            plan = generate_test_plan(
+                ctx,
+                features=features,
+                custom_prompt=custom_prompt,
+                raw_lines=raw_lines or None,
+                site_analysis=site_analysis,
+            )
             session["test_plan_data"] = _plan_to_dict(plan)
             session.modified = True
             flash(

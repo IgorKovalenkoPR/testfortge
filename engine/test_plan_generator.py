@@ -41,8 +41,19 @@ class TestPlan:
 
 
 def generate_test_plan(ctx: ProjectContext, features: list[str] = None,
-                       custom_prompt: str = "") -> TestPlan:
-    """Generate a full Test Plan based on project context and TestFort template."""
+                       custom_prompt: str = "",
+                       raw_lines: list[str] | None = None,
+                       file_texts: list[str] | None = None,
+                       site_analysis=None) -> TestPlan:
+    """Generate a full Test Plan based on project context and TestFort template.
+
+    When ``raw_lines`` / ``file_texts`` / ``site_analysis`` are supplied
+    (e.g. by ``routes/test_plan.py`` after parsing the input block) the
+    Features (Section 6) and In-Scope (Section 4.1) lists are enriched
+    with site-specific data instead of falling back to domain defaults.
+    All three parameters are optional — when ``None`` the generator
+    behaves exactly as before (backward-compat with existing callers).
+    """
     if features is None:
         features = []
 
@@ -111,6 +122,32 @@ def generate_test_plan(ctx: ProjectContext, features: list[str] = None,
         f"Quality requirements and fit metrics of the {sys_name} system.",
         f"End-to-end testing and testing of interfaces of all systems that interact with the {sys_name} system.",
     ]
+
+    # Enrichment from URL crawl — surface concrete navigation/forms so
+    # the In-Scope section reflects the actual site rather than reading
+    # like a generic template.
+    if site_analysis is not None:
+        nav_items = list(getattr(site_analysis, "nav_items", []) or [])[:8]
+        if nav_items:
+            in_scope_items.append(
+                "Navigation flows covering: " + ", ".join(nav_items)
+            )
+        # Collect form names across all crawled pages
+        form_names: list[str] = []
+        for page in getattr(site_analysis, "pages", []) or []:
+            for form in getattr(page, "forms", None) or []:
+                fields_desc = ", ".join(
+                    (f.get("name") or f.get("placeholder")
+                     or f.get("type", "")).strip()
+                    for f in form.get("fields", [])
+                    if f.get("type") not in ("hidden", "submit", "button")
+                )
+                if fields_desc:
+                    form_names.append(fields_desc)
+        if form_names:
+            in_scope_items.append(
+                "Form validation across: " + "; ".join(form_names[:5])
+            )
     out_scope_items = [
         f"Functional requirements testing for systems outside {sys_name} system.",
         "Testing of Business SOPs, disaster recovery, and Business Continuity Plan.",
@@ -145,7 +182,58 @@ def generate_test_plan(ctx: ProjectContext, features: list[str] = None,
     ))
 
     # ── Section 6: Features to be Tested ──
-    features_list = features if features else [m["module"] for m in domain_info.get("critical_modules", [])[:8]]
+    # Build features from the strongest source available, in priority
+    # order: explicit features list (from existing TCs) → crawler-detected
+    # features → bullet lines from text input → uploaded-file bullets →
+    # domain defaults. Each source contributes uniquely; we de-dupe while
+    # preserving order so domain modules don't crowd out site specifics.
+    features_list: list[str] = []
+    seen: set[str] = set()
+
+    def _add(item: str, tag: str = ""):
+        item = (item or "").strip()
+        if not item:
+            return
+        key = item.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        features_list.append(f"{item} {tag}".strip() if tag else item)
+
+    for f in features or []:
+        _add(f)
+
+    if site_analysis is not None:
+        for f in getattr(site_analysis, "features_detected", []) or []:
+            _add(f, "(from URL crawl)")
+        for nav in (getattr(site_analysis, "nav_items", []) or [])[:6]:
+            _add(nav, "(from URL crawl)")
+
+    if raw_lines:
+        for ln in raw_lines:
+            ln_stripped = (ln or "").strip(" \t-*•")
+            if not ln_stripped or ln_stripped.startswith("http"):
+                continue
+            if len(features_list) >= 20:
+                break
+            _add(ln_stripped[:120], "(from input)")
+
+    if file_texts:
+        for txt in file_texts:
+            for raw in (txt or "").splitlines():
+                line_stripped = raw.strip(" \t-*•")
+                if not line_stripped or len(line_stripped) < 4:
+                    continue
+                if len(features_list) >= 20:
+                    break
+                _add(line_stripped[:120], "(from attachment)")
+            if len(features_list) >= 20:
+                break
+
+    if not features_list:
+        features_list = [m["module"]
+                         for m in domain_info.get("critical_modules", [])[:8]]
+
     plan.sections.append(TestPlanSection(
         number="6",
         title="Features to be Tested",

@@ -62,6 +62,12 @@ class AnalysisResult:
     # Per-page crawler data — drives site-specific test cases.
     site_pages: list[dict] = field(default_factory=list)
     site_type: str = "generic"
+    # Crawler partial-failure messages bubbled up so routes can flash a
+    # warning banner instead of silently degrading to generic generation.
+    crawl_errors: list[str] = field(default_factory=list)
+    # Crawler partial-failure messages bubbled up so routes can flash a
+    # warning banner instead of silently degrading to generic generation.
+    crawl_errors: list[str] = field(default_factory=list)
 
 
 _URL_RE = re.compile(
@@ -152,6 +158,9 @@ def analyze_input(requirements: list[dict],
             site_analysis = crawl_site(result.url)
             result.features = list(site_analysis.features_detected)
             result.site_type = site_analysis.site_type
+            # Bubble crawler partial-failure messages up to the route layer.
+            if site_analysis.crawl_errors:
+                result.crawl_errors.extend(site_analysis.crawl_errors)
             for p in site_analysis.pages:
                 if p.error:
                     continue
@@ -201,8 +210,10 @@ def analyze_input(requirements: list[dict],
                     parts.append(f"Nav: {', '.join(page.nav_links[:10])}")
                 if parts:
                     requirements.append({"text": " | ".join(parts)})
-        except Exception:
-            pass
+        except Exception as exc:
+            # Record but do not raise — generation continues on whatever
+            # data we already have (generic templates if site_pages empty).
+            result.crawl_errors.append(f"crawler exception: {exc}")
 
     if result.url:
         try:

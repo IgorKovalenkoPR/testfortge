@@ -214,8 +214,10 @@ def register(app: Flask) -> None:
                 )
                 stories = (generate_user_stories(parsed, custom_prompt)
                            if parsed else [])
+                crawl_errors: list[str] = []
                 tcl = generate_test_cases(stories, custom_prompt,
-                                          raw_requirements=raw_for_persona)
+                                          raw_requirements=raw_for_persona,
+                                          crawl_errors_out=crawl_errors)
                 trc = generate_traceability(stories, tcl) if tcl else []
                 tcd = [tc_to_dict(tc) for tc in tcl]
                 if pid and tcd:
@@ -224,7 +226,8 @@ def register(app: Flask) -> None:
                 return {"tc_dicts": tcd,
                         "stories": [story_to_dict(s) for s in stories],
                         "raw_requirements": raw_for_persona,
-                        "trace": trc}
+                        "trace": trc,
+                        "crawl_errors": crawl_errors}
 
             sid = get_session_id(session)
             # Per-session concurrency cap. Sprint 1 Task 5: a runaway tab
@@ -280,6 +283,20 @@ def register(app: Flask) -> None:
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             session["traceability_data"] = r.get("trace", [])
+
+            # Surface partial crawler failures so the user knows why some
+            # URL-derived test cases might be missing. Generation already
+            # fell back to generic ISTQB knowledge for the failed pages.
+            _crawl_errors = r.get("crawl_errors") or []
+            if _crawl_errors:
+                flash(
+                    g.t.get(
+                        "crawl_partial",
+                        "Some pages could not be crawled — generation "
+                        "continued on available data: "
+                    ) + "; ".join(_crawl_errors[:3]),
+                    "warning",
+                )
 
             tc_list = reconstruct_test_cases(session["test_cases_data"])
             trace = session["traceability_data"]
@@ -395,15 +412,18 @@ def register(app: Flask) -> None:
                 )
                 stories = (generate_user_stories(parsed, custom_prompt)
                            if parsed else [])
+                crawl_errors: list[str] = []
                 cll = generate_checklist(stories, custom_prompt,
-                                         raw_requirements=raw_for_persona)
+                                         raw_requirements=raw_for_persona,
+                                         crawl_errors_out=crawl_errors)
                 cld = [cl_to_dict(c) for c in cll]
                 if pid and cld:
                     try: _db.save_checklist(pid, cld)
                     except Exception: pass
                 return {"cl_dicts": cld,
                         "stories": [story_to_dict(s) for s in stories],
-                        "raw_requirements": raw_for_persona}
+                        "raw_requirements": raw_for_persona,
+                        "crawl_errors": crawl_errors}
 
             sid = get_session_id(session)
             # Per-session concurrency cap — same rationale as the tc_gen
@@ -450,6 +470,18 @@ def register(app: Flask) -> None:
             session["checklist_data"] = r.get("cl_dicts", [])
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
+
+            # Surface partial crawler failures — same logic as /test-cases.
+            _crawl_errors = r.get("crawl_errors") or []
+            if _crawl_errors:
+                flash(
+                    g.t.get(
+                        "crawl_partial",
+                        "Some pages could not be crawled — generation "
+                        "continued on available data: "
+                    ) + "; ".join(_crawl_errors[:3]),
+                    "warning",
+                )
 
             cl_list = reconstruct_checklist(session["checklist_data"])
             if not cl_list:
