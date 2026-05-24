@@ -147,7 +147,6 @@
                 ("user_stories", t.mod_user_stories, t.mod_user_stories_desc),
                 ("test_cases", t.mod_test_cases, t.mod_test_cases_desc),
                 ("checklists", t.mod_checklists, t.mod_checklists_desc),
-                ("test_plan", t.mod_test_plan, t.mod_test_plan_desc),
                 ("status_report", t.mod_status_report, t.mod_status_report_desc),
                 ("test_metrics", t.mod_test_metrics, t.mod_test_metrics_desc),
                 ("techniques", t.mod_techniques, t.mod_techniques_desc),
@@ -156,7 +155,7 @@
                 ("nocode", t.mod_nocode, t.mod_nocode_desc),
                 ("focus_areas", t.mod_focus_areas, t.mod_focus_areas_desc),
             ] %}
-            {% set enabled = setup.get('enabled_modules', ['user_stories','test_cases','checklists','test_plan','status_report','test_metrics','techniques','testing_types','tools','nocode','focus_areas']) %}
+            {% set enabled = setup.get('enabled_modules', ['user_stories','test_cases','checklists','status_report','test_metrics','techniques','testing_types','tools','nocode','focus_areas']) %}
             {% for key, name, desc in modules %}
             <label class="module-card">
                 <input type="checkbox" name="enabled_modules" value="{{ key }}"

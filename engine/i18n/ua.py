@@ -6,7 +6,6 @@ TRANSLATIONS = {
     "nav_setup": "Налаштування проєкту",
     "nav_requirements": "Вимоги",
     "nav_user_stories": "User Stories",
-    "nav_test_plan": "Тест-план",
     "nav_test_cases": "Тест-кейси",
     "nav_checklist": "Чек-лiст",
     "nav_techniques": "Техніки",
@@ -178,11 +177,6 @@ TRANSLATIONS = {
     "us_so_that": "щоб",
     "us_acceptance_criteria": "Критерії прийняття",
 
-    # Тест-план
-    "test_plan_title": "Тест-план",
-    "test_plan_subtitle": "Тест-план у стилі TestFort з 13 секціями",
-    "tp_table_of_contents": "Зміст",
-
     # Тест-кейси
     "tc_title": "Тест-кейси",
     "tc_subtitle": "Тест-кейси у форматі TestFort згруповані по секціям",
@@ -329,8 +323,6 @@ TRANSLATIONS = {
     "mod_test_cases_desc": "Генерація детальних тест-кейсів з кроками (формат TestFort)",
     "mod_checklists": "User Stories → Чек-лісти",
     "mod_checklists_desc": "Компактні чек-лісти для швидкого тестування",
-    "mod_test_plan": "Тест-план",
-    "mod_test_plan_desc": "Тест-план з 13 секцій (шаблон TestFort/IEEE-829)",
     "mod_status_report": "Звіт про статус",
     "mod_status_report_desc": "Щоденні/щотижневі звіти про тестування",
     "mod_test_metrics": "Тестові метрики",

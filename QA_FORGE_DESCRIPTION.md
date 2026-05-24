@@ -66,7 +66,6 @@
 ```
 
 **Key Principle:** Every feature works independently. You can:
-- Generate a Test Plan without User Stories
 - Generate Test Cases from pasted User Stories (skip Requirements)
 - View Techniques/Recommendations without any project data
 - Export at any stage
@@ -92,7 +91,7 @@
 - **Target Markets** — EU, US, UA (affects applicable standards like GDPR, PCI DSS)
 - **Budget** — Free Only, Low, Medium, Enterprise (filters tool recommendations)
 - **Release Frequency** — daily, weekly, biweekly, monthly, quarterly
-- **Modules** — 11 toggleable modules: user_stories, test_cases, checklist, test_plan, status_report, test_metrics, techniques, recommendations, tools, guide, export
+- **Modules** — 10 toggleable modules: user_stories, test_cases, checklist, status_report, test_metrics, techniques, recommendations, tools, guide, export
 
 All of the above feeds into the **ProjectContext** object, which is used by the Advisor engine to personalize recommendations.
 
@@ -201,32 +200,7 @@ A compact testing checklist for faster execution:
 
 **Section Prefixes:** AUTH, CRT, VIEW, UPD, DEL, SRCH, PAY, UPL, EXP, NTF, SEC, PERF, API, NAV, PROF, GEN
 
-### 4.7 Test Plan (`/test-plan`) — TestFort 13-Section Template
-Full test plan following IEEE-829 / TestFort standard:
-
-| # | Section | Content |
-|---|---------|---------|
-| 1 | Test Plan Identifier | Auto-generated: {ProjectName}_v1.0_{date} |
-| 2 | References | Project Plan, Requirements Specs (placeholder links) |
-| 3 | Introduction | Objectives + Team Members table (PM, QA Lead, QA roles/responsibilities) |
-| 4 | Scope | In Scope (from domain modules), Out of Scope |
-| 5 | Assumptions / Risks | Risk Register table (3 risks with severity, triggers, mitigation) |
-| 6 | Features to be Tested | From User Stories or domain critical modules |
-| 7 | Features NOT to be Tested | Placeholder for manual exclusion |
-| 8 | Test Approach (Strategy) | QA Role, Testing Types (from domain), Bug Severity table (5 levels), Automation note |
-| 9 | Pass/Fail Criteria | Table: Function/GUI/Configuration testing criteria |
-| 10 | Environmental Needs | From platform must-test items (browsers, devices, tools) |
-| 11 | Staffing & Training | Training areas for the testing team |
-| 12 | Milestones / Deliverables | Schedule table + Deliverables table |
-| 13 | Approvals | Signature lines (PO, Dev Management, PM) |
-
-**UI Features:**
-- Table of Contents with anchor links
-- Custom prompt for regeneration
-- Tables properly rendered with headers
-- Subsections with left-border styling
-
-### 4.8 Status Report (`/status-report`) — TestFort Format
+### 4.7 Status Report (`/status-report`) — TestFort Format
 Daily/weekly testing status report:
 
 **Input Form:**
@@ -440,7 +414,6 @@ F:/Claude_AI_Project/
 |   |-- knowledge_base.py          # 7 data dictionaries
 |   |-- status_report_generator.py # Status report builder
 |   |-- test_metrics_generator.py  # Metrics tables builder
-|   |-- test_plan_generator.py     # 13-section test plan
 |   |-- testcase_generator.py      # Test case + checklist generator
 |   |-- user_story_generator.py    # Requirements -> User Stories
 |-- templates/
@@ -452,7 +425,6 @@ F:/Claude_AI_Project/
 |   |-- input_stories.html         # Direct story input
 |   |-- test_cases.html            # TestFort test cases
 |   |-- checklist.html             # TestFort checklist
-|   |-- test_plan.html             # 13-section test plan
 |   |-- status_report.html         # Status report form + output
 |   |-- test_metrics.html          # Metrics tables (3 tabs)
 |   |-- techniques.html            # Test design techniques
@@ -488,12 +460,11 @@ http://localhost:5000
 1. **Parse requirements** from 10+ file formats and convert to structured User Stories
 2. **Generate test cases** with TestFort IDs (SC1_001), grouped by section, covering positive/negative/edge/security scenarios
 3. **Generate checklists** with section-prefixed IDs (AUTH_001, PAY_002) for rapid execution
-4. **Create a 13-section test plan** following IEEE-829 / TestFort template
-5. **Build status reports** in TestFort daily/weekly format
-6. **Generate test metrics** tables (coverage, execution, issues breakdown)
-7. **Recommend test design techniques** based on story keywords (ISTQB-aligned)
-8. **Recommend testing types** based on domain and platform
-9. **Recommend tools** filtered by budget and platform
+4. **Build status reports** in TestFort daily/weekly format
+5. **Generate test metrics** tables (coverage, execution, issues breakdown)
+6. **Recommend test design techniques** based on story keywords (ISTQB-aligned)
+7. **Recommend testing types** based on domain and platform
+8. **Recommend tools** filtered by budget and platform
 10. **Recommend standards** based on domain, markets, and features
 11. **Export documentation** in Markdown, HTML, CSV, and formatted Excel
 12. **Track test status** with interactive dropdowns on test cases and checklist

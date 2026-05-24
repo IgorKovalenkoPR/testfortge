@@ -6,7 +6,6 @@ TRANSLATIONS = {
     "nav_setup": "Project Setup",
     "nav_requirements": "Requirements",
     "nav_user_stories": "User Stories",
-    "nav_test_plan": "Test Plan",
     "nav_test_cases": "Test Cases",
     "nav_checklist": "Checklist",
     "nav_techniques": "Techniques",
@@ -178,11 +177,6 @@ TRANSLATIONS = {
     "us_so_that": "so that",
     "us_acceptance_criteria": "Acceptance Criteria",
 
-    # Test Plan
-    "test_plan_title": "Test Plan",
-    "test_plan_subtitle": "TestFort-style test plan with 13 sections",
-    "tp_table_of_contents": "Table of Contents",
-
     # Test Cases
     "tc_title": "Test Cases",
     "tc_subtitle": "TestFort-format test cases grouped by sections",
@@ -329,8 +323,6 @@ TRANSLATIONS = {
     "mod_test_cases_desc": "Generate detailed test cases with steps (TestFort format)",
     "mod_checklists": "User Stories → Checklists",
     "mod_checklists_desc": "Compact checklists for quick testing",
-    "mod_test_plan": "Test Plan",
-    "mod_test_plan_desc": "13-section test plan (TestFort/IEEE-829 template)",
     "mod_status_report": "Status Report",
     "mod_status_report_desc": "Daily/weekly testing status reports",
     "mod_test_metrics": "Test Metrics",
