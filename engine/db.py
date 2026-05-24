@@ -313,6 +313,8 @@ class Project(Base):
                                     cascade="all, delete-orphan", passive_deletes=True)
     tedgie_submissions = relationship("TedgieSubmission", back_populates="project",
                                       cascade="all, delete-orphan", passive_deletes=True)
+    site_profiles = relationship("SiteProfile", back_populates="project",
+                                  cascade="all, delete-orphan", passive_deletes=True)
 
 
 class TestCase(Base):
@@ -495,6 +497,29 @@ class TedgieSubmission(Base):
         DateTime(timezone=True), default=_utcnow, index=True)
 
     project = relationship("Project", back_populates="tedgie_submissions")
+
+
+class SiteProfile(Base):
+    """Stage-2 site-aware generation: per-(project, url) recon result.
+
+    Cached so the second Generate-from-URL hit on the same target does
+    not re-spend an LLM call. The same row holds the strategy matrix
+    returned by the Strategy Agent — both blobs are JSON so the schema
+    survives prompt-shape iteration without a migration.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    profile: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    strategy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    project = relationship("Project", back_populates="site_profiles")
 
 
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
@@ -1236,6 +1261,62 @@ def list_tedgie_submissions(project_id: str | None = None,
         return [_row_to_dict(r) for r in rows]
 
 
+# ── Site profiles (Stage 2: site-aware generation) ─────────────────
+
+def save_site_profile(project_id: str, url: str, profile: dict,
+                      strategy: dict | None = None) -> int:
+    """Upsert the recon profile for (project_id, url).
+
+    A second Generate-from-URL on the same target overwrites the row
+    rather than inserting a duplicate — the LLM call is the costly
+    bit, the row itself is cheap. ``strategy`` is optional so callers
+    can save the profile first and amend the strategy afterwards.
+    """
+    with session_scope() as sess:
+        existing = sess.execute(
+            select(SiteProfile).where(
+                SiteProfile.project_id == project_id,
+                SiteProfile.url == url,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.profile = profile or {}
+            if strategy is not None:
+                existing.strategy = strategy
+            sess.flush()
+            return existing.id
+        row = SiteProfile(
+            project_id=project_id,
+            url=url,
+            profile=profile or {},
+            strategy=strategy,
+        )
+        sess.add(row)
+        sess.flush()
+        return row.id
+
+
+def load_site_profile_by_url(project_id: str, url: str) -> dict | None:
+    with session_scope() as sess:
+        row = sess.execute(
+            select(SiteProfile).where(
+                SiteProfile.project_id == project_id,
+                SiteProfile.url == url,
+            )
+        ).scalar_one_or_none()
+        return _row_to_dict(row) if row else None
+
+
+def list_site_profiles(project_id: str, limit: int = 50) -> list[dict]:
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(SiteProfile)
+            .where(SiteProfile.project_id == project_id)
+            .order_by(SiteProfile.updated_at.desc()).limit(limit)
+        ).scalars().all()
+        return [_row_to_dict(r) for r in rows]
+
+
 # ── Aggregate counts (for /metrics) ────────────────────────────────
 
 def count_records() -> dict:
@@ -1259,7 +1340,7 @@ __all__ = [
     # models (exposed for advanced callers / migrations)
     "Base", "Project", "TestCase", "ChecklistItem", "BugReport",
     "Estimation", "ExecutionRun", "ExecutionCaseResult",
-    "DashboardMetricSnapshot", "TedgieSubmission",
+    "DashboardMetricSnapshot", "TedgieSubmission", "SiteProfile",
     # projects
     "upsert_project", "update_project", "list_projects", "get_project",
     "delete_project", "move_artifacts",
@@ -1279,6 +1360,8 @@ __all__ = [
     "save_metric_snapshot", "list_metric_snapshots",
     # tedgie
     "save_tedgie_submission", "list_tedgie_submissions",
+    # site profiles
+    "save_site_profile", "load_site_profile_by_url", "list_site_profiles",
     # aggregates
     "count_records",
 ]

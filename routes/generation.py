@@ -19,7 +19,11 @@ from engine.qa_persona import is_instruction
 from engine.user_story_generator import generate_user_stories
 from engine.testcase_generator import (
     generate_test_cases, generate_checklist, generate_traceability,
+    generate_from_strategy,
 )
+from engine.site_recon import recon_site
+from engine.test_strategy import build_strategy
+import re as _re
 from engine.exporter import (
     export_markdown, export_html,
     export_csv_testcases, export_csv_checklist,
@@ -44,6 +48,75 @@ from ._shared import (
 MAX_CONCURRENT_GEN_JOBS = 2
 
 _log = get_logger(__name__)
+
+
+# Stage 2 — site-aware path. Used when the input contains a URL: we
+# run crawl → recon → strategy → generate_from_strategy and persist
+# both Test Cases and Checklist for the active project. The caller
+# decides which surface to render — both buckets are saved either way
+# so the sibling page picks up the work without a second click.
+_URL_DETECT = _re.compile(r"(https?://[^\s,]+)", _re.IGNORECASE)
+
+
+def _detect_first_url(raw_lines: list[str]) -> str | None:
+    for line in raw_lines or []:
+        m = _URL_DETECT.search(line or "")
+        if m:
+            return m.group(1).rstrip(".,;)")
+    return None
+
+
+def _run_site_aware(url: str, pid: str | None,
+                    custom_prompt: str) -> dict | None:
+    """crawl_site → recon_site → build_strategy → generate_from_strategy.
+
+    Returns ``None`` when the crawl itself failed (SSRF block, network
+    timeout, etc) — in that case the caller renders the legacy result
+    untouched. Otherwise returns:
+
+        tc_dicts:     site-aware TestCase dicts (``SA1_NNN`` IDs)
+        cl_dicts:     site-aware ChecklistItem dicts (``SA_FUNC_NNN``)
+        profile:      SiteProfile.to_dict()
+        strategy:     TestStrategy.to_dict()
+        crawl_errors: list[str] passed through from the crawler
+
+    Important: this function does NOT write TC/CL to the DB. The
+    caller concatenates these with the legacy stream and writes
+    everything once, so we don't get two ``save_test_cases`` calls
+    each wiping the other's rows (``save_test_cases`` is replace-all).
+    Only the ``site_profile`` row is persisted here — it has no
+    overlap with the legacy stream.
+    """
+    _ = custom_prompt  # reserved — strategy prompt could weave it in later
+    from engine.site_crawler import crawl_site
+    try:
+        site_analysis = crawl_site(url)
+    except Exception as exc:
+        _log.warning("site-aware crawl failed: %s", exc)
+        return None
+    if site_analysis is None:
+        return None
+    profile = recon_site(site_analysis)
+    strategy = build_strategy(profile)
+    tcs, cls = generate_from_strategy(profile, strategy)
+
+    tc_dicts = [tc_to_dict(tc) for tc in tcs]
+    cl_dicts = [cl_to_dict(cl) for cl in cls]
+
+    if pid:
+        try:
+            _db.save_site_profile(pid, url, profile.to_dict(),
+                                  strategy.to_dict())
+        except Exception as exc:  # pragma: no cover — best-effort
+            _log.warning("site-aware: save_site_profile failed: %s", exc)
+
+    return {
+        "tc_dicts": tc_dicts,
+        "cl_dicts": cl_dicts,
+        "profile": profile.to_dict(),
+        "strategy": strategy.to_dict(),
+        "crawl_errors": list(getattr(site_analysis, "crawl_errors", []) or []),
+    }
 
 
 def _persist_test_cases(tc_dicts: list[dict]) -> None:
@@ -204,6 +277,13 @@ def register(app: Flask) -> None:
             def _sync_worker(raw_lines=sync_raw_lines,
                              custom_prompt=sync_custom_prompt,
                              pid=sync_pid):
+                # Legacy path always runs — it owns baseline coverage
+                # (50+ ISTQB-knowledge test cases per typical site)
+                # and the user-stories / traceability surfaces. Stage-2
+                # site-aware then appends focused, site-specific TCs
+                # with SA-prefixed IDs so the two streams concatenate
+                # cleanly. ``_run_site_aware`` writes only the
+                # ``site_profile`` row to DB (legacy owns the TC table).
                 parsed = split_into_requirements(raw_lines)
                 parsed = [r for r in parsed if not is_instruction(r.text)]
                 raw_for_persona = (
@@ -220,14 +300,39 @@ def register(app: Flask) -> None:
                                           crawl_errors_out=crawl_errors)
                 trc = generate_traceability(stories, tcl) if tcl else []
                 tcd = [tc_to_dict(tc) for tc in tcl]
+
+                # Stage 2: when the input has a URL, append focused
+                # site-aware TCs to the legacy stream. Failure is
+                # non-fatal — the user still sees the legacy pack.
+                site_aware_meta: dict = {}
+                url = _detect_first_url(raw_lines)
+                if url:
+                    site_out = _run_site_aware(url, pid, custom_prompt)
+                    if site_out:
+                        tcd.extend(site_out.get("tc_dicts") or [])
+                        # crawl_errors from the recon crawler land in
+                        # the same warning stream — operator sees one
+                        # banner, regardless of which crawler call
+                        # noticed the partial failure.
+                        for e in site_out.get("crawl_errors") or []:
+                            if e and e not in crawl_errors:
+                                crawl_errors.append(e)
+                        site_aware_meta = {
+                            "profile":         site_out.get("profile") or {},
+                            "strategy_source": (site_out.get("strategy") or {})
+                                                .get("source", ""),
+                        }
+
                 if pid and tcd:
                     try: _db.save_test_cases(pid, tcd)
                     except Exception: pass
+
                 return {"tc_dicts": tcd,
                         "stories": [story_to_dict(s) for s in stories],
                         "raw_requirements": raw_for_persona,
                         "trace": trc,
-                        "crawl_errors": crawl_errors}
+                        "crawl_errors": crawl_errors,
+                        **site_aware_meta}
 
             sid = get_session_id(session)
             # Per-session concurrency cap. Sprint 1 Task 5: a runaway tab
@@ -402,6 +507,10 @@ def register(app: Flask) -> None:
             def _sync_worker(raw_lines=sync_raw_lines,
                              custom_prompt=sync_custom_prompt,
                              pid=sync_pid):
+                # Symmetric to test_cases_page: legacy first (baseline
+                # coverage from ISTQB-knowledge templates), site-aware
+                # appended with SA_*-prefixed IDs. One save_checklist
+                # call writes the combined set.
                 parsed = split_into_requirements(raw_lines)
                 parsed = [r for r in parsed if not is_instruction(r.text)]
                 raw_for_persona = (
@@ -417,13 +526,31 @@ def register(app: Flask) -> None:
                                          raw_requirements=raw_for_persona,
                                          crawl_errors_out=crawl_errors)
                 cld = [cl_to_dict(c) for c in cll]
+
+                site_aware_meta: dict = {}
+                url = _detect_first_url(raw_lines)
+                if url:
+                    site_out = _run_site_aware(url, pid, custom_prompt)
+                    if site_out:
+                        cld.extend(site_out.get("cl_dicts") or [])
+                        for e in site_out.get("crawl_errors") or []:
+                            if e and e not in crawl_errors:
+                                crawl_errors.append(e)
+                        site_aware_meta = {
+                            "profile":         site_out.get("profile") or {},
+                            "strategy_source": (site_out.get("strategy") or {})
+                                                .get("source", ""),
+                        }
+
                 if pid and cld:
                     try: _db.save_checklist(pid, cld)
                     except Exception: pass
+
                 return {"cl_dicts": cld,
                         "stories": [story_to_dict(s) for s in stories],
                         "raw_requirements": raw_for_persona,
-                        "crawl_errors": crawl_errors}
+                        "crawl_errors": crawl_errors,
+                        **site_aware_meta}
 
             sid = get_session_id(session)
             # Per-session concurrency cap — same rationale as the tc_gen

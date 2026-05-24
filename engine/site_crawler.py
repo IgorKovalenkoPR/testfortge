@@ -570,16 +570,42 @@ def _detect_architecture(analysis: SiteAnalysis, html_text: str) -> None:
 
 # ── Main Crawl Function ─────────────────────────────────────────
 
+# Per-process TTL cache. A single /test-cases or /checklist POST today
+# triggers two crawls of the same URL — once via qa_persona's
+# rule-based area-detector and once via the Stage-2 site-aware
+# pipeline. Both went over the wire, doubling latency and pushing
+# the synchronous worker past its deadline on real sites. A small
+# in-memory cache keyed by URL collapses these to one HTTP fetch
+# without changing the caller signatures.
+#
+# 5-minute TTL matches the operator-facing "click Generate twice in
+# a row" loop without ever serving genuinely stale data on a longer
+# regenerate. Cache lives only inside one gunicorn worker — that's
+# acceptable on Render free tier where we run with a single worker.
+import time as _time
+_CRAWL_CACHE: dict[str, tuple[float, "SiteAnalysis"]] = {}
+_CRAWL_CACHE_TTL = 300.0
+
+
 def crawl_site(url: str) -> SiteAnalysis:
     """Crawl a website starting from *url* and return a SiteAnalysis.
 
     Fetches up to MAX_PAGES internal pages. Safe to call on any URL —
-    returns partial results on errors.
+    returns partial results on errors. Results are memoised per-URL
+    for ``_CRAWL_CACHE_TTL`` seconds so back-to-back callers on the
+    same target (legacy ``qa_persona`` + Stage-2 ``site_recon``) only
+    pay one network round-trip.
     """
     parsed = urlparse(url)
     if not parsed.scheme:
         url = "https://" + url
         parsed = urlparse(url)
+
+    cache_key = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
+    now = _time.time()
+    hit = _CRAWL_CACHE.get(cache_key)
+    if hit and hit[0] > now:
+        return hit[1]
 
     base_domain = parsed.netloc
     analysis = SiteAnalysis(base_url=url, domain=base_domain)
@@ -633,4 +659,6 @@ def crawl_site(url: str) -> SiteAnalysis:
     all_html = " ".join(all_html_parts)
     _detect_features(analysis, all_html)
 
+    # Memoise — see _CRAWL_CACHE comment above for TTL rationale.
+    _CRAWL_CACHE[cache_key] = (now + _CRAWL_CACHE_TTL, analysis)
     return analysis

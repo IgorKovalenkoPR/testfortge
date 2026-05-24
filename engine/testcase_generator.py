@@ -1095,3 +1095,169 @@ def generate_traceability(stories: list[UserStory], test_cases: list[TestCase]) 
             "categories": sorted(set(tc.category for tc in linked)),
         })
     return matrix
+
+
+# ── Stage 2: site-aware path ──────────────────────────────────────
+
+# Category → checklist-prefix + TC section-number. Prefix shows up in
+# the visible ID (e.g. ``A11Y_001``); section_num drives TC IDs like
+# ``SC4_001``. Kept stable so existing IDs survive a regenerate.
+_CATEGORY_PREFIX: dict[str, str] = {
+    "Functional":           "FUNC",
+    "UI_UX":                "UIUX",
+    "Usability":            "USE",
+    "Accessibility":        "A11Y",
+    "Performance":          "PERF",
+    "Compatibility":        "COMP",
+    "Localization":         "LOC",
+    "Internationalization": "I18N",
+}
+
+_CATEGORY_SECTION_NUM: dict[str, int] = {
+    cat: idx + 1 for idx, cat in enumerate(_CATEGORY_PREFIX.keys())
+}
+
+
+def _check_to_testcase(check, *, category: str, section_num: int,
+                       idx: int) -> TestCase:
+    """Convert a :class:`engine.test_strategy.CheckSpec` into a TC.
+
+    Steps are split out of ``objective`` heuristically — for "Verify X"
+    objectives we generate a 3-step pattern (navigate, perform action,
+    assert). The Live Executor (Stage 3) will rewrite these for
+    Playwright execution; for now they read as good manual TCs.
+    """
+    technique_note = (
+        f" (ISTQB technique: {check.istqb_technique})"
+        if check.istqb_technique else ""
+    )
+    steps = [
+        ("1. Navigate to the matching page"
+         + (f" ({check.url_pattern})" if check.url_pattern else "")),
+        f"2. Perform the action described in the objective{technique_note}",
+        "3. Observe the rendered state and any console / network errors",
+    ]
+    # ``SA`` prefix ("Site-Aware") keeps site-aware IDs disjoint from
+    # legacy ``SC1_001`` IDs so the two streams concatenate cleanly
+    # without a renumbering pass on every regenerate.
+    return TestCase(
+        id=f"SA{section_num}_{idx:03d}",
+        section=category,
+        section_num=section_num,
+        summary=check.objective,
+        preconditions=check.rationale or "Site is reachable; primary "
+                                          "browser is supported.",
+        test_steps="\n".join(steps),
+        test_data="",
+        expected_result="The behaviour matches the objective; no "
+                        "console errors or visible regressions appear.",
+        category=_category_label(category),
+        priority=check.priority,
+        status="Unchecked",
+        testing_type=_testing_type_label(category),
+        url_pattern=check.url_pattern,
+        trigger="walkthrough_url_match" if check.url_pattern else "manual",
+    )
+
+
+def _check_to_checklist(check, *, category: str, idx: int) -> ChecklistItem:
+    prefix = _CATEGORY_PREFIX.get(category, "GEN")
+    # ``SA_`` prefix keeps these disjoint from legacy IDs
+    # (``HDR_001`` / ``FTR_002`` / ``AUTH_005`` ...) so the two streams
+    # can be concatenated without a renumbering pass.
+    item = ChecklistItem(
+        id=f"SA_{prefix}_{idx:03d}",
+        section=category,
+        objective=check.objective,
+        category=_category_label(category),
+        priority=check.priority,
+        status="Unchecked",
+    )
+    try:
+        item.testing_type = _testing_type_label(category)
+    except Exception:
+        pass
+    return item
+
+
+def _category_label(category: str) -> str:
+    """User-facing label for the ``category`` field on TCs/CLs.
+
+    Internally we use ``UI_UX`` etc. as the matrix key (closed enum
+    for code stability); the UI prefers the prettier spelling.
+    """
+    return {
+        "UI_UX": "UI/UX",
+        "Internationalization": "Internationalization",
+    }.get(category, category)
+
+
+def _testing_type_label(category: str) -> str:
+    """Map our matrix category onto the existing ``testing_type``
+    vocabulary used by [_detect_testing_type] and exporters."""
+    return {
+        "Functional":           "Functional",
+        "UI_UX":                "UI/UX",
+        "Usability":            "Usability",
+        "Accessibility":        "Accessibility",
+        "Performance":          "Performance",
+        "Compatibility":        "Compatibility",
+        "Localization":         "Localization",
+        "Internationalization": "Internationalization",
+    }.get(category, "Functional")
+
+
+def generate_from_strategy(profile, strategy) -> tuple[list[TestCase],
+                                                         list[ChecklistItem]]:
+    """Stage-2 entry point: turn a (SiteProfile, TestStrategy) pair
+    into a Test Case pack and a Checklist pack ready to persist.
+
+    Routing rule:
+      * priority == "High"  → TestCase  (worth the detail)
+      * priority in {"Medium","Low"} → ChecklistItem (lighter form)
+
+    Returns ``(test_cases, checklist_items)``. The order across
+    categories follows :data:`_CATEGORY_PREFIX` iteration order so
+    successive regenerates produce stable IDs.
+    """
+    test_cases: list[TestCase] = []
+    checklist: list[ChecklistItem] = []
+    tc_counter: dict[int, int] = {}
+    cl_counter: dict[str, int] = {}
+
+    if strategy is None or not getattr(strategy, "matrix", None):
+        return test_cases, checklist
+
+    # Iterate in canonical category order so IDs are deterministic
+    # regardless of dict insertion order in ``strategy.matrix``.
+    for category in _CATEGORY_PREFIX:
+        checks = strategy.matrix.get(category) or []
+        if not checks:
+            continue
+        section_num = _CATEGORY_SECTION_NUM[category]
+        prefix = _CATEGORY_PREFIX[category]
+        for check in checks:
+            if str(getattr(check, "priority", "Medium")).title() == "High":
+                idx = tc_counter.get(section_num, 0) + 1
+                tc_counter[section_num] = idx
+                test_cases.append(_check_to_testcase(
+                    check, category=category, section_num=section_num,
+                    idx=idx,
+                ))
+            else:
+                idx = cl_counter.get(prefix, 0) + 1
+                cl_counter[prefix] = idx
+                checklist.append(_check_to_checklist(
+                    check, category=category, idx=idx,
+                ))
+
+    # QA Team Lead review — same auto-fix pass the legacy path uses
+    # so site-aware output meets the same documentation quality bar.
+    try:
+        from .qa_team_lead import review_test_cases, review_checklist
+        test_cases, _ = review_test_cases(test_cases)
+        checklist, _ = review_checklist(checklist)
+    except Exception:  # pragma: no cover — defensive; review is best-effort
+        pass
+
+    return test_cases, checklist
