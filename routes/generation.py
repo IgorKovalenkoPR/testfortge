@@ -574,7 +574,7 @@ def register(app: Flask) -> None:
             session["cl_gen_job_id"] = job_id
 
             import time as _time
-            deadline = _time.time() + 60
+            deadline = _time.time() + SYNC_GEN_BUDGET_S
             job = None
             while _time.time() < deadline:
                 job = get_queue().get(job_id)
