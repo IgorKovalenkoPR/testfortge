@@ -2269,6 +2269,12 @@ def register(app: Flask) -> None:
             or []
         )
         walkthrough_tc_bindings = list(payload.get("walkthrough_tc_bindings") or [])
+        # Stage 4: LiveExecutor early-exit (OOM / wall-clock) is
+        # surfaced as one infrastructure bug. The reason string is
+        # produced inside ``engine.live_executor.LiveExecutor.run``
+        # and copied onto ``payload`` by ``runner_worker`` — empty
+        # string means the run finished normally.
+        early_exit_reason = (payload.get("early_exit_reason") or "").strip()
 
         # Re-run the post-processing using the same logic the synchronous
         # path used to run inline. Most fields come from the worker's
@@ -2311,6 +2317,11 @@ def register(app: Flask) -> None:
         # walkthrough run (which the UI warns against but doesn't
         # forbid).
         walkthrough_attached = False
+        # Stage 4: one infra bug per run even when multiple env
+        # checkboxes are ticked. Attaches alongside the walkthrough
+        # findings (same env), but is independent of whether any
+        # findings were produced — an OOM can fire on a clean page.
+        early_exit_attached = False
         for et in env_types:
             environment = (envs_meta.get(et, {}) or {}).get("environment") \
                 or et.title()
@@ -2448,18 +2459,25 @@ def register(app: Flask) -> None:
                         dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
                     ]
 
-            # PR-3: convert walkthrough findings into bugs the same way
-            # the TC-driven loop above converts ``execution["bugs"]``.
-            # Findings live on ``payload`` (not in ``execution``) because
-            # the walkthrough runner doesn't drive the simulator. Each
-            # finding becomes a bug via
-            # ``bug_report.create_bug_from_walkthrough_finding`` —
-            # synthetic ``WALK-...`` TC-id, ``defect:<class>`` +
-            # ``source:walkthrough`` labels — and gets persisted through
-            # the same ``_persist_bug`` path so bug-reports listing and
-            # /bug-reports filtering still work.
+            # PR-3 / Stage 4: convert walkthrough findings into bugs the
+            # same way the TC-driven loop above converts
+            # ``execution["bugs"]``. Findings live on ``payload`` (not in
+            # ``execution``) because neither WalkthroughRunner nor
+            # LiveExecutor drives the simulator. Each finding becomes a
+            # bug via ``bug_report.create_bug_from_walkthrough_finding``
+            # — synthetic ``WALK-...`` / ``LIVE-PAGE-...`` TC-id,
+            # ``defect:<class>`` + ``source:walkthrough`` labels — and
+            # gets persisted through the same ``_persist_bug`` path so
+            # bug-reports listing and /bug-reports filtering still work.
+            #
+            # Stage 4: ``mode == "live"`` (LiveExecutor, the default
+            # since Stage 3) carries the same ``walkthrough_findings``
+            # shape as legacy ``mode == "walkthrough"``. Without
+            # accepting both here, Stage 3 silently lost bug-creation
+            # versus Sprint 5 — findings hit ``result.json`` but never
+            # the Bug Reports board.
             walkthrough_bugs_count = 0
-            if (run_mode == "walkthrough"
+            if (run_mode in ("walkthrough", "live")
                     and walkthrough_findings
                     and not walkthrough_attached):
                 from engine.bug_report import (
@@ -2496,6 +2514,53 @@ def register(app: Flask) -> None:
                         ]
                     walkthrough_bugs_count += 1
                 walkthrough_attached = True
+
+            # Stage 4: LiveExecutor early-exit → one infrastructure
+            # bug. Independent of findings: the OOM guard can fire on
+            # a leak that emits zero walkthrough findings, and the
+            # wall-clock deadline can fire mid-run on a healthy site.
+            # Attached to the first env (same rule as walkthrough
+            # bugs) so the multi-env operator doesn't see N copies.
+            # ``early_exit_bugs_count`` is reset every iteration so
+            # envs past the first contribute 0 to ``run_bug_count``.
+            early_exit_bugs_count = 0  # ALWAYS reset (NameError guard)
+            if (run_mode == "live"
+                    and early_exit_reason
+                    and not early_exit_attached):
+                from engine.bug_report import (
+                    create_bug_from_early_exit as _create_ee_bug,
+                )
+                report_dict = payload.get("report") or {}
+                try:
+                    bug = _create_ee_bug(
+                        early_exit_reason,
+                        run_id=report_dict.get("run_id", "")
+                            or payload.get("config_id", ""),
+                        base_url=base_url,
+                        environment_str=environment,
+                        tester_name=tester_name,
+                    )
+                    bug_dict = bug_to_dict(bug)
+                    new_id = generate_bug_id(running_bugs)
+                    bug_dict["id"] = new_id
+                    if not bug_dict.get("affects_version"):
+                        bug_dict["affects_version"] = affects_version
+                    _persist_bug(bug_dict, source="live_executor",
+                                 run_id=db_run_id)
+                    all_bugs.append(bug_dict)
+                    try:
+                        running_bugs.append(dict_to_bug(bug_dict))
+                    except Exception:
+                        running_bugs = list(existing_bugs) + [
+                            dict_to_bug(b) for b
+                            in all_bugs[len(existing_bugs):]
+                        ]
+                    early_exit_bugs_count = 1
+                except Exception as exc:
+                    log.warning(
+                        "live: early-exit bug conversion skipped: %s",
+                        exc)
+                early_exit_attached = True
 
             for r in execution["results"]:
                 if r["bug_id"].startswith("__pending_"):
@@ -2563,26 +2628,28 @@ def register(app: Flask) -> None:
                  "screenshots": (r.get("screenshots") or [])[:6]}
                 for r in (execution.get("results") or [])
             ]
-            # PR-3: walkthrough findings + TC bindings live on the
-            # first env's run_record so the template's findings subtab
-            # has somewhere to read from. ``walkthrough_bugs_count``
-            # already counts the bugs created above (zero for envs
-            # past the first).
+            # PR-3 / Stage 4: walkthrough/live findings + TC bindings
+            # live on the first env's run_record so the template's
+            # findings subtab has somewhere to read from.
+            # ``walkthrough_bugs_count`` already counts the bugs created
+            # above (zero for envs past the first).
             attached_findings = (
                 walkthrough_findings
-                if (run_mode == "walkthrough"
+                if (run_mode in ("walkthrough", "live")
                     and walkthrough_attached
                     and walkthrough_bugs_count)
                 else []
             )
             attached_bindings = (
                 walkthrough_tc_bindings
-                if (run_mode == "walkthrough"
+                if (run_mode in ("walkthrough", "live")
                     and walkthrough_attached
                     and walkthrough_bugs_count)
                 else []
             )
-            run_bug_count = len(execution["bugs"]) + walkthrough_bugs_count
+            run_bug_count = (len(execution["bugs"])
+                             + walkthrough_bugs_count
+                             + early_exit_bugs_count)
             run_record = {
                 "run_id": len(test_runs) + 1,
                 "db_run_id": db_run_id,
@@ -2642,6 +2709,18 @@ def register(app: Flask) -> None:
                 f"{bug_total} bug report(s) auto-created — see Bug Reports."
             )
         flash(" ".join(parts), "success")
+        # Stage 4: surface the LiveExecutor early-exit reason as a
+        # separate warning flash. Operators need a louder signal than
+        # one row inside "Bug Reports" — losing half a run silently
+        # was the whole point of recording ``early_exit_reason`` in
+        # Stage 3 in the first place.
+        if early_exit_reason:
+            flash(
+                f"Live executor stopped early: {early_exit_reason}. "
+                "A bug report has been filed under "
+                "'Test Run Infrastructure'.",
+                "warning",
+            )
 
         # Clean up pending files so subsequent visits to this URL
         # don't double-bug. Best-effort.

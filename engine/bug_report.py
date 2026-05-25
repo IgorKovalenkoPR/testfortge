@@ -308,6 +308,164 @@ def create_bug_from_walkthrough_finding(
     )
 
 
+# ── Factory: create bug from a LiveExecutor early-exit ────────────
+
+
+# ``early_exit_reason`` strings produced by
+# :class:`engine.live_executor.LiveExecutor`. Kept in sync with
+# ``live_executor.py``'s assignments to ``early_reason``.
+_EARLY_EXIT_OOM_PREFIX = "oom_budget_exceeded"
+_EARLY_EXIT_WALL_CLOCK = "wall_deadline_exceeded"
+
+
+def create_bug_from_early_exit(
+    reason: str,
+    *,
+    run_id: str = "",
+    base_url: str = "",
+    environment_str: str = "",
+    tester_name: str = "",
+    rss_mb: int = 0,
+    budget_mb: int = 0,
+    cases_done: int = 0,
+    cases_total: int = 0,
+) -> BugReport:
+    """Synthesise an infra-level :class:`BugReport` from a LiveExecutor
+    early-exit reason.
+
+    Stage 3's :class:`engine.live_executor.OomGuard` and wall-clock
+    deadline write ``early_exit_reason`` into the worker's result.json
+    when the run is cut short — operators see a "Stopped early" badge
+    in the UI but had no backlog entry to track follow-up against. This
+    factory produces one infrastructure bug per early-exit so the
+    follow-up (raise the memory budget, shrink the URL plan, profile a
+    leak) lives on the project's regular Bug Reports board next to
+    every other defect.
+
+    Severity / priority rationale
+    -----------------------------
+    * OOM is ``Major`` / ``High`` — partial run completes (Stage 3
+      writes ``status=oom_exit``), so it's not "system unusable" but
+      every long run loses cases past the cap.
+    * Wall-clock exit is ``Minor`` / ``Medium`` — the run hit the
+      configured ceiling and stopped on a fully-controlled boundary;
+      operator action is usually "raise the timeout", not "fix a bug".
+
+    The returned bug has ``id=""`` — the caller assigns it via
+    :func:`generate_bug_id` exactly like the other factories.
+    """
+    raw = (reason or "").strip()
+    is_oom = raw.startswith(_EARLY_EXIT_OOM_PREFIX)
+    is_wall_clock = raw.startswith(_EARLY_EXIT_WALL_CLOCK)
+
+    if is_oom:
+        severity = "Major"
+        priority = "High"
+        defect_class = "early_exit_oom"
+        title = "[Test Run] Live executor stopped early: out-of-memory"
+        actual_lines = [
+            f"The LiveExecutor reached its memory budget mid-run and "
+            f"shut down cleanly to avoid a SIGKILL from the host. "
+            f"Reason reported by OomGuard: {raw}.",
+        ]
+        if rss_mb and budget_mb:
+            actual_lines.append(
+                f"Resident set size at the time of the check: "
+                f"{rss_mb} MB (budget {budget_mb} MB)."
+            )
+        expected_lines = [
+            "The run should complete every queued page and test case "
+            "without the worker hitting the per-process RSS ceiling.",
+            "Suggested follow-up: profile the Playwright session for "
+            "leaked contexts, lower ``max_pages`` / ``max_form_fills`` "
+            "in the live config, or raise ``MEMORY_BUDGET_MB`` if the "
+            "host has headroom.",
+        ]
+    elif is_wall_clock:
+        severity = "Minor"
+        priority = "Medium"
+        defect_class = "early_exit_wall_clock"
+        title = "[Test Run] Live executor stopped early: wall-clock deadline"
+        actual_lines = [
+            f"The LiveExecutor hit its wall-clock deadline mid-run and "
+            f"stopped before draining the URL queue. "
+            f"Reason: {raw}.",
+        ]
+        expected_lines = [
+            "The run should fit inside the configured "
+            "``device_timeout_ms`` budget, OR the budget should be "
+            "raised to match the project's actual coverage size.",
+        ]
+    else:
+        # Future-proofing: unknown early-exit string still surfaces as
+        # a bug rather than silently disappearing.
+        severity = "Major"
+        priority = "High"
+        defect_class = "early_exit_unknown"
+        title = "[Test Run] Live executor stopped early"
+        actual_lines = [
+            f"The LiveExecutor reported a non-empty early_exit_reason: "
+            f"{raw or '(empty)'}.",
+        ]
+        expected_lines = [
+            "The run should complete every queued page and test case. "
+            "Inspect the worker log for the exit cause.",
+        ]
+
+    if cases_total:
+        actual_lines.append(
+            f"Cases completed before the early exit: "
+            f"{cases_done} of {cases_total}."
+        )
+
+    steps_lines = [
+        f"1. Open {base_url or '<application URL>'} in the configured "
+        "environment.",
+        "2. Trigger /test-execution with the same TC pack and live "
+        "settings (max_pages, viewport, memory budget) used in this "
+        "run.",
+        "3. Wait until the run reports the early-exit status in "
+        "/test-execution/results.",
+    ]
+
+    labels = [
+        f"defect:{defect_class}",
+        "source:live_executor",
+        "area:test_run_infra",
+    ]
+
+    actual_result = "\n\n".join(actual_lines)
+    expected_result = "\n\n".join(expected_lines)
+    preconditions = (
+        f"LiveExecutor run id {run_id} against {base_url or '<base URL>'}."
+        if run_id
+        else f"LiveExecutor run against {base_url or '<base URL>'}."
+    )
+
+    return BugReport(
+        id="",
+        title=title,
+        severity=severity,
+        priority=priority,
+        status="Open",
+        environment=environment_str,
+        preconditions=preconditions,
+        steps_to_reproduce="\n".join(steps_lines),
+        actual_result=actual_result,
+        expected_result=expected_result,
+        frequency="Always",
+        attachments=[],
+        linked_item_id=run_id or "LIVE-RUN",
+        linked_item_type="live_executor",
+        reporter=tester_name,
+        assignee="",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        component="Test Run Infrastructure",
+        labels=labels,
+        comment="",
+    )
+
+
 # ── Serialisation helpers ──────────────────────────────────────────
 
 def bug_to_dict(bug: BugReport) -> dict:
