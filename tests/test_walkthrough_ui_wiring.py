@@ -326,7 +326,8 @@ class TestResultsWalkthroughPath:
             ],
             "walkthrough_tc_bindings": [
                 {"url": "https://example.com/checkout",
-                 "tc_id": "TC-002"},
+                 "matches": [{"id": "TC-002",
+                              "external_id": "TC-002"}]},
             ],
             "config_echo": {
                 "base_url": "https://example.com/",
@@ -373,7 +374,7 @@ class TestResultsWalkthroughPath:
         last = runs[-1]
         assert last["mode"] == "walkthrough"
         assert len(last["walkthrough_findings"]) == 2
-        assert last["walkthrough_tc_bindings"][0]["tc_id"] == "TC-002"
+        assert last["walkthrough_tc_bindings"][0]["matches"][0]["external_id"] == "TC-002"
         # Bug count includes the synthesised walkthrough bugs even
         # though execution["bugs"] (TC-driven) is empty.
         assert last["bug_count"] == 2
@@ -712,8 +713,9 @@ class TestTemplateSmoke:
                      "tc_id": "WALK-IMG-001"},
                 ],
                 "walkthrough_tc_bindings": [
-                    {"tc_id": "TC-002",
-                     "url": "https://example.com/checkout"},
+                    {"url": "https://example.com/checkout",
+                     "matches": [{"id": "TC-002",
+                                  "external_id": "TC-002"}]},
                 ],
             }]
         resp = client.get("/test-execution")

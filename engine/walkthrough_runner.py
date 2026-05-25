@@ -1052,8 +1052,12 @@ class WalkthroughRunner:
         if self.test_cases:
             matched_tcs = match_tcs_for_url(self.test_cases, final_url)
             if matched_tcs:
+                # Stage 6 cleanup: shape matches LiveExecutor's bindings
+                # (``{url, matches}``) so the UI + bug-emission code
+                # doesn't have to branch on runner. The walk-step id
+                # (``WALK-NNN``) was always synthetic — the meaningful
+                # cross-reference is the matched TCs themselves.
                 self.tc_bindings.append({
-                    "tc_id":   tc_id,
                     "url":     final_url,
                     "matches": [
                         {
