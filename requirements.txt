@@ -25,3 +25,9 @@ tenacity>=9.0.0
 # at boot and validates them against the schemas in engine/qa_knowledge/schema.
 PyYAML>=6.0
 jsonschema>=4.0
+# Stage 3 (engine/live_executor): per-process RSS sampling for OomGuard.
+# Render free tier OOM-kills the worker around ~480 MB resident, so the
+# guard preempts at MEMORY_BUDGET_MB (default 400) by writing a partial
+# result and exiting gracefully. live_executor falls back to a no-op
+# guard if psutil is absent, so the dependency is functionally optional.
+psutil>=5.9.0
