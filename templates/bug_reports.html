@@ -153,11 +153,18 @@
                 {% endfor %}
                 </div>
                 {% else %}
+                {# PR-A: previous copy unconditionally blamed a missing
+                   Base URL, which is only one of three possible causes
+                   and contradicts the bug body in cases like walkthrough
+                   bugs that *do* show a base URL in steps-to-reproduce.
+                   Rewritten to state the symptom honestly and list the
+                   actual causes; the wire-break (cause #2) is addressed
+                   by PR-B. #}
                 <div style="padding:10px 14px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;color:#92400e;font-size:0.85em;">
                     <strong>{{ t.get('bug_no_attachments_title', 'No attachments captured') }}</strong>
                     <p style="margin:4px 0 0 0;">
                         {{ t.get('bug_no_attachments_body',
-                            'This bug was filed by a run that did not have a Base URL set, so Playwright was not invoked and no screenshots or video could be recorded. To attach evidence next time, set the Base URL on the Test Execution form before clicking Run.') }}
+                            'No screenshot or video was linked to this bug. Possible reasons: (1) the run was started without a Base URL, so Playwright was skipped; (2) the page screenshot was captured but did not reach the finding (known wiring gap); (3) the run terminated before evidence could be saved. Re-run with a Base URL set to maximise the chance of attached evidence.') }}
                     </p>
                     <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary"
                        style="margin-top:8px;font-size:0.78em;padding:4px 10px;">
@@ -290,7 +297,14 @@ pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consola
 .bug-checkbox { width: 18px; height: 18px; cursor: pointer; }
 .bug-select-all { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 0.9em; color: #475569; cursor: pointer; }
 
-.bulk-toolbar {
+/* PR-A: the original rule was `.bulk-toolbar { display: flex }` which
+   has higher specificity than the user-agent `[hidden] { display: none }`,
+   so the `hidden` attribute was silently ignored and the toolbar stayed
+   visible at "0 selected". Scoping to `:not([hidden])` lets the JS toggle
+   actually hide the bar. The `[hidden]` rule is a belt-and-braces
+   guarantee in case someone re-introduces the bare class selector. */
+.bulk-toolbar[hidden] { display: none !important; }
+.bulk-toolbar:not([hidden]) {
     position: sticky;
     bottom: 12px;
     z-index: 30;

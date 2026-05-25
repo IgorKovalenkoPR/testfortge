@@ -483,6 +483,18 @@ TRANSLATIONS = {
     "bug_labels": "Labels",
     "bug_comment": "Comment",
 
+    # PR-A: walkthrough-bug "no attachments" banner (EN)
+    "bug_no_attachments_title": "No attachments captured",
+    "bug_no_attachments_body": (
+        "No screenshot or video was linked to this bug. Possible reasons: "
+        "(1) the run was started without a Base URL, so Playwright was "
+        "skipped; (2) the page screenshot was captured but did not reach "
+        "the finding (known wiring gap); (3) the run terminated before "
+        "evidence could be saved. Re-run with a Base URL set to maximise "
+        "the chance of attached evidence."
+    ),
+    "bug_no_attachments_link": "Open Test Execution",
+
     # Automation QA (Senior Automation QA Engineer)
     "nav_automation": "Automation QA",
     "auto_title": "Automation QA",

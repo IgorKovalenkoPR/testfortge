@@ -272,3 +272,40 @@ class TestBugReportsRendersDbId:
         # Sticky toolbar markup must be present (initially hidden).
         assert 'id="bulk-toolbar"' in body
         assert 'name="bug_ids"' in body
+
+    def test_bulk_toolbar_css_respects_hidden_attribute(self, client, monkeypatch):
+        """Regression for PR-A: the original CSS rule was
+        ``.bulk-toolbar { display: flex }``, which has higher specificity
+        than the user-agent default ``[hidden] { display: none }``. As a
+        result the toolbar stayed visible at "0 selected" even though the
+        Jinja markup wrote ``<div id="bulk-toolbar" hidden>``. The fix is
+        to scope the flex rule to ``:not([hidden])`` and to add an
+        explicit ``[hidden] { display: none }`` fallback. This test pins
+        both invariants so the gotcha cannot regress unnoticed.
+        """
+        sid = _new_sid("alice")
+        pid, _ = _seed_project_with_bugs(sid, n=1)
+        _pin_sid(monkeypatch, sid)
+        with client.session_transaction() as sess:
+            sess["project_id"] = pid
+
+        resp = client.get("/bug-reports")
+        body = resp.data.decode("utf-8")
+        # The markup must declare the attribute — JS relies on toggling it.
+        assert 'id="bulk-toolbar" class="bulk-toolbar" hidden' in body, (
+            "the bulk-toolbar div must start with the hidden attribute "
+            "so it is invisible until at least one bug is checked"
+        )
+        # The CSS rule that sets display:flex must be scoped so the
+        # `hidden` attribute actually wins.
+        assert ".bulk-toolbar:not([hidden])" in body, (
+            "the visible-state CSS rule must use :not([hidden]) so the "
+            "user-agent default `[hidden] { display: none }` is not "
+            "overridden by higher-specificity author CSS"
+        )
+        # Belt-and-braces: explicit hidden rule should also be present.
+        assert ".bulk-toolbar[hidden]" in body, (
+            "an explicit `.bulk-toolbar[hidden] { display: none }` rule "
+            "must exist as a safety net against re-introducing the bare "
+            "`.bulk-toolbar { display: flex }` selector"
+        )

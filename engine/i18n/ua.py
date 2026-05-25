@@ -483,6 +483,19 @@ TRANSLATIONS = {
     "bug_labels": "Мітки",
     "bug_comment": "Коментар",
 
+    # PR-A: walkthrough-bug "no attachments" banner (UA)
+    "bug_no_attachments_title": "Скріншоти/відео не прикріплено",
+    "bug_no_attachments_body": (
+        "До цього бага не прив'язано жодного скріншоту чи відео. "
+        "Можливі причини: (1) прогін був запущений без Base URL — "
+        "Playwright не стартував; (2) скріншот сторінки був зроблений, "
+        "але не дійшов до finding-у (відомий розрив у дротах); "
+        "(3) прогін завершився до того, як докази встигли зберегтися. "
+        "Перезапусти прогін зі встановленим Base URL, щоб максимізувати "
+        "шанс отримати докази."
+    ),
+    "bug_no_attachments_link": "Відкрити Test Execution",
+
     # Automation QA (Senior Automation QA Engineer)
     "nav_automation": "Автоматизація QA",
     "auto_title": "Автоматизація QA",
