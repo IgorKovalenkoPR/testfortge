@@ -11,8 +11,8 @@ from __future__ import annotations
 from flask import Flask
 
 from . import (dashboard, projects, generation, execution,
-               automation, estimation, chat, ops, guide,
-               debug)
+               execution_live, bugs, automation, estimation,
+               chat, ops, guide, debug)
 
 
 def register_all(app: Flask) -> None:
@@ -21,6 +21,13 @@ def register_all(app: Flask) -> None:
     projects.register(app)
     generation.register(app)
     execution.register(app)
+    # Stage 7 refactor: ``/test-execution/live*`` + bug-flow routes live in
+    # their own modules now. ``execution_live`` must register AFTER
+    # ``execution`` to keep the URL-rule order stable for tests that
+    # match the first-defined rule. ``bugs`` order is irrelevant
+    # (distinct paths) but kept together with execution for cohesion.
+    execution_live.register(app)
+    bugs.register(app)
     automation.register(app)
     estimation.register(app)
     chat.register(app)
