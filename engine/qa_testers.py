@@ -672,66 +672,277 @@ def _negative_clause_bug_summary(s: str) -> str:
     return out
 
 
-def _make_bug_summary(tc_summary: str) -> str:
-    """Convert test case summary to bug summary (passive voice, negated).
+# PR-C′: archetype-driven passive-voice bug summary builder.
+#
+# Previous implementation negated TC summaries by inserting "not" via
+# regex (e.g. ``rejects`` → ``does not reject``) and falling back to
+# ``" — does not work as expected"`` when no pattern matched. That
+# produced titles like:
+#   • "Privacy policy renders its primary content — does not work as
+#     expected" (positive-voice headline with a tacked-on suffix)
+#   • "Every public page has not a unique, non-empty <title>"
+#     (broken grammar from naive ``has`` → ``has not``)
+#   • "The page meets basic accessibility standards" (no negation at
+#     all because ``meets`` wasn't in the pattern list)
+#
+# The QA style guide mandates passive voice with an "after/while"
+# trigger clause, e.g.:
+#     "The Contact US form is not submitted after clicking the Submit
+#      button."
+#
+# Each archetype below detects a TC-summary shape and emits the
+# matching passive-voice headline with an after-/while-clause where
+# the trigger is unambiguous. The order matters — more specific
+# patterns must come before generic ones.
 
-    Example:
-      TC:  'Verify that login is completed successfully with valid credentials'
-      Bug: 'Login is not completed successfully with valid credentials'
+def _strip_phrase(s: str) -> str:
+    """Strip whitespace and trailing punctuation; collapse internal
+    runs of whitespace into single spaces. Used to clean substrings
+    captured by archetype regexes before they enter the template."""
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.strip(".,;:!?")
 
-    Special case: if the TC already contains a negation word ("no",
-    "never", "cannot", "without", ...) we invert the existing negation
-    instead of stacking another "not" on top of it — otherwise we'd emit
-    nonsense like "has not no console errors" (BUG-001).
-    """
-    s = tc_summary.strip()
-    # Strip "Verify that " prefix
-    prefix = "Verify that "
-    if s.startswith(prefix):
-        s = s[len(prefix):]
-    elif s.lower().startswith(prefix.lower()):
-        s = s[len(prefix):]
 
-    if _has_existing_negation(s):
-        s = _negative_clause_bug_summary(s)
-        if s:
-            s = s[0].upper() + s[1:]
+def _cap(s: str) -> str:
+    """Uppercase the first character without touching the rest. Avoids
+    ``str.capitalize()`` which lowercases the tail and would mangle
+    acronyms / camelCase words inside captured TC phrases."""
+    if not s:
         return s
+    return s[0].upper() + s[1:]
 
-    # Negate: insert "not" after first "is/are/can/should/does/has"
-    patterns = [
-        (r'\b(is)\b', r'\1 not'),
-        (r'\b(are)\b', r'\1 not'),
-        (r'\b(can)\b', r'can not'),
-        (r'\b(should)\b', r'should not'),
-        (r'\b(does)\b', r'does not'),
-        (r'\b(has)\b', r'has not'),
-        (r'\b(allows?)\b', r'does not allow'),
-        (r'\b(displays?)\b', r'does not display'),
-        (r'\b(works?)\b', r'does not work'),
-        (r'\b(loads?)\b', r'does not load'),
-        (r'\b(shows?)\b', r'does not show'),
-        (r'\b(redirects?)\b', r'does not redirect'),
-        (r'\b(accepts?)\b', r'does not accept'),
-        (r'\b(rejects?)\b', r'does not reject'),
-        (r'\b(validates?)\b', r'does not validate'),
-        (r'\b(prevents?)\b', r'does not prevent'),
-    ]
-    negated = False
-    for pat, repl in patterns:
-        new_s, count = re.subn(pat, repl, s, count=1)
-        if count > 0:
-            s = new_s
-            negated = True
-            break
 
-    if not negated:
-        s = s + " — does not work as expected"
+# Singular nouns that end in ``s`` and would otherwise fool the
+# plural-detection heuristic below. Lower-cased; matched on the last
+# space- or hyphen-separated token of the captured object phrase.
+_SINGULAR_S_NOUNS = frozenset({
+    "address", "access", "process", "status", "this", "his", "glass",
+    "press", "class", "boss", "moss", "loss", "miss", "kiss", "less",
+    "mass", "bus", "yes", "news", "series", "species", "analysis",
+    "basis", "thesis", "diagnosis", "css", "rss", "js", "cms",
+})
 
-    # Capitalize first letter
-    if s:
-        s = s[0].upper() + s[1:]
-    return s
+
+def _is_plural_object_phrase(s: str) -> bool:
+    """Best-effort plural detector for the captured-object slot in the
+    ``displays``/``shows`` archetypes. Picks the last whitespace- or
+    hyphen-separated token, lowercases it, and treats it as plural
+    when it ends in ``s`` and is not on the
+    :data:`_SINGULAR_S_NOUNS` deny-list. Conservative — when in doubt
+    we return ``False`` so the generated copy reads "is not displayed"
+    rather than the wrong "are not displayed".
+    """
+    if not s:
+        return False
+    last = re.split(r"[\s\-]+", s.strip().rstrip(".,;:!?"))[-1].lower()
+    if not last:
+        return False
+    if last in _SINGULAR_S_NOUNS:
+        return False
+    if last.endswith("ss"):
+        return False  # "class", "press", "address" tail without lookup
+    return last.endswith("s")
+
+
+_TITLE_ARCHETYPES: list[tuple[re.Pattern[str], "Callable[[re.Match[str]], str]"]] = [
+    # Form rejects empty/malformed input — form-validation TC.
+    # Captures: (1) form-noun, (2) what's being rejected, (3) "input"/"values".
+    (re.compile(
+        r"^(?:the\s+)?(.+?)\s+rejects?\s+(.+?)\s+(input|values?)\s*$",
+        re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} {m.group(3).lower()} "
+         f"is not rejected after submitting "
+         f"the {_strip_phrase(m.group(1))}"
+     )),
+    # Form/feature submits — form-submission TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+submits?\b.*$", re.I),
+     lambda m: (
+         f"The {_strip_phrase(m.group(1))} is not submitted "
+         f"after clicking the submit control"
+     )),
+    # Page/feature renders content — page-render TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+renders?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} is not rendered "
+         f"on {_strip_phrase(m.group(1))} after page load"
+     )),
+    # X returns results — search/feature-returns TC. ``results`` is
+    # plural so we use ``are not returned`` to keep grammar correct.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+returns?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} are not returned "
+         f"by the {_strip_phrase(m.group(1))} "
+         f"after submitting the query"
+     )),
+    # X meets Y standards — compliance TC. ``standards`` is plural →
+    # ``are not met``.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+meets?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} are not met "
+         f"by the {_strip_phrase(m.group(1))}"
+     )),
+    # X redirects to Y — redirect TC. Run BEFORE the generic
+    # has/displays/loads matchers because ``redirects to`` could
+    # otherwise mis-parse as ``redirects` action verb without target.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+redirects?\s+to\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"Redirect to {_strip_phrase(m.group(2))} is not triggered "
+         f"by the {_strip_phrase(m.group(1))}"
+     )),
+    # X validates Y — validation TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+validates?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} validation is not "
+         f"enforced by the {_strip_phrase(m.group(1))}"
+     )),
+    # X accepts Y — input-accept TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+accepts?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} is not accepted "
+         f"by the {_strip_phrase(m.group(1))}"
+     )),
+    # X allows Y — capability TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+allows?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} is not allowed "
+         f"by the {_strip_phrase(m.group(1))}"
+     )),
+    # X displays/shows Y — visibility TC. ``displays`` commonly takes
+    # plural objects (links, items, results) so we detect the case via
+    # :func:`_is_plural_object_phrase` and pick ``is``/``are``
+    # accordingly — otherwise "All primary links is not displayed"
+    # leaks broken subject-verb agreement.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+(?:displays?|shows?)\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} "
+         f"{'are' if _is_plural_object_phrase(m.group(2)) else 'is'} "
+         f"not displayed by the {_strip_phrase(m.group(1))}"
+     )),
+    # X prevents Y — guard TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+prevents?\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(2)))} is not prevented "
+         f"by the {_strip_phrase(m.group(1))}"
+     )),
+    # every/X has Y — uniqueness/presence TC. The ``every`` prefix
+    # (when present) is preserved on the subject so the headline still
+    # reads "is missing from every public page" instead of dropping the
+    # cardinality.
+    (re.compile(r"^(every\s+|each\s+)?(?:the\s+)?(.+?)\s+has\s+"
+                 r"(?:a\s+|an\s+)?(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(3)))} is missing from "
+         f"{(m.group(1) or '').strip()} "
+         f"{_strip_phrase(m.group(2))}".strip()
+     )),
+    # X opens — open TC. Split from ``loads`` so the headline uses
+    # ``is not opened`` rather than the wrong ``is not loaded`` for
+    # menus / modals / drawers that the operator clicks to open.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+opens?\b.*$", re.I),
+     lambda m: (
+         f"The {_strip_phrase(m.group(1))} is not opened "
+         f"after the trigger action"
+     )),
+    # X loads — load TC. The trailing optional group catches
+    # "loads correctly" / "loads quickly" suffixes without leaking
+    # them into the headline.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+loads?\b.*$", re.I),
+     lambda m: (
+         f"The {_strip_phrase(m.group(1))} is not loaded "
+         f"after page navigation"
+     )),
+    # X works (correctly) — generic behavior TC.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+works?\b.*$", re.I),
+     lambda m: (
+         f"The {_strip_phrase(m.group(1))} does not work "
+         f"as expected"
+     )),
+    # Generic "X is Y" — state TC. Last-resort archetype that always
+    # produces a passive-voice headline so we don't fall through to the
+    # banned " — does not work as expected" suffix.
+    (re.compile(r"^(?:the\s+)?(.+?)\s+is\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"The {_strip_phrase(m.group(1))} is not "
+         f"{_strip_phrase(m.group(2))} as expected"
+     )),
+    # Generic "X are Y" — plural state TC.
+    (re.compile(r"^(.+?)\s+are\s+(.+?)\s*$", re.I),
+     lambda m: (
+         f"{_cap(_strip_phrase(m.group(1)))} are not "
+         f"{_strip_phrase(m.group(2))} as expected"
+     )),
+]
+
+
+def _make_bug_summary(tc_summary: str) -> str:
+    """Convert a TC summary into a passive-voice bug summary with an
+    "after/while" trigger clause.
+
+    Strategy: detect the TC archetype (form-reject, page-render,
+    search-returns, redirect, validation, …) and emit the matching
+    passive-voice headline that states the failure observably. Each
+    archetype owns its grammar (singular/plural agreement, trigger
+    clause) — no generic "insert 'not' after the first verb" trick
+    that produced "has not a unique" or "renders … does not work as
+    expected" in earlier revisions.
+
+    Falls back to a safe generic template ("The expected outcome is
+    not observed for: <subject>") so we never emit grammatically
+    broken titles.
+
+    Examples (drawn from real failure modes the simulator path
+    produced on the ART project, see PR-C′ commit body):
+
+      TC:  "Verify that the Contact US form is submitted with valid input"
+      Bug: "The Contact US form is not submitted after clicking the submit control"
+
+      TC:  "Verify that Privacy policy renders its primary content"
+      Bug: "Its primary content is not rendered on Privacy policy after page load"
+
+      TC:  "Verify that the on-site search returns results for a topical query"
+      Bug: "Results for a topical query are not returned by the on-site search after submitting the query"
+
+      TC:  "Verify that every public page has a unique, non-empty <title>"
+      Bug: "Unique, non-empty <title> is missing from every public page"
+
+      TC:  "Verify that the page meets basic accessibility standards"
+      Bug: "Basic accessibility standards are not met by the page"
+
+    Special-case: if the TC already negates ("has no console errors",
+    "without crashes"), invert the existing negation via
+    :func:`_negative_clause_bug_summary` rather than stacking another
+    "not" on top of it.
+    """
+    s = tc_summary.strip().rstrip(".")
+    # Strip "Verify that" prefix (case-insensitive). The trailing
+    # ``\s*`` accepts zero whitespace so a bare ``"Verify that"``
+    # input collapses to the empty-input sentinel below rather than
+    # being treated as a real TC summary.
+    s = re.sub(r"^Verify that\b\s*", "", s, flags=re.I).strip()
+    if not s:
+        return "Expected behaviour is not observed"
+
+    # Existing-negation path — TCs like "has no console errors" need
+    # the existing ``no`` inverted rather than mechanical negation.
+    if _has_existing_negation(s):
+        inverted = _negative_clause_bug_summary(s)
+        if inverted:
+            return _cap(_strip_phrase(inverted))
+
+    # Archetype walk — first match wins.
+    for pat, fn in _TITLE_ARCHETYPES:
+        m = pat.match(s)
+        if m:
+            try:
+                title = fn(m)
+            except Exception:
+                continue
+            if title:
+                return _cap(_strip_phrase(title))
+
+    # Generic safe fallback — passive-voice, no banned suffix.
+    return f"The expected outcome is not observed for: {s}"
 
 
 def _make_bug_expected(tc_summary: str, tc_expected: str) -> str:
