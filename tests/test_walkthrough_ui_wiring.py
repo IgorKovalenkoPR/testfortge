@@ -423,6 +423,232 @@ class TestResultsWalkthroughPath:
                 if b.get("linked_item_type") == "walkthrough"] == []
 
 
+# ── 3b. Stage 4 — LiveExecutor results path ──────────────────────
+
+
+class TestResultsLivePath:
+    """Stage 4: LiveExecutor (``mode='live'``) is the new default.
+    Findings + early-exit reason both produce bug-report rows.
+
+    Reuses the payload-writer pattern from
+    :class:`TestResultsWalkthroughPath` — write a synthetic
+    ``result.json`` into ``_pending/`` and GET the route. The synthetic
+    payload skips the actual Playwright run, so the test is fast and
+    deterministic across platforms.
+    """
+
+    def _write_payload(self, tmp_storage, run_id, payload):
+        import os
+        import json
+        pending = os.path.join(tmp_storage, "automation_runs", "_pending")
+        os.makedirs(pending, exist_ok=True)
+        result_path = os.path.join(pending, f"{run_id}.result.json")
+        done_flag = os.path.join(pending, f"{run_id}.done.flag")
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        open(done_flag, "w").close()
+
+    def _base_payload(self, run_id, **overrides):
+        """Build a minimal mode='live' payload — overridable per-test."""
+        payload = {
+            "status": "done",
+            "config_id": run_id,
+            "mode": "live",
+            "report": {"passed": 0, "failed": 0, "blocked": 0,
+                       "run_id": run_id},
+            "automation_assets": {},
+            "walkthrough_findings": [],
+            "walkthrough_findings_deduped": [],
+            "walkthrough_tc_bindings": [],
+            "early_exit_reason": "",
+            "config_echo": {
+                "base_url": "https://example.com/",
+                "site_url": "https://example.com/",
+                "env_types": ["web"],
+                "items_data": [],
+                "selected_ids": [],
+                "manual_statuses": {},
+                "manual_bug_refs": {},
+                "tester_id": "mid_1",
+                "testing_types": ["Regression"],
+                "source": "test_cases",
+                "item_type": "test_case",
+                "headless": True,
+                "record_video": False,
+                "envs": {"web":
+                          {"environment": "Web · Windows 11 / Chrome"}},
+            },
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_live_mode_findings_become_bugs(self, client, tmp_storage):
+        """Stage 3 regression coverage: ``mode='live'`` findings must
+        be persisted the same way ``mode='walkthrough'`` findings are.
+        Pre-Stage-4 the per-env loop only ran the conversion under
+        ``run_mode == 'walkthrough'`` so LiveExecutor lost the path."""
+        run_id = "20260525_120000_live01"
+        payload = self._base_payload(
+            run_id,
+            walkthrough_findings_deduped=[
+                {"severity": "Critical", "defect_class": "broken_image",
+                 "area": "Images",
+                 "message": "Hero broken on live walk",
+                 "url": "https://example.com/",
+                 "element": "img.hero",
+                 "screenshot": "",
+                 "tc_id": "LIVE-PAGE-001"},
+                {"severity": "Major", "defect_class": "axe_serious",
+                 "area": "Accessibility",
+                 "message": "Form input missing label",
+                 "url": "https://example.com/contact",
+                 "element": "input#email",
+                 "screenshot": "",
+                 "tc_id": "LIVE-PAGE-002"},
+            ],
+            walkthrough_tc_bindings=[
+                {"url": "https://example.com/checkout",
+                 "matches": [{"id": "TC-002",
+                              "external_id": "TC-002",
+                              "summary": "Checkout TC",
+                              "url_pattern": "*/checkout/*",
+                              "trigger": "walkthrough_url_match"}]},
+            ],
+        )
+        self._write_payload(tmp_storage, run_id, payload)
+
+        resp = client.get(f"/test-execution/results/{run_id}",
+                          follow_redirects=False)
+        assert resp.status_code in (200, 302, 303), resp.get_data(as_text=True)
+
+        with client.session_transaction() as sess:
+            bugs = sess.get("bug_reports_data", []) or []
+            runs = sess.get("test_runs", []) or []
+
+        # Two findings → two walkthrough-typed bugs even though
+        # ``mode=='live'`` (not ``'walkthrough'``).
+        wt_bugs = [b for b in bugs
+                   if b.get("linked_item_type") == "walkthrough"]
+        assert len(wt_bugs) == 2, [b.get("title") for b in wt_bugs]
+        wt_ids = {b["linked_item_id"] for b in wt_bugs}
+        assert wt_ids == {"LIVE-PAGE-001", "LIVE-PAGE-002"}
+        # source:walkthrough label is preserved — the listing screen
+        # filter for "walkthrough/live findings" works on this label.
+        for b in wt_bugs:
+            assert "source:walkthrough" in (b.get("labels") or [])
+
+        # The run record carries findings + bindings so the per-run
+        # findings sub-tab renders against them.
+        assert runs
+        last = runs[-1]
+        assert last["mode"] == "live"
+        assert len(last["walkthrough_findings"]) == 2
+        assert last["walkthrough_tc_bindings"]
+        assert last["bug_count"] == 2
+
+    def test_live_oom_early_exit_creates_infra_bug(
+            self, client, tmp_storage):
+        """OomGuard tripping mid-run → exactly one bug with
+        ``linked_item_type='live_executor'`` and the OOM reason
+        verbatim inside ``actual_result``."""
+        run_id = "20260525_120000_live02"
+        payload = self._base_payload(
+            run_id,
+            early_exit_reason="oom_budget_exceeded (412 MB > 400 MB)",
+        )
+        self._write_payload(tmp_storage, run_id, payload)
+
+        resp = client.get(f"/test-execution/results/{run_id}",
+                          follow_redirects=False)
+        assert resp.status_code in (200, 302, 303)
+
+        with client.session_transaction() as sess:
+            bugs = sess.get("bug_reports_data", []) or []
+
+        infra_bugs = [b for b in bugs
+                      if b.get("linked_item_type") == "live_executor"]
+        assert len(infra_bugs) == 1, [b.get("title") for b in infra_bugs]
+        b = infra_bugs[0]
+        assert b["severity"] == "Major"
+        assert "out-of-memory" in b["title"].lower()
+        assert "412 MB > 400 MB" in b["actual_result"]
+        assert "source:live_executor" in (b["labels"] or [])
+        # Run-id is mirrored into linked_item_id so the bug points back
+        # at the specific live run that produced it.
+        assert b["linked_item_id"] == run_id
+
+    def test_live_wall_clock_early_exit_creates_minor_bug(
+            self, client, tmp_storage):
+        """Wall-clock deadline is operator-configured → Minor/Medium
+        rather than Major/High. Severity ladder check."""
+        run_id = "20260525_120000_live03"
+        payload = self._base_payload(
+            run_id,
+            early_exit_reason="wall_deadline_exceeded",
+        )
+        self._write_payload(tmp_storage, run_id, payload)
+
+        resp = client.get(f"/test-execution/results/{run_id}",
+                          follow_redirects=False)
+        assert resp.status_code in (200, 302, 303)
+
+        with client.session_transaction() as sess:
+            bugs = sess.get("bug_reports_data", []) or []
+
+        infra_bugs = [b for b in bugs
+                      if b.get("linked_item_type") == "live_executor"]
+        assert len(infra_bugs) == 1
+        assert infra_bugs[0]["severity"] == "Minor"
+        assert infra_bugs[0]["priority"] == "Medium"
+
+    def test_live_no_early_exit_creates_no_infra_bug(
+            self, client, tmp_storage):
+        """Healthy live run (``early_exit_reason=""``) must not
+        produce an infra bug — operators don't want noise on a clean
+        green pass."""
+        run_id = "20260525_120000_live04"
+        payload = self._base_payload(run_id)  # early_exit_reason=""
+        self._write_payload(tmp_storage, run_id, payload)
+
+        resp = client.get(f"/test-execution/results/{run_id}",
+                          follow_redirects=False)
+        assert resp.status_code in (200, 302, 303)
+
+        with client.session_transaction() as sess:
+            bugs = sess.get("bug_reports_data", []) or []
+        assert [b for b in bugs
+                if b.get("linked_item_type") == "live_executor"] == []
+
+    def test_early_exit_bug_only_attaches_once_across_envs(
+            self, client, tmp_storage):
+        """Multi-env operator (web + mobile_web) must still see one
+        infra bug, not N. Same one-attachment rule as walkthrough
+        findings."""
+        run_id = "20260525_120000_live05"
+        payload = self._base_payload(
+            run_id,
+            early_exit_reason="oom_budget_exceeded (500 MB > 400 MB)",
+        )
+        # Two env types — the per-env loop iterates twice.
+        payload["config_echo"]["env_types"] = ["web", "mobile_web"]
+        payload["config_echo"]["envs"] = {
+            "web":        {"environment": "Web · Linux / Chrome"},
+            "mobile_web": {"environment": "Mobile Web · iPhone 14"},
+        }
+        self._write_payload(tmp_storage, run_id, payload)
+
+        resp = client.get(f"/test-execution/results/{run_id}",
+                          follow_redirects=False)
+        assert resp.status_code in (200, 302, 303)
+
+        with client.session_transaction() as sess:
+            bugs = sess.get("bug_reports_data", []) or []
+        infra_bugs = [b for b in bugs
+                      if b.get("linked_item_type") == "live_executor"]
+        # Exactly one — not two even though the per-env loop ran twice.
+        assert len(infra_bugs) == 1
+
+
 # ── 4. Template smoke — radio + subtab render ────────────────────
 
 
