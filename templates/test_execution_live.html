@@ -9,11 +9,34 @@
 </p>
 
 <div class="card" id="live-status" style="margin-bottom:14px;">
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span class="status-pill" id="status-pill"
               style="display:inline-block;padding:4px 12px;border-radius:999px;
                      font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569;">
             ● idle
+        </span>
+        {# Stage 5: memory pill — RSS / budget surfaced from Stage 3's
+           OomGuard so operators see the early-warning band before the
+           guard trips an early-exit. Hidden by JS when budget == 0
+           (psutil missing on the worker side). #}
+        <span id="status-memory" hidden
+              data-te-mem-pill
+              style="display:inline-block;padding:4px 10px;border-radius:999px;
+                     font-weight:600;font-size:0.8em;background:#f1f5f9;color:#475569;
+                     font-variant-numeric:tabular-nums;">
+            <span aria-hidden="true">🧠</span>
+            <span id="status-memory-text">— MB / — MB</span>
+        </span>
+        {# Stage 5: mode badge — distinguishes 'live' (LiveExecutor),
+           'walkthrough' (legacy WalkthroughRunner), 'tc_driven'
+           (AutomationRunner). Subtle so it doesn't compete with the
+           status pill. JS toggles based on info.mode. #}
+        <span id="status-mode" hidden
+              data-te-mode-badge
+              style="display:inline-block;padding:3px 8px;border-radius:4px;
+                     font-size:0.75em;font-family:ui-monospace,SFMono-Regular,monospace;
+                     background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;">
+            mode: —
         </span>
         <span id="status-text" style="font-size:0.92em;color:#475569;">
             Waiting for an automation run to start…
@@ -22,6 +45,35 @@
     </div>
     <div id="status-pace" style="margin-top:6px;font-size:0.82em;color:#0f172a;"></div>
     <div id="status-meta" style="margin-top:4px;font-size:0.82em;color:#64748b;"></div>
+</div>
+
+{# Stage 5: early-exit banner — surfaces OomGuard / wall-clock exits
+   on the live page itself so operators don't have to wait for the
+   redirect to /test-execution/results to learn the run was cut short.
+   Hidden until JS sees status in (oom_exit, early_exit) OR a non-
+   empty info.early_exit_reason. Colour is set per reason class so
+   OOM (severe) and wall-clock (operator-configured) read differently
+   at a glance. #}
+<div id="te-live-early-exit" hidden
+     data-te-early-exit-banner
+     style="margin:0 0 14px 0;padding:14px 18px;border-radius:6px;
+            background:#fee2e2;border:2px solid #f87171;color:#7f1d1d;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div id="te-live-early-exit-icon" style="font-size:1.7em;line-height:1;">⛔</div>
+        <div style="flex:1;min-width:240px;">
+            <strong id="te-live-early-exit-title"
+                    style="display:block;font-size:1em;margin-bottom:4px;">
+                Run stopped early
+            </strong>
+            <p id="te-live-early-exit-reason"
+               style="margin:0;font-size:0.88em;font-family:ui-monospace,SFMono-Regular,monospace;
+                      word-break:break-word;"></p>
+        </div>
+        <a id="te-live-early-exit-import" href="#"
+           class="btn btn-secondary" style="font-size:0.85em;">
+            Import partial results
+        </a>
+    </div>
 </div>
 
 <div class="card" style="padding:0;overflow:hidden;background:#0f172a;position:relative;">
@@ -182,6 +234,17 @@
     var sprog  = document.getElementById('status-progress');
     var space  = document.getElementById('status-pace');
     var smeta  = document.getElementById('status-meta');
+    // Stage 5: new live-DOM nodes — memory pill, mode badge,
+    // early-exit banner. Looked up here once so paintStatus doesn't
+    // re-query the DOM on every 1 s tick.
+    var memPill  = document.getElementById('status-memory');
+    var memText  = document.getElementById('status-memory-text');
+    var modeBadge = document.getElementById('status-mode');
+    var eeBanner = document.getElementById('te-live-early-exit');
+    var eeTitle  = document.getElementById('te-live-early-exit-title');
+    var eeReason = document.getElementById('te-live-early-exit-reason');
+    var eeIcon   = document.getElementById('te-live-early-exit-icon');
+    var eeImport = document.getElementById('te-live-early-exit-import');
 
     function fmtMs(ms) {
         if (!ms || ms < 0) return '—';
@@ -252,16 +315,31 @@
 
     function paintStatus(info) {
         var status = (info && info.status) || 'idle';
+        // Stage 5: add Stage-3 statuses to the colours table. Without
+        // these entries, 'oom_exit' / 'early_exit' / 'running_tc' fell
+        // through to the idle pill and confused operators ("why does a
+        // crashed run show as idle?").
         var colours = {
-            idle:     ['#f1f5f9', '#475569', '● idle'],
-            starting: ['#fef9c3', '#854d0e', '● starting'],
-            running:  ['#dcfce7', '#166534', '● running'],
-            done:     ['#e0e7ff', '#3730a3', '✓ done']
+            idle:       ['#f1f5f9', '#475569', '● idle'],
+            starting:   ['#fef9c3', '#854d0e', '● starting'],
+            running:    ['#dcfce7', '#166534', '● running'],
+            running_tc: ['#dbeafe', '#1e40af', '● running TC'],
+            done:       ['#e0e7ff', '#3730a3', '✓ done'],
+            oom_exit:   ['#fee2e2', '#7f1d1d', '⛔ oom exit'],
+            early_exit: ['#fef3c7', '#854d0e', '⚠ early exit']
         };
         var c = colours[status] || colours.idle;
         pill.style.background = c[0];
         pill.style.color = c[1];
         pill.textContent = c[2];
+
+        // Stage 5: distinguish LiveExecutor "walking the site" from a
+        // TC-driven step. ``LIVE-PAGE-NNN`` is the synthetic id
+        // LiveExecutor stamps on each visited URL; operators care
+        // about the URL itself, not the synthetic id.
+        var currentTc = (info && info.current_tc) || '';
+        var currentUrl = (info && info.current_url) || '';
+        var isLiveWalk = /^LIVE-PAGE-/.test(currentTc);
 
         if (status === 'idle') {
             stext.textContent = 'Waiting for an automation run to start…';
@@ -270,12 +348,32 @@
             stext.textContent = 'Browser is launching…';
             sprog.textContent = '';
         } else if (status === 'running') {
-            stext.textContent = 'Test case: ' + (info.current_tc || '—');
-            sprog.textContent = (info.cases_done || 0) + ' / '
-                              + (info.cases_total || 0) + ' cases';
+            stext.textContent = isLiveWalk
+                ? ('Walking: ' + (currentUrl || currentTc || '—'))
+                : ('Test case: ' + (currentTc || '—'));
+            sprog.textContent = (info.cases_done || info.done || 0) + ' / '
+                              + (info.cases_total || info.total || 0) + ' cases';
+        } else if (status === 'running_tc') {
+            // LiveExecutor writes 'running_tc' while dispatching a
+            // TC that matched the current URL — show both the TC id
+            // and the URL it's running against.
+            stext.textContent = 'TC ' + (currentTc || '—')
+                              + (currentUrl ? ' @ ' + currentUrl : '');
+            sprog.textContent = (info.cases_done || info.done || 0) + ' / '
+                              + (info.cases_total || info.total || 0) + ' cases';
         } else if (status === 'done') {
             stext.textContent = 'Run finished';
-            sprog.textContent = (info.cases_total || 0) + ' / ' + (info.cases_total || 0) + ' cases';
+            sprog.textContent = (info.cases_total || info.total || 0)
+                              + ' / ' + (info.cases_total || info.total || 0)
+                              + ' cases';
+        } else if (status === 'oom_exit') {
+            stext.textContent = 'Run stopped: out-of-memory';
+            sprog.textContent = (info.done || 0) + ' / '
+                              + (info.total || 0) + ' (partial)';
+        } else if (status === 'early_exit') {
+            stext.textContent = 'Run stopped early';
+            sprog.textContent = (info.done || 0) + ' / '
+                              + (info.total || 0) + ' (partial)';
         }
 
         if (space) {
@@ -293,6 +391,109 @@
                               + (info.base_url || '');
         } else {
             smeta.textContent = '';
+        }
+
+        // Stage 5 paint passes — each is a noop when the relevant
+        // info field is absent, so older runs (pre-Stage-3) still
+        // render cleanly.
+        paintMemoryPill(info);
+        paintModeBadge(info);
+        paintEarlyExitBanner(info, status);
+    }
+
+    /* Stage 5: memory pill — colour-bands rss_mb against
+       memory_budget_mb so operators see the early-warning curve
+       (green → amber → red) before OomGuard actually fires an
+       oom_exit. Hidden when budget is 0 (psutil missing on worker)
+       since there's no meaningful ratio to display. */
+    function paintMemoryPill(info) {
+        if (!memPill || !memText) return;
+        var budget = info && Number(info.memory_budget_mb || 0);
+        var rss = info && Number(info.rss_mb || 0);
+        if (!budget) {
+            memPill.hidden = true;
+            return;
+        }
+        memPill.hidden = false;
+        memText.textContent = rss + ' MB / ' + budget + ' MB';
+        var pct = rss / budget;
+        var bg, fg;
+        if (pct >= 0.9) {
+            // Red — within 10% of the OOM cliff.
+            bg = '#fee2e2'; fg = '#7f1d1d';
+        } else if (pct >= 0.7) {
+            // Amber — operator should think about lowering max_pages.
+            bg = '#fef3c7'; fg = '#854d0e';
+        } else {
+            // Green — comfortable headroom.
+            bg = '#dcfce7'; fg = '#166534';
+        }
+        memPill.style.background = bg;
+        memPill.style.color = fg;
+    }
+
+    /* Stage 5: mode badge — labels which dispatch path the worker
+       picked. Tells operators apart 'live' (LiveExecutor, the Stage-3
+       default), 'walkthrough' (legacy Sprint-5 path, gated by
+       LEGACY_EXECUTOR=1), and 'tc_driven' (pre-walkthrough path).
+       Hidden when info.mode is missing so older runs don't sprout
+       an empty badge. */
+    function paintModeBadge(info) {
+        if (!modeBadge) return;
+        var mode = info && info.mode;
+        if (!mode) {
+            modeBadge.hidden = true;
+            return;
+        }
+        modeBadge.hidden = false;
+        modeBadge.textContent = 'mode: ' + mode;
+    }
+
+    /* Stage 5: early-exit banner — shown when the worker reports a
+       LiveExecutor cut-short. Two trigger surfaces:
+         * info.status === 'oom_exit' / 'early_exit' (LiveExecutor's
+           final live-info write before tearing down the browser)
+         * info.early_exit_reason non-empty (the same string carried
+           in info.extra during the run, surfaced if present)
+       OOM gets a red border + ⛔; wall-clock gets amber + ⚠. */
+    function paintEarlyExitBanner(info, status) {
+        if (!eeBanner) return;
+        var reason = (info && (info.early_exit_reason
+                                || (info.extra && info.extra.early_exit_reason))) || '';
+        var triggered = (status === 'oom_exit' || status === 'early_exit'
+                          || (reason && reason.length));
+        if (!triggered) {
+            eeBanner.hidden = true;
+            return;
+        }
+        eeBanner.hidden = false;
+        var isOom = (status === 'oom_exit')
+                     || /^oom_budget_exceeded/.test(reason);
+        // Colour the card per reason class.
+        if (isOom) {
+            eeBanner.style.background = '#fee2e2';
+            eeBanner.style.borderColor = '#f87171';
+            eeBanner.style.color = '#7f1d1d';
+            if (eeIcon)  eeIcon.textContent = '⛔';
+            if (eeTitle) eeTitle.textContent = 'Run stopped: out-of-memory';
+        } else {
+            eeBanner.style.background = '#fef3c7';
+            eeBanner.style.borderColor = '#fbbf24';
+            eeBanner.style.color = '#854d0e';
+            if (eeIcon)  eeIcon.textContent = '⚠';
+            if (eeTitle) eeTitle.textContent = 'Run stopped early';
+        }
+        if (eeReason) {
+            eeReason.textContent = reason
+                || ('Worker reported status=' + status);
+        }
+        // Wire the import button to the same results endpoint the
+        // poller would have redirected to on a clean done.
+        if (eeImport && runId) {
+            eeImport.href = resultsUrl;
+            eeImport.hidden = false;
+        } else if (eeImport) {
+            eeImport.hidden = true;
         }
     }
 
