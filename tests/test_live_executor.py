@@ -278,6 +278,133 @@ class TestLiveExecutorRun:
                     for f in ex.findings)
 
 
+# ── PR-B: page screenshot fan-out into findings ─────────────────────
+
+
+class TestWalkthroughScreenshotWiring:
+    """PR-B regression — every walkthrough heuristic currently calls
+    ``note(...)`` without ``screenshot=``, so ``finding["screenshot"]``
+    used to stay "" and :func:`create_bug_from_walkthrough_finding`
+    persisted ``attachments=[]``. ``_walk_one`` now fan-outs the
+    page-level screenshot path into any finding emitted during that
+    page visit that has no shot of its own.
+    """
+
+    def test_findings_without_screenshot_inherit_page_shot(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        fake_pw()
+        from engine import live_executor as le
+
+        # Stub one heuristic to emit a finding without a screenshot —
+        # this matches the shape every real heuristic currently
+        # produces (none of them set ``screenshot=`` today).
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Major", "Images", "broken_image",
+                f"Broken image on {url}",
+                url=url, tc_id=tc_id, element="img.hero",
+            )
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        broken = [f for f in ex.findings
+                   if f["defect_class"] == "broken_image"]
+        assert broken, (
+            "fake heuristic should have emitted one broken_image finding"
+        )
+        # The page-shot path was injected — no longer empty.
+        assert broken[0]["screenshot"], (
+            "page-level screenshot must be fanned out into findings "
+            "that don't set one of their own — otherwise the bug "
+            "factory writes attachments=[] and /bug-reports shows the "
+            "misleading 'No attachments captured' banner"
+        )
+        # The path points at the actual PNG written by ``_screenshot``.
+        assert broken[0]["screenshot"].endswith(".png"), (
+            f"expected a .png path, got {broken[0]['screenshot']!r}"
+        )
+
+    def test_explicit_finding_screenshot_is_preserved(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """Future-proofing: if a heuristic ever does pass
+        ``screenshot=`` (per-element capture), the fan-out must keep
+        the explicit value rather than overwriting it with the page
+        shot.
+        """
+        fake_pw()
+        from engine import live_executor as le
+
+        explicit = "/explicit/per-element-shot.png"
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Minor", "CTAs", "cta_tiny_tap_target",
+                f"CTA too small on {url}",
+                url=url, tc_id=tc_id, element="button.signup",
+                screenshot=explicit,
+            )
+
+        monkeypatch.setattr(le, "scan_ctas", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        cta = [f for f in ex.findings
+                if f["defect_class"] == "cta_tiny_tap_target"]
+        assert cta, "fake heuristic should have emitted one CTA finding"
+        assert cta[0]["screenshot"] == explicit, (
+            "fan-out must not clobber an explicit per-element shot — "
+            "future heuristics that capture targeted evidence rely "
+            "on this invariant"
+        )
+
+    def test_walkthrough_step_gallery_inherits_page_shot(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """Side-effect coverage: the per-page gallery card synthesises
+        one ``StepResult`` per finding (with ``action='walkthrough_check'``
+        and ``screenshot_after=f.screenshot``). Before PR-B this slot
+        was empty for every walkthrough defect; after the fan-out the
+        thumbnail finally shows up.
+        """
+        fake_pw()
+        from engine import live_executor as le
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note("Major", "Images", "broken_image",
+                 f"Broken on {url}", url=url, tc_id=tc_id)
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        report = ex.run(start_urls=["https://example.com/"])
+
+        page_script = next(s for s in report.scripts
+                            if s.tc_id.startswith("LIVE-PAGE-"))
+        walk_steps = [s for s in page_script.steps
+                       if s.action == "walkthrough_check"]
+        assert walk_steps, "expected a walkthrough_check step"
+        assert walk_steps[0].screenshot_after, (
+            "per-defect gallery row must carry a screenshot path so "
+            "the bug-report card and the live gallery both show a "
+            "thumbnail"
+        )
+
+
 # ── TC dispatch via url_pattern + trigger ───────────────────────────
 
 

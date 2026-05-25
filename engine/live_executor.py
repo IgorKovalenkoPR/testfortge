@@ -791,6 +791,29 @@ class LiveExecutor:
             collect_console_errors(console_errors, page_errors,
                                     final_url, tc_id, note=self._note)
 
+            # PR-B: heuristics call ``note(...)`` without a ``screenshot=``
+            # kwarg — they have no cheap way to take a per-element shot,
+            # so they leave the field at its default empty string. Before
+            # this fan-out, ``finding["screenshot"]`` stayed "" all the
+            # way into :func:`engine.bug_report.create_bug_from_walkthrough_finding`,
+            # which then wrote ``attachments=[]`` and made /bug-reports
+            # render the misleading "No attachments captured / Base URL
+            # missing" banner even on runs where Playwright took a
+            # perfectly valid page shot at the goto step above.
+            #
+            # Inject ``shot`` into every finding emitted during this
+            # page walk that has no screenshot of its own; heuristics
+            # that gain per-element capture in the future can still
+            # override the field by passing ``screenshot=...`` and we
+            # preserve their value here. Side-effect: walkthrough
+            # ``StepResult.screenshot_after`` slots (built right below)
+            # also inherit the page shot, so the per-page gallery card
+            # finally shows a thumbnail next to each defect row.
+            if shot:
+                for f in self.findings[before_count:]:
+                    if not f.get("screenshot"):
+                        f["screenshot"] = shot
+
             # Synthesise StepResults from new findings so the gallery
             # shows each defect as a row under this page's card.
             for offset, f in enumerate(self.findings[before_count:],
