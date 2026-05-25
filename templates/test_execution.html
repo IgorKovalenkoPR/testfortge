@@ -412,7 +412,9 @@
                 {{ t.get('te_wt_bindings_label',
                     'URL-pattern matched these test cases during the walkthrough:') }}
                 {% for b in wt_bindings %}
-                    <code style="margin-right:6px;">{{ b.tc_id }}</code>
+                    {% for m in (b.matches or []) %}
+                        <code style="margin-right:6px;">{{ m.external_id or m.id }}</code>
+                    {% endfor %}
                 {% endfor %}
             </p>
             {% endif %}
