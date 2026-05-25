@@ -426,8 +426,12 @@ class TestWorkerDispatch:
 
     def test_walkthrough_mode_routes_to_walkthrough_runner(
             self, monkeypatch, fake_pw, tmp_storage):
+        """Legacy walkthrough dispatch is only reachable under
+        ``LEGACY_EXECUTOR=1`` (Stage 3 default reroutes every mode to
+        ``live``). With the flag set the runner still owns the walk."""
         fake_pw()
         monkeypatch.setenv("WALKTHROUGH_MODE_ENABLED", "1")
+        monkeypatch.setenv("LEGACY_EXECUTOR", "1")
 
         rc, result = self._spawn_worker(monkeypatch, tmp_storage, {
             "config_id": "cfg",
@@ -446,10 +450,17 @@ class TestWorkerDispatch:
         assert result["status"] == "done"
         # The serialised report has the walkthrough-shaped tc_id.
         assert result["report"]["scripts"][0]["tc_id"].startswith("WALK-")
+        # And the new ``mode`` echo confirms which dispatch fired.
+        assert result.get("mode") == "walkthrough"
 
     def test_walkthrough_mode_without_flag_fails_cleanly(
             self, monkeypatch, tmp_storage):
+        """When ``LEGACY_EXECUTOR=1`` is set but WALKTHROUGH_MODE_ENABLED
+        is not, the legacy walkthrough gate still raises. With Stage 3's
+        default (LEGACY_EXECUTOR unset) the request is silently
+        redirected to live instead."""
         monkeypatch.delenv("WALKTHROUGH_MODE_ENABLED", raising=False)
+        monkeypatch.setenv("LEGACY_EXECUTOR", "1")
 
         rc, result = self._spawn_worker(monkeypatch, tmp_storage, {
             "config_id": "cfg",
@@ -466,9 +477,9 @@ class TestWorkerDispatch:
 
     def test_default_mode_still_calls_automation_runner(
             self, monkeypatch, tmp_storage):
-        """Sanity check: an existing config (no ``mode`` field) goes
-        through the TC-driven path. We stub AutomationRunner so the
-        test doesn't need real Playwright."""
+        """Legacy TC-driven path is gated by ``LEGACY_EXECUTOR=1``. Stub
+        AutomationRunner so the test doesn't need real Playwright."""
+        monkeypatch.setenv("LEGACY_EXECUTOR", "1")
         captured = {}
 
         class _FakeAR:
@@ -490,7 +501,7 @@ class TestWorkerDispatch:
         rc, result = self._spawn_worker(monkeypatch, tmp_storage, {
             "config_id": "cfg",
             "storage_root": tmp_storage,
-            # No "mode" field — default path
+            "mode": "tc_driven",  # explicit legacy mode
             "base_url": "https://example.com/",
             "items_data": [],
             "runner_kwargs": {"headless": True},
@@ -498,6 +509,7 @@ class TestWorkerDispatch:
         assert rc == 0
         assert result["status"] == "done"
         assert captured.get("scripts") == []
+        assert result.get("mode") == "tc_driven"
 
 
 # ── 7. Debug endpoint gate + 202 on dispatch ─────────────────────

@@ -103,6 +103,23 @@ def _serialise_report(rep) -> dict[str, Any]:
     }
 
 
+def _load_test_cases_for(project_id: str) -> list[dict]:
+    """Wrapper around :func:`engine.db.load_test_cases` so the worker
+    can fetch TCs without taking a hard import dependency at module
+    load (the worker may run in environments without a configured DB).
+    Failure returns an empty list so LiveExecutor still gets the
+    walkthrough-only behaviour rather than crashing the run."""
+    if not project_id:
+        return []
+    try:
+        from engine.db import load_test_cases
+        return list(load_test_cases(project_id) or [])
+    except Exception as exc:  # pragma: no cover — best-effort
+        print(f"runner_worker: load_test_cases({project_id!r}) "
+              f"failed: {exc}", file=sys.stderr)
+        return []
+
+
 def _file_md5(path: str, chunk: int = 65536) -> str:
     """MD5 hex digest of a file. Used to dedupe consecutive byte-
     identical screenshots in a TC's gallery — operator-reported the
@@ -387,12 +404,121 @@ def main() -> int:
                 print(f"runner_worker: cred reconstruction failed: {exc}",
                       file=sys.stderr)
 
-        # TFWefloLab integration PR-1: dispatch on ``mode``. Default
-        # ``"tc_driven"`` keeps every existing run path byte-identical;
-        # ``"walkthrough"`` only fires when the WALKTHROUGH_MODE_ENABLED
-        # env var is set, so the scaffold lands safely on prod.
-        mode = (config.get("mode") or "tc_driven").strip().lower()
-        if mode == "walkthrough":
+        # Stage 3 dispatch.
+        #
+        # Default (LEGACY_EXECUTOR unset): every mode resolves to
+        # ``"live"`` so a stray ``mode="walkthrough"`` in a saved
+        # config picks up the unified executor automatically. The
+        # legacy TC-driven and walkthrough paths are only reachable
+        # by setting ``LEGACY_EXECUTOR=1`` — kept for one release so
+        # operators can A/B compare before we delete the dead code.
+        #
+        # The Sprint-5 ``WALKTHROUGH_MODE_ENABLED`` feature flag still
+        # gates the legacy walkthrough path (kept byte-identical for
+        # the A/B). It has no effect on ``mode="live"``.
+        raw_mode = (config.get("mode") or "").strip().lower()
+        legacy_executor = (os.environ.get("LEGACY_EXECUTOR") or "").strip() == "1"
+        if not raw_mode:
+            mode = "live"  # default → unified executor
+        elif raw_mode in ("live",):
+            mode = "live"
+        elif legacy_executor and raw_mode in ("walkthrough", "tc_driven"):
+            mode = raw_mode
+        else:
+            if raw_mode != "live":
+                # Operator-friendly: don't surprise-fail on a saved
+                # legacy config; redirect with a log line so the
+                # behaviour change is auditable.
+                print(
+                    f"runner_worker: mode={raw_mode!r} requested but "
+                    f"LEGACY_EXECUTOR is not set — redirecting to 'live'",
+                    file=sys.stderr,
+                )
+            mode = "live"
+
+        if mode == "live":
+            from engine.live_executor import LiveExecutor
+            # Stage 3 config block (``live``) mirrors the Sprint-5
+            # ``walkthrough`` block so the route layer can swap a key
+            # name without restructuring the dispatch JSON.
+            live_cfg = config.get("live") or config.get("walkthrough") or {}
+            # AutomationRunner-shaped knobs that LiveExecutor also
+            # accepts. Unknown keys are dropped by LiveExecutor's
+            # ``**_ignored``.
+            live_kwargs = {
+                k: runner_kwargs.get(k)
+                for k in ("headless", "viewport", "record_video",
+                          "user_agent", "engine_kind",
+                          "credentials")
+                if k in runner_kwargs
+            }
+            # Try to pull the SiteProfile if the caller passed a
+            # project_id + base_url combination. Best-effort — a
+            # missing profile just means we fall back to base_url
+            # as the sole seed.
+            site_profile_dict = None
+            pid = (config.get("project_id") or "").strip()
+            base_url = config.get("base_url", "")
+            if pid and base_url:
+                try:
+                    from engine.db import load_site_profile_by_url
+                    row = load_site_profile_by_url(pid, base_url)
+                    if row and isinstance(row.get("profile"), dict):
+                        site_profile_dict = row["profile"]
+                except Exception as exc:
+                    print(f"runner_worker: load_site_profile failed: {exc}",
+                          file=sys.stderr)
+
+            live_kwargs.update({
+                "project_id": pid,
+                "max_pages": int(live_cfg.get("max_pages", 50)),
+                "device_timeout_ms": int(live_cfg.get(
+                    "device_timeout_ms", 480000)),
+                "navigation_timeout_ms": int(live_cfg.get(
+                    "navigation_timeout_ms", 45000)),
+                "max_form_fills": int(live_cfg.get("max_form_fills", 5)),
+                "axe_enabled": bool(live_cfg.get("axe_enabled", True)),
+                "memory_budget_mb": int(live_cfg.get(
+                    "memory_budget_mb",
+                    int(os.environ.get("MEMORY_BUDGET_MB", "400")))),
+                # TestCases: explicit ``live.test_cases`` > config-level
+                # ``items_data`` > DB load (per project_id).
+                "test_cases": list(
+                    live_cfg.get("test_cases")
+                    or config.get("items_data")
+                    or _load_test_cases_for(pid)
+                ),
+                "site_profile": site_profile_dict,
+            })
+            runner = LiveExecutor(
+                storage_root=storage_root,
+                base_url=base_url,
+                **live_kwargs,
+            )
+            start_urls = live_cfg.get("start_urls") or None
+            report = runner.run(start_urls=start_urls)
+            items_data: list = list(live_kwargs.get("test_cases") or [])
+            # Stage 3 surfaces the same findings shape as Sprint 5's
+            # walkthrough mode so downstream readers (bug_report
+            # creation, /bug-reports filter, stats CLI) don't need to
+            # branch on mode. Field names are kept identical
+            # (``walkthrough_findings`` / ``_deduped`` / ``_tc_bindings``)
+            # for the same reason.
+            walkthrough_findings = list(runner.findings)
+            try:
+                walkthrough_findings_deduped = runner.dedupe_findings()
+            except Exception as exc:  # pragma: no cover — defensive
+                print(f"runner_worker: dedupe failed: {exc}",
+                      file=sys.stderr)
+                walkthrough_findings_deduped = walkthrough_findings
+            walkthrough_tc_bindings = list(
+                getattr(runner, "tc_bindings", []) or []
+            )
+            # If LiveExecutor early-exited (OOM / wall-clock), echo
+            # the reason into the result so the polling UI can render
+            # a clear "stopped early" badge instead of "done".
+            early_exit_reason = getattr(runner, "early_exit_reason", "")
+        elif mode == "walkthrough":
             from engine.walkthrough_runner import (
                 WalkthroughRunner, feature_enabled as _wt_enabled,
             )
@@ -402,9 +528,6 @@ def main() -> int:
                     "WALKTHROUGH_MODE_ENABLED is not set"
                 )
             wt_cfg = config.get("walkthrough") or {}
-            # AutomationRunner-shaped kwargs that the scaffold also
-            # accepts (headless, viewport, record_video). Unknown keys
-            # are dropped by WalkthroughRunner.__init__'s ``**_ignored``.
             wt_kwargs = {
                 k: runner_kwargs.get(k)
                 for k in ("headless", "viewport", "record_video")
@@ -418,11 +541,6 @@ def main() -> int:
                     wt_cfg.get("navigation_timeout_ms", 45000)),
                 "max_form_fills": int(wt_cfg.get("max_form_fills", 5)),
                 "axe_enabled": bool(wt_cfg.get("axe_enabled", True)),
-                # PR-2: project TestCases as plain dicts so the runner
-                # can record URL-pattern bindings per visited page.
-                # The route layer materialises these from the DB in
-                # PR-3; for now the debug endpoint can supply them
-                # directly in the config JSON.
                 "test_cases": list(wt_cfg.get("test_cases") or []),
             })
             runner = WalkthroughRunner(
@@ -432,14 +550,7 @@ def main() -> int:
             )
             start_urls = wt_cfg.get("start_urls") or [config.get("base_url", "")]
             report = runner.run(start_urls=start_urls)
-            items_data: list = []
-            # PR-2: surface the heuristic findings to the route layer.
-            # The result.json now carries two parallel views — raw, in
-            # the order the runner emitted them, plus a deduped view
-            # collapsed by ``walkthrough_dedup.fingerprint``. The route
-            # picks whichever fits the rendering target; PR-3's findings
-            # subtab will read the deduped one to mirror TFWefloLab's
-            # cross-device collapsing.
+            items_data = []
             walkthrough_findings = list(runner.findings)
             try:
                 walkthrough_findings_deduped = runner.dedupe_findings()
@@ -450,7 +561,8 @@ def main() -> int:
             walkthrough_tc_bindings = list(
                 getattr(runner, "tc_bindings", []) or []
             )
-        else:
+            early_exit_reason = ""
+        else:  # tc_driven (only reachable when LEGACY_EXECUTOR=1)
             runner = AutomationRunner(storage_root=storage_root, **runner_kwargs)
             items_data = config.get("items_data") or []
             scripts = scripts_from_session(items_data, config.get("base_url", ""))
@@ -459,6 +571,7 @@ def main() -> int:
             walkthrough_findings = []
             walkthrough_findings_deduped = []
             walkthrough_tc_bindings = []
+            early_exit_reason = ""
         rep_dict = _serialise_report(report)
         assets = _build_automation_assets(rep_dict, storage_root)
 
@@ -474,6 +587,12 @@ def main() -> int:
             "walkthrough_findings":         walkthrough_findings,
             "walkthrough_findings_deduped": walkthrough_findings_deduped,
             "walkthrough_tc_bindings":      walkthrough_tc_bindings,
+            # Stage 3: surfaced when LiveExecutor.OomGuard fires or the
+            # wall-clock budget is hit. Empty string means the run
+            # finished normally — the UI uses it to decide whether to
+            # render an "stopped early" badge over the per-TC card list.
+            "mode":              mode,
+            "early_exit_reason": early_exit_reason,
             "config_echo": {
                 "base_url": config.get("base_url", ""),
                 "items_data": items_data,
