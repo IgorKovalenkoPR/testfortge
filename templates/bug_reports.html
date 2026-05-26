@@ -7,6 +7,65 @@
 
 {% include '_project_picker.html' %}
 
+{# ── PR-J: Reset Project bugs — always-visible affordance ────────
+   This button was originally rendered only when ``bugs`` was
+   non-empty (inside the outer ``{% if bugs %}`` at the stats block
+   below). The result was a UX trap: an operator who saw the feature
+   once on a noisy project, then started a fresh project with zero
+   bugs, couldn't find the button anymore and assumed the feature
+   had been removed.
+   The button now renders for every project — when there are no
+   bugs the form still submits cleanly (``delete_bugs_for_project``
+   returns ``0`` and the route flashes "0 bugs deleted"), so the
+   only cost is one extra DOM node on empty pages and the upside
+   is the feature stops looking conditional. Modal lives just below
+   so its DOM is always available too. #}
+<div class="bug-actions" style="margin-bottom:14px;">
+    <button type="button" class="btn btn-secondary" id="bug-reset-open"
+            style="color:#b91c1c; border-color:#fecaca;">
+        <i data-lucide="trash-2" class="icon-sm"></i>
+        {{ t.get('bug_reset_button', 'Reset Project bugs') }}
+        {% if bugs %}({{ stats.total }}){% endif %}
+    </button>
+</div>
+
+{# PR-J: Confirm modal — moved alongside the button (above the
+   ``{% if bugs %}`` gate) so the modal DOM exists for every
+   project. ``stats.total`` is always passed by the route layer
+   (``len(bugs)``) so the count line reads "0 bug(s) will be
+   deleted" on an empty project — informative rather than broken.
+   #}
+<div id="bug-reset-modal" class="bug-reset-modal" hidden>
+    <div class="bug-reset-modal-backdrop"></div>
+    <div class="bug-reset-modal-panel" role="dialog"
+         aria-labelledby="bug-reset-title">
+        <h3 id="bug-reset-title" style="margin-top:0;color:#b91c1c;">
+            {{ t.get('bug_reset_title', 'Reset Project bugs?') }}
+        </h3>
+        <p style="color:#475569;font-size:0.95em;">
+            {{ t.get(
+                'bug_reset_body',
+                'This deletes every bug attached to the active project. The project itself, its test cases, and its checklists are NOT touched. The action cannot be undone.') }}
+        </p>
+        <p style="color:#1e293b;font-size:0.95em;">
+            <strong>{{ stats.total if stats else 0 }}</strong>
+            {{ t.get('bug_reset_count_suffix', 'bug(s) will be deleted.') }}
+        </p>
+        <form method="POST" action="{{ url_for('bugs_reset') }}"
+              style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="confirm" value="yes">
+            <button type="button" class="btn btn-secondary" id="bug-reset-cancel">
+                {{ t.get('bug_reset_cancel', 'Cancel') }}
+            </button>
+            <button type="submit" class="btn btn-primary"
+                    style="background:#dc2626;border-color:#dc2626;">
+                {{ t.get('bug_reset_confirm', 'Yes, delete all bugs') }}
+            </button>
+        </form>
+    </div>
+</div>
+
 {% if bugs %}
 {# ── Stats Summary ── #}
 <div class="bug-stats-row">
@@ -65,61 +124,25 @@
     {% endif %}
 </div>
 
-{# ── Export + Reset (PR-H) ── #}
-{# Reset Project lives next to Export so destructive actions are
-   grouped. The button opens a confirm modal — see the inline JS at
-   the bottom of this template — that posts to /bugs/reset with the
-   mandatory confirm=yes token. Without that token the route flashes
-   an error rather than wiping data, defending against accidental
-   double-clicks and lost cookies. #}
+{# ── Export + Select-all toolbar ──
+   PR-H originally bundled Reset Project here. PR-J split Reset out
+   to the always-visible toolbar above (line 8-ish) so the affordance
+   doesn't disappear on empty projects. Export + Select-all stay
+   gated by ``{% if bugs %}`` because they're meaningless without
+   any rows to act on. #}
 <div class="bug-actions">
     <a href="{{ url_for('export_bug_reports') }}" class="btn btn-secondary"><i data-lucide="file-text" class="icon-sm"></i> {{ t.get('bug_export', 'Export Bug Reports') }}</a>
-    {% if bugs %}
-    <button type="button" class="btn btn-secondary" id="bug-reset-open"
-            style="color:#b91c1c; border-color:#fecaca;">
-        <i data-lucide="trash-2" class="icon-sm"></i>
-        {{ t.get('bug_reset_button', 'Reset Project bugs') }}
-    </button>
-    {% endif %}
     <label class="bug-select-all">
         <input type="checkbox" id="bug-select-all">
         {{ t.get('bug_select_all', 'Select all') }}
     </label>
 </div>
 
-{# Confirm modal — hidden until the Reset button is clicked. The
-   form submits POST /bugs/reset with the mandatory ``confirm=yes``
-   field; routes/bugs.py refuses to delete without it. #}
-<div id="bug-reset-modal" class="bug-reset-modal" hidden>
-    <div class="bug-reset-modal-backdrop"></div>
-    <div class="bug-reset-modal-panel" role="dialog"
-         aria-labelledby="bug-reset-title">
-        <h3 id="bug-reset-title" style="margin-top:0;color:#b91c1c;">
-            {{ t.get('bug_reset_title', 'Reset Project bugs?') }}
-        </h3>
-        <p style="color:#475569;font-size:0.95em;">
-            {{ t.get(
-                'bug_reset_body',
-                'This deletes every bug attached to the active project. The project itself, its test cases, and its checklists are NOT touched. The action cannot be undone.') }}
-        </p>
-        <p style="color:#1e293b;font-size:0.95em;">
-            <strong>{{ stats.total }}</strong>
-            {{ t.get('bug_reset_count_suffix', 'bug(s) will be deleted.') }}
-        </p>
-        <form method="POST" action="{{ url_for('bugs_reset') }}"
-              style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="confirm" value="yes">
-            <button type="button" class="btn btn-secondary" id="bug-reset-cancel">
-                {{ t.get('bug_reset_cancel', 'Cancel') }}
-            </button>
-            <button type="submit" class="btn btn-primary"
-                    style="background:#dc2626;border-color:#dc2626;">
-                {{ t.get('bug_reset_confirm', 'Yes, delete all bugs') }}
-            </button>
-        </form>
-    </div>
-</div>
+{# PR-J: the Reset confirm modal was previously rendered here
+   inside ``{% if bugs %}``; it now lives next to the always-visible
+   Reset button above so the DOM is consistent on empty projects.
+   See the comment block alongside the button at the top of the
+   template. #}
 
 {# ── Bulk-action form (Sprint 4 task 4.2) ── #}
 {# The form wraps every card so checkboxes inside `<label>`s submit

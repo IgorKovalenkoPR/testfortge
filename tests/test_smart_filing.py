@@ -318,6 +318,55 @@ class TestDbDedupHelpers:
         assert _db.delete_bugs_for_project("") == 0
 
 
+# ── 5. PR-J: Reset button visible on empty projects ───────────────
+
+
+class TestResetButtonVisibilityOnEmptyProject:
+    """PR-H originally rendered the Reset Project button inside the
+    outer ``{% if bugs %}`` gate on /bug-reports. On a fresh project
+    with zero bugs the button vanished, and operators (rightly)
+    reported the feature as missing. PR-J moved the button + modal
+    above the gate so they appear for every project. This regression
+    test pins that contract: even with zero bugs in the project, the
+    Reset button + modal markup render.
+    """
+
+    def test_reset_button_renders_on_empty_project(
+        self, client, monkeypatch,
+    ):
+        sid = f"sid-{uuid.uuid4().hex}"
+        pid = _db.upsert_project(name="empty-reset-test", owner_sid=sid)
+        # Pin the session id helpers ``ensure_active_project`` /
+        # ``_require_project_owner`` chain through so the test session
+        # owns ``pid`` without going through a real login.
+        monkeypatch.setattr(
+            "routes.projects.get_session_id",
+            lambda *_a, **_kw: sid,
+        )
+        monkeypatch.setattr(
+            "routes.execution.get_session_id",
+            lambda *_a, **_kw: sid,
+        )
+        with client.session_transaction() as sess:
+            sess["project_id"] = pid
+
+        resp = client.get("/bug-reports")
+        assert resp.status_code == 200
+        body = resp.data.decode("utf-8")
+        # The Reset button + confirm-modal markup MUST be present
+        # even though the project has zero bugs.
+        assert 'id="bug-reset-open"' in body, (
+            "Reset Project button must render on empty projects"
+        )
+        assert 'id="bug-reset-modal"' in body, (
+            "Reset confirm modal must be in the DOM on empty projects"
+        )
+        # And the empty-state body should still render its own
+        # message — the button addition mustn't have broken the
+        # "No bug reports created yet" branch.
+        assert "No bug reports created yet" in body or "bug_no_bugs" in body
+
+
 # ── 4. BugReport carries the PR-H metadata round-trip ─────────────
 
 
