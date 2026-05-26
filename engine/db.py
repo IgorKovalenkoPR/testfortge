@@ -904,7 +904,17 @@ def load_checklist(project_id: str) -> list[dict]:
 
 # ── Bug reports ────────────────────────────────────────────────────
 
-VALID_BUG_SOURCES = {"tedgie", "execution", "manual", "import"}
+# PR-H: ``walkthrough`` + ``live_executor`` previously coerced to
+# ``manual`` because they weren't in the whitelist — but routes/
+# execution.py passes them explicitly when persisting walkthrough
+# bugs and the LiveExecutor early-exit bug factory. Including them
+# here lets the cross-run dedup query (which filters by source)
+# actually find prior walkthrough bugs instead of skipping every
+# row as "manual entry".
+VALID_BUG_SOURCES = {
+    "tedgie", "execution", "manual", "import",
+    "walkthrough", "live_executor",
+}
 
 
 def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
@@ -961,6 +971,91 @@ def list_bugs(project_id: str | None = None,
             stmt = stmt.where(BugReport.source == source)
         rows = sess.execute(stmt).scalars().all()
         return [_row_to_dict(r) for r in rows]
+
+
+# ── PR-H: cross-run dedup helpers ─────────────────────────────────
+
+
+def find_bug_id_by_signature(
+    project_id: str, dedup_signature: str,
+) -> int | None:
+    """Return the row id of an existing bug in ``project_id`` whose
+    ``extra.dedup_signature`` matches ``dedup_signature``; ``None``
+    when no match exists. Used by the walkthrough save-path so a
+    rerun on an unchanged site does not pile a duplicate bug onto
+    the project for every finding it already recorded.
+
+    Implementation note: SQLAlchemy's portable JSON column doesn't
+    expose ``->>`` operators on SQLite (the default in dev), so the
+    function does the comparison in Python after pulling the
+    project's bug rows. Pagination is unnecessary at the typical
+    project scale (hundreds of bugs); if we ever hit four-digit
+    backlogs we can migrate the dedup signature into its own indexed
+    column without API changes.
+    """
+    if not (project_id and dedup_signature):
+        return None
+    with session_scope() as sess:
+        stmt = (
+            select(BugReport.id, BugReport.extra)
+            .where(BugReport.project_id == project_id)
+            .where(BugReport.source.in_(("walkthrough", "live_executor")))
+        )
+        for row_id, extra in sess.execute(stmt).all():
+            ext = extra or {}
+            if not isinstance(ext, dict):
+                continue
+            if ext.get("dedup_signature") == dedup_signature:
+                return int(row_id)
+        return None
+
+
+def bump_bug_occurrence(bug_id: int) -> int:
+    """Increment the ``extra.occurrence_count`` of ``bug_id`` and
+    refresh ``updated_at``; return the new count.
+
+    Called by the walkthrough save-path when ``find_bug_id_by_signature``
+    finds an existing row — instead of inserting a duplicate, we
+    just bump the counter so the bug record reflects "seen 4 times
+    across runs". Best-effort: missing extras and unexpected dict
+    shapes are tolerated (the column is JSON, not a strict schema).
+    """
+    with session_scope() as sess:
+        row = sess.get(BugReport, bug_id)
+        if row is None:
+            return 0
+        extra = dict(row.extra or {})
+        try:
+            new_count = int(extra.get("occurrence_count") or 1) + 1
+        except (TypeError, ValueError):
+            new_count = 2
+        extra["occurrence_count"] = new_count
+        row.extra = extra
+        # SQLAlchemy detects ``onupdate=_utcnow`` automatically when
+        # any column changes; touching ``extra`` is enough.
+        return new_count
+
+
+def delete_bugs_for_project(project_id: str) -> int:
+    """Hard-delete every bug row attached to ``project_id``; return
+    the count deleted. Used by the Reset Project action — the
+    operator wants a clean slate after a noisy walkthrough run, and
+    SET NULL cascade isn't enough (it leaves orphan rows visible in
+    the bug listing). Confirmation lives in the route layer.
+    """
+    if not project_id:
+        return 0
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(BugReport).where(BugReport.project_id == project_id)
+        ).scalars().all()
+        count = len(rows)
+        for r in rows:
+            sess.delete(r)
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
+        return count
 
 
 # ── Bulk bug operations (Sprint 4 task 4.2) ───────────────────────

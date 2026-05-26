@@ -823,6 +823,13 @@ class LiveExecutor:
             #      which path got written. Without these the only way
             #      to diagnose the silent failure was to dig through
             #      bug records via the MCP server.
+            # PR-H: each branch below sets ``f["annotation_status"]``
+            # so the bug factory carries the diagnostic verdict into
+            # ``bug.extra.annotation_status``. Render Logs strips
+            # Python application logs in the current host config,
+            # so writing telemetry through the bug record is the
+            # only reliable way to see WHY annotation succeeded or
+            # bailed for a given finding.
             if shot:
                 try:
                     from engine.screenshot_annotator import (
@@ -834,12 +841,26 @@ class LiveExecutor:
                         "to raw page shots via PR-B fan-out", exc,
                     )
                     annotate_screenshot = None  # type: ignore[assignment]
+                    # Mark every future finding on this page so the
+                    # bug record explains why annotation didn't fire.
+                    for f in self.findings[before_count:]:
+                        f.setdefault(
+                            "annotation_status",
+                            f"failed:module_import:{type(exc).__name__}",
+                        )
 
                 if shot and annotate_screenshot is not None:
                     for idx, f in enumerate(
                         self.findings[before_count:], start=1
                     ):
                         if f.get("screenshot"):
+                            # Already populated by a heuristic that
+                            # took a per-element shot — keep its
+                            # value and note we didn't overlay.
+                            f.setdefault(
+                                "annotation_status",
+                                "skipped:screenshot_preset",
+                            )
                             continue
                         # ── 1. Coerce element into a single string ──
                         element_raw = f.get("element") or ""
@@ -855,6 +876,7 @@ class LiveExecutor:
                         else:
                             selector = str(element_raw).strip()
                         if not selector:
+                            f["annotation_status"] = "skipped:no_selector"
                             continue
                         # ── 2. Per-finding try ─────────────────────────
                         try:
@@ -867,11 +889,39 @@ class LiveExecutor:
                                 "raw page shot via PR-B fan-out",
                                 selector, exc,
                             )
+                            f["annotation_status"] = (
+                                f"failed:bbox_exc:{type(exc).__name__}"
+                            )
                             continue
+                        # PR-H: ``bounding_box`` commonly returns
+                        # ``None`` for broken images because the
+                        # ``<img>`` element with ``naturalWidth=0``
+                        # has no rendered geometry. Try
+                        # ``scroll_into_view_if_needed`` + retry once
+                        # before giving up — this rescues many
+                        # broken-image cases where the element is
+                        # below the fold.
+                        if not box:
+                            try:
+                                page.locator(selector).first \
+                                    .scroll_into_view_if_needed(timeout=2000)
+                                box = (
+                                    page.locator(selector).first
+                                    .bounding_box(timeout=2000)
+                                )
+                            except Exception as exc:
+                                _logger.info(
+                                    "annotate: scroll-retry(%r) failed: %s",
+                                    selector, exc,
+                                )
+                                # Fall through — ``box`` still None.
                         if not box:
                             _logger.info(
                                 "annotate: bounding_box(%r) returned None — "
                                 "raw page shot via PR-B fan-out", selector,
+                            )
+                            f["annotation_status"] = (
+                                "skipped:bbox_none"
                             )
                             continue
                         try:
@@ -885,9 +935,15 @@ class LiveExecutor:
                                 "annotate: draw failed for %r: %s",
                                 selector, exc,
                             )
+                            f["annotation_status"] = (
+                                f"failed:draw_exc:{type(exc).__name__}"
+                            )
                             continue
                         if annotated:
                             f["screenshot"] = annotated
+                            f["annotation_status"] = (
+                                f"annotated:{annotated}"
+                            )
                             _logger.info(
                                 "annotate: wrote %s for %r",
                                 annotated, selector,
@@ -896,6 +952,9 @@ class LiveExecutor:
                             _logger.info(
                                 "annotate: annotator returned None for %r — "
                                 "raw page shot via PR-B fan-out", selector,
+                            )
+                            f["annotation_status"] = (
+                                "skipped:annotator_returned_none"
                             )
 
             # PR-B: heuristics call ``note(...)`` without a ``screenshot=``

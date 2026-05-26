@@ -83,6 +83,32 @@ class BugReport:
     # external id through SQL. Defaults to 0 so older sessions and the
     # auto-bug factory don't have to pass it explicitly.
     db_id: int = 0
+    # ── PR-H: smart-filing metadata ──
+    # ``defect_class`` mirrors the walkthrough heuristic's class tag
+    # (``broken_image``, ``axe_critical``, …) so dedup can group by
+    # defect type without parsing labels. Empty for TC-driven bugs.
+    defect_class: str = ""
+    # ``page_url`` is the URL where the finding was raised. Captured
+    # separately from steps_to_reproduce text so cross-run dedup can
+    # match by structured field rather than parse free-form steps.
+    page_url: str = ""
+    # ``dedup_signature`` is a stable identifier across runs computed
+    # from ``(defect_class, element_signature, page_url)``. Two bugs
+    # with the same signature describe the same defect — the second
+    # one is suppressed by the smart-filing pre-insert check.
+    dedup_signature: str = ""
+    # ``occurrence_count`` is incremented every time a re-run finds
+    # the same defect (instead of creating a duplicate row). The UI
+    # can surface "found 4× across runs" without changing the bug
+    # body. Default 1 so first occurrence reads naturally.
+    occurrence_count: int = 1
+    # ``annotation_status`` records the PR-D′/F annotation outcome
+    # per bug so Render Logs (which strip Python application logs in
+    # the current host config) are no longer the only diagnostic
+    # channel. Values: "annotated:<path>", "skipped:<reason>",
+    # "failed:<exception>". Empty when the finding had no selector
+    # to annotate.
+    annotation_status: str = ""
 
 
 # ── ID generation ──────────────────────────────────────────────────
@@ -426,6 +452,86 @@ def _walkthrough_passive_title(
     return f"[{title_area}] {message}"
 
 
+# ── PR-H: dedup-signature builder ──────────────────────────────────
+#
+# Cross-run deduplication groups bugs by their *intent* — same
+# defect on same element on same page across multiple runs. The
+# signature is a stable hex digest of ``(defect_class, element,
+# page_url_path)`` where:
+#
+#   * ``element`` is normalised to its first non-empty selector
+#     when axe gives a chain list (``["#All-vacancies"]``);
+#   * ``page_url`` is reduced to ``(scheme, host, path)`` so query
+#     params (cache busters, analytics) don't fragment groups.
+#
+# We use SHA-1 truncated to 16 hex chars — long enough to avoid
+# accidental collisions across the project's bug catalogue,
+# short enough to keep ``extra.dedup_signature`` readable in logs.
+
+import hashlib as _hashlib
+
+
+def _normalise_element_for_dedup(element) -> str:
+    """Collapse ``element`` to a single normalised selector string.
+
+    Walkthrough findings sometimes store ``element`` as a list (axe
+    targets), sometimes as a string (everything else). Cross-run
+    dedup needs the SAME shape regardless of which heuristic emitted
+    the finding — otherwise two runs that found the same defect
+    would compute different signatures.
+    """
+    if not element:
+        return ""
+    if isinstance(element, (list, tuple)):
+        for item in element:
+            s = str(item or "").strip()
+            if s:
+                return s
+        return ""
+    return str(element).strip()
+
+
+def _normalise_url_for_dedup(url: str) -> str:
+    """Reduce ``url`` to ``scheme://host/path`` so query strings and
+    fragments don't fragment dedup groups across reruns (analytics
+    cache busters, session ids, etc.).
+    """
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+    except Exception:
+        return url.strip()
+    scheme = (p.scheme or "").lower()
+    netloc = (p.netloc or "").lower()
+    path = p.path or ""
+    # Trailing slash is non-significant for our purposes.
+    path = path.rstrip("/") or "/"
+    if scheme and netloc:
+        return f"{scheme}://{netloc}{path}"
+    return path
+
+
+def compute_dedup_signature(
+    defect_class: str, element, page_url: str,
+) -> str:
+    """Return the stable dedup signature for a walkthrough finding.
+
+    The signature is a 16-char hex SHA-1 digest of the
+    pipe-separated ``(defect_class|normalised_element|normalised_url)``
+    triple. Empty inputs are tolerated — the function never raises so
+    the bug-saving path stays robust to partial finding records.
+    """
+    parts = [
+        (defect_class or "").strip().lower(),
+        _normalise_element_for_dedup(element),
+        _normalise_url_for_dedup(page_url),
+    ]
+    payload = "|".join(parts).encode("utf-8", errors="replace")
+    return _hashlib.sha1(payload).hexdigest()[:16]
+
+
 # ── Factory: create bug from a walkthrough finding ─────────────────
 
 
@@ -531,6 +637,23 @@ def create_bug_from_walkthrough_finding(
 
     attachments = [screenshot] if screenshot else []
 
+    # PR-H: compute the cross-run dedup signature so the smart-filing
+    # check in routes/execution.py can group reruns by intent without
+    # parsing free-form bug body text. ``element`` is fed in raw so
+    # ``_normalise_element_for_dedup`` handles list/string variance
+    # at one place.
+    dedup_signature = compute_dedup_signature(
+        defect_class=cls,
+        element=finding.get("element"),
+        page_url=url,
+    )
+    # PR-H: annotation_status comes from the LiveExecutor annotation
+    # block (set in :meth:`engine.live_executor._walk_one` for every
+    # code path — success / skipped / failed). Surfacing it via the
+    # bug record lets us diagnose the silent-failure mode of PR-D′/F
+    # without depending on Render's app log capture.
+    annotation_status = str(finding.get("annotation_status") or "")
+
     return BugReport(
         id="",
         title=title,
@@ -555,6 +678,12 @@ def create_bug_from_walkthrough_finding(
         component=area,
         labels=labels,
         comment="",
+        # PR-H smart-filing metadata.
+        defect_class=cls,
+        page_url=url,
+        dedup_signature=dedup_signature,
+        occurrence_count=1,
+        annotation_status=annotation_status,
     )
 
 
@@ -744,6 +873,14 @@ def bug_to_dict(bug: BugReport) -> dict:
         "labels": list(bug.labels),
         "comment": bug.comment,
         "db_id": bug.db_id,
+        # PR-H smart-filing metadata. ``save_bug`` collects all
+        # non-canonical keys into ``extra`` so these land in the
+        # ``BugReport.extra`` JSON column without a schema change.
+        "defect_class": bug.defect_class,
+        "page_url": bug.page_url,
+        "dedup_signature": bug.dedup_signature,
+        "occurrence_count": bug.occurrence_count,
+        "annotation_status": bug.annotation_status,
     }
 
 
@@ -779,6 +916,13 @@ def dict_to_bug(d: dict) -> BugReport:
         labels=d.get("labels", []),
         comment=d.get("comment", ""),
         db_id=int(d.get("db_id") or 0),
+        # PR-H smart-filing metadata. Tolerates older snapshots that
+        # pre-date these fields by defaulting empty / 1.
+        defect_class=d.get("defect_class", ""),
+        page_url=d.get("page_url", ""),
+        dedup_signature=d.get("dedup_signature", ""),
+        occurrence_count=int(d.get("occurrence_count") or 1),
+        annotation_status=d.get("annotation_status", ""),
     )
 
 

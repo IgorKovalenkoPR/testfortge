@@ -50,6 +50,106 @@ from .bugs import _persist_bug
 log = get_logger(__name__)
 
 
+# ── PR-H: page-level broken_image aggregation ─────────────────────
+
+
+def _aggregate_broken_image_findings(
+    findings: list[dict],
+) -> list[dict]:
+    """Collapse findings of ``defect_class == 'broken_image'`` sharing
+    the same ``url`` into a single aggregate finding.
+
+    A marketing page with 12 broken graphics produced 12 bug rows
+    pre-PR-H — operators saw "12 broken-image bugs on /careers"
+    where one aggregate ("12 page graphics missing on Careers
+    page") would have communicated the same impact for triage. We
+    only fold ``broken_image`` here because other defect classes
+    (axe, JS) need per-element resolution; collapsing them would
+    hide actionable detail.
+
+    The aggregate finding's ``message`` is replaced with an "N page
+    graphics missing on …" form (the title transform in
+    :func:`engine.bug_report._walkthrough_passive_title` handles the
+    final passive-voice phrasing). The list of original filenames
+    is carried through ``aggregated_filenames`` so the bug body /
+    Developer Detail still names every affected asset.
+
+    Other heuristics' findings pass through unchanged.
+    """
+    if not findings:
+        return list(findings or [])
+
+    # Bucket only broken_image findings; everything else flows
+    # straight through.
+    bucket: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for f in findings:
+        if not isinstance(f, dict):
+            passthrough.append(f)
+            continue
+        cls = str(f.get("defect_class") or "").strip().lower()
+        url = str(f.get("url") or "")
+        if cls == "broken_image" and url:
+            bucket.setdefault((cls, url), []).append(f)
+        else:
+            passthrough.append(f)
+
+    result: list[dict] = list(passthrough)
+    for (cls, url), group in bucket.items():
+        if len(group) <= 1:
+            # Solo finding — pass through, no aggregation needed.
+            result.extend(group)
+            continue
+        # Multi-finding group → synthesise one aggregate. Use the
+        # first finding as the template so severity / area /
+        # tc_id are preserved; replace message + element with the
+        # aggregate phrasing and list every affected filename in
+        # ``aggregated_filenames`` so the bug body can render it.
+        first = dict(group[0])
+        filenames: list[str] = []
+        elements: list[str] = []
+        for member in group:
+            el = member.get("element") or ""
+            elements.append(str(el))
+            # Best-effort filename extraction from the heuristic's
+            # message ("Broken image on the page — foo.svg did not
+            # load …"). The walkthrough heuristic always frames it
+            # the same way; mismatches just leave the filename
+            # blank rather than crashing.
+            msg = str(member.get("message") or "")
+            import re as _re
+            m = _re.search(
+                r"—\s*(?P<fn>[^\s]+?)\s+did not load", msg,
+            )
+            if m:
+                filenames.append(m.group("fn"))
+        count = len(group)
+        # Replace ``message`` with a per-page aggregate phrase so
+        # the title transform produces a clean headline. We don't
+        # touch ``element`` of the first item so annotation can
+        # still try the first selector — operators only need to
+        # see *one* example overlay on the aggregate bug.
+        first["message"] = (
+            f"{count} broken images on the page — visitors see "
+            f"empty slots or broken-image icons where graphics "
+            f"should be"
+        )
+        first["aggregated_filenames"] = filenames
+        first["aggregated_elements"] = elements
+        first["aggregated_count"] = count
+        # Append a summary block to dev_detail so the bug body
+        # surfaces the original filenames for engineering triage.
+        prior_detail = str(first.get("dev_detail") or "")
+        filename_block = "\n".join(f"  • {fn}" for fn in filenames if fn)
+        if filename_block:
+            first["dev_detail"] = (
+                f"{prior_detail}\n\nAffected assets ({count}):\n"
+                f"{filename_block}"
+            ).strip()
+        result.append(first)
+    return result
+
+
 def _dedupe_bugs_by_root_cause(execution: dict,
                                 automation_assets: dict) -> None:
     """Group bugs that share the same root cause so the operator
@@ -2224,13 +2324,42 @@ def register(app: Flask) -> None:
             # versus Sprint 5 — findings hit ``result.json`` but never
             # the Bug Reports board.
             walkthrough_bugs_count = 0
+            walkthrough_dedup_skipped = 0
+            walkthrough_aggregated = 0
             if (run_mode in ("walkthrough", "live")
                     and walkthrough_findings
                     and not walkthrough_attached):
                 from engine.bug_report import (
                     create_bug_from_walkthrough_finding as _create_wt_bug,
                 )
-                for finding in walkthrough_findings:
+                from engine.db import (
+                    find_bug_id_by_signature as _find_existing_bug,
+                    bump_bug_occurrence as _bump_occurrence,
+                )
+
+                # PR-H: page-level aggregation for broken-image findings.
+                # The heuristic emits one finding per broken <img>; a
+                # marketing site with 12 broken graphics on one page
+                # was filing 12 bugs ("BUG-053 … BUG-064"). Collapse
+                # findings sharing ``(defect_class='broken_image',
+                # url)`` into a single aggregate finding whose body
+                # lists every affected filename + element. Other
+                # defect classes (axe, JS errors) are NOT aggregated
+                # — they need per-element resolution.
+                processed_findings = _aggregate_broken_image_findings(
+                    walkthrough_findings,
+                )
+                walkthrough_aggregated = (
+                    len(walkthrough_findings) - len(processed_findings)
+                )
+
+                # Active project id for the cross-run dedup lookup.
+                # ``ensure_active_project`` is the same helper
+                # ``_persist_bug`` already calls.
+                from routes._shared import ensure_active_project
+                active_pid = ensure_active_project()
+
+                for finding in processed_findings:
                     if not isinstance(finding, dict):
                         continue
                     try:
@@ -2244,6 +2373,35 @@ def register(app: Flask) -> None:
                         log.warning(
                             "walkthrough: bug conversion skipped: %s", exc)
                         continue
+
+                    # ── PR-H cross-run dedup ──
+                    # Same defect on same page across runs → bump the
+                    # existing bug's occurrence_count and skip INSERT.
+                    # Without this every re-run on an unchanged site
+                    # piles another ~65 duplicates onto the project.
+                    existing_id = None
+                    if active_pid and bug.dedup_signature:
+                        try:
+                            existing_id = _find_existing_bug(
+                                active_pid, bug.dedup_signature,
+                            )
+                        except Exception as exc:  # pragma: no cover
+                            log.warning(
+                                "walkthrough: dedup query failed: %s",
+                                exc,
+                            )
+                            existing_id = None
+                    if existing_id is not None:
+                        try:
+                            _bump_occurrence(existing_id)
+                        except Exception as exc:  # pragma: no cover
+                            log.warning(
+                                "walkthrough: dedup bump failed: %s",
+                                exc,
+                            )
+                        walkthrough_dedup_skipped += 1
+                        continue
+
                     bug_dict = bug_to_dict(bug)
                     new_id = generate_bug_id(running_bugs)
                     bug_dict["id"] = new_id
@@ -2261,6 +2419,14 @@ def register(app: Flask) -> None:
                         ]
                     walkthrough_bugs_count += 1
                 walkthrough_attached = True
+                if walkthrough_dedup_skipped or walkthrough_aggregated:
+                    log.info(
+                        "walkthrough: filed %d bugs (skipped %d duplicates, "
+                        "aggregated %d broken-image findings)",
+                        walkthrough_bugs_count,
+                        walkthrough_dedup_skipped,
+                        walkthrough_aggregated,
+                    )
 
             # Stage 4: LiveExecutor early-exit → one infrastructure
             # bug. Independent of findings: the OOM guard can fire on

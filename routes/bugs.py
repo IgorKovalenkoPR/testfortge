@@ -134,6 +134,16 @@ def _bug_dict_to_db_row(bug_dict: dict) -> dict:
         "attachments":         bug_dict.get("attachments"),
         "preconditions":       bug_dict.get("preconditions"),
         "created_at":          bug_dict.get("created_at"),
+        # PR-H smart-filing metadata — lands in BugReport.extra so
+        # cross-run dedup can query it back out, the per-bug
+        # annotation diagnostic surfaces in the UI, and the
+        # page-aggregated broken-image bug can describe N filenames.
+        "defect_class":        bug_dict.get("defect_class"),
+        "page_url":            bug_dict.get("page_url"),
+        "dedup_signature":     bug_dict.get("dedup_signature"),
+        "occurrence_count":    bug_dict.get("occurrence_count"),
+        "annotation_status":   bug_dict.get("annotation_status"),
+        "aggregated_filenames": bug_dict.get("aggregated_filenames"),
     }
 
 
@@ -325,6 +335,67 @@ def register(app: Flask) -> None:
         flash(g.t.get("bug_bulk_ok",
                       "Updated {n} bug{s}.").format(n=n, s=suffix),
               "success")
+        return redirect(url_for("bug_reports_page"))
+
+    @app.route("/bugs/reset", methods=["POST"])
+    def bugs_reset():
+        """Hard-delete every bug attached to the active project.
+
+        PR-H: operators who hammered Test Execution multiple times on
+        an unchanged site ended up with 130+ bug rows that all
+        describe the same handful of defects on the site. The
+        cross-run dedup added in this PR stops fresh duplicates from
+        piling up, but the pre-PR-H accumulation is still on disk —
+        operators need a one-click "start over" affordance to clear
+        the existing pile without dropping the entire project.
+
+        Auth gate mirrors ``/bugs/bulk``: project-owner check via
+        ``_require_project_owner``. The reason every operator sees a
+        confirm modal in the UI before this POST fires is the same
+        rationale — bulk delete is irreversible and the action
+        deletes EVERY bug row, not a checkbox subset.
+
+        Form parameters:
+            * ``confirm=yes`` (mandatory) — the template's modal sets
+              this on the "Yes, reset" button so a stray POST from a
+              broken script can't wipe the project.
+        """
+        pid = ensure_active_project()
+        if not pid:
+            flash(g.t.get("bug_bulk_no_project",
+                          "Pick or create a project before resetting."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+        if _require_project_owner(pid) is None:
+            flash(g.t.get("bug_bulk_no_project",
+                          "Project not found."), "error")
+            return redirect(url_for("bug_reports_page"))
+        # Mandatory confirm token — the template's modal sets this.
+        if (request.form.get("confirm") or "").strip().lower() != "yes":
+            flash(g.t.get(
+                "bug_reset_unconfirmed",
+                "Reset cancelled — confirmation missing."), "error")
+            return redirect(url_for("bug_reports_page"))
+
+        try:
+            n = _db.delete_bugs_for_project(pid)
+        except Exception as exc:
+            log.warning("delete_bugs_for_project failed: %s", exc)
+            flash(g.t.get(
+                "bug_reset_failed",
+                "Reset failed — see server logs."), "error")
+            return redirect(url_for("bug_reports_page"))
+
+        # Wipe the session cache so the next render doesn't show the
+        # rows we just deleted from the DB.
+        session["bug_reports_data"] = []
+        session.modified = True
+
+        suffix = "s" if n != 1 else ""
+        flash(g.t.get(
+            "bug_reset_ok",
+            "Project reset — {n} bug{s} deleted.").format(n=n, s=suffix),
+            "success")
         return redirect(url_for("bug_reports_page"))
 
     @app.route("/export-bug-reports")
