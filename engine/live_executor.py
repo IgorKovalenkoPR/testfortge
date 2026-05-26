@@ -791,6 +791,52 @@ class LiveExecutor:
             collect_console_errors(console_errors, page_errors,
                                     final_url, tc_id, note=self._note)
 
+            # PR-D′: for every finding that names a CSS selector, try
+            # to capture an *annotated* screenshot — the raw page shot
+            # with a red rectangle around the offending element and a
+            # red arrow pointing at it. Done BEFORE the PR-B fan-out
+            # below so annotation succeeds → ``finding["screenshot"]``
+            # is the annotated path; annotation fails → the field stays
+            # empty and PR-B's fan-out falls back to the raw page shot.
+            # That two-stage degradation keeps the bug list lossless
+            # while delivering the better-looking attachment on the
+            # happy path. ``page`` is still alive at this point —
+            # ``finally`` block at the bottom of the method closes the
+            # context after we exit.
+            if shot:
+                from engine.screenshot_annotator import (
+                    annotate_screenshot, derive_annotated_path,
+                )
+                for idx, f in enumerate(self.findings[before_count:], start=1):
+                    selector = (f.get("element") or "").strip()
+                    if not selector or f.get("screenshot"):
+                        continue
+                    try:
+                        # ``.first`` so a selector matching multiple
+                        # elements doesn't raise — annotate the first
+                        # hit, which is what the heuristic message
+                        # already describes ("affects N elements" wording
+                        # in axe etc. acknowledges plurality without
+                        # demanding a per-element overlay).
+                        box = page.locator(selector).first.bounding_box(
+                            timeout=2000,
+                        )
+                    except Exception as exc:
+                        _logger.debug(
+                            "annotate: bounding_box(%r) failed: %s",
+                            selector, exc,
+                        )
+                        box = None
+                    if not box:
+                        continue
+                    annotated = annotate_screenshot(
+                        raw_path=shot,
+                        bbox=box,
+                        output_path=derive_annotated_path(shot, idx),
+                    )
+                    if annotated:
+                        f["screenshot"] = annotated
+
             # PR-B: heuristics call ``note(...)`` without a ``screenshot=``
             # kwarg — they have no cheap way to take a per-element shot,
             # so they leave the field at its default empty string. Before
