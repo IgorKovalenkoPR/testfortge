@@ -318,6 +318,100 @@ class TestWalkOneAnnotation:
             f"got {shot!r}"
         )
 
+    def test_axe_style_list_element_is_accepted(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """PR-F regression: axe heuristic emits ``element`` as a *list*
+        of selectors (the locator chain — ``node.target``). PR-D′
+        crashed silently on ``.strip()`` because it assumed ``element``
+        was always a string. The PR-F coercion takes the first non-empty
+        string item, so list-shaped element values produce an annotated
+        path just like string-shaped ones.
+        """
+        fake_pw()
+        from engine import live_executor as le
+        from engine import screenshot_annotator
+        from tests.test_walkthrough_scaffold import _FakeLocator
+
+        monkeypatch.setattr(
+            _FakeLocator, "bounding_box",
+            lambda self, **_kw: {
+                "x": 30, "y": 40, "width": 80, "height": 30,
+            },
+            raising=False,
+        )
+        stub_calls: list[dict] = []
+
+        def _stub_annot(*, raw_path, bbox, output_path):
+            stub_calls.append({"raw_path": raw_path, "output_path": output_path})
+            return output_path
+
+        monkeypatch.setattr(
+            screenshot_annotator, "annotate_screenshot", _stub_annot,
+        )
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Critical", "Accessibility", "axe_critical",
+                f"Select element must have an accessible name on {url}",
+                url=url, tc_id=tc_id,
+                # axe's real format: target is a list, not string
+                element=["#All-vacancies"],
+            )
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        # Annotator was reached even though ``element`` was a list.
+        assert stub_calls, (
+            "annotator must be invoked for axe-style list-form element"
+        )
+        axe = [f for f in ex.findings
+                if f["defect_class"] == "axe_critical"]
+        assert axe
+        assert axe[0]["screenshot"].endswith("_annotated.png"), axe[0]
+
+    def test_empty_list_element_skips_annotation(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """An axe finding with ``element=[]`` (no resolvable selector)
+        must skip annotation and let PR-B fan-out supply the raw page
+        shot — same behaviour as ``element=""``."""
+        fake_pw()
+        from engine import live_executor as le
+        from engine import screenshot_annotator
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            screenshot_annotator, "annotate_screenshot",
+            lambda **_kw: (called.update(n=called["n"] + 1) or None),
+        )
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Critical", "Accessibility", "axe_critical",
+                "Some axe rule with empty target",
+                url=url, tc_id=tc_id,
+                element=[],  # axe sometimes emits empty target
+            )
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        assert called["n"] == 0, (
+            "annotator must not be invoked when element list is empty"
+        )
+
     def test_annotator_failure_falls_through_to_page_shot(
         self, fake_pw, tmp_storage, monkeypatch
     ):

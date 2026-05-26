@@ -179,6 +179,122 @@ def create_bug_from_failed_item(
     )
 
 
+# ── PR-F: walkthrough-message → passive-voice transform ────────────
+#
+# PR-C′ rewrote ``engine.qa_testers._make_bug_summary`` so TC-driven
+# bugs got passive-voice titles with after/while trigger clauses. But
+# walkthrough bugs (every bug in the ART project export) flow through
+# :func:`create_bug_from_walkthrough_finding` below, which built the
+# title via ``f"[{area}] {message}"`` — the heuristic's free-text
+# message was used as-is. That re-introduced positive-voice titles
+# like:
+#
+#   • "[Accessibility] Select element must have an accessible name —
+#      affects 2 elements on this page"  (reads as a requirement, not
+#      a defect)
+#   • "[JS] A JavaScript error happened during the user journey"
+#     (active voice; "happened" reads casual)
+#   • "[Images] Broken image on the page — foo.avif did not load …"
+#     (passive but no after/while trigger)
+#
+# The transforms below rewrite the heuristic's message into a
+# passive-voice headline without the "must have" framing. The list
+# is ordered most-specific first.
+
+_WALKTHROUGH_MESSAGE_TRANSFORMS: list[tuple[re.Pattern[str], str]] = [
+    # "Select element must have an accessible name — affects 2 elements
+    # on this page" → "Accessible name is missing from select element
+    # (affects 2 elements on this page)"
+    (
+        re.compile(
+            r"^(?P<subject>.+?)\s+must have\s+(?:an?\s+)?(?P<thing>.+?)\s*(?:—\s*(?P<tail>.+))?$",
+            re.I,
+        ),
+        "{thing_cap} is missing from {subject_lower}{tail_paren}",
+    ),
+    # "Broken image on the page — foo.avif did not load (visitors see ...)"
+    # → "Image foo.avif is not loaded on the page (visitors see ...)"
+    (
+        re.compile(
+            r"^Broken image on the page\s*—\s*(?P<filename>\S+?)\s+did not load\b\s*(?P<tail>\(.+\))?\s*$",
+            re.I,
+        ),
+        "Image {filename} is not loaded on the page{tail_space}",
+    ),
+    # "A JavaScript error happened during the user journey"
+    # → "JavaScript error is raised during the user journey"
+    # Optional ``A`` / ``An`` article prefix so "An async exception
+    # happened while loading…" also lands in this archetype.
+    (
+        re.compile(
+            r"^(?:An?\s+)?(?P<subject>.+?)\s+happened\s+(?P<adv>during|while|after)\s+(?P<rest>.+)$",
+            re.I,
+        ),
+        "{subject_cap} is raised {adv} {rest}",
+    ),
+    # Generic "<X> did not load (<tail>)" → "<X> is not loaded after page navigation (<tail>)"
+    (
+        re.compile(
+            r"^(?P<subject>.+?)\s+did not load\b\s*(?P<tail>\(.+\))?\s*$",
+            re.I,
+        ),
+        "{subject_cap} is not loaded after page navigation{tail_space}",
+    ),
+    # "<X> failed to <Y>" → "<X> did not <Y> as expected"
+    (
+        re.compile(r"^(?P<subject>.+?)\s+failed to\s+(?P<verb>.+?)\s*$", re.I),
+        "{subject_cap} did not {verb} as expected",
+    ),
+]
+
+
+def _walkthrough_passive_title(area: str, message: str) -> str:
+    """Compose the headline for a walkthrough-source bug.
+
+    Format: ``[Area] <passive-voice transformed message>``. When the
+    raw message doesn't fit any archetype below we keep it verbatim
+    so we don't regress on findings whose heuristic phrasing is
+    already grammatical (broken HTTP server-error, console JS errors,
+    etc. that read fine as-is).
+    """
+    title_area = area or "Page"
+    if not message:
+        return f"[{title_area}] Walkthrough finding"
+
+    for pat, template in _WALKTHROUGH_MESSAGE_TRANSFORMS:
+        m = pat.match(message)
+        if not m:
+            continue
+        groups = m.groupdict()
+        # Compute derived substitutions per archetype.
+        rendered: dict[str, str] = {}
+        for key, val in groups.items():
+            v = (val or "").strip()
+            rendered[key] = v
+            rendered[f"{key}_cap"] = v[0].upper() + v[1:] if v else ""
+            rendered[f"{key}_lower"] = v[0].lower() + v[1:] if v else ""
+        # ``tail`` group needs special handling — wrap with spacing
+        # only if non-empty so we don't emit a stray trailing space.
+        tail = (groups.get("tail") or "").strip()
+        rendered["tail_paren"] = f" ({tail})" if tail and not tail.startswith("(") else (
+            f" {tail}" if tail else ""
+        )
+        rendered["tail_space"] = f" {tail}" if tail else ""
+        try:
+            transformed = template.format(**rendered).strip()
+        except Exception:
+            continue
+        if transformed:
+            # Collapse stray double spaces left by optional groups.
+            transformed = re.sub(r"\s{2,}", " ", transformed)
+            return f"[{title_area}] {transformed}"
+
+    # No archetype matched — fall back to the original "[Area] message"
+    # form. Beats forcing a grammatical rewrite that mangles the
+    # heuristic's diagnostic detail.
+    return f"[{title_area}] {message}"
+
+
 # ── Factory: create bug from a walkthrough finding ─────────────────
 
 
@@ -242,11 +358,12 @@ def create_bug_from_walkthrough_finding(
         "Critical", "Major", "Minor", "Trivial",
     ) else sev_computed
 
-    title_area = area or "Page"
-    title = (
-        f"[{title_area}] {message}"
-        if message else f"[{title_area}] Walkthrough finding"
-    )
+    # PR-F: route through the passive-voice transformer so walkthrough
+    # bugs get the same "is not <pp> after/while <trigger>" treatment
+    # PR-C′ gave TC-driven bugs. Falls back to ``[Area] message`` when
+    # no archetype matches so heuristic messages that are already
+    # grammatical (e.g. console JS errors) are left untouched.
+    title = _walkthrough_passive_title(area, message)
 
     str_lines = [f"1. Open {url or base_url or '<application URL>'}."]
     if element:

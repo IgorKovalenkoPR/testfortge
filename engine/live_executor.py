@@ -803,39 +803,100 @@ class LiveExecutor:
             # happy path. ``page`` is still alive at this point —
             # ``finally`` block at the bottom of the method closes the
             # context after we exit.
+            # PR-F: hardened annotation block.
+            #
+            # The previous revision (PR-D′) crashed silently for every
+            # axe finding because ``scan_axe`` puts a *list* of CSS
+            # selectors in ``f["element"]`` (axe's ``node0.target`` is
+            # the locator chain). ``str.strip()`` on a list raises and
+            # the whole walk fell into the outer ``except Exception``
+            # → no annotation, raw page shot via the PR-B fan-out
+            # below. Three defences:
+            #
+            #   1. Accept ``element`` as ``list[str] | str`` — take the
+            #      first non-empty string item when it's a list.
+            #   2. Wrap the whole block in its own ``try`` so a single
+            #      bad finding does not skip annotation for the rest
+            #      of the page.
+            #   3. Log every outcome at INFO so Render's stdout stream
+            #      shows whether annotation fired, why it bailed, and
+            #      which path got written. Without these the only way
+            #      to diagnose the silent failure was to dig through
+            #      bug records via the MCP server.
             if shot:
-                from engine.screenshot_annotator import (
-                    annotate_screenshot, derive_annotated_path,
-                )
-                for idx, f in enumerate(self.findings[before_count:], start=1):
-                    selector = (f.get("element") or "").strip()
-                    if not selector or f.get("screenshot"):
-                        continue
-                    try:
-                        # ``.first`` so a selector matching multiple
-                        # elements doesn't raise — annotate the first
-                        # hit, which is what the heuristic message
-                        # already describes ("affects N elements" wording
-                        # in axe etc. acknowledges plurality without
-                        # demanding a per-element overlay).
-                        box = page.locator(selector).first.bounding_box(
-                            timeout=2000,
-                        )
-                    except Exception as exc:
-                        _logger.debug(
-                            "annotate: bounding_box(%r) failed: %s",
-                            selector, exc,
-                        )
-                        box = None
-                    if not box:
-                        continue
-                    annotated = annotate_screenshot(
-                        raw_path=shot,
-                        bbox=box,
-                        output_path=derive_annotated_path(shot, idx),
+                try:
+                    from engine.screenshot_annotator import (
+                        annotate_screenshot, derive_annotated_path,
                     )
-                    if annotated:
-                        f["screenshot"] = annotated
+                except Exception as exc:
+                    _logger.warning(
+                        "annotate: module import failed: %s — falling back "
+                        "to raw page shots via PR-B fan-out", exc,
+                    )
+                    annotate_screenshot = None  # type: ignore[assignment]
+
+                if shot and annotate_screenshot is not None:
+                    for idx, f in enumerate(
+                        self.findings[before_count:], start=1
+                    ):
+                        if f.get("screenshot"):
+                            continue
+                        # ── 1. Coerce element into a single string ──
+                        element_raw = f.get("element") or ""
+                        if isinstance(element_raw, (list, tuple)):
+                            # axe's ``target`` is a chain like
+                            # ``["#All-vacancies"]`` — first non-empty
+                            # item is the canonical selector.
+                            selector = next(
+                                (str(s).strip() for s in element_raw
+                                 if s and str(s).strip()),
+                                "",
+                            )
+                        else:
+                            selector = str(element_raw).strip()
+                        if not selector:
+                            continue
+                        # ── 2. Per-finding try ─────────────────────────
+                        try:
+                            box = page.locator(selector).first.bounding_box(
+                                timeout=2000,
+                            )
+                        except Exception as exc:
+                            _logger.info(
+                                "annotate: bounding_box(%r) failed: %s — "
+                                "raw page shot via PR-B fan-out",
+                                selector, exc,
+                            )
+                            continue
+                        if not box:
+                            _logger.info(
+                                "annotate: bounding_box(%r) returned None — "
+                                "raw page shot via PR-B fan-out", selector,
+                            )
+                            continue
+                        try:
+                            out_path = derive_annotated_path(shot, idx)
+                            annotated = annotate_screenshot(
+                                raw_path=shot, bbox=box,
+                                output_path=out_path,
+                            )
+                        except Exception as exc:
+                            _logger.warning(
+                                "annotate: draw failed for %r: %s",
+                                selector, exc,
+                            )
+                            continue
+                        if annotated:
+                            f["screenshot"] = annotated
+                            _logger.info(
+                                "annotate: wrote %s for %r",
+                                annotated, selector,
+                            )
+                        else:
+                            _logger.info(
+                                "annotate: annotator returned None for %r — "
+                                "raw page shot via PR-B fan-out", selector,
+                            )
 
             # PR-B: heuristics call ``note(...)`` without a ``screenshot=``
             # kwarg — they have no cheap way to take a per-element shot,
