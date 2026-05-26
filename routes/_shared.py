@@ -202,32 +202,176 @@ def extract_resource_urls() -> list[str]:
 
 
 # ── Session identity (for per-session rate limiting) ─────────────
+#
+# PR-L: persistent signed SID cookie.
+#
+# Pre-PR-L the SID was stored either as ``session.sid`` (Flask-Session
+# filesystem backend, derived from the session file path) or as
+# ``session["_tf_sid"]`` (a UUID we minted inside the session dict).
+# Both routes live INSIDE the filesystem-backed session store. On
+# Render's free tier the container filesystem is wiped on every
+# redeploy → the session file disappears → ``_tf_sid`` is regenerated
+# from scratch → projects in Postgres tagged with the old SID become
+# invisible to the user (the dropdown shows an auto-generated
+# "Untitled project YYYY-MM-DD HH:MM" instead). Operator-reported
+# repeatedly across this work session.
+#
+# Fix: store a copy of the SID in a SEPARATE signed cookie
+# (``_tfg_sid_v1``) signed by ``SECRET_KEY``. SECRET_KEY is set as a
+# Render env-var and persists across redeploys (render.yaml line 45,
+# ``generateValue: true`` only fires on first deploy). The browser
+# keeps the cookie even when the server-side session file is wiped, so
+# the SID survives. ``ensure_active_project`` then re-derives the
+# project_id from Postgres via ``list_projects(owner_sid=sid)`` — the
+# user sees their original projects again.
+
+_PERSISTENT_SID_COOKIE = "_tfg_sid_v1"
+_PERSISTENT_SID_SALT = "tfg-persistent-sid-v1"
+# Two years — long enough to survive any realistic gap between user
+# visits without being unbounded. Browser will refresh the cookie on
+# every response that sets it (we re-set on every request to keep the
+# rolling expiry).
+_PERSISTENT_SID_MAX_AGE = 60 * 60 * 24 * 365 * 2
+
+
+def _make_sid_serializer():
+    """Build a fresh URLSafeSerializer keyed by the app's SECRET_KEY.
+
+    Constructed on demand because ``current_app`` is only available
+    inside a request / app context — we cannot stash a module-level
+    serializer at import time.
+    """
+    from itsdangerous import URLSafeSerializer
+    secret = current_app.config["SECRET_KEY"]
+    return URLSafeSerializer(secret, salt=_PERSISTENT_SID_SALT)
+
+
+def _read_persistent_sid_cookie() -> str | None:
+    """Return the SID stored in the persistent cookie, or ``None`` if
+    the cookie is missing or its signature doesn't validate. Failure
+    is silent — the caller falls back to the session-stored SID and
+    we re-mint a fresh cookie on the way out.
+    """
+    raw = request.cookies.get(_PERSISTENT_SID_COOKIE)
+    if not raw:
+        return None
+    try:
+        sid = _make_sid_serializer().loads(raw)
+    except Exception:
+        return None
+    if not isinstance(sid, str) or not sid:
+        return None
+    return sid
+
+
+def _persistent_sid_cookie_value(sid: str) -> str:
+    """Return the signed cookie payload for *sid*. Pure function — the
+    after-request hook in ``app.py`` reads this and sets the response
+    cookie. Kept here so the signing code lives next to the reader.
+    """
+    return _make_sid_serializer().dumps(sid)
+
 
 def get_session_id(session_obj=None) -> str:
     """Return a stable identifier for the caller's session.
 
-    Used by the async routes to cap concurrent jobs per session. Order
-    of preference:
+    Used by the async routes to cap concurrent jobs per session AND
+    (via :func:`ensure_active_project`) to scope projects to the
+    browser that owns them.
 
-    1. ``session.sid`` — Flask-Session populates this on filesystem /
-       Redis / Memcached backends. It's the real session file key, so
-       different browsers/cookies naturally get different ids.
-    2. ``session["_tf_sid"]`` — a UUID we mint and store in the session
-       itself. Covers the signed-cookie backend (no ``sid`` attribute)
-       and any custom backend that doesn't set ``sid``.
+    Order of preference (PR-L):
 
-    The id is opaque — we only compare it for equality, never parse or
-    expose it.
+    1. ``_tfg_sid_v1`` signed cookie — persists across Render
+       redeploys (browser-side, signed by stable ``SECRET_KEY``).
+       This is the primary path post-PR-L.
+    2. ``session.sid`` — Flask-Session backend identifier. Used for
+       new browsers that haven't received the persistent cookie yet
+       AND as a migration helper for users with existing sessions:
+       on first request post-PR-L their session.sid is promoted to
+       the persistent cookie (see ``set_persistent_sid_cookie`` hook
+       in app.py).
+    3. ``session["_tf_sid"]`` — legacy UUID fallback for sessions
+       that lack a ``sid`` attribute.
+
+    The id is opaque — we only compare it for equality, never parse
+    or expose it.
     """
     sess = session_obj if session_obj is not None else session
+    # 1. Persistent cookie (PR-L)
+    sid = _read_persistent_sid_cookie()
+    if sid:
+        # Mirror into session for code paths that read ``_tf_sid``
+        # without going through this function.
+        if sess.get("_tf_sid") != sid:
+            sess["_tf_sid"] = sid
+        return sid
+    # 2. Flask-Session backend sid
     sid = getattr(sess, "sid", None)
     if sid:
+        # Mirror into ``_tf_sid`` so subsequent ``session["_tf_sid"]``
+        # reads work. The after-request hook will also promote this
+        # value into the persistent cookie.
+        if sess.get("_tf_sid") != sid:
+            sess["_tf_sid"] = sid
         return sid
+    # 3. Legacy / signed-cookie backend fallback
     sid = sess.get("_tf_sid")
     if not sid:
         sid = uuid.uuid4().hex
         sess["_tf_sid"] = sid
     return sid
+
+
+def needs_persistent_sid_cookie() -> bool:
+    """Return True when the current request lacks the persistent SID
+    cookie AND the resolved session id is worth promoting to a
+    cookie. Called by the after-request hook in app.py.
+    """
+    if request.cookies.get(_PERSISTENT_SID_COOKIE):
+        return False
+    # We only promote when there's an established SID to copy — if
+    # ``session`` is brand-new (no project, no test cases, no bugs)
+    # we let the next "real" request mint the cookie so we don't
+    # spend a Set-Cookie on static asset requests that don't even
+    # touch the session.
+    try:
+        sess = session
+        return bool(sess.get("_tf_sid"))
+    except Exception:
+        return False
+
+
+def set_persistent_sid_cookie(response):
+    """Mutate *response* to attach the persistent SID cookie.
+
+    Called by the after-request hook in app.py when
+    :func:`needs_persistent_sid_cookie` returns True. Idempotent:
+    re-applies the same SID on every response so the rolling
+    two-year expiry stays fresh even when the user opens the app
+    after a long idle period.
+    """
+    try:
+        sid = session.get("_tf_sid") or ""
+    except Exception:
+        return response
+    if not sid:
+        return response
+    try:
+        value = _persistent_sid_cookie_value(sid)
+    except Exception:
+        return response
+    # ``secure`` mirrors Flask's session cookie config so we don't
+    # accidentally send a cleartext cookie over HTTPS-only deploys.
+    secure_cookie = bool(
+        current_app.config.get("SESSION_COOKIE_SECURE", False)
+    )
+    response.set_cookie(
+        _PERSISTENT_SID_COOKIE, value,
+        max_age=_PERSISTENT_SID_MAX_AGE,
+        httponly=True, samesite="Lax", secure=secure_cookie,
+        path="/",
+    )
+    return response
 
 
 # ── Active-project resolver (Phase 2) ────────────────────────────

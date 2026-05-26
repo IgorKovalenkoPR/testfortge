@@ -298,6 +298,37 @@ def _inject_csp_nonce():
 
 
 @app.after_request
+def _maybe_set_persistent_sid_cookie(resp):
+    """PR-L: mint the persistent ``_tfg_sid_v1`` cookie on the way
+    out when the browser doesn't already have it and the current
+    session has an established SID worth preserving across Render
+    redeploys.
+
+    The cookie is signed by ``SECRET_KEY`` (which Render persists
+    across redeploys), so the SID survives the filesystem-session
+    wipe that happens on every redeploy. Without this hook, every
+    redeploy would create a new SID, orphaning the user's projects
+    in Postgres under their previous SID and showing a fresh
+    "Untitled project" in the dropdown.
+
+    Idempotent: called on every response. Skips when the cookie
+    already exists OR the session has no SID yet to promote.
+    """
+    try:
+        from routes._shared import (
+            needs_persistent_sid_cookie, set_persistent_sid_cookie,
+        )
+        if needs_persistent_sid_cookie():
+            set_persistent_sid_cookie(resp)
+    except Exception:
+        # Never let the cookie hook 500 the response — the SID
+        # fallback in ``get_session_id`` keeps the app functional
+        # even when the persistent cookie isn't set.
+        pass
+    return resp
+
+
+@app.after_request
 def _apply_security_headers(resp):
     nonce = getattr(g, "csp_nonce", "") or secrets.token_urlsafe(16)
     resp.headers.setdefault(
