@@ -202,6 +202,14 @@ class TestWalkOneAnnotation:
         from engine import screenshot_annotator
         from tests.test_walkthrough_scaffold import _FakeLocator
 
+        # PR-I: ``_walk_one`` now calls ``scroll_into_view_if_needed``
+        # before ``bounding_box``. Stub it as a no-op on the fake
+        # locator so the per-finding flow can proceed.
+        monkeypatch.setattr(
+            _FakeLocator, "scroll_into_view_if_needed",
+            lambda self, **_kw: None,
+            raising=False,
+        )
         # Teach the scaffold's locator to answer ``bounding_box`` —
         # the real Playwright Locator has this; the scaffold left it
         # out because heuristic tests never needed it.
@@ -248,7 +256,11 @@ class TestWalkOneAnnotation:
         ex.run(start_urls=["https://example.com/"])
 
         # Annotator must have been called with the bounding box the
-        # locator returned.
+        # locator returned. PR-I: scroll offset defaults to 0 in the
+        # fake page (``page.evaluate`` returns ``[]`` for unknown
+        # JS expressions; ``float([])`` raises and the executor
+        # falls back to ``0.0``), so the page-absolute bbox equals
+        # the viewport-relative one in the test environment.
         assert stub_annot_called["calls"], (
             "annotator must be invoked when a finding has a selector"
         )
@@ -256,6 +268,14 @@ class TestWalkOneAnnotation:
         assert call["bbox"] == {
             "x": 30, "y": 40, "width": 80, "height": 30,
         }, call
+        # PR-I: annotator's ``raw_path`` is the per-finding viewport
+        # shot now, not the page-level shot. The filename pattern
+        # encodes the finding index and ``_viewport`` suffix so the
+        # bug-export listing can distinguish the focused capture
+        # from the page-wide screenshot.
+        assert call["raw_path"].endswith("_finding01_viewport.png"), (
+            f"expected per-finding viewport shot, got {call['raw_path']!r}"
+        )
 
         broken = [f for f in ex.findings
                    if f["defect_class"] == "broken_image"]
@@ -333,6 +353,11 @@ class TestWalkOneAnnotation:
         from engine import screenshot_annotator
         from tests.test_walkthrough_scaffold import _FakeLocator
 
+        monkeypatch.setattr(
+            _FakeLocator, "scroll_into_view_if_needed",
+            lambda self, **_kw: None,
+            raising=False,
+        )
         monkeypatch.setattr(
             _FakeLocator, "bounding_box",
             lambda self, **_kw: {
@@ -412,6 +437,142 @@ class TestWalkOneAnnotation:
             "annotator must not be invoked when element list is empty"
         )
 
+    def test_viewport_relative_bbox_translation(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """PR-I regression: after scrolling the element into view,
+        ``window.scrollY`` is non-zero. The page-absolute bbox
+        Playwright returns must be translated to viewport-relative
+        coords (subtract the scroll offset) so the annotator can
+        draw at the right place on the just-captured viewport
+        screenshot.
+        """
+        fake_pw()
+        from engine import live_executor as le
+        from engine import screenshot_annotator
+        from tests.test_walkthrough_scaffold import (
+            _FakeLocator, _FakePage,
+        )
+
+        monkeypatch.setattr(
+            _FakeLocator, "scroll_into_view_if_needed",
+            lambda self, **_kw: None,
+            raising=False,
+        )
+        # Element is at page-absolute (x=30, y=4040) — i.e. 4000 px
+        # below the fold. After ``scroll_into_view`` the viewport
+        # would have scrolled by ~3300 px so the element is mid-frame.
+        monkeypatch.setattr(
+            _FakeLocator, "bounding_box",
+            lambda self, **_kw: {
+                "x": 30, "y": 4040, "width": 80, "height": 30,
+            },
+            raising=False,
+        )
+
+        # Stub ``page.evaluate`` so the scroll-offset reads return
+        # numeric values matching the simulated scroll position.
+        original_evaluate = _FakePage.evaluate
+
+        def _scroll_aware_evaluate(self, expression, *args, **kwargs):
+            if "scrollX" in expression:
+                return 0
+            if "scrollY" in expression:
+                return 3300
+            return original_evaluate(self, expression, *args, **kwargs)
+
+        monkeypatch.setattr(
+            _FakePage, "evaluate", _scroll_aware_evaluate, raising=False,
+        )
+
+        captured: list[dict] = []
+
+        def _stub_annot(*, raw_path, bbox, output_path):
+            captured.append(dict(bbox))
+            return output_path
+
+        monkeypatch.setattr(
+            screenshot_annotator, "annotate_screenshot", _stub_annot,
+        )
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Critical", "Accessibility", "axe_critical",
+                f"Below-fold defect on {url}",
+                url=url, tc_id=tc_id,
+                element="#below-fold-select",
+            )
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        assert captured, "annotator must be invoked"
+        # Viewport-relative y = 4040 - 3300 = 740 (element near
+        # bottom of a 1280×800 viewport after scrolling).
+        assert captured[0]["y"] == 740, captured
+        assert captured[0]["x"] == 30, captured
+
+    def test_finding_records_annotation_status_for_diagnostics(
+        self, fake_pw, tmp_storage, monkeypatch
+    ):
+        """PR-H + PR-I: every code path in the annotation block sets
+        ``f["annotation_status"]`` so the bug record (and via PR-I
+        the markdown export) carries the verdict — success path or
+        skipped-reason. Without this, silent fallback to the page
+        shot was indistinguishable from a working annotation.
+        """
+        fake_pw()
+        from engine import live_executor as le
+        from engine import screenshot_annotator
+        from tests.test_walkthrough_scaffold import _FakeLocator
+
+        monkeypatch.setattr(
+            _FakeLocator, "scroll_into_view_if_needed",
+            lambda self, **_kw: None,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            _FakeLocator, "bounding_box",
+            lambda self, **_kw: {
+                "x": 10, "y": 10, "width": 100, "height": 50,
+            },
+            raising=False,
+        )
+
+        def _stub_annot(*, raw_path, bbox, output_path):
+            return output_path
+
+        monkeypatch.setattr(
+            screenshot_annotator, "annotate_screenshot", _stub_annot,
+        )
+
+        def _fake_scan(page, url, tc_id, *, note):
+            note(
+                "Major", "Images", "broken_image",
+                f"Image gap on {url}",
+                url=url, tc_id=tc_id,
+                element='img[src="hero.svg"]',
+            )
+
+        monkeypatch.setattr(le, "scan_broken_images", _fake_scan)
+        ex = le.LiveExecutor(
+            storage_root=tmp_storage,
+            base_url="https://example.com/",
+            max_pages=1,
+        )
+        ex.run(start_urls=["https://example.com/"])
+
+        broken = [f for f in ex.findings
+                   if f["defect_class"] == "broken_image"]
+        assert broken
+        status = broken[0].get("annotation_status", "")
+        assert status.startswith("annotated:"), status
+
     def test_annotator_failure_falls_through_to_page_shot(
         self, fake_pw, tmp_storage, monkeypatch
     ):
@@ -426,6 +587,11 @@ class TestWalkOneAnnotation:
         from engine import screenshot_annotator
         from tests.test_walkthrough_scaffold import _FakeLocator
 
+        monkeypatch.setattr(
+            _FakeLocator, "scroll_into_view_if_needed",
+            lambda self, **_kw: None,
+            raising=False,
+        )
         monkeypatch.setattr(
             _FakeLocator, "bounding_box",
             lambda self, **_kw: {

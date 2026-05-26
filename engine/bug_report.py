@@ -995,6 +995,20 @@ def export_bug_report_markdown(bug: BugReport) -> str:
             lines.append(f"- {att}")
         lines.append("")
 
+    # PR-I: annotation diagnostic. Tells the reader whether the
+    # attached screenshot is the annotated overlay (red box + arrow
+    # on the offending element) or the raw page shot, and — when
+    # annotation didn't fire — exactly why (selector not found,
+    # bbox null, Pillow draw error, …). Without this the export
+    # silently hid the PR-D/F/H/I telemetry behind ``bug.extra``,
+    # making it impossible to debug the cosmetic-overlay gap
+    # offline. Skipped when ``annotation_status`` is empty (every
+    # TC-driven bug and any walkthrough finding without a selector).
+    if bug.annotation_status:
+        lines.append("### Annotation status")
+        lines.append(bug.annotation_status)
+        lines.append("")
+
     # Linked items
     if bug.linked_item_id:
         lines.append("### Linked Items")

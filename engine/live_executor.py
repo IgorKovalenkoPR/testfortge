@@ -849,25 +849,41 @@ class LiveExecutor:
                             f"failed:module_import:{type(exc).__name__}",
                         )
 
+                # PR-I: per-finding viewport screenshot.
+                #
+                # The PR-D/F/H approach annotated the *page-level*
+                # screenshot taken at goto. That shot is viewport-
+                # sized (1280×800) and captures the top of the page
+                # only. The bbox we compute after running heuristics
+                # is page-absolute (Playwright contract), so any
+                # element below the fold (axe ``#All-vacancies`` on
+                # /jobs, broken images at bottom of /careers, …) had
+                # bbox.y > screenshot_height, my annotator clamped to
+                # zero, and the fallback to raw page.png made the
+                # attachment useless for triage.
+                #
+                # PR-I fixes it per-finding: scroll the element into
+                # view, take a FRESH viewport screenshot (the element
+                # is now visible in it), translate the page-absolute
+                # bbox to viewport-relative coords by subtracting the
+                # current scrollX/Y, and annotate THAT shot. Each bug
+                # ends up with its own focused 1280×800 image showing
+                # the defect with a red box around it — exactly what
+                # the QA style guide asked for.
                 if shot and annotate_screenshot is not None:
+                    import os as _os_pr_i
                     for idx, f in enumerate(
                         self.findings[before_count:], start=1
                     ):
                         if f.get("screenshot"):
-                            # Already populated by a heuristic that
-                            # took a per-element shot — keep its
-                            # value and note we didn't overlay.
                             f.setdefault(
                                 "annotation_status",
                                 "skipped:screenshot_preset",
                             )
                             continue
-                        # ── 1. Coerce element into a single string ──
+                        # ── 1. Coerce element to a single string ──
                         element_raw = f.get("element") or ""
                         if isinstance(element_raw, (list, tuple)):
-                            # axe's ``target`` is a chain like
-                            # ``["#All-vacancies"]`` — first non-empty
-                            # item is the canonical selector.
                             selector = next(
                                 (str(s).strip() for s in element_raw
                                  if s and str(s).strip()),
@@ -878,56 +894,99 @@ class LiveExecutor:
                         if not selector:
                             f["annotation_status"] = "skipped:no_selector"
                             continue
-                        # ── 2. Per-finding try ─────────────────────────
+                        # ── 2. Scroll element into view ────────────────
                         try:
-                            box = page.locator(selector).first.bounding_box(
-                                timeout=2000,
+                            page.locator(selector).first \
+                                .scroll_into_view_if_needed(timeout=2000)
+                        except Exception as exc:
+                            _logger.info(
+                                "annotate: scroll(%r) failed: %s — "
+                                "falling back to page-level shot",
+                                selector, exc,
+                            )
+                            f["annotation_status"] = (
+                                f"failed:scroll_exc:{type(exc).__name__}"
+                            )
+                            continue
+                        # ── 3. Read page-absolute bbox ─────────────────
+                        try:
+                            page_box = (
+                                page.locator(selector).first
+                                .bounding_box(timeout=2000)
                             )
                         except Exception as exc:
                             _logger.info(
-                                "annotate: bounding_box(%r) failed: %s — "
-                                "raw page shot via PR-B fan-out",
+                                "annotate: bounding_box(%r) failed: %s",
                                 selector, exc,
                             )
                             f["annotation_status"] = (
                                 f"failed:bbox_exc:{type(exc).__name__}"
                             )
                             continue
-                        # PR-H: ``bounding_box`` commonly returns
-                        # ``None`` for broken images because the
-                        # ``<img>`` element with ``naturalWidth=0``
-                        # has no rendered geometry. Try
-                        # ``scroll_into_view_if_needed`` + retry once
-                        # before giving up — this rescues many
-                        # broken-image cases where the element is
-                        # below the fold.
-                        if not box:
-                            try:
-                                page.locator(selector).first \
-                                    .scroll_into_view_if_needed(timeout=2000)
-                                box = (
-                                    page.locator(selector).first
-                                    .bounding_box(timeout=2000)
-                                )
-                            except Exception as exc:
-                                _logger.info(
-                                    "annotate: scroll-retry(%r) failed: %s",
-                                    selector, exc,
-                                )
-                                # Fall through — ``box`` still None.
-                        if not box:
+                        if not page_box:
                             _logger.info(
-                                "annotate: bounding_box(%r) returned None — "
-                                "raw page shot via PR-B fan-out", selector,
+                                "annotate: bounding_box(%r) returned None",
+                                selector,
+                            )
+                            f["annotation_status"] = "skipped:bbox_none"
+                            continue
+                        # ── 4. Take a fresh viewport screenshot ────────
+                        # The element is now visible after the
+                        # ``scroll_into_view_if_needed`` above. We
+                        # save it next to the page-level shot so
+                        # /automation/asset serves it from the same
+                        # directory the bug attachment will reference.
+                        try:
+                            page_shot_dir = _os_pr_i.path.dirname(shot)
+                            page_shot_stem, _ = _os_pr_i.path.splitext(
+                                _os_pr_i.path.basename(shot)
+                            )
+                            viewport_shot = _os_pr_i.path.join(
+                                page_shot_dir,
+                                f"{page_shot_stem}_finding"
+                                f"{idx:02d}_viewport.png",
+                            )
+                            page.screenshot(
+                                path=viewport_shot, full_page=False,
+                            )
+                        except Exception as exc:
+                            _logger.warning(
+                                "annotate: viewport screenshot for %r "
+                                "failed: %s", selector, exc,
                             )
                             f["annotation_status"] = (
-                                "skipped:bbox_none"
+                                f"failed:screenshot_exc:"
+                                f"{type(exc).__name__}"
                             )
                             continue
+                        # ── 5. Translate page-abs bbox → viewport-rel ──
+                        try:
+                            scroll_x = float(
+                                page.evaluate("window.scrollX || 0")
+                            )
+                            scroll_y = float(
+                                page.evaluate("window.scrollY || 0")
+                            )
+                        except Exception:
+                            # Older Playwright versions / unusual
+                            # contexts — assume scroll origin if
+                            # the evaluate path errored. The bbox
+                            # will still be roughly correct for
+                            # above-fold elements.
+                            scroll_x = 0.0
+                            scroll_y = 0.0
+                        viewport_box = {
+                            "x": page_box["x"] - scroll_x,
+                            "y": page_box["y"] - scroll_y,
+                            "width": page_box["width"],
+                            "height": page_box["height"],
+                        }
+                        # ── 6. Annotate the viewport shot ──────────────
                         try:
                             out_path = derive_annotated_path(shot, idx)
                             annotated = annotate_screenshot(
-                                raw_path=shot, bbox=box,
+                                raw_path=viewport_shot,
+                                bbox=viewport_box,
                                 output_path=out_path,
                             )
                         except Exception as exc:
@@ -950,8 +1009,8 @@ class LiveExecutor:
                             )
                         else:
                             _logger.info(
-                                "annotate: annotator returned None for %r — "
-                                "raw page shot via PR-B fan-out", selector,
+                                "annotate: annotator returned None for %r",
+                                selector,
                             )
                             f["annotation_status"] = (
                                 "skipped:annotator_returned_none"
