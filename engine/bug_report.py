@@ -179,6 +179,76 @@ def create_bug_from_failed_item(
     )
 
 
+# ── PR-G: humanise URL paths + CDN-hash filenames for titles ───────
+#
+# Walkthrough bug titles used to contain raw CDN hash filenames like
+# ``6a0dc9966e1d43dd88d9b8a5_Frame%202136140580.svg`` — opaque to
+# PMs/stakeholders. The two helpers below let title templates print
+# friendly substitutes (``"a page graphic"``, ``"the Careers page"``)
+# while the raw values still land in Steps to Reproduce + Developer
+# Detail where they belong.
+
+# Webflow / Wix / similar CDNs prefix asset filenames with a long
+# alphanumeric hex hash (the asset id). We treat any 16+ char hex
+# prefix followed by an underscore as a CDN hash and substitute a
+# generic phrase in titles. The full filename remains in the bug body.
+_CDN_HASH_PREFIX_RE = re.compile(r"^[a-f0-9]{16,}_", re.I)
+
+
+def _is_cdn_hash_filename(name: str) -> bool:
+    """Return True when *name* looks like a CDN-emitted asset (long
+    hex prefix). The substring after the prefix is usually the
+    original filename minus extension, but it's mangled enough that
+    showing it in a bug title is more noise than signal.
+    """
+    if not name:
+        return False
+    base = name.rsplit("/", 1)[-1]
+    return bool(_CDN_HASH_PREFIX_RE.match(base))
+
+
+def _humanise_url_page(url: str) -> str:
+    """Convert a URL into a short human-readable page reference for
+    bug titles.
+
+    Examples:
+        ``https://example.com/``               → "the homepage"
+        ``https://example.com/index.html``     → "the homepage"
+        ``https://example.com/careers``        → "the Careers page"
+        ``https://example.com/contact-us``     → "the Contact Us page"
+        ``https://example.com/blog/2024/foo``  → "the Foo page"
+
+    Falls back to "the page" when *url* is empty or unparseable.
+    """
+    if not url:
+        return "the page"
+    try:
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(url)
+        # Bare strings ("not-a-url") parse as a relative path with no
+        # scheme — refuse those so a typo doesn't turn into "the
+        # Not A Url page". An absolute path ("/careers") is allowed
+        # since it's a valid form for in-app relative URLs.
+        if not parsed.scheme and not url.startswith("/"):
+            return "the page"
+        path = unquote(parsed.path or "")
+    except Exception:
+        return "the page"
+    path = path.strip("/")
+    if not path or path.lower() in ("index", "index.html", "index.htm", "home"):
+        return "the homepage"
+    last = path.split("/")[-1]
+    # Strip file extension — most user-facing routes are extensionless
+    # but we cover the index.html / about.php edge cases.
+    if "." in last and not last.startswith("."):
+        last = last.rsplit(".", 1)[0]
+    # ``contact-us`` → ``Contact Us``; ``senior_engineer`` → ``Senior Engineer``.
+    name = re.sub(r"[-_]+", " ", last).strip().title()
+    if not name:
+        return "the page"
+    return f"the {name} page"
+
+
 # ── PR-F: walkthrough-message → passive-voice transform ────────────
 #
 # PR-C′ rewrote ``engine.qa_testers._make_bug_summary`` so TC-driven
@@ -203,23 +273,46 @@ def create_bug_from_failed_item(
 
 _WALKTHROUGH_MESSAGE_TRANSFORMS: list[tuple[re.Pattern[str], str]] = [
     # "Select element must have an accessible name — affects 2 elements
-    # on this page" → "Accessible name is missing from select element
-    # (affects 2 elements on this page)"
+    # on this page" → with URL: "Accessible name is missing from select
+    # element on the Jobs page (affects …)"; without URL: "Accessible
+    # name is missing from select element (affects …)". The
+    # ``{on_page}`` substitution is conditional — empty when no URL
+    # was plumbed through — to avoid the redundant "on the page (…
+    # on this page)" mouthful.
     (
         re.compile(
             r"^(?P<subject>.+?)\s+must have\s+(?:an?\s+)?(?P<thing>.+?)\s*(?:—\s*(?P<tail>.+))?$",
             re.I,
         ),
-        "{thing_cap} is missing from {subject_lower}{tail_paren}",
+        "{thing_cap} is missing from {subject_lower}{on_page}{tail_paren}",
     ),
-    # "Broken image on the page — foo.avif did not load (visitors see ...)"
-    # → "Image foo.avif is not loaded on the page (visitors see ...)"
+    # "Broken image on the page — "alt text" did not load (visitors ...)"
+    # → ""Alt Text" graphic is missing on the Careers page (visitors ...)"
+    # PR-G: alt-aware archetype — when the heuristic captured an
+    # ``alt`` attribute we use it verbatim (much more meaningful than
+    # a CDN-hash filename). Runs BEFORE the filename archetype so
+    # quoted alt strings don't get scooped by the ``\S+?`` filename
+    # capture. ``{on_page_always}`` always renders ("on the page" or
+    # "on the Careers page") because broken-image titles need the
+    # destination context even without a URL.
+    (
+        re.compile(
+            r"^Broken image on the page\s*—\s*\"(?P<alt>[^\"]+)\"\s+did not load\b\s*(?P<tail>\(.+\))?\s*$",
+            re.I,
+        ),
+        "\"{alt_cap}\" graphic is missing {on_page_always}{tail_space}",
+    ),
+    # "Broken image on the page — foo.avif did not load (visitors ...)"
+    # → either (filename meaningful) "Image foo.avif is missing on the
+    # Careers page (...)" or (CDN hash) "A page graphic is missing on
+    # the Careers page (...)". The template chooses based on the
+    # ``filename_human`` derived substitution computed at render time.
     (
         re.compile(
             r"^Broken image on the page\s*—\s*(?P<filename>\S+?)\s+did not load\b\s*(?P<tail>\(.+\))?\s*$",
             re.I,
         ),
-        "Image {filename} is not loaded on the page{tail_space}",
+        "{filename_human} {on_page_always}{tail_space}",
     ),
     # "A JavaScript error happened during the user journey"
     # → "JavaScript error is raised during the user journey"
@@ -248,18 +341,40 @@ _WALKTHROUGH_MESSAGE_TRANSFORMS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-def _walkthrough_passive_title(area: str, message: str) -> str:
+def _walkthrough_passive_title(
+    area: str, message: str, *, url: str = "",
+) -> str:
     """Compose the headline for a walkthrough-source bug.
 
-    Format: ``[Area] <passive-voice transformed message>``. When the
-    raw message doesn't fit any archetype below we keep it verbatim
-    so we don't regress on findings whose heuristic phrasing is
-    already grammatical (broken HTTP server-error, console JS errors,
-    etc. that read fine as-is).
+    Format: ``[Area] <passive-voice transformed message>``.
+
+    *url* is consumed by the archetype templates to inject a friendly
+    page reference ("the Careers page") in place of the generic "on
+    the page" phrasing. When the URL is empty or unparseable the
+    helper returns "the page" so existing tests stay green.
+
+    When the raw message doesn't fit any archetype below we keep it
+    verbatim — heuristic phrasings that already read clearly (Chrome
+    console error snippets, HTTP server-error lines) should not be
+    forced through a grammatical rewrite.
     """
     title_area = area or "Page"
     if not message:
         return f"[{title_area}] Walkthrough finding"
+
+    page_name = _humanise_url_page(url)
+    has_url = bool((url or "").strip())
+    # Two substitutions for the templates to choose between:
+    #   - ``on_page``        — empty when no URL, "on {page_name}"
+    #                          when one was provided. Used by archetypes
+    #                          whose heuristic tail already mentions
+    #                          "on this page" to avoid duplication.
+    #   - ``on_page_always`` — always "on {page_name}" (falls back to
+    #                          "on the page"). Used by archetypes
+    #                          whose semantics require destination
+    #                          context regardless (broken images).
+    on_page = f" on {page_name}" if has_url else ""
+    on_page_always = f"on {page_name}"
 
     for pat, template in _WALKTHROUGH_MESSAGE_TRANSFORMS:
         m = pat.match(message)
@@ -267,7 +382,11 @@ def _walkthrough_passive_title(area: str, message: str) -> str:
             continue
         groups = m.groupdict()
         # Compute derived substitutions per archetype.
-        rendered: dict[str, str] = {}
+        rendered: dict[str, str] = {
+            "page_name": page_name,
+            "on_page": on_page,
+            "on_page_always": on_page_always,
+        }
         for key, val in groups.items():
             v = (val or "").strip()
             rendered[key] = v
@@ -280,6 +399,18 @@ def _walkthrough_passive_title(area: str, message: str) -> str:
             f" {tail}" if tail else ""
         )
         rendered["tail_space"] = f" {tail}" if tail else ""
+        # PR-G filename humanisation: when the filename capture is a
+        # CDN hash, substitute "A page graphic is missing"; otherwise
+        # keep the original filename in a friendlier "Image foo.svg
+        # is missing" shape. The template references
+        # ``{filename_human}`` and we compute it here so the template
+        # itself stays declarative.
+        fn = (groups.get("filename") or "").strip()
+        if fn:
+            if _is_cdn_hash_filename(fn):
+                rendered["filename_human"] = "A page graphic is missing"
+            else:
+                rendered["filename_human"] = f"Image {fn} is missing"
         try:
             transformed = template.format(**rendered).strip()
         except Exception:
@@ -363,7 +494,9 @@ def create_bug_from_walkthrough_finding(
     # PR-C′ gave TC-driven bugs. Falls back to ``[Area] message`` when
     # no archetype matches so heuristic messages that are already
     # grammatical (e.g. console JS errors) are left untouched.
-    title = _walkthrough_passive_title(area, message)
+    # PR-G: forward ``url`` so the title can swap the generic
+    # "on the page" phrasing for a human-readable "the Careers page".
+    title = _walkthrough_passive_title(area, message, url=url)
 
     str_lines = [f"1. Open {url or base_url or '<application URL>'}."]
     if element:
