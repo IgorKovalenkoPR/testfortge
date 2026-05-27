@@ -107,3 +107,69 @@ When `BEHIND_HTTPS=1` is set but **neither** `TESTFORTGE_BASIC_USER`
 `SECURITY:` warning at boot. That's the signal that `/metrics` is
 publicly reachable — fix one of the three options above or take the
 proxy approach.
+
+## Recording test steps (pilot — PR-B)
+
+A manual QA can record a Playwright session and attach the captured
+steps to a Test Case so the next run plays them back deterministically,
+instead of relying on the heuristic parse of the case's text steps.
+
+### Opt in
+
+Recorder is gated on `RECORDER_ENABLED=1` everywhere — the CLI, the
+MCP write tool, and the per-TC "🎬 Record steps" block on
+`/test-cases`. Hosts without the env var see no Recorder surface at
+all. Flip it on per-host:
+
+```bash
+export RECORDER_ENABLED=1
+```
+
+### One-time setup
+
+```bash
+pip install playwright
+python -m playwright install chromium
+```
+
+### Recording a TC
+
+From a TestForTge checkout, run:
+
+```bash
+RECORDER_ENABLED=1 python -m tools.tfg_record \
+    --project <project_id> --tc <TC_ID> --url <start_url>
+```
+
+Codegen opens a Chromium window. Click through the scenario, close the
+window — the CLI parses the captured Python, writes the steps to
+`TestCase.automation_steps_json`, and the next `/test-execution` run
+uses them verbatim (skipping the heuristic text parse).
+
+The `/test-cases` page surfaces a per-TC "🎬 Record steps" panel with
+the same command pre-filled. Tester pastes a Start URL, clicks
+**📋 Copy command**, runs it locally.
+
+### Re-importing a capture
+
+If codegen output already exists (saved from another run, or a
+teammate's checkout), skip the browser launch and import directly:
+
+```bash
+RECORDER_ENABLED=1 python -m tools.tfg_record \
+    --project <project_id> --tc <TC_ID> --from-file path/to/captured.py
+```
+
+### Notes
+
+- The CLI talks to the **local DB** directly. Use it from the same
+  checkout that's serving TestForTge (or pointing at the same
+  `DATABASE_URL`). For cross-machine flows the MCP server exposes
+  `record_steps_attach` — a future CLI release will wrap it behind an
+  `--mcp-url` flag.
+- The pilot uses **one** locator per recorded step. PR-A (multi-locator
+  fallback) builds on this foundation; until it lands, a flaky locator
+  has to be re-recorded.
+- `RECORDER_TIMEOUT_S` (default 1800 s) caps a single recording
+  session — bump for slow accessibility regressions, but the floor of
+  60 s prevents a typo from disabling the safety net entirely.

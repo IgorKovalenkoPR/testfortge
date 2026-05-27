@@ -24,6 +24,7 @@ short-lived session so callers don't have to think about transactions.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
@@ -217,6 +218,17 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
             'ALTER TABLE test_case ADD COLUMN "trigger" '
             "VARCHAR(40) NOT NULL DEFAULT 'manual'",
         ))
+    # PR-B (Recorder MVP) column. NOT NULL DEFAULT '' mirrors
+    # ``url_pattern`` and ``trigger`` so dataclass callers never see a
+    # surprise None. Existing rows back-fill with '' and behave
+    # byte-identically — the runner falls back to its heuristic parse of
+    # ``test_steps`` when this is empty.
+    if "automation_steps_json" not in existing:
+        additions.append((
+            "automation_steps_json",
+            "ALTER TABLE test_case ADD COLUMN automation_steps_json "
+            "TEXT NOT NULL DEFAULT ''",
+        ))
     if not additions:
         return
 
@@ -353,6 +365,15 @@ class TestCase(Base):
     trigger: Mapped[str] = mapped_column(String(40), nullable=False,
                                           default="manual",
                                           server_default="manual")
+    # Recorder integration: serialised list[dict] of AutomationStep payloads
+    # captured by ``tfg record`` (PR-B). When non-empty, ``_run_script``
+    # prefers these over the heuristic parse of ``test_steps``. Empty
+    # string on every pre-Recorder row — matches the NOT NULL DEFAULT ''
+    # pattern used by ``url_pattern`` / ``trigger`` so callers never see
+    # a surprise None value through the dataclass field.
+    automation_steps_json: Mapped[str] = mapped_column(Text, nullable=False,
+                                                       default="",
+                                                       server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -806,6 +827,12 @@ def save_test_cases(project_id: str, test_cases: list) -> int:
                 # so the editor UI's writes actually persist.
                 url_pattern=d.get("url_pattern", "") or "",
                 trigger=d.get("trigger", "manual") or "manual",
+                # PR-B: recorder output. Empty string when the TC was
+                # not recorded — coerce None / missing to "" so the NOT
+                # NULL constraint is never violated. Stored as a JSON
+                # string so the runner decodes on demand without forcing
+                # a column type migration later.
+                automation_steps_json=d.get("automation_steps_json") or "",
             ))
             written += 1
     return written
@@ -818,7 +845,44 @@ _TC_DATACLASS_FIELDS = (
     # Sprint 5: walkthrough binding metadata. Listed last so callers
     # that unpack-by-position keep their existing column order.
     "url_pattern", "trigger",
+    # PR-B: recorder output. Listed after walkthrough fields for the
+    # same reason — additive columns extend the tuple, never reshuffle.
+    "automation_steps_json",
 )
+
+
+def update_tc_automation_steps(project_id: str,
+                                tc_external_id: str,
+                                steps: list[dict]) -> bool:
+    """Write a serialised AutomationStep list onto a TC's ``automation_steps_json``.
+
+    Looks the row up by ``(project_id, external_id)``. Returns ``True``
+    on success, ``False`` when no matching row exists (caller decides
+    whether that's an error). Passing ``steps=[]`` clears the column —
+    the runner then falls back to its heuristic parse of ``test_steps``.
+
+    The list is JSON-serialised here so the call site does not need to
+    care about column-type subtleties. We persist a string so a future
+    PR can switch to JSON-typed columns without rewriting the helper.
+    """
+    if not project_id or not tc_external_id:
+        return False
+    payload = json.dumps(steps, ensure_ascii=False) if steps else ""
+    with session_scope() as sess:
+        row = sess.execute(
+            select(TestCase).where(
+                TestCase.project_id == project_id,
+                TestCase.external_id == tc_external_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return False
+        row.automation_steps_json = payload
+        # Bump parent project's updated_at so the picker reflects recency.
+        proj = sess.get(Project, project_id)
+        if proj is not None:
+            proj.updated_at = _utcnow()
+        return True
 
 
 def load_test_cases(project_id: str) -> list[dict]:

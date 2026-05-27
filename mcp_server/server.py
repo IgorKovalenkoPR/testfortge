@@ -541,6 +541,95 @@ def tedgie_ask(
     return chatbot.respond_dict(str(question).strip(), lang or "en")
 
 
+# ── Recorder write tool (PR-B) ─────────────────────────────────────
+
+# Recorder integration is feature-flagged off by default. ``tfg record``
+# CLI users have the flag flipped on for their host; the public Render
+# deployment keeps it off until pilot graduates to global rollout.
+def _recorder_enabled() -> bool:
+    return os.environ.get("RECORDER_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+@mcp.tool()
+def record_steps_attach(
+    project_id: str,
+    tc_external_id: str,
+    steps: list[dict],
+) -> dict:
+    """Attach a recorded step list to a TC's ``automation_steps_json``.
+
+    Receives the output of :mod:`engine.recorder_parser` (one
+    AutomationStep payload per item), serialises it to JSON, and writes
+    it through :func:`engine.db.update_tc_automation_steps`. The runner
+    then prefers these over the heuristic text parse on the next run.
+
+    Args:
+        project_id: 32-char project id from :func:`list_projects`.
+            Required.
+        tc_external_id: TC external id (``TC-001`` / ``SC1_002`` style),
+            as returned by :func:`list_test_cases`. Required.
+        steps: ordered list of dicts shaped like
+            ``{"action", "target", "value", "raw", "comment"}``. Each
+            item must have a non-empty ``action`` — items without are
+            silently dropped server-side as a defensive filter. Passing
+            ``[]`` clears the recording, restoring the heuristic path.
+
+    Returns:
+        ``{"ok": True, "tc_external_id": ..., "steps_count": N}``
+        when the TC was found and updated. ``{"ok": False, "reason":
+        "tc_not_found"}`` if the lookup misses — caller surfaces this
+        to the operator instead of treating it as an error.
+
+    Raises:
+        RuntimeError: when ``RECORDER_ENABLED`` is not flipped on. The
+            production deployment refuses to accept recordings until
+            pilot graduates — matches the CLI's own feature-flag check.
+        ValueError: missing project_id / tc_external_id.
+    """
+    if not _recorder_enabled():
+        raise RuntimeError(
+            "record_steps_attach: RECORDER_ENABLED is not set — this "
+            "host is not in the Recorder pilot. Flip the env var on "
+            "the MCP server boot to opt in.")
+    if not project_id or not str(project_id).strip():
+        raise ValueError("record_steps_attach: project_id is required")
+    if not tc_external_id or not str(tc_external_id).strip():
+        raise ValueError("record_steps_attach: tc_external_id is required")
+    if not isinstance(steps, list):
+        raise ValueError("record_steps_attach: steps must be a list")
+
+    cleaned: list[dict] = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or "").strip()
+        if not action:
+            continue
+        cleaned.append({
+            "action": action,
+            "target": str(item.get("target") or ""),
+            "value": str(item.get("value") or ""),
+            "raw": str(item.get("raw") or ""),
+            "comment": str(item.get("comment") or ""),
+        })
+
+    ok = db.update_tc_automation_steps(
+        str(project_id).strip(),
+        str(tc_external_id).strip(),
+        cleaned,
+    )
+    if not ok:
+        return {"ok": False, "reason": "tc_not_found",
+                "project_id": project_id, "tc_external_id": tc_external_id}
+    return {
+        "ok": True,
+        "project_id": project_id,
+        "tc_external_id": tc_external_id,
+        "steps_count": len(cleaned),
+    }
+
+
 # ── Entry ──────────────────────────────────────────────────────────
 
 def main() -> int:

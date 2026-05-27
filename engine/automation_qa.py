@@ -5,6 +5,7 @@ ISTQB Test Automation Engineer, 8+ years with Playwright, Selenium, Cypress.
 Converts manual TestCase objects into runnable Playwright Python scripts.
 """
 from __future__ import annotations
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -129,7 +130,17 @@ def _extract_seconds(text: str) -> str:
 # ---------- TC → Script ----------
 
 def tc_to_script(tc: dict, base_url: str = "") -> AutomationScript:
-    """Convert a TestCase dict from session['test_cases_data'] into a script."""
+    """Convert a TestCase dict from session['test_cases_data'] into a script.
+
+    When the TC carries recorded steps in ``automation_steps_json`` (PR-B),
+    those are used verbatim — the Playwright codegen capture is already
+    deterministic, locators are real, and the recording usually opens
+    with its own ``goto`` so we skip the heuristic ``parse_manual_step``
+    pass entirely. The ``expected_result`` still becomes a synthetic
+    ``expect_text`` at the tail so the runner has the same pass/fail
+    surface for both authoring paths. Falls back to the legacy text
+    parse when the recording is absent or malformed.
+    """
     script = AutomationScript(
         tc_id=tc.get("id", ""),
         summary=tc.get("summary", ""),
@@ -139,16 +150,21 @@ def tc_to_script(tc: dict, base_url: str = "") -> AutomationScript:
     pre = tc.get("preconditions", "")
     if pre:
         script.preconditions = [p.strip() for p in pre.splitlines() if p.strip()]
-    steps_text = tc.get("test_steps", "") or tc.get("steps", "")
-    if isinstance(steps_text, str):
-        lines = [ln for ln in steps_text.splitlines() if ln.strip()]
+
+    recorded = _decode_recorded_steps(tc.get("automation_steps_json", ""))
+    if recorded:
+        script.steps.extend(recorded)
     else:
-        lines = list(steps_text)
-    if base_url and not any(_URL_RE.search(ln) for ln in lines[:1]):
-        lines.insert(0, f"Navigate to {base_url}")
-    for line in lines:
-        script.steps.append(parse_manual_step(line, base_url))
-    # Add expectation from expected result
+        steps_text = tc.get("test_steps", "") or tc.get("steps", "")
+        if isinstance(steps_text, str):
+            lines = [ln for ln in steps_text.splitlines() if ln.strip()]
+        else:
+            lines = list(steps_text)
+        if base_url and not any(_URL_RE.search(ln) for ln in lines[:1]):
+            lines.insert(0, f"Navigate to {base_url}")
+        for line in lines:
+            script.steps.append(parse_manual_step(line, base_url))
+
     if script.expected_result:
         script.steps.append(AutomationStep(
             action="expect_text",
@@ -156,6 +172,39 @@ def tc_to_script(tc: dict, base_url: str = "") -> AutomationScript:
             raw=f"EXPECT: {script.expected_result}",
         ))
     return script
+
+
+def _decode_recorded_steps(payload: str) -> list[AutomationStep]:
+    """Decode a TC's ``automation_steps_json`` into AutomationStep objects.
+
+    Empty / malformed / wrong-shape payload returns ``[]`` so the caller
+    falls back to the legacy heuristic parse — a half-written recording
+    must never crash the runner. Each item is type-coerced defensively
+    against future schema drift.
+    """
+    if not payload:
+        return []
+    try:
+        raw = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[AutomationStep] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action", "") or "").strip()
+        if not action:
+            continue
+        out.append(AutomationStep(
+            action=action,
+            target=str(item.get("target", "") or ""),
+            value=str(item.get("value", "") or ""),
+            raw=str(item.get("raw", "") or ""),
+            comment=str(item.get("comment", "") or ""),
+        ))
+    return out
 
 
 def scripts_from_session(test_cases: list[dict], base_url: str) -> list[AutomationScript]:
