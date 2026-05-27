@@ -49,6 +49,10 @@ class TestCase:
     # backward-compatible so pre-Sprint-5 packs deserialise cleanly.
     url_pattern: str = ""
     trigger: str = "manual"
+    # PR-B (Recorder MVP): JSON-encoded list[dict] of AutomationStep
+    # payloads captured by ``tfg record``. Empty string preserves
+    # today's heuristic-parse behaviour for every pre-Recorder TC.
+    automation_steps_json: str = ""
 
 
 @dataclass

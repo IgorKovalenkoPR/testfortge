@@ -212,7 +212,14 @@ def _inject_csrf():
 
 @app.context_processor
 def inject_globals():
-    return {"t": g.t, "lang": g.lang}
+    # ``recorder_enabled`` gates the PR-B "🎬 Record" surface in
+    # templates/test_cases.html. Driven by the same env var the CLI
+    # and the MCP tool consult, so a host is either fully in the
+    # pilot or fully out of it. Cheap call — string compare per
+    # request, no I/O.
+    recorder_enabled = os.environ.get("RECORDER_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on")
+    return {"t": g.t, "lang": g.lang, "recorder_enabled": recorder_enabled}
 
 
 @app.template_filter('nl2br')

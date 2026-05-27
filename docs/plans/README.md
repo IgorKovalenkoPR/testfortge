@@ -12,6 +12,7 @@ references, code sketches, tests, risks, and an estimate.
 | [sprint_4_polish.md](sprint_4_polish.md) | S4 | Prompt-injection guards, /healthz hardening, test plan UI, bulk bug ops, roles (deferred to S5) | ~43 h |
 | [identity_model_spike.md](identity_model_spike.md) | S5 pre-spike | Email-vs-sid identifier model design; locks the open questions blocking Sprint 4.1 (Roles) | 1 day |
 | [tfweflo_walkthrough_integration.md](tfweflo_walkthrough_integration.md) | TFWefloLab | Port QA walkthrough heuristics from Node into Python; URL-pattern TC binding; cross-env bug dedup | ~52 h |
+| [recorder_integration.md](recorder_integration.md) | Recorder | TestLum-inspired Web Recorder via Playwright codegen CLI + multi-locator Page Object + Assertion Mode | ~70 h |
 
 ## Recommended sequencing
 

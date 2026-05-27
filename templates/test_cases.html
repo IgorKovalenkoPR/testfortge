@@ -471,6 +471,51 @@
                     'Empty URL pattern + trigger "always" makes the walkthrough fire this TC on every visited page. trigger="manual" disables walkthrough firing entirely.') }}
             </p>
         </details>
+
+        {# PR-B Recorder: collapsed by default per-TC card. Gated on the
+           host opting into the pilot — when the env var is off this
+           block is invisible and the bytes go nowhere. Body is a
+           pre-filled CLI command the tester copies + runs on their own
+           machine; the actual codegen browser belongs there, not on
+           the server. #}
+        {% if recorder_enabled %}
+        <details class="tc-recorder-edit" style="margin-top:10px;
+                    border:1px dashed #cbd5e1;border-radius:6px;
+                    padding:8px 12px;background:#fafbfc;">
+            <summary style="cursor:pointer;font-weight:600;color:#475569;font-size:0.9em;">
+                🎬 {{ t.get('tc_recorder_title', 'Record steps') }}
+                {% if tc.automation_steps_json %}
+                <small style="color:#16a34a;font-weight:600;">— ✓ {{ t.get('tc_recorder_has_steps', 'Has recorded steps') }}</small>
+                {% endif %}
+            </summary>
+            <div style="margin-top:8px;">
+                <p class="hint" style="font-size:0.82em;color:#475569;margin:0 0 6px 0;">
+                    {{ t.get('tc_recorder_hint',
+                        'Run locally — opens Chromium so you can click through the scenario. Steps land on this TC automatically.') }}
+                </p>
+                <label for="recorder_url_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                    {{ t.get('tc_recorder_url_label', 'Start URL') }}
+                </label>
+                <input type="url" id="recorder_url_{{ tc.id }}"
+                       placeholder="https://app.example.com/login"
+                       style="width:100%;font-family:monospace;font-size:0.85em;margin:2px 0 8px 0;"
+                       data-recorder-url-input="{{ tc.id }}">
+                <pre id="recorder_cmd_{{ tc.id }}"
+                     style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
+                            border-radius:4px;font-size:0.78em;
+                            white-space:pre-wrap;word-break:break-all;
+                            margin:0 0 6px 0;"
+                     data-recorder-cmd="{{ tc.id }}"
+                     data-project="{{ active_project_id }}"
+                     data-tc="{{ tc.id }}">RECORDER_ENABLED=1 python -m tools.tfg_record --project {{ active_project_id }} --tc {{ tc.id }} --url &lt;START_URL&gt;</pre>
+                <button type="button" class="btn btn-secondary"
+                        data-recorder-copy="{{ tc.id }}"
+                        style="font-size:0.85em;padding:6px 14px;">
+                    📋 {{ t.get('tc_recorder_copy', 'Copy command') }}
+                </button>
+            </div>
+        </details>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
@@ -548,5 +593,49 @@ function filterTC(category, btn) {
         card.style.display = (category === 'all' || card.dataset.category === category) ? '' : 'none';
     });
 }
+
+// PR-B Recorder: per-TC <details> block updates its CLI command as the
+// tester types a Start URL, and the Copy button pushes the rendered
+// command onto the clipboard. No-op when the Recorder section is gated
+// off — query selectors return empty NodeLists and the listeners never
+// attach.
+(function recorderInit() {
+    document.querySelectorAll('[data-recorder-url-input]').forEach(input => {
+        const tcId = input.dataset.recorderUrlInput;
+        const pre = document.querySelector(`[data-recorder-cmd="${tcId}"]`);
+        if (!pre) return;
+        const project = pre.dataset.project || '';
+        const tc = pre.dataset.tc || '';
+        const render = () => {
+            const url = (input.value || '').trim() || '<START_URL>';
+            pre.textContent =
+                `RECORDER_ENABLED=1 python -m tools.tfg_record ` +
+                `--project ${project} --tc ${tc} --url ${url}`;
+        };
+        input.addEventListener('input', render);
+    });
+    document.querySelectorAll('[data-recorder-copy]').forEach(btn => {
+        const tcId = btn.dataset.recorderCopy;
+        const pre = document.querySelector(`[data-recorder-cmd="${tcId}"]`);
+        if (!pre) return;
+        btn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(pre.textContent);
+                const original = btn.textContent;
+                btn.textContent = '✓ Copied';
+                setTimeout(() => { btn.textContent = original; }, 1500);
+            } catch (e) {
+                // Fallback: select the <pre> contents so the tester can
+                // Ctrl+C themselves. Clipboard API can fail under
+                // permissions-policy or insecure-context (non-HTTPS).
+                const range = document.createRange();
+                range.selectNodeContents(pre);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        });
+    });
+})();
 </script>
 {% endblock %}
