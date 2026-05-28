@@ -1,4 +1,4 @@
-"""PR-A — runner-side multi-locator chain tests.
+"""PR-A — runner-side multi-locator chain + selector-decoder tests.
 
 The previous test file (``test_locator_registry.py``) covers the pure
 data + DB helpers. This file pins the contract for
@@ -82,6 +82,23 @@ class _FakePage:
     def get_by_placeholder(self, pat):
         src = getattr(pat, "pattern", pat)
         return self.locator(f"placeholder={src}")
+
+    # PR-A follow-up: ``_locator()`` now routes the recorder's literal
+    # forms (``data-testid=…``, ``label=…``, ``alt=…``, ``title=…``) to
+    # the matching ``get_by_*`` accessor instead of falling through to
+    # ``page.locator``. The fake mirrors that back into ``self.locator``
+    # so test mappings can stay keyed by the canonical selector string.
+    def get_by_test_id(self, tid):
+        return self.locator(f"data-testid={tid}")
+
+    def get_by_label(self, text):
+        return self.locator(f"label={text}")
+
+    def get_by_alt_text(self, text):
+        return self.locator(f"alt={text}")
+
+    def get_by_title(self, text):
+        return self.locator(f"title={text}")
 
 
 def _make_runner(tmp_path, project_id: str = ""):
@@ -246,6 +263,36 @@ class TestRegistryInteraction:
         assert row["fail_count"] == 1
         assert row["success_count"] == 0
 
+    def test_non_timeout_exception_surfaces_immediately(self, tmp_path):
+        """A hard failure during wait_for (page crash / websocket
+        disconnect / browser closed) must NOT be silently treated as
+        locator drift — it has to surface so _run_step can mark the
+        step blocked instead of walking the whole chain looking for an
+        element that the browser can no longer answer about."""
+        class _BoomPage:
+            def __init__(self):
+                self.locator_calls: list[str] = []
+
+            def locator(self, sel):
+                self.locator_calls.append(sel)
+                class _Boom:
+                    @property
+                    def first(self): return self
+                    def wait_for(self, **_kw):
+                        raise RuntimeError("page crashed: websocket closed")
+                return _Boom()
+
+        page = _BoomPage()
+        step = AutomationStep(
+            action="click", target=".one",
+            target_alternates=[".two", ".three"], raw="click",
+        )
+        runner = _make_runner(tmp_path)
+        with pytest.raises(RuntimeError, match="websocket closed"):
+            runner._try_locator_chain(page, step)
+        # First candidate raised; chain MUST stop right there.
+        assert page.locator_calls == [".one"]
+
     def test_registry_promotes_winner_to_front(self, tmp_path, project):
         """After a prior success records ``last_success_strategy``, the
         next run's chain walk must try that strategy FIRST."""
@@ -269,3 +316,103 @@ class TestRegistryInteraction:
         runner._try_locator_chain(page, step)
         # First call must be the promoted text= selector, not testid=.
         assert page.locator_calls[0] == "text=Promote"
+
+
+class _DecoderPage:
+    """Records which Playwright accessor + arguments the runner picked
+    so the parametrised decoder test below can assert the routing.
+
+    Each method captures its arguments and returns an always-visible
+    fake locator — we only care about how ``_locator(page, target)``
+    dispatches, not about wait_for semantics.
+    """
+    def __init__(self):
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def _record(self, _method, *a, **kw):
+        # ``_method`` is intentionally underscore-prefixed so it can't
+        # collide with a Playwright kwarg the runner forwards (notably
+        # ``get_by_role(role, name=...)``, where the literal-named
+        # method ``_record("get_by_role", *a, name=...)`` would crash
+        # if the first positional slot were called ``name``).
+        self.calls.append((_method, a, kw))
+        return _FakeLocator(_method, True)
+
+    def locator(self, *a, **kw):            return self._record("locator", *a, **kw)
+    def get_by_role(self, *a, **kw):        return self._record("get_by_role", *a, **kw)
+    def get_by_label(self, *a, **kw):       return self._record("get_by_label", *a, **kw)
+    def get_by_placeholder(self, *a, **kw): return self._record("get_by_placeholder", *a, **kw)
+    def get_by_text(self, *a, **kw):        return self._record("get_by_text", *a, **kw)
+    def get_by_test_id(self, *a, **kw):     return self._record("get_by_test_id", *a, **kw)
+    def get_by_alt_text(self, *a, **kw):    return self._record("get_by_alt_text", *a, **kw)
+    def get_by_title(self, *a, **kw):       return self._record("get_by_title", *a, **kw)
+
+
+class TestLocatorDecoder:
+    """Pin the contract that every selector format the recorder emits
+    routes to the matching Playwright accessor. Before PR-A's
+    follow-up fix, ``label=`` / ``placeholder=<lit>`` / ``alt=`` /
+    ``title=`` / ``data-testid=`` / ``role=X[name="Y"]`` all silently
+    fell through to ``page.locator(target)`` which Playwright treats
+    as CSS, so every recorder-emitted alternate in those formats was
+    dead at runtime."""
+
+    @pytest.mark.parametrize("target, expected_method, expected_arg", [
+        ("data-testid=submit",        "get_by_test_id",     "submit"),
+        ("label=Email",               "get_by_label",       "Email"),
+        ("placeholder=Search",        "get_by_placeholder", "Search"),
+        ("alt=Logo",                  "get_by_alt_text",    "Logo"),
+        ("title=Help",                "get_by_title",       "Help"),
+        ("text=Welcome",              "get_by_text",        "Welcome"),
+    ])
+    def test_literal_prefix_routes_to_get_by_x(self, target, expected_method,
+                                                expected_arg):
+        from engine.automation_runner import _locator
+        page = _DecoderPage()
+        _locator(page, target)
+        assert len(page.calls) == 1
+        method, args, _kw = page.calls[0]
+        assert method == expected_method
+        assert args[0] == expected_arg
+
+    def test_role_with_literal_name_routes_to_get_by_role(self):
+        from engine.automation_runner import _locator
+        page = _DecoderPage()
+        _locator(page, 'role=button[name="Sign in"]')
+        method, args, kwargs = page.calls[0]
+        assert method == "get_by_role"
+        assert args[0] == "button"
+        assert kwargs.get("name") == "Sign in"
+
+    def test_role_with_regex_name_still_works(self):
+        """Heuristic-parser legacy form must not regress."""
+        from engine.automation_runner import _locator
+        page = _DecoderPage()
+        _locator(page, "role=button[name=/save/i]")
+        method, args, kwargs = page.calls[0]
+        assert method == "get_by_role"
+        assert args[0] == "button"
+        # name was passed as compiled regex.
+        import re
+        assert isinstance(kwargs.get("name"), re.Pattern)
+        assert kwargs["name"].pattern == "save"
+
+    def test_role_only_routes_without_name_kwarg(self):
+        from engine.automation_runner import _locator
+        page = _DecoderPage()
+        _locator(page, "role=link")
+        method, args, kwargs = page.calls[0]
+        assert method == "get_by_role"
+        assert args[0] == "link"
+        assert "name" not in kwargs or kwargs["name"] is None
+
+    def test_unknown_prefix_falls_through_to_locator(self):
+        """CSS / XPath / anything we don't recognise must still pass
+        straight through to ``page.locator`` so existing behaviour is
+        preserved for hand-written selectors."""
+        from engine.automation_runner import _locator
+        page = _DecoderPage()
+        _locator(page, ".btn-primary")
+        method, args, _kw = page.calls[0]
+        assert method == "locator"
+        assert args[0] == ".btn-primary"
