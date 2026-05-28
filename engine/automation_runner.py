@@ -4,6 +4,7 @@ TestFortge — Automation Runner
 Executes AutomationScript objects in Playwright with step-by-step screenshots.
 """
 from __future__ import annotations
+import fnmatch
 import os
 import re
 import shutil
@@ -194,6 +195,22 @@ class RunReport:
 # + 3 alternates, which covers every recorder-emitted shape in PR-A
 # (joined chain + leaf-only + role-only + text=name).
 MAX_CHAIN_TARGETS = 4
+
+
+def _step_label(step: AutomationStep) -> str:
+    """Human-readable step label for failure annotations + logs.
+
+    For PR-C assertion steps we surface ``"assert visible"`` /
+    ``"assert text"`` / ``"assert url"`` instead of the generic
+    ``step.action`` so the annotated failure screenshot — and the
+    bug-report attachment that uses it — names what actually went
+    wrong. Action steps keep their existing label (``click``, ``goto``)
+    so PR-A/PR-B golden outputs stay byte-identical.
+    """
+    if step.kind == "assertion":
+        atype = (step.assertion_type or "").strip().lower() or "?"
+        return f"assert {atype}"
+    return step.action
 
 
 def _is_locator_drift(exc: BaseException) -> bool:
@@ -846,7 +863,78 @@ class AutomationRunner:
                 self._screenshot(page, before_path)
                 sr.screenshot_before = _rel_url(before_path, self.storage_root)
 
-            if step.action == "goto":
+            if step.kind == "assertion":
+                # PR-C — Assertion Mode dispatch. Separate from action
+                # steps so a failed expectation surfaces as ``failed``
+                # with the exact assertion type in the comment, not a
+                # mis-routed click() retry. All three variants raise
+                # AssertionError on miss so the outer except handler
+                # records the screenshot + comment exactly as it does
+                # for action failures.
+                atype = (step.assertion_type or "").strip().lower()
+                if atype == "visible":
+                    # ``_try_locator_chain`` already walks PR-A
+                    # alternates and consults the registry — exact
+                    # same semantics as the click/fill branches use
+                    # for finding the element. The extra wait_for is
+                    # the 5 s budget the plan specified for assertion
+                    # visibility checks (vs the click's 2 s/cand cap).
+                    loc = self._try_locator_chain(page, step)
+                    self._scroll_and_highlight(page, loc)
+                    target_bbox = self._safe_bbox(loc)
+                    try:
+                        loc.wait_for(state="visible", timeout=5000)
+                    except Exception as exc:
+                        raise AssertionError(
+                            f"Assert visible failed for "
+                            f"{step.target!r}: "
+                            f"{str(exc).splitlines()[0][:200]}"
+                        )
+                elif atype == "text":
+                    expected = (step.value or "").strip()
+                    if not expected:
+                        raise AssertionError(
+                            "Assert text has empty expected value")
+                    try:
+                        page.get_by_text(expected, exact=False).first.wait_for(
+                            state="visible", timeout=5000)
+                    except Exception:
+                        # Fall back to substring scan of the rendered
+                        # content — covers cases where the text lives
+                        # inside an attribute (placeholder, aria-label)
+                        # that get_by_text doesn't pick up.
+                        content = ""
+                        try:
+                            content = page.content() or ""
+                        except Exception:
+                            pass
+                        if expected.lower() not in content.lower():
+                            raise AssertionError(
+                                f"Assert text not found: {expected!r}")
+                elif atype == "url":
+                    pattern = (step.target or step.value or "").strip()
+                    if not pattern:
+                        raise AssertionError(
+                            "Assert URL has empty pattern")
+                    # Brief settle window so an in-flight nav lands
+                    # before we read page.url — matches expect_url's
+                    # treatment of the same race.
+                    page.wait_for_timeout(400)
+                    actual = page.url or ""
+                    if "*" in pattern or "?" in pattern or "[" in pattern:
+                        if not fnmatch.fnmatchcase(actual, pattern):
+                            raise AssertionError(
+                                f"Assert URL pattern {pattern!r} "
+                                f"did not match {actual!r}")
+                    else:
+                        if pattern.lower() not in actual.lower():
+                            raise AssertionError(
+                                f"Assert URL {pattern!r} "
+                                f"not found in {actual!r}")
+                else:
+                    raise AssertionError(
+                        f"Unknown assertion_type {step.assertion_type!r}")
+            elif step.action == "goto":
                 # Make sure the window is in front before each navigation so
                 # the user actually sees the page load in headed mode.
                 if not self.headless:
@@ -1054,7 +1142,7 @@ class AutomationRunner:
                 shutil.copyfile(after_path, failure_path)
                 self._annotate_failure(
                     failure_path, target_bbox, sr.comment,
-                    header=f"Step {idx} ({step.action})")
+                    header=f"Step {idx} ({_step_label(step)})")
                 sr.screenshot_failure = _rel_url(failure_path, self.storage_root)
             except Exception as ann_exc:
                 _logger.debug("annotate_failure copy: %s", ann_exc)
@@ -1074,7 +1162,7 @@ class AutomationRunner:
                     shutil.copyfile(after_path, failure_path)
                     self._annotate_failure(
                         failure_path, target_bbox, sr.comment,
-                        header=f"Step {idx} ({step.action})")
+                        header=f"Step {idx} ({_step_label(step)})")
                     sr.screenshot_failure = _rel_url(failure_path, self.storage_root)
                 except Exception as ann_exc:
                     _logger.debug("annotate_failure copy: %s", ann_exc)

@@ -50,6 +50,12 @@ MAX_CONCURRENT_GEN_JOBS = 2
 _log = get_logger(__name__)
 
 
+def _recorder_enabled() -> bool:
+    """Match the same env-var gate the recorder CLI + MCP tool use."""
+    return os.environ.get("RECORDER_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 # Stage 2 — site-aware path. Used when the input contains a URL: we
 # run crawl → recon → strategy → generate_from_strategy and persist
 # both Test Cases and Checklist for the active project. The caller
@@ -810,6 +816,106 @@ def register(app: Flask) -> None:
             "success",
         )
         return redirect(url_for("test_cases_page") + f"#{tc_id}")
+
+    @app.route("/test-cases/<tc_id>/automation-step-kind", methods=["POST"])
+    def test_cases_update_step_kind(tc_id: str):
+        """PR-C — patch one or many recorded steps' ``kind`` /
+        ``assertion_type`` fields.
+
+        The TC editor dropdown fires this when the operator flips a
+        recorded step from "Action" to "Assert visible/text/url". We
+        accept either a single-step patch
+        (``{"index": N, "kind": "...", "assertion_type": "..."}``) or
+        a list under ``steps`` for bulk edits. Out-of-range indices and
+        invalid kind/assertion_type values are rejected with 400 so a
+        client-side bug can't silently corrupt the recording.
+
+        Gated on the same ``RECORDER_ENABLED`` flag as the recorder
+        surfaces — when the host hasn't opted into the pilot the route
+        returns 403 instead of writing.
+        """
+        if not _recorder_enabled():
+            return jsonify({"error": "recorder_disabled"}), 403
+
+        tc_data = session.get("test_cases_data", []) or []
+        target = None
+        for tc in tc_data:
+            if tc.get("id") == tc_id:
+                target = tc
+                break
+        if target is None:
+            return jsonify({"error": "tc_not_found", "tc_id": tc_id}), 404
+
+        payload = request.get_json(silent=True) or {}
+        patches = payload.get("steps")
+        if not isinstance(patches, list):
+            # Single-patch convenience shape.
+            patches = [{
+                "index":           payload.get("index"),
+                "kind":            payload.get("kind"),
+                "assertion_type":  payload.get("assertion_type"),
+            }]
+
+        import json as _json
+        raw_json = target.get("automation_steps_json") or ""
+        if not raw_json:
+            return jsonify({"error": "no_recording",
+                            "tc_id": tc_id}), 400
+        try:
+            steps = _json.loads(raw_json)
+        except (ValueError, TypeError):
+            return jsonify({"error": "corrupt_recording",
+                            "tc_id": tc_id}), 400
+        if not isinstance(steps, list):
+            return jsonify({"error": "corrupt_recording",
+                            "tc_id": tc_id}), 400
+
+        changed = 0
+        for patch in patches:
+            try:
+                idx = int(patch.get("index"))
+            except (TypeError, ValueError):
+                continue
+            if idx < 0 or idx >= len(steps):
+                return jsonify({"error": "index_out_of_range",
+                                "index": idx,
+                                "tc_id": tc_id}), 400
+            kind = str(patch.get("kind") or "action").strip().lower()
+            atype = str(patch.get("assertion_type") or "").strip().lower()
+            if kind not in ("action", "assertion"):
+                return jsonify({"error": "invalid_kind",
+                                "kind": kind,
+                                "tc_id": tc_id}), 400
+            if kind == "assertion":
+                if atype not in ("visible", "text", "url"):
+                    return jsonify({"error": "invalid_assertion_type",
+                                    "assertion_type": atype,
+                                    "tc_id": tc_id}), 400
+            else:
+                atype = ""
+            step = steps[idx]
+            if not isinstance(step, dict):
+                continue
+            step["kind"] = kind
+            step["assertion_type"] = atype
+            changed += 1
+
+        # Resave both into session (for the live view) and DB (for the
+        # runner's next pass). Wipe-and-replace through the helper so
+        # the column stays consistent with the session snapshot.
+        target["automation_steps_json"] = _json.dumps(steps, ensure_ascii=False)
+        session["test_cases_data"] = tc_data
+
+        pid = session.get("active_project_id") or ""
+        if pid:
+            try:
+                _db.update_tc_automation_steps(pid, tc_id, steps)
+            except Exception as exc:
+                _log.warning("automation-step-kind persist failed for "
+                              "%s/%s: %s", pid, tc_id, exc)
+
+        return jsonify({"ok": True, "tc_id": tc_id,
+                        "changed": changed, "total_steps": len(steps)})
 
     # ── Async generation pipeline ────────────────────────────────
     # The sync /test-cases and /checklist POST handlers can block for

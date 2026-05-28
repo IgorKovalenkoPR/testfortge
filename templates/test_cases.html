@@ -513,6 +513,69 @@
                         style="font-size:0.85em;padding:6px 14px;">
                     📋 {{ t.get('tc_recorder_copy', 'Copy command') }}
                 </button>
+
+                {# PR-C — per-step kind dropdown so the operator can
+                   flip a recorded step from "Action" to one of the
+                   assertion variants without re-recording. Each row
+                   POSTs the change to /test-cases/<id>/automation-step-kind
+                   on change; failure surfaces inline. The block is
+                   hydrated server-side from the saved JSON so a hard
+                   refresh keeps showing the last persisted shape. #}
+                {% if tc.automation_steps_json %}
+                <div style="margin-top:12px;border-top:1px dashed #cbd5e1;padding-top:10px;"
+                     data-step-editor="{{ tc.id }}">
+                    <p class="hint" style="font-size:0.82em;color:#475569;margin:0 0 6px 0;">
+                        {{ t.get('tc_recorder_step_kind_hint',
+                            'Flip a step to an assertion (visible / text / URL) to make the runner check expectations instead of issuing a click.') }}
+                    </p>
+                    <table style="width:100%;font-size:0.82em;border-collapse:collapse;">
+                        <thead style="color:#64748b;text-align:left;">
+                            <tr>
+                                <th style="padding:2px 4px;width:32px;">#</th>
+                                <th style="padding:2px 4px;">{{ t.get('tc_recorder_step_action', 'Recorded step') }}</th>
+                                <th style="padding:2px 4px;width:200px;">{{ t.get('tc_recorder_step_kind', 'Kind') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {# Steps are parsed and frozen at render time so the
+                               dropdown reflects what the runner will replay
+                               (defensive default kind="action" matches
+                               _decode_recorded_steps for pre-PR-C rows). #}
+                            {% set _raw_steps = tc.automation_steps_json|fromjson %}
+                            {% for s in _raw_steps %}
+                            {% set _kind = s.get('kind') or 'action' %}
+                            {% set _atype = s.get('assertion_type') or '' %}
+                            {% set _combo = (_kind ~ '/' ~ _atype) if _kind == 'assertion' else 'action' %}
+                            <tr>
+                                <td style="padding:2px 4px;color:#94a3b8;font-family:monospace;">{{ loop.index }}</td>
+                                <td style="padding:2px 4px;font-family:monospace;color:#334155;">
+                                    {% if _kind == 'assertion' %}◇{% else %}▸{% endif %}
+                                    {{ s.get('action', '') }}
+                                    {% if s.get('target') %} <span style="color:#94a3b8;">{{ s.get('target')|truncate(60) }}</span>{% endif %}
+                                </td>
+                                <td style="padding:2px 4px;">
+                                    <select data-step-kind-select
+                                            data-tc="{{ tc.id }}"
+                                            data-index="{{ loop.index0 }}"
+                                            style="font-size:0.82em;padding:2px 4px;width:100%;">
+                                        <option value="action"
+                                                {% if _combo == 'action' %}selected{% endif %}>Action</option>
+                                        <option value="assertion/visible"
+                                                {% if _combo == 'assertion/visible' %}selected{% endif %}>Assert visible</option>
+                                        <option value="assertion/text"
+                                                {% if _combo == 'assertion/text' %}selected{% endif %}>Assert text</option>
+                                        <option value="assertion/url"
+                                                {% if _combo == 'assertion/url' %}selected{% endif %}>Assert URL</option>
+                                    </select>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    <p data-step-editor-status="{{ tc.id }}"
+                       style="font-size:0.78em;color:#94a3b8;margin:4px 0 0 0;min-height:1.2em;"></p>
+                </div>
+                {% endif %}
             </div>
         </details>
         {% endif %}
@@ -633,6 +696,62 @@ function filterTC(category, btn) {
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
+            }
+        });
+    });
+})();
+
+// PR-C — per-step kind dropdown POSTs the change to
+// /test-cases/<tc>/automation-step-kind so the runner can branch on
+// kind=="assertion" the next time it replays this TC. No fancy state
+// machine; each <select> is independent so a 4xx on one row doesn't
+// block the others.
+(function stepKindInit() {
+    const selects = document.querySelectorAll('[data-step-kind-select]');
+    selects.forEach(sel => {
+        sel.addEventListener('change', async () => {
+            const tcId = sel.dataset.tc;
+            const idx = parseInt(sel.dataset.index, 10);
+            const combo = sel.value || 'action';
+            // "action" → kind=action, assertion_type=""
+            // "assertion/visible" / "assertion/text" / "assertion/url"
+            let kind = 'action';
+            let atype = '';
+            if (combo.startsWith('assertion/')) {
+                kind = 'assertion';
+                atype = combo.split('/')[1];
+            }
+            const status = document.querySelector(
+                `[data-step-editor-status="${tcId}"]`);
+            const setStatus = (txt, color) => {
+                if (status) {
+                    status.textContent = txt;
+                    status.style.color = color || '#94a3b8';
+                }
+            };
+            setStatus('saving…');
+            try {
+                const resp = await fetch(
+                    `/test-cases/${encodeURIComponent(tcId)}/automation-step-kind`,
+                    {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            index: idx,
+                            kind: kind,
+                            assertion_type: atype,
+                        }),
+                    });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    setStatus(
+                        `error: ${err.error || resp.status}`, '#dc2626');
+                    return;
+                }
+                setStatus('✓ saved', '#16a34a');
+                setTimeout(() => setStatus(''), 1800);
+            } catch (e) {
+                setStatus(`network error: ${e}`, '#dc2626');
             }
         });
     });

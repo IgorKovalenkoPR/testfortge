@@ -47,6 +47,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 from engine import db  # noqa: E402
 from engine import recorder  # noqa: E402
+from engine.locator_registry import (LocatorCandidate,  # noqa: E402
+                                      register_candidates,
+                                      strategy_of)
 from engine.recorder_parser import parse_codegen_output  # noqa: E402
 
 
@@ -148,6 +151,30 @@ def main(argv: list[str] | None = None) -> int:
               f"attach — race or concurrent delete?", file=sys.stderr)
         return 7
 
+    # PR-C — feed each step's locator chain into the Page Object DB so
+    # the runner can promote the last-success strategy across runs.
+    # Steps without a label (text-authored fallbacks) are silently
+    # skipped by ``register_candidates`` so noise stays out of the table.
+    registered = 0
+    for s in steps:
+        label = (s.locator_label or "").strip()
+        primary = (s.target or "").strip()
+        if not (label and primary):
+            continue
+        all_targets = [primary]
+        for a in s.target_alternates or []:
+            a_s = (a or "").strip()
+            if a_s and a_s not in all_targets:
+                all_targets.append(a_s)
+        cands = [LocatorCandidate(strategy=strategy_of(t), value=t)
+                  for t in all_targets]
+        try:
+            if register_candidates(args.project, label, cands):
+                registered += 1
+        except Exception:
+            # Registry hiccup shouldn't fail the recording.
+            continue
+
     if delete_after:
         try:
             capture_path.unlink()
@@ -156,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"ok: attached {len(steps)} recorded step(s) to "
           f"{args.tc_id} (project {args.project}).")
+    if registered:
+        print(f"     registered {registered} locator label(s) "
+              f"into the Page Object DB.")
     if not delete_after:
         print(f"     capture kept at: {capture_path}")
     return 0

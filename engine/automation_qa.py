@@ -33,6 +33,18 @@ class AutomationStep:
     # (e.g. ``"role=button:Sign in"``) that is stable across recordings
     # of the same control.
     locator_label: str = ""
+    # PR-C — Assertion Mode. ``kind`` segregates pure-effect steps
+    # ("action": click / fill / select / goto / wait / ...) from
+    # expectation steps ("assertion": visible / text / url). Every
+    # existing step defaults to "action", so old TCs and PR-B/PR-A
+    # recordings deserialise unchanged. ``assertion_type`` is only
+    # consulted when ``kind == "assertion"`` and picks the runner branch:
+    # ``"visible"`` (re-uses ``_try_locator_chain`` + wait_for visible),
+    # ``"text"`` (page.get_by_text exists), ``"url"`` (page.url matches
+    # the recorded glob in ``target``). Empty string for non-assertion
+    # steps keeps the JSON payload tidy.
+    kind: str = "action"
+    assertion_type: str = ""
 
 
 @dataclass
@@ -218,6 +230,21 @@ def _decode_recorded_steps(payload: str) -> list[AutomationStep]:
             alts = [str(a) for a in alts_raw if isinstance(a, (str, int, float)) and str(a)]
         else:
             alts = []
+        # PR-C — defensive defaults so pre-PR-C recordings (which omit
+        # ``kind``) still parse as plain action steps. Unknown values
+        # for ``kind`` / ``assertion_type`` are normalised back to
+        # safe defaults rather than raising — a malformed payload
+        # would otherwise break the runner instead of degrading to an
+        # action step.
+        kind = str(item.get("kind", "") or "action").strip().lower()
+        if kind not in ("action", "assertion"):
+            kind = "action"
+        assertion_type = str(item.get("assertion_type", "") or "").strip().lower()
+        if kind == "assertion":
+            if assertion_type not in ("visible", "text", "url"):
+                assertion_type = "visible"
+        else:
+            assertion_type = ""
         out.append(AutomationStep(
             action=action,
             target=str(item.get("target", "") or ""),
@@ -226,6 +253,8 @@ def _decode_recorded_steps(payload: str) -> list[AutomationStep]:
             comment=str(item.get("comment", "") or ""),
             target_alternates=alts,
             locator_label=str(item.get("locator_label", "") or ""),
+            kind=kind,
+            assertion_type=assertion_type,
         ))
     return out
 

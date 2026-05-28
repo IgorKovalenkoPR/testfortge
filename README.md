@@ -167,9 +167,32 @@ RECORDER_ENABLED=1 python -m tools.tfg_record \
   `DATABASE_URL`). For cross-machine flows the MCP server exposes
   `record_steps_attach` — a future CLI release will wrap it behind an
   `--mcp-url` flag.
-- The pilot uses **one** locator per recorded step. PR-A (multi-locator
-  fallback) builds on this foundation; until it lands, a flaky locator
-  has to be re-recorded.
+- PR-A populates each step's `target_alternates` so the runner walks a
+  ranked candidate list when the primary locator drifts. The Page
+  Object DB (`Locator` table) is populated from the same recording so
+  the next run promotes the last-success strategy automatically. No
+  re-record needed for drift recovery.
 - `RECORDER_TIMEOUT_S` (default 1800 s) caps a single recording
   session — bump for slow accessibility regressions, but the floor of
   60 s prevents a typo from disabling the safety net entirely.
+
+### Capturing assertions (PR-C — Assertion Mode)
+
+Playwright codegen's toolbar has three **Assert** buttons (visibility,
+text, URL). When you click them mid-recording, codegen emits
+`expect(...)` lines that `engine.recorder_parser` recognises and
+materialises as `AutomationStep` rows with `kind="assertion"`. The
+runner then branches on `step.kind`:
+
+| Assertion         | Codegen output                                       | Runner behaviour                                                          |
+| ----------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| Assert visible    | `expect(loc).to_be_visible()`                        | Walks PR-A locator chain, then `wait_for(state="visible", timeout=5s)`.   |
+| Assert text       | `expect(loc).to_contain_text("X")` / `to_have_text`  | `page.get_by_text(X)` + content-scan fallback for attribute-hosted text.  |
+| Assert URL        | `expect(page).to_have_url("https://app/...*")`       | `fnmatch` glob (or substring when no glob chars) on `page.url`.           |
+
+The `/test-cases` editor surfaces a per-step **Action / Assert visible
+/ Assert text / Assert URL** dropdown next to every recorded step, so
+you can flip a captured click into an assertion without re-recording.
+Edits POST to `/test-cases/<id>/automation-step-kind` and persist to
+`automation_steps_json` immediately. Pre-PR-C recordings deserialise as
+plain action steps — backward-compatible.
