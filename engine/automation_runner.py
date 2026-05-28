@@ -228,7 +228,16 @@ class AutomationRunner:
                  # working unchanged.
                  engine_kind: str | None = None,
                  user_agent: str | None = None,
-                 viewport_override: tuple[int, int] | None = None):
+                 viewport_override: tuple[int, int] | None = None,
+                 # PR-A multi-locator fallback. When provided, the
+                 # runner consults ``engine.locator_registry`` to promote
+                 # the previously-winning strategy for each labelled step
+                 # and writes back success/failure counts. Empty string
+                 # disables registry interaction entirely — the chain
+                 # walk still tries every alternate but learns nothing
+                 # across runs. Defaulting to "" keeps every existing
+                 # call-site working unchanged.
+                 project_id: str | None = None):
         self.storage_root = storage_root
         self.base_url = base_url
         self.headless = headless
@@ -308,6 +317,9 @@ class AutomationRunner:
         # browser context; the login sequence only needs to run once per
         # context, not once per test case.
         self._logged_in_once = False
+        # PR-A: project context for the locator registry. Empty when
+        # the caller (legacy code path / unit tests) doesn't care.
+        self.project_id = (project_id or "").strip()
 
 
 
@@ -829,7 +841,7 @@ class AutomationRunner:
                 # sees page activity. Also drives the live filmstrip.
                 self._visible_scroll(page)
             elif step.action == "click":
-                loc = _locator(page, step.target).first
+                loc = self._try_locator_chain(page, step)
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
                 # Pump a frame BEFORE the cursor moves so the live tab
@@ -839,7 +851,7 @@ class AutomationRunner:
                 self._move_cursor_to(page, target_bbox)
                 loc.click()
             elif step.action == "fill":
-                loc = _locator(page, step.target).first
+                loc = self._try_locator_chain(page, step)
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
                 self._live_pump(page, tc_dir, idx, "pre_fill")
@@ -855,14 +867,14 @@ class AutomationRunner:
                 else:
                     loc.type(step.value, delay=40)
             elif step.action == "select":
-                loc = _locator(page, step.target).first
+                loc = self._try_locator_chain(page, step)
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
                 self._live_pump(page, tc_dir, idx, "pre_select")
                 self._move_cursor_to(page, target_bbox)
                 loc.select_option(step.value)
             elif step.action == "check":
-                loc = _locator(page, step.target).first
+                loc = self._try_locator_chain(page, step)
                 self._scroll_and_highlight(page, loc)
                 target_bbox = self._safe_bbox(loc)
                 self._live_pump(page, tc_dir, idx, "pre_check")
@@ -1104,6 +1116,83 @@ class AutomationRunner:
             page.wait_for_timeout(250)
         except Exception as exc:
             _logger.debug("cursor move: %s", exc)
+
+    def _try_locator_chain(self, page, step: AutomationStep):
+        """PR-A multi-locator fallback.
+
+        Walks ``[step.target, *step.target_alternates]`` and returns the
+        first Locator that resolves to a visible element. Pre-PR-A
+        steps (text-authored TCs without alternates) bypass the chain
+        and hand back the legacy single-target locator, preserving
+        byte-identical timing for every TC that the recorder hasn't
+        touched.
+
+        When ``self.project_id`` AND ``step.locator_label`` are both
+        non-empty, the registry promotes the previously-winning strategy
+        to the front of the chain and learns from this run via
+        ``record_success`` / ``record_failure``. No-op otherwise — keeps
+        the registry empty for noise-prone text-parse steps.
+        """
+        primary = (step.target or "").strip()
+        if not primary:
+            raise AssertionError(f"empty target for step: {step.raw or step.action}")
+
+        targets = [primary]
+        for alt in step.target_alternates or []:
+            alt_s = (alt or "").strip()
+            if alt_s and alt_s not in targets:
+                targets.append(alt_s)
+
+        pid = self.project_id
+        label = (getattr(step, "locator_label", "") or "").strip()
+
+        # Registry consultation — only meaningful when both ends are wired.
+        if pid and label:
+            try:
+                from engine.locator_registry import best_alternates
+                promoted = best_alternates(pid, label, defaults=targets)
+                if promoted:
+                    targets = promoted
+            except Exception as exc:
+                _logger.debug("locator_registry best_alternates: %s", exc)
+
+        # Single-target fast path: no alternates → return the locator
+        # without an explicit wait_for so the downstream click()/fill()
+        # action's auto-wait drives timing exactly as it did pre-PR-A.
+        if len(targets) == 1:
+            return _locator(page, targets[0]).first
+
+        # Per-candidate visibility budget. Kept well below
+        # ``default_timeout_ms`` so a 4-candidate chain on a missing
+        # element still bails inside the per-step budget instead of
+        # multiplying the wait by 4.
+        per_cand_ms = max(500, min(1500, self.default_timeout_ms // 2))
+        tried: list[str] = []
+        for target in targets:
+            try:
+                loc = _locator(page, target).first
+                loc.wait_for(state="visible", timeout=per_cand_ms)
+            except Exception:
+                tried.append(target)
+                continue
+            if pid and label:
+                try:
+                    from engine.locator_registry import record_success
+                    record_success(pid, label, target)
+                except Exception as exc:
+                    _logger.debug("locator_registry record_success: %s", exc)
+            return loc
+
+        if pid and label:
+            try:
+                from engine.locator_registry import record_failure
+                record_failure(pid, label)
+            except Exception as exc:
+                _logger.debug("locator_registry record_failure: %s", exc)
+        raise AssertionError(
+            f"All locators failed for step: {step.raw or step.action}\n"
+            f"Tried: {tried}"
+        )
 
     @staticmethod
     def _safe_bbox(loc):

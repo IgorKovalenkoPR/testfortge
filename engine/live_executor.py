@@ -553,6 +553,7 @@ class LiveExecutor:
                 credentials=self.credentials,
                 user_agent=self.user_agent,
                 engine_kind=self.engine_kind,
+                project_id=self.project_id,
             )
             self._silence_inner_runner_live(self._inner_runner)
 

@@ -97,6 +97,7 @@ def register(app: Flask) -> None:
             headless=headless,
             record_video=record_video,
             credentials=credentials if credentials.is_active() else None,
+            project_id=session.get("project_id") or "",
         )
         try:
             report = runner.run(scripts)
@@ -162,6 +163,7 @@ def register(app: Flask) -> None:
             headless=headless,
             record_video=record_video,
             credentials=credentials if credentials.is_active() else None,
+            project_id=session.get("project_id") or "",
         )
 
         def _worker(scripts_arg=scripts, runner_arg=runner):

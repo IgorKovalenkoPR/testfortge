@@ -18,9 +18,11 @@ Pure function, no Playwright runtime required — safe to import in tests.
 from __future__ import annotations
 
 import ast
-from typing import List
+from typing import List, Tuple
 
 from engine.automation_qa import AutomationStep
+from engine.locator_registry import (LocatorCandidate, candidates_to_targets,
+                                      rank_candidates)
 
 
 # Codegen action methods on a locator → internal action label.
@@ -103,6 +105,20 @@ def _process_expr(expr: ast.Expr, steps: List[AutomationStep]) -> None:
         target = _render_locator(call.func.value)
         if not target:
             return
+        candidates = _candidates_from_chain(call.func.value)
+        primary, alternates = candidates_to_targets(candidates)
+        # ``_render_locator`` is the source of truth for ``target`` —
+        # it always produces a non-empty selector when the chain
+        # bottoms out at ``page``. If candidate derivation produced a
+        # different primary (rare: e.g. testid sorting wins over a
+        # text leaf), trust the dedicated renderer to keep
+        # PR-B's test golden contracts stable and use candidates
+        # purely as additional alternates.
+        if primary and primary != target:
+            alternates = [primary] + [a for a in alternates if a != target]
+        # Drop the primary if it slipped into alternates via dedup.
+        alternates = [a for a in alternates if a and a != target]
+        label = _label_from_chain(call.func.value)
         value = _first_string_arg(call)
         if method == "uncheck":
             value = "false"
@@ -111,6 +127,8 @@ def _process_expr(expr: ast.Expr, steps: List[AutomationStep]) -> None:
             target=target,
             value=value,
             raw=ast.unparse(call),
+            target_alternates=alternates,
+            locator_label=label,
         ))
 
 
@@ -190,3 +208,162 @@ def _locator_part(method: str, call: ast.Call) -> str:
     if method == "get_by_title":
         return f"title={arg0}"
     return arg0
+
+
+# ── PR-A: candidate enumeration (multi-locator fallback) ─────────
+
+def _collect_chain(value_node: ast.AST) -> List[Tuple[str, ast.Call]]:
+    """Walk a locator chain bottom→top, return [(method, call_node), ...]
+    in outer-first order — i.e. the leaf the action was called on lands
+    LAST. Mirrors :func:`_render_locator`'s traversal but keeps both the
+    method name and the AST node around so candidate enumeration can
+    pull arg / kwarg metadata. Returns ``[]`` when the chain doesn't
+    root at ``page``."""
+    parts: List[Tuple[str, ast.Call]] = []
+    cur = value_node
+    while isinstance(cur, ast.Call) and isinstance(cur.func, ast.Attribute):
+        method = cur.func.attr
+        if method in _LOCATOR_FACTORIES:
+            parts.append((method, cur))
+        cur = cur.func.value
+    if not (isinstance(cur, ast.Name) and cur.id == "page"):
+        return []
+    return list(reversed(parts))
+
+
+def _candidates_from_chain(value_node: ast.AST) -> List[LocatorCandidate]:
+    """Derive every selector strategy reachable from a single codegen
+    chain — without a Playwright runtime probe.
+
+    The recorded primary ``page.get_by_role("button", name="Sign in")``
+    yields:
+        * ``role=button[name="Sign in"]`` (score 70, full)
+        * ``role=button`` (score 70, role-only — relaxed)
+        * ``text=Sign in`` (score 40, derived from the role-name)
+
+    A chained ``page.locator("#bar").get_by_text("Hi")`` yields:
+        * ``#bar >> text=Hi`` (score 40, full chain)
+        * ``text=Hi`` (score 40, leaf-only)
+        * ``#bar`` (score 90 if it starts with ``#``, the ``id`` strategy)
+
+    Order doesn't need to be perfect here — the registry's
+    :func:`engine.locator_registry.rank_candidates` re-sorts by score
+    and dedups by value, so callers always see a clean ranked list.
+    """
+    parts = _collect_chain(value_node)
+    if not parts:
+        return []
+    cands: List[LocatorCandidate] = []
+
+    # Full chain (joined with " >> ") — what the runner uses today.
+    joined = " >> ".join(_locator_part(m, c) for m, c in parts).strip()
+    if joined:
+        leaf_method, _leaf_call = parts[-1]
+        leaf_strategy = _strategy_for_method(leaf_method, joined)
+        # Boost the joined chain so it ALWAYS wins over a relaxed
+        # variant of the same leaf — testers expect the recorded
+        # exact match to be tried first when the recording is fresh.
+        cands.append(LocatorCandidate(strategy=leaf_strategy,
+                                       value=joined, score=999))
+
+    # Leaf alone (when the chain has more than one segment) + role/text
+    # relaxations off the leaf.
+    leaf_method, leaf_call = parts[-1]
+    leaf_value = _locator_part(leaf_method, leaf_call)
+    if leaf_value and len(parts) > 1:
+        cands.append(LocatorCandidate(
+            strategy=_strategy_for_method(leaf_method, leaf_value),
+            value=leaf_value,
+        ))
+
+    # role+name → role-only AND text=name fallbacks.
+    if leaf_method == "get_by_role":
+        name_kw = _kw_string(leaf_call, "name")
+        role_arg = _first_string_arg(leaf_call)
+        if name_kw and role_arg:
+            cands.append(LocatorCandidate(
+                strategy="role", value=f"role={role_arg}"))
+            cands.append(LocatorCandidate(
+                strategy="text", value=f"text={name_kw}"))
+
+    # Each ancestor segment is also a usable selector on its own
+    # (e.g. ``#bar`` from ``#bar >> text=Hi``). They generally won't
+    # outrank the joined chain because their score is the strategy
+    # baseline, but they give the runner *something* to try when the
+    # leaf drifted and the chain no longer resolves.
+    for method, call in parts[:-1]:
+        seg = _locator_part(method, call)
+        if seg:
+            cands.append(LocatorCandidate(
+                strategy=_strategy_for_method(method, seg), value=seg))
+
+    return rank_candidates(cands)
+
+
+def _strategy_for_method(method: str, value: str) -> str:
+    """Map a codegen factory method back to a locator_registry strategy.
+
+    ``locator(...)`` is the catch-all bucket — the parser doesn't know
+    whether the literal selector inside is CSS, XPath, or a Playwright
+    pseudo (``role=...``), so we sniff the value's prefix. Everything
+    else maps straight from the factory name.
+    """
+    if method == "get_by_test_id":
+        return "testid"
+    if method == "get_by_role":
+        return "role"
+    if method == "get_by_label":
+        return "label"
+    if method == "get_by_placeholder":
+        return "placeholder"
+    if method == "get_by_text":
+        return "text"
+    if method == "get_by_alt_text":
+        return "alt"
+    if method == "get_by_title":
+        return "title"
+    # method == "locator" → sniff the raw selector.
+    v = value.lstrip()
+    if v.startswith("#") or v.startswith("id="):
+        return "id"
+    if v.startswith("//") or v.startswith("xpath="):
+        return "xpath"
+    return "css"
+
+
+def _label_from_chain(value_node: ast.AST) -> str:
+    """Stable identifier for the registry: same recorded element across
+    different runs → same label. We use the leaf segment only, because
+    the leaf is what actually identifies the control — the chain ancestor
+    is a scope hint, not the element's identity. A role+name leaf yields
+    ``"role=button:Sign in"``; a testid leaf yields ``"testid=submit"``.
+
+    Returns ``""`` when the chain is empty or doesn't root at ``page``;
+    callers (and the runner) treat an empty label as "skip registry
+    tracking entirely" — matches what text-authored TCs do too.
+    """
+    parts = _collect_chain(value_node)
+    if not parts:
+        return ""
+    leaf_method, leaf_call = parts[-1]
+    arg0 = _first_string_arg(leaf_call)
+    name_kw = _kw_string(leaf_call, "name")
+    if leaf_method == "get_by_role" and arg0:
+        if name_kw:
+            return f"role={arg0}:{name_kw}"
+        return f"role={arg0}"
+    if leaf_method == "get_by_test_id" and arg0:
+        return f"testid={arg0}"
+    if leaf_method == "get_by_label" and arg0:
+        return f"label={arg0}"
+    if leaf_method == "get_by_placeholder" and arg0:
+        return f"placeholder={arg0}"
+    if leaf_method == "get_by_text" and arg0:
+        return f"text={arg0}"
+    if leaf_method == "get_by_alt_text" and arg0:
+        return f"alt={arg0}"
+    if leaf_method == "get_by_title" and arg0:
+        return f"title={arg0}"
+    if leaf_method == "locator" and arg0:
+        return f"locator={arg0}"
+    return ""

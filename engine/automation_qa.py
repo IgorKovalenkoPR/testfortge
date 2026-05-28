@@ -17,6 +17,22 @@ class AutomationStep:
     value: str = ""      # text to fill / expected text
     raw: str = ""        # original manual step text
     comment: str = ""
+    # PR-A — multi-locator fallback. ``target`` holds the highest-ranked
+    # candidate (testid > id > role > label > text > placeholder > css >
+    # xpath); ``target_alternates`` carries the remaining candidates in
+    # descending score order. The runner walks the chain in
+    # ``try_locator_chain`` and the first one that resolves to a visible
+    # element wins. Empty for text-authored TCs — ``parse_manual_step``
+    # still emits single-target steps and the runner's chain walk degrades
+    # to a single attempt, byte-identical to PR-B behaviour.
+    target_alternates: list[str] = field(default_factory=list)
+    # Stable label used by ``engine.locator_registry`` to remember which
+    # strategy worked last time for this element across runs. Empty for
+    # text-authored TCs so the registry never records noise from the
+    # heuristic parser; the recorder populates it with a derived key
+    # (e.g. ``"role=button:Sign in"``) that is stable across recordings
+    # of the same control.
+    locator_label: str = ""
 
 
 @dataclass
@@ -197,12 +213,19 @@ def _decode_recorded_steps(payload: str) -> list[AutomationStep]:
         action = str(item.get("action", "") or "").strip()
         if not action:
             continue
+        alts_raw = item.get("target_alternates") or []
+        if isinstance(alts_raw, list):
+            alts = [str(a) for a in alts_raw if isinstance(a, (str, int, float)) and str(a)]
+        else:
+            alts = []
         out.append(AutomationStep(
             action=action,
             target=str(item.get("target", "") or ""),
             value=str(item.get("value", "") or ""),
             raw=str(item.get("raw", "") or ""),
             comment=str(item.get("comment", "") or ""),
+            target_alternates=alts,
+            locator_label=str(item.get("locator_label", "") or ""),
         ))
     return out
 
