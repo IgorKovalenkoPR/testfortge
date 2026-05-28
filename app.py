@@ -222,6 +222,25 @@ def inject_globals():
     return {"t": g.t, "lang": g.lang, "recorder_enabled": recorder_enabled}
 
 
+@app.template_filter('fromjson')
+def fromjson_filter(s):
+    """Decode a JSON string for template iteration.
+
+    Used by the PR-C recorder step editor in templates/test_cases.html
+    to walk a TC's ``automation_steps_json`` and render the per-step
+    Action/Assert dropdown. Returns ``[]`` on missing / malformed
+    payload so a corrupt recording never crashes the page.
+    """
+    if not s:
+        return []
+    try:
+        import json as _json
+        out = _json.loads(s)
+    except (ValueError, TypeError):
+        return []
+    return out if isinstance(out, list) else []
+
+
 @app.template_filter('nl2br')
 def nl2br_filter(s):
     if not s:

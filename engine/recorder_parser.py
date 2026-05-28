@@ -91,6 +91,21 @@ def _process_expr(expr: ast.Expr, steps: List[AutomationStep]) -> None:
         return
     method = call.func.attr
 
+    # PR-C — codegen 1.40+ assertion toolbar emits
+    #   ``await expect(page.get_by_role(...)).to_be_visible()``
+    #   ``await expect(page).to_have_url("https://...")``
+    #   ``await expect(page.get_by_text("X")).to_contain_text("X")``
+    # The hot-key the plan asked for IS codegen's native "Assert" UI;
+    # we ride on it instead of injecting our own overlay. Pattern: the
+    # outermost call is a method on ``expect(...)`` — the inner call
+    # carries the locator argument we need to render. Anything we don't
+    # recognise falls through to the action dispatch below.
+    if _is_expect_assertion(call):
+        a_step = _build_assertion_step(call)
+        if a_step is not None:
+            steps.append(a_step)
+        return
+
     if method in _NAV_METHODS and _is_page_root(call.func.value):
         url = _first_string_arg(call)
         if url:
@@ -367,3 +382,113 @@ def _label_from_chain(value_node: ast.AST) -> str:
     if leaf_method == "locator" and arg0:
         return f"locator={arg0}"
     return ""
+
+
+# ── PR-C: assertion capture (codegen toolbar → AutomationStep) ──
+
+# Map a codegen ``expect(...).<matcher>()`` call to our assertion_type.
+# ``to_have_url`` / ``to_have_url`` accept a string or a regex — the
+# parser keeps the raw string verbatim and the runner glob-matches it.
+_TEXT_MATCHERS = {"to_contain_text", "to_have_text"}
+_VISIBLE_MATCHERS = {"to_be_visible", "to_be_attached", "to_be_in_viewport"}
+_URL_MATCHERS = {"to_have_url"}
+
+
+def _is_expect_assertion(call: ast.Call) -> bool:
+    """True when ``call`` is the outer ``.to_*()`` of an expect-chain.
+
+    Recognises both ``expect(...).to_be_visible()`` and the negated
+    ``expect(...).not_.to_be_visible()`` form — negation is deferred
+    (no runtime support yet), but we still record it as an assertion
+    so the editor can show it instead of silently dropping the step.
+    """
+    if not isinstance(call.func, ast.Attribute):
+        return False
+    matcher = call.func.attr
+    if matcher not in (_TEXT_MATCHERS | _VISIBLE_MATCHERS | _URL_MATCHERS):
+        return False
+    # Walk down through .not_ / Attribute chains to find expect(...).
+    cur = call.func.value
+    while isinstance(cur, ast.Attribute):
+        cur = cur.value
+    if not (isinstance(cur, ast.Call)
+            and isinstance(cur.func, ast.Name)
+            and cur.func.id == "expect"):
+        return False
+    return True
+
+
+def _build_assertion_step(call: ast.Call) -> AutomationStep | None:
+    """Turn an ``expect(LOCATOR).to_*()`` call into an AutomationStep.
+
+    Returns ``None`` when the locator chain inside ``expect`` doesn't
+    root at ``page`` (defensive against scaffolding the parser doesn't
+    own). ``to_have_url`` is special-cased because its inner argument is
+    ``page`` rather than a locator factory chain — we read the URL
+    pattern off the matcher's first positional arg.
+    """
+    matcher = call.func.attr  # type: ignore[attr-defined]
+
+    # Find the ``expect(LOCATOR)`` call by walking attribute chain.
+    cur = call.func.value  # type: ignore[attr-defined]
+    while isinstance(cur, ast.Attribute):
+        cur = cur.value
+    if not (isinstance(cur, ast.Call)
+            and isinstance(cur.func, ast.Name)
+            and cur.func.id == "expect"
+            and cur.args):
+        return None
+    inner = cur.args[0]
+    raw_src = ast.unparse(call)
+
+    if matcher in _URL_MATCHERS:
+        # expect(page).to_have_url("...") — pattern is the first arg.
+        pattern = _first_string_arg(call)
+        return AutomationStep(
+            action="expect_url",
+            target=pattern,
+            value=pattern,
+            raw=raw_src,
+            kind="assertion",
+            assertion_type="url",
+        )
+
+    # For visible / text the inner expression is a locator chain.
+    if isinstance(inner, ast.Call):
+        target = _render_locator(inner)
+        if not target:
+            return None
+        cands = _candidates_from_chain(inner)
+        primary, alternates = candidates_to_targets(cands)
+        if primary and primary != target:
+            alternates = [primary] + [a for a in alternates if a != target]
+        alternates = [a for a in alternates if a and a != target]
+        label = _label_from_chain(inner)
+    else:
+        target = ""
+        alternates = []
+        label = ""
+
+    if matcher in _VISIBLE_MATCHERS:
+        return AutomationStep(
+            action="expect_visible",
+            target=target,
+            raw=raw_src,
+            target_alternates=alternates,
+            locator_label=label,
+            kind="assertion",
+            assertion_type="visible",
+        )
+
+    # _TEXT_MATCHERS — value carries the expected substring.
+    expected = _first_string_arg(call)
+    return AutomationStep(
+        action="expect_text",
+        target=target,
+        value=expected,
+        raw=raw_src,
+        target_alternates=alternates,
+        locator_label=label,
+        kind="assertion",
+        assertion_type="text",
+    )

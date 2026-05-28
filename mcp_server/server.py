@@ -606,28 +606,87 @@ def record_steps_attach(
         action = str(item.get("action") or "").strip()
         if not action:
             continue
+        # PR-A fields — multi-locator fallback + Page Object registry key.
+        # PR-C fields — kind/assertion_type for Assertion Mode.
+        # Pass-through so the recorder's payload survives the MCP round-trip;
+        # _decode_recorded_steps will apply safe defaults if any are missing.
+        alts_raw = item.get("target_alternates") or []
+        alts = [str(a) for a in alts_raw
+                if isinstance(a, (str, int, float)) and str(a)] \
+                    if isinstance(alts_raw, list) else []
         cleaned.append({
             "action": action,
             "target": str(item.get("target") or ""),
             "value": str(item.get("value") or ""),
             "raw": str(item.get("raw") or ""),
             "comment": str(item.get("comment") or ""),
+            "target_alternates": alts,
+            "locator_label": str(item.get("locator_label") or ""),
+            "kind": str(item.get("kind") or "action"),
+            "assertion_type": str(item.get("assertion_type") or ""),
         })
 
+    project_id_norm = str(project_id).strip()
     ok = db.update_tc_automation_steps(
-        str(project_id).strip(),
+        project_id_norm,
         str(tc_external_id).strip(),
         cleaned,
     )
     if not ok:
         return {"ok": False, "reason": "tc_not_found",
                 "project_id": project_id, "tc_external_id": tc_external_id}
+
+    # PR-C — populate the Locator table so the runner can promote
+    # last-success strategies across runs. Without this the table stays
+    # empty and PR-A's chain walk works purely off step-carried
+    # alternates (no learning). Best-effort: registry failures must NOT
+    # roll back the attach.
+    _register_recorder_locators(project_id_norm, cleaned)
+
     return {
         "ok": True,
         "project_id": project_id,
         "tc_external_id": tc_external_id,
         "steps_count": len(cleaned),
     }
+
+
+def _register_recorder_locators(project_id: str, steps: list[dict]) -> int:
+    """Feed step locator chains into the Page Object DB.
+
+    For every step carrying both ``locator_label`` and at least one
+    locator value, register the ranked candidate list. Returns the
+    count of rows touched. Errors are swallowed and logged so a
+    registry hiccup never blocks the attach.
+    """
+    try:
+        from engine.locator_registry import (LocatorCandidate,
+                                              register_candidates,
+                                              strategy_of)
+    except Exception:
+        return 0
+    if not project_id:
+        return 0
+    touched = 0
+    for step in steps:
+        label = (step.get("locator_label") or "").strip()
+        primary = (step.get("target") or "").strip()
+        alts = step.get("target_alternates") or []
+        if not (label and primary):
+            continue
+        all_targets = [primary]
+        for a in alts:
+            a_s = str(a).strip()
+            if a_s and a_s not in all_targets:
+                all_targets.append(a_s)
+        cands = [LocatorCandidate(strategy=strategy_of(t), value=t)
+                  for t in all_targets]
+        try:
+            if register_candidates(project_id, label, cands):
+                touched += 1
+        except Exception:
+            continue
+    return touched
 
 
 # ── Entry ──────────────────────────────────────────────────────────
