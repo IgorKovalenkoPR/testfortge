@@ -62,7 +62,7 @@
                    transition:transform .15s ease, box-shadow .15s ease;">
         <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">▶️</div>
         <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Execution</strong>
-        <small style="color:#64748b;">Run TCs in real Playwright + live view</small>
+        <small style="color:#64748b;">Run TCs in real Playwright · recorder · assertions · live view</small>
     </button>
 
     <button type="button" class="guide-card" data-section="bug-reports"
@@ -338,7 +338,22 @@
 
   <template data-content="test-execution">
     <h3>What it is</h3>
-    <p>Runs your TC pack against an environment. Two modes:
+    <p>Runs your TC pack against an environment. Three authoring paths
+       converge into the same runner:</p>
+    <ul>
+      <li><strong>Heuristic text parse</strong> — the runner reads
+          plain-language steps (<code>"Click Submit"</code>) and guesses
+          locators via regex. Works out of the box but is the largest
+          flake source.</li>
+      <li><strong>Recorded steps (PR-B)</strong> — a Playwright codegen
+          session captures real selectors deterministically. The runner
+          replays them verbatim, skipping the guesser.</li>
+      <li><strong>Recorded steps with assertions (PR-C)</strong> —
+          recording captures <em>both</em> actions and expectations
+          (visibility, text presence, URL match) so the run pass/fail
+          surface mirrors what you actually asked.</li>
+    </ul>
+    <p>Two run modes:
        <strong>deterministic simulator</strong> (no Base URL — fast,
        heuristic) or <strong>real Playwright run</strong> (Base URL
        set — headless browser, screenshots, optional video).</p>
@@ -366,6 +381,10 @@
           screenshot</em> (red box + arrow on the broken element)
           plus the previous step's frame for context.</li>
       <li>Identical consecutive frames are deduped.</li>
+      <li>Assertion steps surface in the header as
+          <code>Step N (assert visible)</code> /
+          <code>(assert text)</code> / <code>(assert url)</code> so
+          a failed expectation is named, not labelled <em>click</em>.</li>
     </ul>
     <h3>If the run stalls</h3>
     <p>The recent-runs table on <code>/test-execution/live</code>
@@ -379,7 +398,75 @@
       <li>Running 100+ cases on the free tier — Chromium memory
           adds up. Split into batches of ≤62 or upgrade to a
           Render Background Worker.</li>
+      <li>Editing recorded steps as plain text — the recording lives
+          in <code>automation_steps_json</code>, not <code>test_steps</code>.
+          Use the per-step dropdown in the Test Cases editor, or
+          re-record.</li>
     </ul>
+
+    <h3>Recording test steps (pilot)</h3>
+    <p>For TCs you want to lock down without flake, capture real
+       Playwright selectors instead of trusting the text guesser. Pilot
+       feature — gated on <code>RECORDER_ENABLED=1</code> per host. When
+       the env var is off, the Recorder surfaces are invisible
+       everywhere (CLI, MCP tool, the per-TC "🎬 Record steps" panel).</p>
+    <h4>One-time setup on the tester's machine</h4>
+    <pre style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
+                 border-radius:4px;font-size:0.85em;">pip install playwright
+python -m playwright install chromium</pre>
+    <h4>Recording a TC</h4>
+    <p>Open <code>/test-cases</code>, expand <em>🎬 Record steps</em>
+       on the TC card, paste a Start URL, copy the pre-filled command,
+       and run it locally:</p>
+    <pre style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
+                 border-radius:4px;font-size:0.85em;">RECORDER_ENABLED=1 python -m tools.tfg_record \
+    --project &lt;PID&gt; --tc &lt;TC_ID&gt; --url &lt;START_URL&gt;</pre>
+    <p>Codegen opens Chromium. Click through the scenario; on close,
+       the CLI parses the captured Python, writes the steps to
+       <code>TestCase.automation_steps_json</code>, and populates the
+       project's Page Object DB (locator registry). The next run picks
+       the recording up automatically — no further action needed.</p>
+    <h4>Capturing assertions mid-recording</h4>
+    <p>Codegen 1.40+ has three <strong>Assert</strong> buttons in the
+       toolbar — visibility, text, URL. Click them at the points where
+       you want the runner to <em>check</em> something instead of
+       clicking. Codegen emits <code>expect(...).to_be_visible()</code>
+       /<code>.to_contain_text()</code> /<code>.to_have_url()</code> lines;
+       the parser materialises them as <code>kind=assertion</code> steps.
+       The runner then branches into a dedicated dispatch (5 s
+       visibility budget, text-content scan fallback, fnmatch glob on
+       URLs).</p>
+    <h4>Editing kind after the fact</h4>
+    <p>If you forgot to mark a step as an assertion (or codegen is on
+       an older version), open the TC editor. Each recorded step has a
+       per-step dropdown next to it:</p>
+    <ul>
+      <li><strong>Action</strong> — default. Runner clicks/fills/etc.</li>
+      <li><strong>Assert visible</strong> — runner waits up to 5 s for
+          the element to become visible. Failure marks the step
+          <em>failed</em> with <code>"Assert visible failed for …"</code>.</li>
+      <li><strong>Assert text</strong> — runner looks for the
+          <code>value</code> string via <code>get_by_text</code> with a
+          <code>page.content()</code> substring fallback (catches
+          placeholder / aria-label hosted text).</li>
+      <li><strong>Assert URL</strong> — runner matches
+          <code>page.url</code> against the <code>target</code> as an
+          <code>fnmatch</code> glob
+          (<code>https://app/dashboard*</code>), or a substring when
+          there are no wildcard characters.</li>
+    </ul>
+    <p>Changes persist immediately via
+       <code>POST /test-cases/&lt;id&gt;/automation-step-kind</code>.</p>
+    <h4>Why recordings rarely re-break (multi-locator fallback)</h4>
+    <p>Each recorded element is stored with a ranked candidate list
+       (testid > id > role > label > placeholder > alt > title > text >
+       css > xpath). If the primary locator drifts after a refactor,
+       the runner walks the chain and the first candidate that resolves
+       within 2 s wins. The Page Object DB remembers which strategy
+       worked last and promotes it to the front of the chain on the
+       next run — so a relocated <em>Sign in</em> button captured by
+       <code>role+name</code> survives via its <code>text=</code> or
+       <code>data-testid=</code> fallback without operator action.</p>
     <h3>QA Walkthrough mode</h3>
     <p>An orthogonal Run Mode at the top of the form. Choose
        <strong>QA walkthrough</strong> to skip the TC/CL picker and let
@@ -417,10 +504,11 @@
        <em>TC binding = URL pattern</em>, every test case whose
        <code>trigger</code> is <code>walkthrough_url_match</code> or
        <code>always</code> and whose <code>url_pattern</code> matches
-       the current page is fired through the regular TC runner. Pre-PR-2
-       test cases default to <code>trigger=manual</code> and are
-       skipped — set the trigger explicitly when authoring TCs you
-       want the walkthrough to fire.</p>
+       the current page is fired through the regular TC runner. TCs
+       authored before the binding model defaulted to
+       <code>trigger=manual</code> and are skipped by the walkthrough —
+       set the trigger explicitly in the TC editor when you want the
+       walkthrough to fire them.</p>
     <p><strong>When to use it:</strong> smoke runs on a new build,
        link-rot checks after content migrations, accessibility
        baselines, exploratory pre-release sweeps. Not a substitute
