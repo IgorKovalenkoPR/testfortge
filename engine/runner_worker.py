@@ -563,6 +563,11 @@ def main() -> int:
             )
             early_exit_reason = ""
         else:  # tc_driven (only reachable when LEGACY_EXECUTOR=1)
+            # PR-A: thread project_id so the locator registry can learn
+            # per-project across runs. Falls back to "" when the caller
+            # didn't set one — runner treats that as "disable registry".
+            if "project_id" not in runner_kwargs:
+                runner_kwargs["project_id"] = (config.get("project_id") or "")
             runner = AutomationRunner(storage_root=storage_root, **runner_kwargs)
             items_data = config.get("items_data") or []
             scripts = scripts_from_session(items_data, config.get("base_url", ""))

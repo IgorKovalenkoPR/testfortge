@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from sqlalchemy import (DateTime, Float, ForeignKey, Integer, String, Text,
+                        UniqueConstraint,
                         create_engine, event, func, select, text)
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -327,6 +328,8 @@ class Project(Base):
                                       cascade="all, delete-orphan", passive_deletes=True)
     site_profiles = relationship("SiteProfile", back_populates="project",
                                   cascade="all, delete-orphan", passive_deletes=True)
+    locators = relationship("Locator", back_populates="project",
+                            cascade="all, delete-orphan", passive_deletes=True)
 
 
 class TestCase(Base):
@@ -541,6 +544,41 @@ class SiteProfile(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     project = relationship("Project", back_populates="site_profiles")
+
+
+class Locator(Base):
+    """PR-A multi-locator Page Object: remembers which selector strategy
+    actually resolved each recorded element last time, so the runner can
+    promote the winning fallback to the front of the chain on the next
+    run.
+
+    Schema mirrors the spec in ``docs/plans/recorder_integration.md``
+    (PR-A § Files / Modified ``engine/db.py``): one row per
+    (project_id, label) pair, ``candidates_json`` carries the ranked
+    LocatorCandidate list that the recorder captured, and the two counters
+    drive a simple learning loop the runner pings in
+    ``try_locator_chain``. Project scoping is enforced by the
+    UniqueConstraint so a stray label collision between two unrelated
+    projects can't poison either's stats.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    candidates_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    last_success_strategy: Mapped[str | None] = mapped_column(
+        String(40), nullable=True)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "label", name="uq_locator_project_label"),
+    )
+
+    project = relationship("Project", back_populates="locators")
 
 
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
@@ -883,6 +921,164 @@ def update_tc_automation_steps(project_id: str,
         if proj is not None:
             proj.updated_at = _utcnow()
         return True
+
+
+# ── PR-A: Locator registry (Page Object DB) ───────────────────────
+
+def register_locator_candidates(project_id: str, label: str,
+                                 candidates: list[dict]) -> int:
+    """Upsert a Locator row with the latest ranked candidate list.
+
+    Called by the recorder pipeline after each successful capture. When
+    a row already exists, only ``candidates_json`` + ``last_seen`` are
+    refreshed — the success / fail counters survive so the historical
+    learning signal isn't reset by a fresh recording of the same flow.
+    Returns the locator row id, or 0 if inputs are invalid (no project,
+    blank label, or non-list candidates).
+    """
+    if not (project_id and label) or not isinstance(candidates, list):
+        return 0
+    payload = json.dumps(candidates, ensure_ascii=False)
+    with session_scope() as sess:
+        row = sess.execute(
+            select(Locator).where(
+                Locator.project_id == project_id,
+                Locator.label == label,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = Locator(
+                project_id=project_id,
+                label=label,
+                candidates_json=payload,
+            )
+            sess.add(row)
+            sess.flush()
+            return row.id
+        row.candidates_json = payload
+        return row.id
+
+
+def record_locator_success(project_id: str, label: str,
+                            strategy: str) -> bool:
+    """Bump ``success_count`` and stamp ``last_success_strategy`` so the
+    next ``try_locator_chain`` walk can short-circuit straight to the
+    winner. No-op (returns False) when the row doesn't exist yet — the
+    recorder must register candidates first via
+    :func:`register_locator_candidates`.
+
+    The strategy string mirrors the LocatorCandidate.strategy taxonomy
+    (``testid|id|role|label|text|placeholder|css|xpath``). Garbage in,
+    garbage out — the helper trusts the caller.
+    """
+    if not (project_id and label):
+        return False
+    with session_scope() as sess:
+        row = sess.execute(
+            select(Locator).where(
+                Locator.project_id == project_id,
+                Locator.label == label,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return False
+        row.success_count = (row.success_count or 0) + 1
+        if strategy:
+            row.last_success_strategy = strategy
+        return True
+
+
+def record_locator_failure(project_id: str, label: str,
+                            strategy: str = "all") -> bool:
+    """Bump ``fail_count`` after every candidate in the chain failed.
+
+    ``strategy`` defaults to the sentinel ``"all"`` because the runner
+    reaches this branch only when none of the alternates resolved; if
+    a caller wants to track per-strategy fails (currently no caller
+    does), they can pass the failing strategy name and the registry
+    keeps the value alongside the counter. No-op when the row is
+    absent.
+    """
+    if not (project_id and label):
+        return False
+    with session_scope() as sess:
+        row = sess.execute(
+            select(Locator).where(
+                Locator.project_id == project_id,
+                Locator.label == label,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return False
+        row.fail_count = (row.fail_count or 0) + 1
+        return True
+
+
+def get_locator(project_id: str, label: str) -> dict | None:
+    """Return the locator row as a plain dict (with parsed candidates), or
+    ``None`` when no row exists. Used by ``engine.locator_registry`` to
+    promote the previously-winning strategy to the front of the chain.
+
+    The ``candidates`` key in the returned dict is the decoded JSON list;
+    keeping the raw ``candidates_json`` string out of the public shape
+    matches the same convention every other DB helper follows.
+    """
+    if not (project_id and label):
+        return None
+    with session_scope() as sess:
+        row = sess.execute(
+            select(Locator).where(
+                Locator.project_id == project_id,
+                Locator.label == label,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        try:
+            cands = json.loads(row.candidates_json or "[]")
+            if not isinstance(cands, list):
+                cands = []
+        except (json.JSONDecodeError, TypeError):
+            cands = []
+        return {
+            "id": row.id,
+            "project_id": row.project_id,
+            "label": row.label,
+            "candidates": cands,
+            "last_success_strategy": row.last_success_strategy,
+            "success_count": row.success_count,
+            "fail_count": row.fail_count,
+        }
+
+
+def list_locators(project_id: str) -> list[dict]:
+    """Project-scoped dump of every Locator row. Returns an empty list
+    when ``project_id`` is blank. Used by tests + a future Locator
+    admin page; not on the hot path of the runner."""
+    if not project_id:
+        return []
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(Locator).where(Locator.project_id == project_id)
+            .order_by(Locator.label.asc())
+        ).scalars().all()
+        out: list[dict] = []
+        for row in rows:
+            try:
+                cands = json.loads(row.candidates_json or "[]")
+                if not isinstance(cands, list):
+                    cands = []
+            except (json.JSONDecodeError, TypeError):
+                cands = []
+            out.append({
+                "id": row.id,
+                "label": row.label,
+                "candidates": cands,
+                "last_success_strategy": row.last_success_strategy,
+                "success_count": row.success_count,
+                "fail_count": row.fail_count,
+            })
+        return out
 
 
 def load_test_cases(project_id: str) -> list[dict]:
@@ -1500,6 +1696,7 @@ __all__ = [
     "Base", "Project", "TestCase", "ChecklistItem", "BugReport",
     "Estimation", "ExecutionRun", "ExecutionCaseResult",
     "DashboardMetricSnapshot", "TedgieSubmission", "SiteProfile",
+    "Locator",
     # projects
     "upsert_project", "update_project", "list_projects", "get_project",
     "delete_project", "move_artifacts",
@@ -1521,6 +1718,9 @@ __all__ = [
     "save_tedgie_submission", "list_tedgie_submissions",
     # site profiles
     "save_site_profile", "load_site_profile_by_url", "list_site_profiles",
+    # PR-A locator registry
+    "register_locator_candidates", "record_locator_success",
+    "record_locator_failure", "get_locator", "list_locators",
     # aggregates
     "count_records",
 ]
