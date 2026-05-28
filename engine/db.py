@@ -35,9 +35,9 @@ from typing import Any, Iterable
 
 from sqlalchemy import (DateTime, Float, ForeignKey, Integer, String, Text,
                         UniqueConstraint,
-                        create_engine, event, func, select, text)
+                        create_engine, event, func, select, text, update)
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, declared_attr,
                             mapped_column, relationship, sessionmaker)
 from sqlalchemy.types import JSON
@@ -565,7 +565,11 @@ class Locator(Base):
     project_id: Mapped[str] = mapped_column(
         String(32), ForeignKey("project.id", ondelete="CASCADE"),
         nullable=False, index=True)
-    label: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    # 500 chars — recorder labels can include arbitrarily long button
+    # text (e.g. ``text=Subscribe to our weekly newsletter and...``),
+    # and the original 200 limit truncated those silently on Postgres.
+    # SQLite ignores the length spec, so this is a no-op there.
+    label: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     candidates_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
     last_success_strategy: Mapped[str | None] = mapped_column(
         String(40), nullable=True)
@@ -935,28 +939,49 @@ def register_locator_candidates(project_id: str, label: str,
     learning signal isn't reset by a fresh recording of the same flow.
     Returns the locator row id, or 0 if inputs are invalid (no project,
     blank label, or non-list candidates).
+
+    Race tolerance: two concurrent first-time registrations for the
+    same ``(project_id, label)`` would otherwise both INSERT and lose
+    the second to a UNIQUE-constraint violation. We catch
+    :class:`IntegrityError` once and retry as an UPDATE — at-most-one
+    INSERT, at-least-once UPDATE, idempotent payload.
     """
     if not (project_id and label) or not isinstance(candidates, list):
         return 0
     payload = json.dumps(candidates, ensure_ascii=False)
-    with session_scope() as sess:
-        row = sess.execute(
-            select(Locator).where(
-                Locator.project_id == project_id,
-                Locator.label == label,
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            row = Locator(
-                project_id=project_id,
-                label=label,
-                candidates_json=payload,
-            )
-            sess.add(row)
-            sess.flush()
-            return row.id
-        row.candidates_json = payload
-        return row.id
+    for attempt in range(2):
+        try:
+            with session_scope() as sess:
+                row = sess.execute(
+                    select(Locator).where(
+                        Locator.project_id == project_id,
+                        Locator.label == label,
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    row = Locator(
+                        project_id=project_id,
+                        label=label,
+                        candidates_json=payload,
+                    )
+                    sess.add(row)
+                    sess.flush()
+                    return row.id
+                # UPDATE existing in-place. Atomic at the statement level
+                # — the session_scope() commit serialises with other
+                # writers; concurrent updates land in insertion order.
+                row.candidates_json = payload
+                row.last_seen = _utcnow()
+                return row.id
+        except IntegrityError:
+            # Lost the INSERT race — loop once and treat as UPDATE.
+            if attempt == 0:
+                continue
+            log.warning("register_locator_candidates: IntegrityError "
+                        "persisted after retry for project=%s label=%s",
+                        project_id, label)
+            return 0
+    return 0
 
 
 def record_locator_success(project_id: str, label: str,
@@ -970,22 +995,29 @@ def record_locator_success(project_id: str, label: str,
     The strategy string mirrors the LocatorCandidate.strategy taxonomy
     (``testid|id|role|label|text|placeholder|css|xpath``). Garbage in,
     garbage out — the helper trusts the caller.
+
+    Atomic at the SQL statement level — two parallel gunicorn workers
+    proving the same TC both bump the counter via a single
+    ``UPDATE … SET success_count = success_count + 1`` so neither
+    loses its increment. ORM-side ``onupdate`` doesn't fire for raw
+    UPDATE statements, so ``last_seen`` is set explicitly.
     """
     if not (project_id and label):
         return False
+    values: dict = {
+        "success_count": Locator.success_count + 1,
+        "last_seen": _utcnow(),
+    }
+    if strategy:
+        values["last_success_strategy"] = strategy
     with session_scope() as sess:
-        row = sess.execute(
-            select(Locator).where(
-                Locator.project_id == project_id,
-                Locator.label == label,
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            return False
-        row.success_count = (row.success_count or 0) + 1
-        if strategy:
-            row.last_success_strategy = strategy
-        return True
+        result = sess.execute(
+            update(Locator)
+            .where(Locator.project_id == project_id,
+                   Locator.label == label)
+            .values(**values)
+        )
+        return result.rowcount > 0
 
 
 def record_locator_failure(project_id: str, label: str,
@@ -997,21 +1029,19 @@ def record_locator_failure(project_id: str, label: str,
     a caller wants to track per-strategy fails (currently no caller
     does), they can pass the failing strategy name and the registry
     keeps the value alongside the counter. No-op when the row is
-    absent.
+    absent. Same atomic-UPDATE pattern as ``record_locator_success``.
     """
     if not (project_id and label):
         return False
     with session_scope() as sess:
-        row = sess.execute(
-            select(Locator).where(
-                Locator.project_id == project_id,
-                Locator.label == label,
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            return False
-        row.fail_count = (row.fail_count or 0) + 1
-        return True
+        result = sess.execute(
+            update(Locator)
+            .where(Locator.project_id == project_id,
+                   Locator.label == label)
+            .values(fail_count=Locator.fail_count + 1,
+                    last_seen=_utcnow())
+        )
+        return result.rowcount > 0
 
 
 def get_locator(project_id: str, label: str) -> dict | None:

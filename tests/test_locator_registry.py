@@ -355,3 +355,84 @@ class TestRegistryDbRoundTrip:
         assert register_candidates("pid", "", [LocatorCandidate("testid", "a")]) == 0
         assert record_success("", "x", "data-testid=a") is False
         assert record_failure("pid", "") is False
+
+
+class TestConcurrentCounterWrites:
+    """Pin the atomic-UPDATE contract.
+
+    Read-modify-write bumped both writers to ``count = current + 1`` —
+    if the second writer read the value BEFORE the first committed, the
+    second clobbered the first's increment back to ``current + 1``
+    instead of ``current + 2``. The fix swaps to a single
+    ``UPDATE locator SET count = count + 1`` statement that the DB
+    serialises regardless of whether two threads / two gunicorn workers
+    issue it concurrently.
+
+    A real two-threads-two-connections test would need a separate
+    engine and proper SAVEPOINT plumbing — overkill for a unit test.
+    The SQL-statement-level test below is the equivalent invariant:
+    issue N back-to-back ``record_*`` calls and assert all increments
+    land. Pre-fix this would still pass (because each call ran a fresh
+    SELECT before the bump), but the parallel-thread version below
+    catches the real race on SQLite WAL.
+    """
+
+    def test_n_sequential_successes_land_exactly_n(self, two_projects):
+        pid_a, _ = two_projects
+        register_candidates(pid_a, "race.label",
+                            [LocatorCandidate("testid", "data-testid=x")])
+        for _ in range(5):
+            record_success(pid_a, "race.label", "data-testid=x")
+        assert db.get_locator(pid_a, "race.label")["success_count"] == 5
+
+    def test_parallel_thread_bumps_no_lost_updates(self, two_projects):
+        """Two threads each do M ``record_locator_success`` calls; the
+        final count MUST equal 2*M. Pre-fix (read-modify-write) this
+        race-failed on SQLite WAL because both threads read the same
+        ``current`` snapshot before either committed."""
+        import threading
+        pid_a, _ = two_projects
+        register_candidates(pid_a, "thread.race",
+                            [LocatorCandidate("testid", "data-testid=t")])
+        M = 20
+
+        def _bump():
+            for _ in range(M):
+                db.record_locator_success(pid_a, "thread.race", "testid")
+
+        t1 = threading.Thread(target=_bump)
+        t2 = threading.Thread(target=_bump)
+        t1.start(); t2.start()
+        t1.join();  t2.join()
+
+        # Both threads landed all of their increments.
+        assert db.get_locator(pid_a, "thread.race")["success_count"] == 2 * M
+
+    def test_register_handles_concurrent_first_insert(self, two_projects):
+        """Two concurrent first-time registrations for the same label
+        must not blow up with IntegrityError — one wins as INSERT, the
+        other should silently downgrade to an UPDATE. Final state:
+        exactly one row, with the most recent payload."""
+        import threading
+        pid_a, _ = two_projects
+        cands_a = [LocatorCandidate("testid", "data-testid=A")]
+        cands_b = [LocatorCandidate("testid", "data-testid=B")]
+        results: list[int] = []
+        results_lock = threading.Lock()
+
+        def _reg(cands):
+            rid = register_candidates(pid_a, "concurrent.label", cands)
+            with results_lock:
+                results.append(rid)
+
+        t1 = threading.Thread(target=_reg, args=(cands_a,))
+        t2 = threading.Thread(target=_reg, args=(cands_b,))
+        t1.start(); t2.start()
+        t1.join();  t2.join()
+
+        # Both calls succeeded (returned a non-zero row id).
+        assert all(r > 0 for r in results), results
+        # Exactly one row landed in the DB.
+        rows = db.list_locators(pid_a)
+        assert len([r for r in rows
+                    if r["label"] == "concurrent.label"]) == 1

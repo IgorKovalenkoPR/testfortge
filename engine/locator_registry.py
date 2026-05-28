@@ -15,13 +15,18 @@ tests. The Playwright wait/click logic lives in
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Iterable
 
 from engine import db as _db
-from engine.log import get_logger
 
-_log = get_logger(__name__)
+# Hard upper bound on alternates returned by :func:`best_alternates`.
+# Matches the runner's per-step budget assumption — 5 strategies × 2 s
+# per-candidate visibility wait = 10 s, which is the soft ceiling for
+# a "drift" recovery within one default-timeout window. Tested labels
+# with more than 5 strategies registered would otherwise blow the
+# per-step budget on every missing element.
+_MAX_RETURNED_ALTERNATES = 5
 
 
 # Priority table — higher score = tried first by ``try_locator_chain``.
@@ -210,8 +215,8 @@ def best_alternates(project_id: str, label: str,
             cands = promoted + rest
         targets = [c.value for c in cands if c.value]
         if targets:
-            return targets
-    return list(defaults or [])
+            return targets[:_MAX_RETURNED_ALTERNATES]
+    return list(defaults or [])[:_MAX_RETURNED_ALTERNATES]
 
 
 def record_success(project_id: str, label: str, selector: str) -> bool:

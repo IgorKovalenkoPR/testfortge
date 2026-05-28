@@ -14,6 +14,9 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
 from engine.automation_qa import AutomationScript, AutomationStep
+from engine.locator_registry import (best_alternates as _best_alternates,
+                                      record_failure as _record_failure,
+                                      record_success as _record_success)
 from engine.log import get_logger
 from engine.test_credentials import TestCredentials
 
@@ -185,22 +188,93 @@ class RunReport:
         return (self.passed / self.total * 100) if self.total else 0.0
 
 
+# PR-A: maximum chain length after registry promotion. Caps the wait
+# budget so a label with N strategies registered can't multiply a
+# missing-element wait into N × per_cand_ms of dead time. 4 = primary
+# + 3 alternates, which covers every recorder-emitted shape in PR-A
+# (joined chain + leaf-only + role-only + text=name).
+MAX_CHAIN_TARGETS = 4
+
+
+def _is_locator_drift(exc: BaseException) -> bool:
+    """True when an exception from ``loc.wait_for(state='visible', ...)``
+    looks like locator drift (element missing / detached / never
+    visible) — the chain should try the next candidate. False for hard
+    failures (page crashed, websocket closed, browser disconnected) —
+    those must surface immediately so the runner can mark the step as
+    blocked instead of silently walking the entire chain looking for
+    something that the browser can no longer answer.
+
+    Message-based because Playwright's TimeoutError class doesn't
+    inherit from Python's builtin TimeoutError, and importing the
+    playwright module at module-load time breaks pure-Python unit
+    tests that stub the page. Both Playwright + the test's builtin
+    TimeoutError surface the words ``timeout`` / ``timed out`` /
+    ``never visible`` in their messages.
+    """
+    msg = str(exc).lower()
+    return any(needle in msg for needle in
+               ("timeout", "timed out", "never visible", "not visible",
+                "waiting for"))
+
+
 # ---------- Selector resolution ----------
 
 def _locator(page, target: str):
-    """Resolve our symbolic selectors to Playwright locators."""
+    """Resolve our symbolic selectors to Playwright locators.
+
+    Two authoring paths converge here: the heuristic
+    ``parse_manual_step`` (regex-name form ``role=button[name=/save/i]``,
+    regex-placeholder form ``placeholder=/email/i``), and the recorder
+    parser (literal-name form ``role=button[name="Save"]`` plus
+    ``data-testid=`` / ``label=`` / ``placeholder=`` / ``alt=`` /
+    ``title=`` literal forms). Both must decode to the right Playwright
+    accessor — ``page.locator("label=Email")`` is invalid CSS, so any
+    unrecognised prefix that falls through is silently broken.
+
+    Prefix → Playwright API:
+      * ``role=<r>``                  → ``get_by_role(r)``
+      * ``role=<r>[name=/.../i]``     → ``get_by_role(r, name=regex)``
+      * ``role=<r>[name="..."]``      → ``get_by_role(r, name=literal)``
+      * ``label=<text>``              → ``get_by_label(text)``
+      * ``placeholder=/.../i``        → ``get_by_placeholder(regex)``
+      * ``placeholder=<text>``        → ``get_by_placeholder(text)``
+      * ``text=<text>``               → ``get_by_text(text, exact=False)``
+      * ``data-testid=<id>``          → ``get_by_test_id(id)``
+      * ``alt=<text>``                → ``get_by_alt_text(text)``
+      * ``title=<text>``              → ``get_by_title(text)``
+      * anything else                 → ``page.locator(target)`` (CSS/XPath)
+    """
     if target.startswith("role="):
-        m = re.match(r"role=([a-z]+)(?:\[name=/(.+?)/i\])?", target)
-        if m:
-            role, name = m.group(1), m.group(2)
-            return page.get_by_role(role, name=re.compile(name, re.I)) if name \
-                else page.get_by_role(role)
+        # Literal-name form (recorder output) — must be tried BEFORE
+        # the regex-name form so a quoted name doesn't get parsed as
+        # the role-only group of the regex pattern below.
+        m_lit = re.match(r'role=([a-zA-Z]+)\[name="([^"]+)"\]', target)
+        if m_lit:
+            return page.get_by_role(m_lit.group(1), name=m_lit.group(2))
+        # Regex-name form (heuristic parser output).
+        m_re = re.match(r"role=([a-zA-Z]+)(?:\[name=/(.+?)/i\])?", target)
+        if m_re:
+            role, name = m_re.group(1), m_re.group(2)
+            if name:
+                return page.get_by_role(role, name=re.compile(name, re.I))
+            return page.get_by_role(role)
     if target.startswith("placeholder=/"):
         m = re.match(r"placeholder=/(.+)/i", target)
         if m:
             return page.get_by_placeholder(re.compile(m.group(1), re.I))
+    if target.startswith("placeholder="):
+        return page.get_by_placeholder(target[len("placeholder="):])
     if target.startswith("text="):
         return page.get_by_text(target[5:], exact=False)
+    if target.startswith("label="):
+        return page.get_by_label(target[len("label="):])
+    if target.startswith("data-testid="):
+        return page.get_by_test_id(target[len("data-testid="):])
+    if target.startswith("alt="):
+        return page.get_by_alt_text(target[len("alt="):])
+    if target.startswith("title="):
+        return page.get_by_title(target[len("title="):])
     return page.locator(target)
 
 
@@ -1147,12 +1221,14 @@ class AutomationRunner:
         label = (getattr(step, "locator_label", "") or "").strip()
 
         # Registry consultation — only meaningful when both ends are wired.
+        # Capped at MAX_CHAIN_TARGETS so a label with five strategies
+        # registered doesn't blow past the per-step budget on a missing
+        # element (per_cand_ms × N).
         if pid and label:
             try:
-                from engine.locator_registry import best_alternates
-                promoted = best_alternates(pid, label, defaults=targets)
+                promoted = _best_alternates(pid, label, defaults=targets)
                 if promoted:
-                    targets = promoted
+                    targets = promoted[:MAX_CHAIN_TARGETS]
             except Exception as exc:
                 _logger.debug("locator_registry best_alternates: %s", exc)
 
@@ -1162,31 +1238,37 @@ class AutomationRunner:
         if len(targets) == 1:
             return _locator(page, targets[0]).first
 
-        # Per-candidate visibility budget. Kept well below
-        # ``default_timeout_ms`` so a 4-candidate chain on a missing
-        # element still bails inside the per-step budget instead of
-        # multiplying the wait by 4.
-        per_cand_ms = max(500, min(1500, self.default_timeout_ms // 2))
+        # Per-candidate visibility budget. Bumped to 2000ms per the
+        # plan; the cap divided by 2 is the runner's default timeout
+        # so a 4-candidate chain stays inside one default_timeout
+        # window worst-case.
+        per_cand_ms = max(500, min(2000, self.default_timeout_ms // 2))
         tried: list[str] = []
         for target in targets:
             try:
                 loc = _locator(page, target).first
                 loc.wait_for(state="visible", timeout=per_cand_ms)
-            except Exception:
+            except Exception as exc:
+                # Only locator-drift signals (timeout / not visible) get
+                # treated as "try next candidate". Anything else — page
+                # crash, websocket disconnect, browser closed — must
+                # surface immediately instead of being silently turned
+                # into 4 × per_cand_ms of dead time and an
+                # AssertionError that hides the real root cause.
+                if not _is_locator_drift(exc):
+                    raise
                 tried.append(target)
                 continue
             if pid and label:
                 try:
-                    from engine.locator_registry import record_success
-                    record_success(pid, label, target)
+                    _record_success(pid, label, target)
                 except Exception as exc:
                     _logger.debug("locator_registry record_success: %s", exc)
             return loc
 
         if pid and label:
             try:
-                from engine.locator_registry import record_failure
-                record_failure(pid, label)
+                _record_failure(pid, label)
             except Exception as exc:
                 _logger.debug("locator_registry record_failure: %s", exc)
         raise AssertionError(
