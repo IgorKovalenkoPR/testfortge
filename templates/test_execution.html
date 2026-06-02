@@ -693,10 +693,13 @@
                 </label>
             {% endif %}
             <div class="item-select-row">
-                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc sec-tc-{{ current_section.idx }}" data-section="tc-sec-{{ current_section.idx }}">
+                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc sec-tc-{{ current_section.idx }}" data-section="tc-sec-{{ current_section.idx }}" data-suite="{{ tc.suite or '' }}">
                 <span class="item-id">{{ tc.id }}</span>
                 <span class="item-summary">{{ tc.summary }}</span>
                 <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
+                {% if tc.suite %}
+                <span class="item-badge" style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">{{ tc.suite }}</span>
+                {% endif %}
                 <select name="status_{{ tc.id }}" class="item-status-select" aria-label="Status for {{ tc.id }}">
                     <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
                     <option value="Passed">{{ t.get('passed', 'Passed') }}</option>
@@ -1067,8 +1070,51 @@
     </p>
 </div>
 
+{# PR-D — "Run only [suite ▼]" knob. Client-side filter that ticks
+   / unticks selected_items checkboxes by their data-suite attribute
+   before the form posts. Default "All suites" — no filtering applied,
+   identical to the pre-PR-D behaviour. #}
+<div style="margin:14px 0;display:flex;align-items:center;gap:10px;">
+    <label for="suite-filter-select" style="font-size:0.92em;color:#475569;">
+        {{ t.get('te_suite_filter_label', 'Run only suite:') }}
+    </label>
+    <select id="suite-filter-select"
+            style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;min-width:160px;">
+        <option value="all">{{ t.get('te_suite_filter_all', 'All suites') }}</option>
+        <option value="Smoke">Smoke</option>
+        <option value="Regression">Regression</option>
+        <option value="E2E">E2E</option>
+        <option value="">{{ t.get('te_suite_filter_untagged', 'Untagged only') }}</option>
+    </select>
+    <small style="color:#94a3b8;">
+        {{ t.get('te_suite_filter_hint', '— ticks / unticks the TC checkboxes by suite tag.') }}
+    </small>
+</div>
+
 <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" class="btn btn-secondary btn-lg" id="watch-live-link" style="margin-right:10px;"><i data-lucide="monitor-play" class="icon-sm"></i> {{ t.get('te_watch_live', 'Watch live (opens in new tab)') }}</a><button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
 </form>
+
+<script nonce="{{ csp_nonce }}">
+// PR-D — the suite filter ticks selected_items checkboxes whose
+// data-suite matches. "All suites" un-filters (all checkboxes
+// returned to checked). "Untagged only" matches the empty data-suite
+// — for backward compat with TCs created before PR-D.
+(function suiteFilterInit() {
+    var sel = document.getElementById('suite-filter-select');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+        var want = sel.value;
+        document.querySelectorAll('input.item-cb-tc').forEach(function (cb) {
+            var s = cb.dataset.suite || '';
+            if (want === 'all') {
+                cb.checked = true;
+            } else {
+                cb.checked = (s === want);
+            }
+        });
+    });
+})();
+</script>
 
 {# ── Run progress overlay (shown while POST is in flight) ── #}
 <div id="te-run-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">

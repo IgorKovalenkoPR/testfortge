@@ -62,7 +62,7 @@
                    transition:transform .15s ease, box-shadow .15s ease;">
         <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">▶️</div>
         <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Execution</strong>
-        <small style="color:#64748b;">Run TCs in real Playwright + live view</small>
+        <small style="color:#64748b;">Run TCs in real Playwright · record sessions → suites · live view</small>
     </button>
 
     <button type="button" class="guide-card" data-section="bug-reports"
@@ -380,6 +380,70 @@
           adds up. Split into batches of ≤62 or upgrade to a
           Render Background Worker.</li>
     </ul>
+
+    <h3>Generate TCs from a manual session (pilot)</h3>
+    <p>Record yourself exploring the app — TestForTge slices the
+       session into discrete proposed test cases and asks you to
+       confirm each one. Saved TCs land in your project with their
+       Playwright steps already attached, so the next run replays
+       them deterministically. Pilot feature — gated on
+       <code>RECORDER_ENABLED=1</code> per host.</p>
+    <h4>One-time setup on the tester's machine</h4>
+    <pre style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
+                 border-radius:4px;font-size:0.85em;">pip install playwright
+python -m playwright install chromium</pre>
+    <h4>Recording + review flow</h4>
+    <ol>
+      <li>From a TestForTge checkout, start review-mode capture:
+          <pre style="background:#0f172a;color:#e2e8f0;padding:6px 10px;border-radius:4px;font-size:0.82em;">RECORDER_ENABLED=1 python -m tools.tfg_record \
+    --project &lt;PID&gt; --url &lt;START_URL&gt;</pre>
+          (Omit <code>--tc</code> to get review-mode. With
+          <code>--tc</code> the recording attaches to an existing TC
+          instead — that's the legacy single-TC flow.)</li>
+      <li>Chromium opens. Walk the scenario as a tester would.
+          Optionally use codegen's <strong>Assert visibility / text /
+          URL</strong> toolbar buttons to mark expectation steps.</li>
+      <li>Close the window. The CLI prints a <em>review link</em>
+          like <code>/test-cases/review-session/&lt;token&gt;</code>.</li>
+      <li>Open the link in TestForTge. The page shows N proposed
+          TCs (LLM split your session into logical flows). For each:
+          tick <em>Save</em>, optionally edit the summary, pick a
+          suite tag (<strong>Smoke / Regression / E2E</strong> —
+          the classifier pre-selects a sensible default).</li>
+      <li>Click <strong>Save selected</strong>. Saved TCs land in
+          your <code>/test-cases</code> page with a suite badge, and
+          you can re-run them via <strong>Test Execution</strong>
+          with the new <em>Run only [suite ▼]</em> knob.</li>
+    </ol>
+    <h4>Suite tags — what they mean</h4>
+    <ul>
+      <li><strong>Smoke</strong> — short flows, single-page nav,
+          quick health checks. Default for unclassified flows.</li>
+      <li><strong>Regression</strong> — business-critical flows
+          (auth, payment, checkout, billing, password reset,
+          MFA…). Auto-tagged when the URL or step touches these
+          keywords.</li>
+      <li><strong>E2E</strong> — multi-page user journeys with
+          form submission. Auto-tagged when the flow walks ≥2
+          distinct pages and includes a submit.</li>
+    </ul>
+    <h4>Filters + suite-run knob</h4>
+    <p>On <code>/test-cases</code>, the second filter row chips by
+       suite — composed with the existing Positive / Negative chips
+       so you can see "Smoke ∩ Positive" cards. On
+       <code>/test-execution</code>, the <em>Run only [suite ▼]</em>
+       knob next to the Run button ticks the right checkboxes for
+       you before submission.</p>
+    <h4>Review-link lifecycle</h4>
+    <ul>
+      <li>Link is single-use — once you click Save, a refresh
+          shows "expired or already used".</li>
+      <li>Drafts expire after 24 hours if you don't review them.</li>
+      <li>A draft is bound to the project you ran the CLI against —
+          switching to another project in the picker rejects the
+          link with "wrong project".</li>
+    </ul>
+
     <h3>QA Walkthrough mode</h3>
     <p>An orthogonal Run Mode at the top of the form. Choose
        <strong>QA walkthrough</strong> to skip the TC/CL picker and let
