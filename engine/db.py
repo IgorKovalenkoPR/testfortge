@@ -29,12 +29,12 @@ import os
 import re
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import (DateTime, Float, ForeignKey, Integer, String, Text,
-                        UniqueConstraint,
+from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, String,
+                        Text, UniqueConstraint,
                         create_engine, event, func, select, text, update)
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -230,6 +230,15 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
             "ALTER TABLE test_case ADD COLUMN automation_steps_json "
             "TEXT NOT NULL DEFAULT ''",
         ))
+    # PR-D suite classification — same NOT NULL DEFAULT '' pattern so
+    # pre-PR-D rows back-fill to the "unclassified" bucket and the
+    # /test-cases filter UI's "All" chip still shows them.
+    if "suite" not in existing:
+        additions.append((
+            "suite",
+            "ALTER TABLE test_case ADD COLUMN suite "
+            "VARCHAR(20) NOT NULL DEFAULT ''",
+        ))
     if not additions:
         return
 
@@ -330,6 +339,12 @@ class Project(Base):
                                   cascade="all, delete-orphan", passive_deletes=True)
     locators = relationship("Locator", back_populates="project",
                             cascade="all, delete-orphan", passive_deletes=True)
+    # PR-D — pending session-review drafts. Cascade so deleting the
+    # project also clears unreviewed recordings; passive_deletes lets
+    # the DB's ON DELETE CASCADE handle the rows without ORM load.
+    session_drafts = relationship("SessionDraft", back_populates="project",
+                                   cascade="all, delete-orphan",
+                                   passive_deletes=True)
 
 
 class TestCase(Base):
@@ -377,6 +392,15 @@ class TestCase(Base):
     automation_steps_json: Mapped[str] = mapped_column(Text, nullable=False,
                                                        default="",
                                                        server_default="")
+    # PR-D: test-suite classification — "" (unclassified, default),
+    # "Smoke", "Regression", or "E2E". Set by the suite_classifier when a
+    # TC is created via the session-review flow; manually editable from
+    # the TC editor later. Filtered on /test-cases (chip row) and on
+    # /test-execution ("Run only [suite ▼]" knob). Empty string is the
+    # default to keep every pre-PR-D TC visible under "All" — the
+    # filter UI explicitly handles the empty bucket.
+    suite: Mapped[str] = mapped_column(String(20), nullable=False,
+                                        default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -583,6 +607,49 @@ class Locator(Base):
     )
 
     project = relationship("Project", back_populates="locators")
+
+
+class SessionDraft(Base):
+    """PR-D — staging row for a recorded session before the operator
+    confirms which proposed TCs to keep.
+
+    Lifecycle:
+      1. ``tools/tfg_record.py`` finishes capture → segments steps via
+         :mod:`engine.session_segmenter` → classifies each segment via
+         :mod:`engine.suite_classifier` → INSERTs one row here with the
+         full ``ProposedTC`` list serialised as JSON.
+      2. CLI prints the review URL ``/test-cases/review-session/<token>``.
+      3. Operator opens the URL, picks Save / Skip + suite override per
+         segment, hits Save.
+      4. Review route consumes the draft (``consumed=True``) and creates
+         N ``TestCase`` rows in the active project.
+
+    Drafts auto-expire after 24 h via ``expires_at`` so an abandoned
+    recording never lingers indefinitely. The token is a high-entropy
+    string the operator can't forge — required because the URL is
+    publicly reachable until the session cookie's project_id matches.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 64 chars: secrets.token_urlsafe(32) → 43-char base64 + headroom.
+    token: Mapped[str] = mapped_column(String(64), nullable=False,
+                                        unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Serialised list[ProposedTC] dicts: [{"summary", "intent",
+    # "suggested_suite", "steps": [...AutomationStep dicts...]}].
+    proposed_tcs_json: Mapped[str] = mapped_column(Text, nullable=False,
+                                                    default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+    # Single-use — once an operator clicks Save, the draft is sealed so
+    # a refresh of the review page can't double-insert the TCs.
+    consumed: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                            default=False, server_default="0")
+
+    project = relationship("Project", back_populates="session_drafts")
 
 
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
@@ -875,9 +942,58 @@ def save_test_cases(project_id: str, test_cases: list) -> int:
                 # string so the runner decodes on demand without forcing
                 # a column type migration later.
                 automation_steps_json=d.get("automation_steps_json") or "",
+                # PR-D — test-suite classification carried over when a
+                # call-site already knows the suite (e.g. the session
+                # review POST creates pre-classified rows). Empty string
+                # for every other authoring path keeps the column happy
+                # under NOT NULL DEFAULT ''.
+                suite=d.get("suite", "") or "",
             ))
             written += 1
     return written
+
+
+def create_test_case(project_id: str, tc: dict) -> int | None:
+    """PR-D — append a single TC row without wiping the project's pack.
+
+    Different from :func:`save_test_cases` which is wipe-and-replace.
+    Used by the session-review POST so each Saved ProposedTC lands as a
+    new row instead of clobbering the existing pack. Returns the new
+    row's primary key, or None when project_id is empty / project does
+    not exist.
+    """
+    if not project_id:
+        return None
+    with session_scope() as sess:
+        proj = sess.get(Project, project_id)
+        if proj is None:
+            return None
+        row = TestCase(
+            project_id=project_id,
+            external_id=tc.get("id"),
+            section=tc.get("section"),
+            section_num=tc.get("section_num"),
+            summary=tc.get("summary"),
+            preconditions=tc.get("preconditions"),
+            test_steps=tc.get("test_steps"),
+            test_data=tc.get("test_data"),
+            expected_result=tc.get("expected_result"),
+            issues=tc.get("issues"),
+            comment=tc.get("comment"),
+            user_story_id=tc.get("user_story_id"),
+            category=tc.get("category"),
+            priority=tc.get("priority", "Medium"),
+            status=tc.get("status", "Unchecked"),
+            testing_type=tc.get("testing_type", "Functional"),
+            url_pattern=tc.get("url_pattern", "") or "",
+            trigger=tc.get("trigger", "manual") or "manual",
+            automation_steps_json=tc.get("automation_steps_json") or "",
+            suite=tc.get("suite", "") or "",
+        )
+        sess.add(row)
+        sess.flush()
+        proj.updated_at = _utcnow()
+        return row.id
 
 
 _TC_DATACLASS_FIELDS = (
@@ -890,6 +1006,8 @@ _TC_DATACLASS_FIELDS = (
     # PR-B: recorder output. Listed after walkthrough fields for the
     # same reason — additive columns extend the tuple, never reshuffle.
     "automation_steps_json",
+    # PR-D: suite classification. Same append-only pattern — kept last.
+    "suite",
 )
 
 
@@ -1704,6 +1822,145 @@ def list_site_profiles(project_id: str, limit: int = 50) -> list[dict]:
 
 # ── Aggregate counts (for /metrics) ────────────────────────────────
 
+# ── PR-D: SessionDraft (review-staging for recorded sessions) ─────
+
+
+# Time-to-live for a recorded session before the draft self-evicts.
+# 24 h matches the plan's spec — long enough for an operator to finish
+# coffee + review, short enough that an abandoned recording doesn't
+# linger forever. Bumped via the env var only for tests / dev demos.
+SESSION_DRAFT_TTL_HOURS = int(
+    os.environ.get("SESSION_DRAFT_TTL_HOURS", "24"))
+
+
+def create_session_draft(project_id: str, token: str,
+                           proposed_tcs: list[dict]) -> int | None:
+    """Persist a new draft for later review. Returns the row id.
+
+    ``token`` is the operator-facing handle that appears in the review
+    URL — caller mints it (``secrets.token_urlsafe(32)``) so it never
+    leaks through the DB random source. ``proposed_tcs`` is the list of
+    ``ProposedTC`` dicts that ``session_segmenter`` produced + the
+    ``suggested_suite`` field from ``suite_classifier``.
+
+    Returns ``None`` when the project doesn't exist — keeps the call
+    site free of try/except for the FK-violation case.
+    """
+    if not (project_id and token and isinstance(proposed_tcs, list)):
+        return None
+    with session_scope() as sess:
+        proj = sess.get(Project, project_id)
+        if proj is None:
+            return None
+        now = _utcnow()
+        ttl = timedelta(hours=max(1, SESSION_DRAFT_TTL_HOURS))
+        row = SessionDraft(
+            token=token,
+            project_id=project_id,
+            proposed_tcs_json=json.dumps(proposed_tcs, ensure_ascii=False),
+            created_at=now,
+            expires_at=now + ttl,
+            consumed=False,
+        )
+        sess.add(row)
+        sess.flush()
+        return row.id
+
+
+def get_session_draft(token: str) -> dict | None:
+    """Fetch a draft by its public token.
+
+    Returns ``None`` when:
+      * token is empty,
+      * row doesn't exist,
+      * row already consumed,
+      * row has expired (the cleanup pass purges them lazily on read).
+
+    The "already consumed" branch returns None to keep the review URL
+    single-use even if the operator refreshes the page after Save —
+    they get a fresh 404 instead of a confusing double-create.
+    """
+    if not token:
+        return None
+    with session_scope() as sess:
+        row = sess.execute(
+            select(SessionDraft).where(SessionDraft.token == token)
+        ).scalar_one_or_none()
+        if row is None or row.consumed:
+            return None
+        # SQLite drops tzinfo on round-trip; Postgres preserves it.
+        # Normalise both sides to naive UTC before comparing so the
+        # check works under either backend.
+        if row.expires_at:
+            now = _utcnow()
+            exp = row.expires_at
+            if exp.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            elif exp.tzinfo is not None and now.tzinfo is None:
+                exp = exp.replace(tzinfo=None)
+            if exp < now:
+                # Lazy cleanup so a never-reviewed draft doesn't
+                # survive past its TTL just because no one visited
+                # the URL.
+                sess.delete(row)
+                return None
+        try:
+            proposed = json.loads(row.proposed_tcs_json or "[]")
+        except (ValueError, TypeError):
+            proposed = []
+        return {
+            "id": row.id,
+            "token": row.token,
+            "project_id": row.project_id,
+            "proposed_tcs": proposed if isinstance(proposed, list) else [],
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+            "expires_at": row.expires_at.isoformat() if row.expires_at else "",
+        }
+
+
+def consume_session_draft(token: str) -> bool:
+    """Mark the draft as consumed so a refresh of the review URL can't
+    double-insert TCs. Returns False when the row is missing / already
+    consumed — caller surfaces that as 404."""
+    if not token:
+        return False
+    with session_scope() as sess:
+        row = sess.execute(
+            select(SessionDraft).where(SessionDraft.token == token)
+        ).scalar_one_or_none()
+        if row is None or row.consumed:
+            return False
+        row.consumed = True
+        return True
+
+
+def purge_expired_session_drafts() -> int:
+    """Sweeper for the snapshot worker (or a manual admin call). Deletes
+    every row past its ``expires_at``. Returns count removed."""
+    with session_scope() as sess:
+        # Load every row then filter in Python — keeps the tz-naive
+        # vs tz-aware comparison consistent across SQLite + Postgres
+        # without going through the engine-level inspection rabbit
+        # hole. The table is small (one row per active recording
+        # session, 24h TTL) so the over-fetch is benign.
+        rows = sess.execute(select(SessionDraft)).scalars().all()
+        removed = 0
+        now = _utcnow()
+        for r in rows:
+            exp = r.expires_at
+            if exp is None:
+                continue
+            this_now = now
+            if exp.tzinfo is None and this_now.tzinfo is not None:
+                this_now = this_now.replace(tzinfo=None)
+            elif exp.tzinfo is not None and this_now.tzinfo is None:
+                exp = exp.replace(tzinfo=None)
+            if exp < this_now:
+                sess.delete(r)
+                removed += 1
+        return removed
+
+
 def count_records() -> dict:
     """Cheap top-level counts — used by /metrics and admin checks."""
     with session_scope() as sess:
@@ -1726,12 +1983,12 @@ __all__ = [
     "Base", "Project", "TestCase", "ChecklistItem", "BugReport",
     "Estimation", "ExecutionRun", "ExecutionCaseResult",
     "DashboardMetricSnapshot", "TedgieSubmission", "SiteProfile",
-    "Locator",
+    "Locator", "SessionDraft",
     # projects
     "upsert_project", "update_project", "list_projects", "get_project",
     "delete_project", "move_artifacts",
     # test cases
-    "save_test_cases", "load_test_cases",
+    "save_test_cases", "load_test_cases", "create_test_case",
     # checklist
     "save_checklist", "load_checklist",
     # bugs
@@ -1751,6 +2008,10 @@ __all__ = [
     # PR-A locator registry
     "register_locator_candidates", "record_locator_success",
     "record_locator_failure", "get_locator", "list_locators",
+    # PR-D session-review drafts
+    "create_session_draft", "get_session_draft",
+    "consume_session_draft", "purge_expired_session_drafts",
+    "SESSION_DRAFT_TTL_HOURS",
     # aggregates
     "count_records",
 ]

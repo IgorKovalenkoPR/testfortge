@@ -372,6 +372,16 @@
         <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
         <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
     </div>
+    {# PR-D suite filter — sits separately from the category chips
+       above so the two axes compose (e.g. Positive ∩ Smoke). The
+       "All suites" reset is the default. #}
+    <div class="filter-bar" style="margin-top:8px;">
+        <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
+        <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
+        <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
+        <button class="filter-btn-suite" onclick="filterSuite('Regression', this)">Regression</button>
+        <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
+    </div>
 
     {% set ns = namespace(current_section='') %}
     {% for tc in test_cases %}
@@ -380,12 +390,19 @@
     <h2 class="section-header">{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
     {% endif %}
 
-    <div class="card tc-card" data-category="{{ tc.category }}" id="{{ tc.id }}">
+    <div class="card tc-card" data-category="{{ tc.category }}"
+         data-suite="{{ tc.suite or '' }}" id="{{ tc.id }}">
         <div class="card-header-row">
             <h3>{{ tc.id }}: {{ tc.summary }}</h3>
             <div class="badge-group">
                 <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc.category }}</span>
                 <span class="badge badge-{{ tc.priority|lower }}">{{ tc.priority }}</span>
+                {% if tc.suite %}
+                <span class="badge badge-suite-{{ tc.suite|lower }}"
+                      style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">
+                    {{ tc.suite }}
+                </span>
+                {% endif %}
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
                 {% if tc.trigger and tc.trigger != 'manual' %}
                 <span class="badge badge-outline" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3;"
@@ -649,12 +666,35 @@ function showTab(tabId) {
     document.getElementById(tabId).classList.add('active');
     event.target.classList.add('active');
 }
+// PR-D — category filter and suite filter compose multiplicatively
+// (a card is visible iff it passes both). Both filters keep their
+// current selection in module-level vars so we don't need to read it
+// out of the DOM on every change.
+var _activeCategory = 'all';
+var _activeSuite = 'all';
+
+function _applyFilters() {
+    document.querySelectorAll('.tc-card').forEach(card => {
+        var catOk = (_activeCategory === 'all'
+                      || card.dataset.category === _activeCategory);
+        var suiteOk = (_activeSuite === 'all'
+                        || card.dataset.suite === _activeSuite);
+        card.style.display = (catOk && suiteOk) ? '' : 'none';
+    });
+}
+
 function filterTC(category, btn) {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    document.querySelectorAll('.tc-card').forEach(card => {
-        card.style.display = (category === 'all' || card.dataset.category === category) ? '' : 'none';
-    });
+    _activeCategory = category;
+    _applyFilters();
+}
+
+function filterSuite(suite, btn) {
+    document.querySelectorAll('.filter-btn-suite').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _activeSuite = suite;
+    _applyFilters();
 }
 
 // PR-B Recorder: per-TC <details> block updates its CLI command as the

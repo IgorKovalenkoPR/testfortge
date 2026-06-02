@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}TestForTge — {{ t.get('review_session_title', 'Review recorded session') }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🎬 {{ t.get('review_session_title', 'Review recorded session') }}</h1>
+    <p class="subtitle">
+        {{ t.get('review_session_subtitle',
+            'The recorder split your session into the proposed flows below. Tick the ones to keep, optionally tweak the suite tag, then save — each becomes a new test case in the active project.') }}
+    </p>
+</div>
+
+{# Error states surface here. The route renders the same template with
+   draft=None + an error_message string for "not found" / "wrong
+   project" so the user always lands on a familiar layout. #}
+{% if error_message %}
+    <div class="card card-error" style="margin-top:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:14px 18px;border-radius:8px;">
+        <strong>{{ t.get('review_session_blocked', 'Review unavailable') }}</strong>
+        <p style="margin:6px 0 0 0;">{{ error_message }}</p>
+        <p style="margin-top:10px;">
+            <a href="{{ url_for('test_cases_page') }}" class="btn btn-secondary">&larr; {{ t.get('nav_test_cases', 'Test Cases') }}</a>
+        </p>
+    </div>
+{% elif draft %}
+    <div class="card" style="margin-top:14px;padding:14px 18px;background:#f0f9ff;border:1px solid #bae6fd;color:#075985;border-radius:8px;">
+        <strong>{{ draft.proposed_tcs|length }}</strong>
+        {{ t.get('review_session_proposed_n', 'proposed test case(s) for project') }}
+        <code style="background:#e0f2fe;padding:1px 6px;border-radius:3px;">{{ draft.project_id }}</code>.
+        {{ t.get('review_session_expires', 'Link expires') }}: <small>{{ draft.expires_at }}</small>
+    </div>
+
+    <form id="review-form" method="POST" action="{{ url_for('test_cases_review_session_save', token=token) }}"
+          style="margin-top:16px;">
+
+        {% for pc in draft.proposed_tcs %}
+        <div class="card" data-proposed-card="{{ loop.index0 }}"
+             style="margin-top:14px;padding:18px 20px;border:1px solid #e2e8f0;border-radius:8px;background:white;">
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+                    <input type="checkbox" name="save_{{ loop.index0 }}" value="on" checked
+                           style="width:18px;height:18px;cursor:pointer;">
+                    <span style="font-size:0.85em;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">
+                        {{ t.get('review_session_save_label', 'Save') }} #{{ loop.index }}
+                    </span>
+                </label>
+                <div style="flex:1;">
+                    <strong style="display:block;font-size:1.05em;margin-bottom:4px;">
+                        {{ pc.summary }}
+                    </strong>
+                    {% if pc.intent %}
+                    <p style="color:#475569;font-size:0.92em;margin:0 0 8px 0;">
+                        <em>{{ t.get('review_session_intent', 'Intent') }}:</em> {{ pc.intent }}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:12px;align-items:center;">
+                <label style="font-size:0.9em;color:#475569;">
+                    {{ t.get('review_session_summary_label', 'Summary (editable)') }}
+                </label>
+                <input type="text" name="summary_{{ loop.index0 }}" value="{{ pc.summary }}"
+                       style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;">
+
+                <label style="font-size:0.9em;color:#475569;">
+                    {{ t.get('review_session_suite_label', 'Suite tag') }}
+                </label>
+                <div>
+                    <select name="suite_{{ loop.index0 }}"
+                            style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;min-width:180px;">
+                        <option value="Smoke"      {% if pc.suggested_suite == 'Smoke' %}selected{% endif %}>Smoke</option>
+                        <option value="Regression" {% if pc.suggested_suite == 'Regression' %}selected{% endif %}>Regression</option>
+                        <option value="E2E"        {% if pc.suggested_suite == 'E2E' %}selected{% endif %}>E2E</option>
+                    </select>
+                    {% if pc.rationale %}
+                    <small style="display:block;color:#94a3b8;margin-top:4px;font-size:0.82em;">
+                        {{ t.get('review_session_classifier_hint', 'Classifier suggests') }}
+                        <strong>{{ pc.suggested_suite }}</strong>: {{ pc.rationale }}
+                    </small>
+                    {% endif %}
+                </div>
+            </div>
+
+            <details style="margin-top:12px;">
+                <summary style="cursor:pointer;color:#475569;font-size:0.88em;">
+                    ▸ {{ t.get('review_session_steps_preview', 'Preview captured steps') }} ({{ pc.steps|length }})
+                </summary>
+                <ol style="margin:8px 0 0 18px;color:#334155;font-size:0.88em;font-family:monospace;">
+                    {% for step in pc.steps %}
+                    <li style="margin:2px 0;">
+                        {% if step.kind == 'assertion' %}◇{% else %}▸{% endif %}
+                        <strong>{{ step.action }}</strong>
+                        {% if step.target %}<span style="color:#94a3b8;">{{ step.target|truncate(60) }}</span>{% endif %}
+                        {% if step.value %}<em style="color:#0369a1;">= "{{ step.value|truncate(40) }}"</em>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ol>
+            </details>
+        </div>
+        {% endfor %}
+
+        <div style="margin-top:18px;display:flex;gap:10px;align-items:center;">
+            <button type="submit" class="btn btn-primary" id="review-save-btn"
+                    style="font-size:1em;padding:10px 22px;">
+                💾 {{ t.get('review_session_save_all', 'Save selected') }}
+            </button>
+            <a href="{{ url_for('test_cases_page') }}" class="btn btn-secondary"
+               style="font-size:0.95em;padding:10px 18px;">
+                {{ t.get('review_session_cancel', 'Cancel — discard recording') }}
+            </a>
+            <span id="review-status" style="color:#94a3b8;font-size:0.88em;"></span>
+        </div>
+    </form>
+{% endif %}
+
+<script nonce="{{ csp_nonce }}">
+// Async-POST handler — keeps the operator on this page (with a status
+// message) instead of doing a full page-reload. Falls through to the
+// vanilla form submit if fetch is unavailable.
+(function reviewInit() {
+    var form = document.getElementById('review-form');
+    if (!form || !window.fetch) return;
+    var btn = document.getElementById('review-save-btn');
+    var status = document.getElementById('review-status');
+
+    function setStatus(text, color) {
+        if (status) {
+            status.textContent = text || '';
+            status.style.color = color || '#94a3b8';
+        }
+    }
+
+    form.addEventListener('submit', async function (ev) {
+        ev.preventDefault();
+        setStatus('Saving…');
+        if (btn) btn.disabled = true;
+
+        var selected = [];
+        var rows = form.querySelectorAll('[data-proposed-card]');
+        rows.forEach(function (row) {
+            var i = row.dataset.proposedCard;
+            var saveCb = row.querySelector('input[name="save_' + i + '"]');
+            if (!saveCb || !saveCb.checked) return;
+            var suite = row.querySelector('select[name="suite_' + i + '"]');
+            var summary = row.querySelector('input[name="summary_' + i + '"]');
+            selected.push({
+                idx: parseInt(i, 10),
+                suite: suite ? suite.value : '',
+                summary_override: summary ? summary.value : '',
+            });
+        });
+        if (!selected.length) {
+            setStatus('Select at least one TC to save.', '#dc2626');
+            if (btn) btn.disabled = false;
+            return;
+        }
+
+        try {
+            var resp = await fetch(form.action, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({selected: selected}),
+            });
+            var body = await resp.json().catch(function () { return {}; });
+            if (!resp.ok) {
+                setStatus('Error: ' + (body.error || resp.status), '#dc2626');
+                if (btn) btn.disabled = false;
+                return;
+            }
+            setStatus('Saved ' + body.created_count + ' TC(s). Redirecting…',
+                       '#16a34a');
+            window.location.assign(body.redirect_url || '/test-cases');
+        } catch (e) {
+            setStatus('Network error — falling back to plain submit.',
+                       '#dc2626');
+            if (btn) btn.disabled = false;
+            form.submit();
+        }
+    });
+})();
+</script>
+{% endblock %}

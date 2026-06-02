@@ -56,6 +56,100 @@ def _recorder_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
+# ── PR-D session-review helpers ────────────────────────────────
+
+
+def _parse_review_form(form, proposed_count: int) -> list[dict]:
+    """Translate the review template's <form> fields into the same
+    shape the JSON body uses, so the POST handler stays one code-path.
+
+    Per row the form ships ``save_<i>=on``, ``suite_<i>=Smoke|...``,
+    and ``summary_<i>=...``. Unchecked rows just omit ``save_<i>``.
+    """
+    out: list[dict] = []
+    for i in range(proposed_count):
+        if not form.get(f"save_{i}"):
+            continue
+        out.append({
+            "idx":              i,
+            "suite":            form.get(f"suite_{i}") or "",
+            "summary_override": form.get(f"summary_{i}") or "",
+        })
+    return out
+
+
+def _next_section_num(project_id: str) -> int:
+    """Find the next free integer section_num for a new TC. Recorded
+    flows land in a synthetic ``Section N: Recorded session`` group
+    so the operator sees them clustered in /test-cases."""
+    tcs = _db.load_test_cases(project_id)
+    used = []
+    for t in tcs:
+        try:
+            used.append(int(t.get("section_num") or 0))
+        except (TypeError, ValueError):
+            continue
+    return (max(used) + 1) if used else 1
+
+
+def _mint_external_id(project_id: str) -> str:
+    """Mint a fresh external_id for a recorded TC. Format
+    ``REC_<n>`` where n is one past the highest existing REC_ id —
+    keeps recorded TCs visually distinct from generated TCs (TC-001,
+    SC1_002, ...) without colliding with them."""
+    tcs = _db.load_test_cases(project_id)
+    highest = 0
+    for t in tcs:
+        ext = str(t.get("id") or "")
+        if ext.startswith("REC_"):
+            try:
+                highest = max(highest, int(ext[4:]))
+            except (TypeError, ValueError):
+                continue
+    return f"REC_{highest + 1:03d}"
+
+
+def _human_steps_preview(steps: list[dict]) -> str:
+    """Render the recorded steps as numbered text so the legacy
+    ``test_steps`` field reads naturally. The runner prefers the
+    JSON column anyway; this is purely for the editor view."""
+    lines: list[str] = []
+    for i, s in enumerate(steps or [], start=1):
+        action = (s.get("action") or "").lower()
+        target = (s.get("target") or "")[:80]
+        value = (s.get("value") or "")[:40]
+        kind = (s.get("kind") or "").lower()
+        atype = (s.get("assertion_type") or "").lower()
+        if kind == "assertion":
+            verb = {
+                "visible": "Assert visible",
+                "text":    "Assert text",
+                "url":     "Assert URL",
+            }.get(atype, "Assert")
+            tail = (
+                f" {target!r}" if target else "" if atype != "text"
+                else (f" {value!r}" if value else "")
+            )
+            lines.append(f"{i}. {verb}{tail}")
+            continue
+        verb_map = {
+            "goto":   "Navigate to",
+            "click":  "Click",
+            "fill":   "Fill",
+            "select": "Select",
+            "check":  "Check",
+            "press":  "Press key",
+        }
+        verb = verb_map.get(action, action.title() or "Step")
+        bits = [verb]
+        if target:
+            bits.append(target)
+        if value and action in ("fill", "select", "press"):
+            bits.append(f"= {value!r}")
+        lines.append(f"{i}. " + " ".join(bits))
+    return "\n".join(lines)
+
+
 # Stage 2 — site-aware path. Used when the input contains a URL: we
 # run crawl → recon → strategy → generate_from_strategy and persist
 # both Test Cases and Checklist for the active project. The caller
@@ -916,6 +1010,171 @@ def register(app: Flask) -> None:
 
         return jsonify({"ok": True, "tc_id": tc_id,
                         "changed": changed, "total_steps": len(steps)})
+
+    # ── PR-D: session-review route (CLI staging → operator confirm) ─
+
+    @app.route("/test-cases/review-session/<token>", methods=["GET"])
+    def test_cases_review_session(token: str):
+        """GET — render the review screen.
+
+        Looks the draft up by token, validates the active session's
+        project_id matches the draft's, and shows N proposed-TC cards
+        with summary, step preview, suggested-suite dropdown, and a
+        per-card Save / Skip checkbox.
+
+        Token failures (missing / expired / consumed) → 404 with a
+        friendly message rather than a generic error so the operator
+        understands they're past the 24-h window or already saved.
+        """
+        if not _recorder_enabled():
+            return render_template(
+                "review_session.html",
+                draft=None,
+                error_message=g.t.get(
+                    "review_session_pilot_off",
+                    "Recorder pilot is not enabled on this host "
+                    "(RECORDER_ENABLED=0).",
+                ),
+            ), 403
+        draft = _db.get_session_draft(token)
+        if draft is None:
+            return render_template(
+                "review_session.html",
+                draft=None,
+                error_message=g.t.get(
+                    "review_session_not_found",
+                    "This review link is expired, already used, or "
+                    "never existed. Recordings stage for 24 hours; "
+                    "re-run the CLI to capture again.",
+                ),
+            ), 404
+        # Project guard — the link is unguessable but we still scope
+        # the rendering to the currently-active project. An operator
+        # juggling multiple projects shouldn't accidentally land TCs
+        # into the wrong one because they followed a stale link.
+        active_pid = session.get("active_project_id") or session.get("project_id") or ""
+        if active_pid and active_pid != draft["project_id"]:
+            return render_template(
+                "review_session.html",
+                draft=None,
+                error_message=g.t.get(
+                    "review_session_wrong_project",
+                    "This review link belongs to a different project. "
+                    "Switch projects in the picker and reopen the link.",
+                ),
+            ), 403
+        return render_template("review_session.html",
+                                draft=draft,
+                                token=token,
+                                error_message=None)
+
+    @app.route("/test-cases/review-session/<token>", methods=["POST"])
+    def test_cases_review_session_save(token: str):
+        """POST — consume the draft and create the selected ProposedTCs
+        as real TestCase rows.
+
+        Body shape (form-encoded or JSON):
+          ``{"selected": [{"idx": 0, "suite": "Smoke",
+                            "summary_override": "..."}, ...]}``
+
+        Out-of-range / unknown-suite entries are rejected with 400 so
+        a tampered POST cannot smuggle weird values into the DB.
+        ``consume_session_draft`` then seals the row so a refresh of
+        the GET cannot double-insert.
+        """
+        if not _recorder_enabled():
+            return jsonify({"error": "recorder_disabled"}), 403
+
+        draft = _db.get_session_draft(token)
+        if draft is None:
+            return jsonify({"error": "draft_not_found"}), 404
+
+        active_pid = session.get("active_project_id") or session.get("project_id") or ""
+        if active_pid and active_pid != draft["project_id"]:
+            return jsonify({"error": "wrong_project"}), 403
+        pid = draft["project_id"]
+
+        # JSON body or form-encoded — accept both so the template can
+        # POST via plain <form> if JS is disabled.
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+            selected = payload.get("selected") or []
+        else:
+            selected = _parse_review_form(request.form,
+                                           len(draft["proposed_tcs"]))
+
+        if not isinstance(selected, list) or not selected:
+            return jsonify({"error": "no_selection"}), 400
+
+        from engine.suite_classifier import VALID_SUITES
+
+        # Build the TC rows in order. Wrong-index / wrong-suite → 400.
+        created_ids: list[int] = []
+        created_external_ids: list[str] = []
+        proposed = draft["proposed_tcs"]
+        next_section_num = _next_section_num(pid)
+        import json as _json
+        for entry in selected:
+            try:
+                idx = int(entry.get("idx"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "invalid_idx"}), 400
+            if idx < 0 or idx >= len(proposed):
+                return jsonify({"error": "idx_out_of_range",
+                                "idx": idx}), 400
+            suite = str(entry.get("suite") or "").strip()
+            if suite and suite not in VALID_SUITES:
+                return jsonify({"error": "invalid_suite",
+                                "suite": suite}), 400
+            pt = proposed[idx]
+            summary_override = (entry.get("summary_override") or "").strip()
+            summary = summary_override or pt.get("summary", "") or "Recorded flow"
+            steps_dicts = pt.get("steps") or []
+            new_ext = _mint_external_id(pid)
+            tc = {
+                "id": new_ext,
+                "section": f"Section {next_section_num}: Recorded session",
+                "section_num": next_section_num,
+                "summary": summary,
+                "preconditions": "",
+                "test_steps": _human_steps_preview(steps_dicts),
+                "test_data": "",
+                "expected_result": pt.get("intent", "") or "",
+                "issues": "",
+                "comment": "Generated from recorded session "
+                           f"(draft {token[:8]}…).",
+                "user_story_id": "",
+                "category": "Positive",
+                "priority": "Medium",
+                "status": "Unchecked",
+                "testing_type": "Functional",
+                "url_pattern": "",
+                "trigger": "manual",
+                "automation_steps_json": _json.dumps(
+                    steps_dicts, ensure_ascii=False),
+                "suite": suite or pt.get("suggested_suite", ""),
+            }
+            new_id = _db.create_test_case(pid, tc)
+            if new_id is None:
+                return jsonify({"error": "create_failed",
+                                "idx": idx}), 500
+            created_ids.append(new_id)
+            created_external_ids.append(new_ext)
+            next_section_num += 1
+
+        # Seal the draft so a refresh of the GET doesn't double-insert.
+        _db.consume_session_draft(token)
+
+        # Push the new pack into the session so /test-cases renders
+        # the additions immediately without a manual project switch.
+        session["test_cases_data"] = _db.load_test_cases(pid)
+
+        return jsonify({
+            "ok": True,
+            "created_count": len(created_ids),
+            "created_external_ids": created_external_ids,
+            "redirect_url": url_for("test_cases_page"),
+        })
 
     # ── Async generation pipeline ────────────────────────────────
     # The sync /test-cases and /checklist POST handlers can block for

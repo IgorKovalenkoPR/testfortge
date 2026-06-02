@@ -53,6 +53,11 @@ class TestCase:
     # payloads captured by ``tfg record``. Empty string preserves
     # today's heuristic-parse behaviour for every pre-Recorder TC.
     automation_steps_json: str = ""
+    # PR-D: suite tag for filtering on /test-cases and run-only-suite
+    # on /test-execution. One of "" (unclassified, default) | "Smoke"
+    # | "Regression" | "E2E". Empty string keeps every pre-PR-D TC
+    # visible under "All suites".
+    suite: str = ""
 
 
 @dataclass
