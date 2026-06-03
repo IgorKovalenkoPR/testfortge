@@ -196,3 +196,22 @@ you can flip a captured click into an assertion without re-recording.
 Edits POST to `/test-cases/<id>/automation-step-kind` and persist to
 `automation_steps_json` immediately. Pre-PR-C recordings deserialise as
 plain action steps — backward-compatible.
+
+### Web Recorder browser extension (PR-E)
+
+The full no-CLI flow: click **🎬 Start session recording** on
+`/test-cases`, walk through the SUT in the new tab, click **Stop** on
+the floating overlay, confirm the auto-segmented TCs in the review
+screen. See [extension/README.md](extension/README.md) for the install
+walkthrough (Developer mode → Load unpacked).
+
+Backend endpoints the extension uses:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/recorder-session/start` | Mint a one-shot token bound to the active project |
+| `POST /api/recorder-session/finish` | Receive captured steps, run PR-D segmenter + classifier, return `review_url` |
+
+CORS is `*` because the extension's content-script runs in the SUT's
+origin, which we can't pre-list. Token auth replaces origin-checking.
+Both endpoints gated on `RECORDER_ENABLED`.

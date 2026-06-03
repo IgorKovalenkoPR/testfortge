@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TestForTge Recorder</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      width: 280px;
+      margin: 0;
+      padding: 14px;
+      background: #fff;
+      color: #1e293b;
+    }
+    h1 { font-size: 1.05em; margin: 0 0 8px 0; }
+    p { font-size: 0.85em; color: #475569; margin: 4px 0; }
+    .status-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    .status-active { background: #fef2f2; border-color: #fca5a5; }
+    .status-active strong { color: #dc2626; }
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 0.9em;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid #cbd5e1;
+      background: #f1f5f9;
+      color: #1e293b;
+    }
+    button.primary {
+      background: #f97316;
+      color: #fff;
+      border-color: #ea580c;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    code {
+      background: #f1f5f9;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.82em;
+    }
+    .step-count { color: #0369a1; font-weight: 600; }
+    .hint { font-size: 0.78em; color: #94a3b8; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>🎬 TestForTge Recorder</h1>
+
+  <div id="status-card" class="status-card">
+    <p id="status-line">Loading…</p>
+  </div>
+
+  <button id="stop-btn" class="primary" disabled>Stop recording</button>
+  <p class="hint">
+    To start a new recording, click <strong>Start session recording</strong>
+    on the <code>/test-cases</code> page in TestForTge.
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

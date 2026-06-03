@@ -415,6 +415,54 @@ python -m playwright install chromium</pre>
           you can re-run them via <strong>Test Execution</strong>
           with the new <em>Run only [suite ▼]</em> knob.</li>
     </ol>
+    <h4>Web Recorder browser extension (no terminal needed)</h4>
+    <p>For testers who don't want to run a CLI, the
+       <strong>TestForTge Recorder</strong> Chrome extension provides
+       the same review-mode flow entirely in the browser. Pilot
+       release — install via Developer mode unpacked.</p>
+    <ol>
+      <li><strong>Install the extension once:</strong> open
+          <code>chrome://extensions</code> → toggle <em>Developer mode</em>
+          on (top-right) → click <em>Load unpacked</em> → select the
+          <code>extension/</code> folder from your TestForTge checkout.
+          A 🎬 icon appears in the toolbar.</li>
+      <li><strong>On <code>/test-cases</code></strong> (with
+          <code>RECORDER_ENABLED=1</code> on the host) click
+          <strong>🎬 Start session recording</strong> above the TC
+          list. Enter a Start URL → click <em>Launch</em>.</li>
+      <li>A new browser tab opens at the URL with a
+          <strong>floating REC overlay</strong> in the top-right.
+          Walk through the scenario — every click, fill, change, and
+          SPA navigation is captured. Overlay shows live step count
+          and timer.</li>
+      <li>Click <strong>Stop</strong> on the overlay. The extension
+          uploads captured steps and opens the review tab in the same
+          browser. From there, the flow is identical to the CLI
+          path: tick <em>Save</em>, pick suite tag, click
+          <em>Save selected</em>.</li>
+    </ol>
+    <p>Each captured click carries up to 5 ranked locator alternates
+       (<code>data-testid</code> > <code>id</code> > <code>role</code>
+       > <code>label</code> > <code>placeholder</code> > ...) — same
+       priority ladder the runner uses at replay time, so PR-A's
+       multi-locator fallback works for extension-captured flows
+       byte-identically to CLI-captured ones.</p>
+    <p><strong>What's not yet captured:</strong> Shadow DOM internals,
+       iframe-nested events, drag-and-drop sequences, file contents.
+       The host element is captured but internals skipped — pilot
+       trade-offs, not bugs.</p>
+
+    <h4>CLI vs extension — when to use which</h4>
+    <ul>
+      <li><strong>Use the extension</strong> for routine recordings
+          done by manual QA. No install on the tester's machine
+          beyond the extension itself, no terminal, no Python.</li>
+      <li><strong>Use the CLI</strong> (<code>python -m tools.tfg_record</code>)
+          for CI/CD automation, debugging the recorder pipeline, or
+          when you need to re-record from a saved codegen capture
+          file (<code>--from-file</code>).</li>
+    </ul>
+
     <h4>Suite tags — what they mean</h4>
     <ul>
       <li><strong>Smoke</strong> — short flows, single-page nav,

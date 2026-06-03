@@ -383,6 +383,84 @@
         <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
     </div>
 
+    {# PR-E browser-extension trigger. Visible only when RECORDER_ENABLED
+       so the surface stays invisible on hosts that aren't in the pilot.
+       Click opens a modal with Start URL input + install instructions
+       — the JS handler hits /api/recorder-session/start, then opens the
+       SUT in a new tab with the token in the URL fragment so the
+       extension's content-script picks it up automatically. #}
+    {% if recorder_enabled %}
+    <div style="margin-top:14px;padding:14px;border:1px dashed #d97706;
+                 background:#fff7ed;border-radius:6px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <button type="button" id="ext-recorder-start"
+                    class="btn btn-primary"
+                    style="font-size:0.95em;padding:10px 18px;
+                           display:flex;align-items:center;gap:6px;">
+                🎬 {{ t.get('ext_recorder_start',
+                            'Start session recording') }}
+            </button>
+            <span style="color:#7c2d12;font-size:0.88em;">
+                {{ t.get('ext_recorder_hint',
+                    'Walk through your scenario in any tab — Stop and the captured TCs land in a review screen.') }}
+            </span>
+            <a href="#" id="ext-recorder-install-link"
+               style="font-size:0.85em;margin-left:auto;color:#0369a1;">
+                {{ t.get('ext_recorder_install',
+                    'Install the extension') }} ↗
+            </a>
+        </div>
+
+        {# Hidden modal — shown by the JS handler when the operator
+           clicks Start. Contains a Start URL field + the launch button
+           that hits /api/recorder-session/start. #}
+        <div id="ext-recorder-modal" hidden
+             role="dialog" aria-modal="true"
+             style="position:fixed;inset:0;background:rgba(15,23,42,0.55);
+                    z-index:1000;display:flex;align-items:flex-start;
+                    justify-content:center;padding:8vh 16px;">
+            <div style="background:white;max-width:560px;width:100%;
+                         border-radius:10px;padding:22px 26px;
+                         box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 12px 0;">
+                    🎬 {{ t.get('ext_recorder_modal_title',
+                                'Start session recording') }}
+                </h3>
+                <p style="font-size:0.88em;color:#475569;
+                          margin:0 0 12px 0;">
+                    {{ t.get('ext_recorder_modal_hint',
+                        'The TestForTge recorder extension must be installed in this Chrome profile. The recorder will open the URL below in a new tab — walk the scenario, then click Stop on the floating overlay to land the captured steps in a review screen.') }}
+                </p>
+                <label for="ext-recorder-url"
+                       style="font-size:0.85em;color:#475569;">
+                    {{ t.get('ext_recorder_url_label', 'Start URL') }}
+                </label>
+                <input type="url" id="ext-recorder-url"
+                       placeholder="https://app.example.com/login"
+                       style="width:100%;font-family:monospace;
+                              font-size:0.9em;margin:4px 0 12px 0;
+                              padding:8px 10px;
+                              border:1px solid #cbd5e1;border-radius:4px;">
+                <p id="ext-recorder-status"
+                   style="font-size:0.82em;color:#94a3b8;
+                          min-height:1.2em;margin:0 0 12px 0;"></p>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button type="button" id="ext-recorder-cancel"
+                            class="btn btn-secondary"
+                            style="font-size:0.9em;padding:8px 18px;">
+                        {{ t.get('ext_recorder_cancel', 'Cancel') }}
+                    </button>
+                    <button type="button" id="ext-recorder-launch"
+                            class="btn btn-primary"
+                            style="font-size:0.9em;padding:8px 18px;">
+                        {{ t.get('ext_recorder_launch', 'Launch') }} →
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% set ns = namespace(current_section='') %}
     {% for tc in test_cases %}
     {% if tc.section != ns.current_section %}
@@ -794,6 +872,99 @@ function filterSuite(suite, btn) {
                 setStatus(`network error: ${e}`, '#dc2626');
             }
         });
+    });
+})();
+
+// PR-E browser-extension trigger. Hits /api/recorder-session/start to
+// mint a token, then opens the SUT in a new tab with the token in the
+// URL fragment so the extension's content-script picks it up. No-op
+// when the trigger button is absent (RECORDER_ENABLED=0).
+(function extRecorderInit() {
+    const startBtn = document.getElementById('ext-recorder-start');
+    const modal = document.getElementById('ext-recorder-modal');
+    const urlInput = document.getElementById('ext-recorder-url');
+    const launchBtn = document.getElementById('ext-recorder-launch');
+    const cancelBtn = document.getElementById('ext-recorder-cancel');
+    const statusEl = document.getElementById('ext-recorder-status');
+    const installLink = document.getElementById('ext-recorder-install-link');
+    if (!startBtn || !modal || !urlInput || !launchBtn) return;
+
+    const setStatus = (txt, colour) => {
+        if (!statusEl) return;
+        statusEl.textContent = txt;
+        statusEl.style.color = colour || '#94a3b8';
+    };
+
+    startBtn.addEventListener('click', () => {
+        modal.hidden = false;
+        setStatus('');
+        urlInput.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+        modal.hidden = true;
+        setStatus('');
+    });
+    modal.addEventListener('click', (e) => {
+        // Click on the dim background closes the modal; click on the
+        // card itself doesn't bubble up here.
+        if (e.target === modal) {
+            modal.hidden = true;
+            setStatus('');
+        }
+    });
+    if (installLink) {
+        installLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            // Anchor to the README section in the Guide; same page,
+            // hash-jump so the operator can read install steps without
+            // losing context.
+            window.open('/guide#test-execution', '_blank');
+        });
+    }
+
+    launchBtn.addEventListener('click', async () => {
+        const startUrl = (urlInput.value || '').trim();
+        if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
+            setStatus('Enter an http:// or https:// URL.', '#dc2626');
+            return;
+        }
+        launchBtn.disabled = true;
+        setStatus('Requesting recording token…');
+        try {
+            const resp = await fetch('/api/recorder-session/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({}),
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                setStatus(`error: ${body.error || resp.status}`, '#dc2626');
+                launchBtn.disabled = false;
+                return;
+            }
+            const token = body.token;
+            const finishUrl = body.finish_url;
+            // URL fragment is the handoff channel — extension's
+            // content-script reads location.hash on page load.
+            // We separately POST a hint payload to the extension via
+            // a window.postMessage when the SUT tab opens, but the
+            // hash is the primary signal so it survives redirects.
+            const sep = startUrl.includes('#') ? '&' : '#';
+            const handoffUrl = startUrl + sep +
+                `testfortge-recorder-token=${encodeURIComponent(token)}` +
+                `&testfortge-finish-url=${encodeURIComponent(finishUrl)}`;
+            setStatus('✓ Opening recording tab…', '#16a34a');
+            window.open(handoffUrl, '_blank');
+            setTimeout(() => {
+                modal.hidden = true;
+                launchBtn.disabled = false;
+                setStatus('');
+            }, 1000);
+        } catch (e) {
+            setStatus(`network error: ${e}`, '#dc2626');
+            launchBtn.disabled = false;
+        }
     });
 })();
 </script>
