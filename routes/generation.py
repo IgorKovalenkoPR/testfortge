@@ -1210,6 +1210,25 @@ def register(app: Flask) -> None:
             "proposed_tc_count": len(proposed),
         })
 
+    # Both /api/recorder-session/{start,finish} carry their own auth
+    # (the per-session token from /start; the active project_id binding
+    # in session). The global CSRFProtect gate can't apply because:
+    #   * /finish is called from the extension's service worker from
+    #     the SUT's origin — there's no TestForTge session cookie or
+    #     csrf_token in that context.
+    #   * /start is called from the modal on /test-cases via fetch(),
+    #     but for consistency with /finish we exempt both rather than
+    #     thread a CSRF header through the modal-JS handler.
+    # Same pattern routes/debug.py uses for /debug/walkthrough.
+    _ext = app.extensions.get("csrf") if hasattr(app, "extensions") else None
+    if _ext is not None:
+        for _fn in (api_recorder_session_start,
+                     api_recorder_session_finish):
+            try:
+                _ext.exempt(_fn)
+            except Exception as exc:  # pragma: no cover — defensive
+                _log.debug("recorder-session csrf.exempt skipped: %s", exc)
+
     # ── PR-D: session-review route (CLI staging → operator confirm) ─
 
     @app.route("/test-cases/review-session/<token>", methods=["GET"])

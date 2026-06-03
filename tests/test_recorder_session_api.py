@@ -254,6 +254,48 @@ class TestUiTrigger:
         assert 'id="ext-recorder-modal"' in body
         assert "/api/recorder-session/start" in body
 
+    def test_csrf_protection_does_not_block_endpoints(self, app, ext_project):
+        """Regression for PR-E hotfix: production has CSRFProtect on
+        every POST, but recorder endpoints must be exempt because:
+        * /finish is called cross-origin from the extension (no CSRF
+          token possible);
+        * /start is called via fetch() from the modal — keeping both
+          exempt is consistent with /debug/walkthrough's pattern.
+
+        Test re-enables CSRF (conftest disables it for the rest of the
+        suite) and verifies the POSTs still succeed with no token."""
+        app.config["WTF_CSRF_ENABLED"] = True
+        try:
+            with app.test_client() as csrf_client:
+                with csrf_client.session_transaction() as s:
+                    s["project_id"] = ext_project
+                    s["active_project_id"] = ext_project
+                    s["_session_active_since"] = 9_999_999_999
+                with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+                    # /start — must NOT 400 with CSRF error.
+                    resp = csrf_client.post(
+                        "/api/recorder-session/start",
+                        json={"project_id": ext_project},
+                    )
+                assert resp.status_code == 200, (
+                    f"CSRF blocked /start: {resp.get_data(as_text=True)}")
+                token = resp.get_json()["token"]
+
+                # /finish — same expectation.
+                from engine import session_segmenter as _seg
+                with mock.patch.object(_seg, "_call_llm", return_value=[]):
+                    with mock.patch.dict(os.environ,
+                                          {"RECORDER_ENABLED": "1"}):
+                        resp = csrf_client.post(
+                            "/api/recorder-session/finish",
+                            json={"token": token,
+                                   "steps": [_make_step()]},
+                        )
+                assert resp.status_code == 200, (
+                    f"CSRF blocked /finish: {resp.get_data(as_text=True)}")
+        finally:
+            app.config["WTF_CSRF_ENABLED"] = False
+
     def test_button_hidden_when_flag_off(self, client, ext_project):
         db.save_test_cases(ext_project, [{
             "id": "TC-001", "section": "Login", "section_num": 1,
