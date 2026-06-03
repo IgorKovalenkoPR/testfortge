@@ -56,6 +56,67 @@ def _recorder_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
+# ── PR-E browser-extension helpers ─────────────────────────────
+#
+# In-memory ``token → {project_id, created_at}`` mapping for active
+# extension recordings. Lives only in this worker process; a restart
+# loses every in-flight session, and the extension surfaces that as a
+# "session expired — restart from TestForTge" toast. Persisting to DB
+# would require a second migration and bring no real recovery benefit
+# (recording was abandoned anyway), so we deliberately keep it RAM-only.
+_RECORDER_SESSIONS: dict[str, dict] = {}
+
+import time as _time
+
+
+def _purge_oldest_recorder_session() -> None:
+    """Drop the single oldest entry — bounded LRU. Called only when
+    the dict exceeds the soft cap (1000 entries), so a misbehaving
+    integration can't accumulate sessions unboundedly."""
+    if not _RECORDER_SESSIONS:
+        return
+    oldest_token = min(
+        _RECORDER_SESSIONS,
+        key=lambda t: _RECORDER_SESSIONS[t].get("created_at", 0),
+    )
+    _RECORDER_SESSIONS.pop(oldest_token, None)
+
+
+def _recorder_cors_headers() -> dict:
+    """CORS headers for the recorder API endpoints.
+
+    The extension's content-script runs in the SUT's origin (whatever
+    site the operator is recording against). Since we can't pre-list
+    every SUT, we accept ``*`` — the endpoints carry their own auth
+    (the per-session token from /start) so a public origin can still
+    only act on a project it was authorised against.
+    """
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "600",
+    }
+
+
+def _recorder_cors_preflight():
+    """Empty 204 response for the CORS preflight OPTIONS request."""
+    from flask import make_response
+    resp = make_response("", 204)
+    for k, v in _recorder_cors_headers().items():
+        resp.headers[k] = v
+    return resp
+
+
+def _json_with_cors(body: dict, status: int = 200):
+    """``jsonify`` + recorder CORS headers in one call."""
+    resp = jsonify(body)
+    resp.status_code = status
+    for k, v in _recorder_cors_headers().items():
+        resp.headers[k] = v
+    return resp
+
+
 # ── PR-D session-review helpers ────────────────────────────────
 
 
@@ -1010,6 +1071,144 @@ def register(app: Flask) -> None:
 
         return jsonify({"ok": True, "tc_id": tc_id,
                         "changed": changed, "total_steps": len(steps)})
+
+    # ── PR-E: browser-extension recorder endpoints ─────────────────
+    #
+    # The extension posts here from the SUT's tab (cross-origin). Both
+    # routes are JSON-only, CORS-enabled for any origin (the extension's
+    # content-script runs in the SUT's origin which we cannot predict),
+    # and gated on RECORDER_ENABLED so the surface stays invisible when
+    # the pilot flag is off. The /start endpoint mints a one-shot token
+    # bound to the active project; /finish accepts the captured step
+    # list and reuses the PR-D segmenter → classifier → SessionDraft
+    # pipeline.
+
+    @app.route("/api/recorder-session/start", methods=["POST", "OPTIONS"])
+    def api_recorder_session_start():
+        """Mint a fresh recording token for the active project.
+
+        Called from the /test-cases trigger button. The token returned
+        is appended to the SUT URL as ``#testfortge-recorder-token=<t>``
+        so the extension's content-script can pick it up on the next
+        page load without needing the operator to copy-paste anything.
+
+        Body (JSON, optional):
+          ``{"project_id": "<pid>"}`` — overrides the session's active
+          project. Falls back to ``session['active_project_id']`` when
+          omitted (the usual path from the TestForTge UI button).
+
+        Returns ``{token, project_id, finish_url, review_url_template}``
+        on success. 403 when RECORDER_ENABLED is off, 400 when neither
+        the body nor session carries a project_id.
+        """
+        if request.method == "OPTIONS":
+            return _recorder_cors_preflight()
+        if not _recorder_enabled():
+            return _json_with_cors({"error": "recorder_disabled"}, 403)
+        payload = request.get_json(silent=True) or {}
+        pid = (payload.get("project_id")
+                or session.get("active_project_id")
+                or session.get("project_id") or "").strip()
+        if not pid:
+            return _json_with_cors({"error": "no_active_project"}, 400)
+        # Token is the same shape as PR-D's draft tokens — secrets-grade
+        # URL-safe base64 so the value is opaque and can't be guessed.
+        import secrets as _secrets
+        token = _secrets.token_urlsafe(32)
+        # In-memory mapping token → (pid, created_at). The extension's
+        # /finish call resolves the project off this. We deliberately
+        # do NOT persist to DB — these tokens are short-lived (max
+        # session lifetime), don't survive a worker restart, and a
+        # restart-orphaned recording just expires gracefully (extension
+        # gets 404 on finish and the operator re-starts). Persisting
+        # would require a second migration and add no real safety.
+        _RECORDER_SESSIONS[token] = {
+            "project_id": pid,
+            "created_at": _time.time(),
+        }
+        # Cap the mapping at 1000 entries — far above any realistic
+        # concurrent-session count, but keeps a runaway integration
+        # from filling worker memory indefinitely.
+        if len(_RECORDER_SESSIONS) > 1000:
+            _purge_oldest_recorder_session()
+        base = request.host_url.rstrip("/")
+        return _json_with_cors({
+            "token": token,
+            "project_id": pid,
+            "finish_url": f"{base}/api/recorder-session/finish",
+            "review_url_template": f"{base}/test-cases/review-session/{{token}}",
+        })
+
+    @app.route("/api/recorder-session/finish", methods=["POST", "OPTIONS"])
+    def api_recorder_session_finish():
+        """Accept captured steps from the extension, stage as a draft.
+
+        Body (JSON, required):
+          ``{"token": "<from /start>", "steps": [<AutomationStep dict>, ...]}``
+
+        Pipeline mirrors PR-D's CLI ``_finish_review_mode``:
+
+          1. Resolve token → project_id (404 if unknown / expired).
+          2. Decode steps via ``AutomationStep(**dict)`` defensively.
+          3. ``session_segmenter.segment()`` → list[ProposedTC].
+          4. ``db.create_session_draft()`` writes the draft row.
+          5. Return ``{review_url}`` for the extension to open.
+
+        We consume the token (delete from the in-memory map) regardless
+        of segmenter outcome so a stuck recording can't be replayed by
+        a hostile or buggy client.
+        """
+        if request.method == "OPTIONS":
+            return _recorder_cors_preflight()
+        if not _recorder_enabled():
+            return _json_with_cors({"error": "recorder_disabled"}, 403)
+        payload = request.get_json(silent=True) or {}
+        token = (payload.get("token") or "").strip()
+        steps_raw = payload.get("steps") or []
+        if not token or not isinstance(steps_raw, list):
+            return _json_with_cors({"error": "bad_request"}, 400)
+        meta = _RECORDER_SESSIONS.pop(token, None)
+        if not meta:
+            return _json_with_cors({"error": "unknown_token"}, 404)
+        pid = meta["project_id"]
+
+        # Decode steps. Each item is a dict with the AutomationStep
+        # field shape — be defensive against the extension sending
+        # partial / extra keys. _decode_recorded_steps already handles
+        # this exact pattern for PR-D's review-flow.
+        from engine.automation_qa import _decode_recorded_steps
+        import json as _json
+        steps = _decode_recorded_steps(_json.dumps(steps_raw))
+        if not steps:
+            return _json_with_cors({
+                "error": "no_valid_steps",
+                "received": len(steps_raw),
+            }, 400)
+
+        # Reuse PR-D pipeline verbatim.
+        from engine.session_segmenter import segment
+        proposed = [p.to_dict() for p in segment(steps)]
+        if not proposed:
+            return _json_with_cors({
+                "error": "segmenter_returned_empty",
+            }, 500)
+
+        # Use the same draft-token shape PR-D uses so the review URL
+        # is indistinguishable from a CLI-staged session. Generated
+        # fresh per finish — the recorder token from /start is never
+        # written to DB.
+        import secrets as _secrets
+        draft_token = _secrets.token_urlsafe(32)
+        row_id = _db.create_session_draft(pid, draft_token, proposed)
+        if row_id is None:
+            return _json_with_cors({"error": "draft_persist_failed"}, 500)
+
+        base = request.host_url.rstrip("/")
+        return _json_with_cors({
+            "ok": True,
+            "review_url": f"{base}/test-cases/review-session/{draft_token}",
+            "proposed_tc_count": len(proposed),
+        })
 
     # ── PR-D: session-review route (CLI staging → operator confirm) ─
 
