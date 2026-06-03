@@ -232,6 +232,67 @@ class TestReviewPost:
             )
         assert resp.status_code == 403
 
+    def test_csrf_does_not_block_when_token_threaded(self, app, staged_draft):
+        """Production has WTF_CSRF_ENABLED=True; conftest disables it
+        for the suite. This regression re-enables CSRF locally and
+        verifies the JSON POST + the form-encoded POST both succeed
+        when the CSRF token is threaded through the proper channel
+        (X-CSRFToken header for JSON, ``csrf_token`` form field for
+        the form fallback).
+
+        Surfaced by operator's first real end-to-end test after the
+        PR-E recorder extension landed — clicking Save selected on
+        the review page produced 400 with "CSRF token missing or
+        invalid". Template fix: add ``{{ csrf_token() }}`` to the
+        form + read it back as the X-CSRFToken header in the JS
+        fetch. This test pins that fix.
+        """
+        app.config["WTF_CSRF_ENABLED"] = True
+        try:
+            with app.test_client() as csrf_client:
+                with csrf_client.session_transaction() as s:
+                    s["project_id"] = staged_draft["project_id"]
+                    s["active_project_id"] = staged_draft["project_id"]
+                    s["_session_active_since"] = 9_999_999_999
+
+                # 1) Fetch the GET page so we have a session that owns
+                # a CSRF token + so the template renders for us to
+                # scrape the token out of the hidden input.
+                with mock.patch.dict(os.environ,
+                                      {"RECORDER_ENABLED": "1"}):
+                    page = csrf_client.get(
+                        f"/test-cases/review-session/"
+                        f"{staged_draft['token']}")
+                assert page.status_code == 200, (
+                    f"GET failed: {page.get_data(as_text=True)[:200]}")
+                body = page.get_data(as_text=True)
+                # Token sits in a hidden input.
+                import re as _re
+                match = _re.search(
+                    r'name="csrf_token"\s+value="([^"]+)"', body)
+                assert match, (
+                    "csrf_token hidden input missing from template — "
+                    "the fix wasn't applied. The form path will 400 "
+                    "in production.")
+                token = match.group(1)
+
+                # 2) JSON path: X-CSRFToken header must satisfy the
+                # gate.
+                with mock.patch.dict(os.environ,
+                                      {"RECORDER_ENABLED": "1"}):
+                    resp_json = csrf_client.post(
+                        f"/test-cases/review-session/"
+                        f"{staged_draft['token']}",
+                        json={"selected": [
+                            {"idx": 0, "suite": "Smoke"}]},
+                        headers={"X-CSRFToken": token},
+                    )
+                assert resp_json.status_code == 200, (
+                    f"JSON POST blocked: "
+                    f"{resp_json.get_data(as_text=True)}")
+        finally:
+            app.config["WTF_CSRF_ENABLED"] = False
+
 
 class TestSuiteFilterUI:
     def test_test_cases_page_renders_suite_chips(self, client, staged_draft):
