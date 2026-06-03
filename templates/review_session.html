@@ -31,6 +31,11 @@
 
     <form id="review-form" method="POST" action="{{ url_for('test_cases_review_session_save', token=token) }}"
           style="margin-top:16px;">
+        {# CSRF token for the form-encoded fallback. The JS fetch in
+           the script block at the bottom also passes this value as
+           the X-CSRFToken header so the JSON path doesn't bypass the
+           gate. See feedback_csrf_exempt_new_endpoints. #}
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         {% for pc in draft.proposed_tcs %}
         <div class="card" data-proposed-card="{{ loop.index0 }}"
@@ -156,9 +161,18 @@
         }
 
         try {
+            // Pull CSRF token from the hidden form input so this fetch
+            // doesn't bypass the gate the form path uses. Same value
+            // Flask-WTF expects under either ``csrf_token`` form field
+            // OR the ``X-CSRFToken`` header — we send both for safety.
+            var csrfInput = form.querySelector('input[name="csrf_token"]');
+            var csrfToken = csrfInput ? csrfInput.value : '';
             var resp = await fetch(form.action, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
                 credentials: 'same-origin',
                 body: JSON.stringify({selected: selected}),
             });
