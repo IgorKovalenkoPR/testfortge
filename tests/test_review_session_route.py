@@ -76,6 +76,82 @@ def staged_draft(client):
     db.delete_project(pid)
 
 
+class TestListPendingDrafts:
+    """PR-E hotfix — `list_pending_session_drafts` feeds the "Pending
+    recording sessions" banner so a draft whose review tab got closed is
+    still reachable until its TTL lapses."""
+
+    def test_lists_unconsumed_draft(self, client, staged_draft):
+        pid = staged_draft["project_id"]
+        pending = db.list_pending_session_drafts(pid)
+        assert len(pending) == 1
+        item = pending[0]
+        assert item["token"] == staged_draft["token"]
+        assert item["tc_count"] == 2
+        assert item["created_at"]
+
+    def test_excludes_consumed_draft(self, client, staged_draft):
+        pid = staged_draft["project_id"]
+        assert db.consume_session_draft(staged_draft["token"]) is True
+        assert db.list_pending_session_drafts(pid) == []
+
+    def test_excludes_expired_draft(self, client, staged_draft):
+        # create_session_draft floors the TTL at 1 h, so backdate the
+        # row's expires_at directly to simulate a lapsed draft, then
+        # confirm the lazy-purge drops it from the pending list.
+        pid = staged_draft["project_id"]
+        db.create_session_draft(pid, "tok_expired_001", [
+            {"summary": "x", "intent": "", "suggested_suite": "Smoke",
+             "steps": []},
+        ])
+        from datetime import datetime, timedelta, timezone
+        with db.session_scope() as sess:
+            from sqlalchemy import select
+            row = sess.execute(
+                select(db.SessionDraft).where(
+                    db.SessionDraft.token == "tok_expired_001")
+            ).scalar_one()
+            row.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        pending = db.list_pending_session_drafts(pid)
+        tokens = {p["token"] for p in pending}
+        assert "tok_expired_001" not in tokens
+
+    def test_scoped_to_project(self, client, staged_draft):
+        # A draft under a different project must not leak into this
+        # project's pending list.
+        other = db.upsert_project(name=f"other-{os.urandom(4).hex()}",
+                                  base_url="https://other.test")
+        try:
+            db.create_session_draft(other, "tok_other_001", [
+                {"summary": "y", "intent": "", "suggested_suite": "Smoke",
+                 "steps": []},
+            ])
+            pending = db.list_pending_session_drafts(staged_draft["project_id"])
+            assert all(p["token"] != "tok_other_001" for p in pending)
+        finally:
+            db.delete_project(other)
+
+
+class TestPendingBanner:
+    """The Test Cases page surfaces a banner + review link for each
+    pending draft when RECORDER_ENABLED is on."""
+
+    def test_banner_links_pending_draft(self, client, staged_draft):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get("/test-cases")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Pending recording sessions" in body
+        assert (f"/test-cases/review-session/{staged_draft['token']}"
+                in body)
+
+    def test_banner_absent_when_flag_off(self, client, staged_draft):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "0"}):
+            resp = client.get("/test-cases")
+        body = resp.get_data(as_text=True)
+        assert "Pending recording sessions" not in body
+
+
 class TestReviewGet:
     def test_renders_proposed_cards(self, client, staged_draft):
         with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
