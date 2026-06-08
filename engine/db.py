@@ -1918,6 +1918,52 @@ def get_session_draft(token: str) -> dict | None:
         }
 
 
+def list_pending_session_drafts(project_id: str) -> list[dict]:
+    """Every still-reviewable draft for a project, newest first.
+
+    "Reviewable" = not consumed and not past ``expires_at``. Used by the
+    Test Cases page to surface a "Pending recording sessions" banner so a
+    recording whose review tab got closed isn't silently lost. Each item
+    carries the token (for the review URL), timestamps, and a count of
+    proposed TCs so the banner can label the link without deserialising
+    every step. Expired rows are purged lazily on read, mirroring
+    :func:`get_session_draft`.
+    """
+    if not project_id:
+        return []
+    out: list[dict] = []
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(SessionDraft)
+            .where(SessionDraft.project_id == project_id)
+            .where(SessionDraft.consumed == False)  # noqa: E712
+            .order_by(SessionDraft.created_at.desc())
+        ).scalars().all()
+        now = _utcnow()
+        for row in rows:
+            exp = row.expires_at
+            if exp is not None:
+                this_now = now
+                if exp.tzinfo is None and this_now.tzinfo is not None:
+                    this_now = this_now.replace(tzinfo=None)
+                elif exp.tzinfo is not None and this_now.tzinfo is None:
+                    exp = exp.replace(tzinfo=None)
+                if exp < this_now:
+                    sess.delete(row)
+                    continue
+            try:
+                proposed = json.loads(row.proposed_tcs_json or "[]")
+            except (ValueError, TypeError):
+                proposed = []
+            out.append({
+                "token": row.token,
+                "tc_count": len(proposed) if isinstance(proposed, list) else 0,
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "expires_at": row.expires_at.isoformat() if row.expires_at else "",
+            })
+    return out
+
+
 def consume_session_draft(token: str) -> bool:
     """Mark the draft as consumed so a refresh of the review URL can't
     double-insert TCs. Returns False when the row is missing / already
@@ -2010,6 +2056,7 @@ __all__ = [
     "record_locator_failure", "get_locator", "list_locators",
     # PR-D session-review drafts
     "create_session_draft", "get_session_draft",
+    "list_pending_session_drafts",
     "consume_session_draft", "purge_expired_session_drafts",
     "SESSION_DRAFT_TTL_HOURS",
     # aggregates

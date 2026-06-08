@@ -390,6 +390,67 @@
        SUT in a new tab with the token in the URL fragment so the
        extension's content-script picks it up automatically. #}
     {% if recorder_enabled %}
+    <style>
+      /* Recorder modal overlay. Scoped to :not([hidden]) so the JS
+         ``modal.hidden = true`` toggle actually hides it — an inline
+         ``display:flex`` would out-specify the UA ``[hidden]`` rule and
+         the modal would never close. The ``[hidden]`` rule is the
+         belt-and-braces fallback. Same pattern as .bulk-toolbar /
+         .bug-reset-modal in bug_reports.html. */
+      .ext-recorder-modal[hidden] { display: none !important; }
+      .ext-recorder-modal:not([hidden]) {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.55);
+          z-index: 1000;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          padding: 8vh 16px;
+      }
+    </style>
+    {# Pending recording sessions — a capture whose review tab was closed
+       before Save still lives as a SessionDraft (24 h TTL). Surface a
+       link back to each review screen so the recorded TCs aren't lost.
+       Only rendered when there's at least one un-consumed draft for the
+       active project (``pending_drafts`` injected by app.inject_globals). #}
+    {% if pending_drafts %}
+    <div style="margin-top:14px;padding:14px;border:1px solid #2563eb;
+                 background:#eff6ff;border-radius:6px;">
+        <div style="font-weight:600;color:#1e3a8a;margin-bottom:8px;">
+            ⏳ {{ t.get('recorder_pending_title',
+                        'Pending recording sessions') }}
+        </div>
+        <p style="font-size:0.85em;color:#1e40af;margin:0 0 10px 0;">
+            {{ t.get('recorder_pending_hint',
+                'These recordings are waiting for review — open one to pick which captured test cases to keep and which suite they land in. Unreviewed sessions expire 24 h after capture.') }}
+        </p>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;
+                   flex-direction:column;gap:6px;">
+            {% for draft in pending_drafts %}
+            <li style="display:flex;align-items:center;gap:10px;
+                       flex-wrap:wrap;font-size:0.88em;">
+                <a href="/test-cases/review-session/{{ draft.token }}"
+                   class="btn btn-secondary"
+                   style="font-size:0.85em;padding:5px 12px;">
+                    📋 {{ t.get('recorder_pending_review', 'Review session') }} →
+                </a>
+                <span style="color:#1e40af;">
+                    {{ draft.tc_count }}
+                    {{ t.get('recorder_pending_tc_count', 'proposed test case(s)') }}
+                </span>
+                {% if draft.created_at %}
+                <span style="color:#64748b;font-size:0.92em;">
+                    · {{ t.get('recorder_pending_captured', 'captured') }}
+                    {{ draft.created_at[:16].replace('T', ' ') }} UTC
+                </span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     <div style="margin-top:14px;padding:14px;border:1px dashed #d97706;
                  background:#fff7ed;border-radius:6px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -413,12 +474,17 @@
 
         {# Hidden modal — shown by the JS handler when the operator
            clicks Start. Contains a Start URL field + the launch button
-           that hits /api/recorder-session/start. #}
-        <div id="ext-recorder-modal" hidden
-             role="dialog" aria-modal="true"
-             style="position:fixed;inset:0;background:rgba(15,23,42,0.55);
-                    z-index:1000;display:flex;align-items:flex-start;
-                    justify-content:center;padding:8vh 16px;">
+           that hits /api/recorder-session/start.
+
+           The overlay layout lives in the <style> block above, scoped to
+           ``:not([hidden])`` with an explicit ``[hidden]{display:none
+           !important}`` fallback. An inline ``display:flex`` here would
+           out-specify the user-agent ``[hidden]{display:none}`` rule, so
+           the ``hidden`` attribute the JS toggles would be silently
+           ignored and the modal could never close — same gotcha PR-A/PR-H
+           fixed for the bulk toolbar and reset-project modal. #}
+        <div id="ext-recorder-modal" class="ext-recorder-modal" hidden
+             role="dialog" aria-modal="true">
             <div style="background:white;max-width:560px;width:100%;
                          border-radius:10px;padding:22px 26px;
                          box-shadow:0 20px 60px rgba(0,0,0,0.25);">

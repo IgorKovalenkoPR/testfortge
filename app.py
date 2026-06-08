@@ -219,7 +219,23 @@ def inject_globals():
     # request, no I/O.
     recorder_enabled = os.environ.get("RECORDER_ENABLED", "0").strip().lower() in (
         "1", "true", "yes", "on")
-    return {"t": g.t, "lang": g.lang, "recorder_enabled": recorder_enabled}
+    # ``pending_drafts`` powers the "Pending recording sessions" banner in
+    # templates/test_cases.html — a recording whose review tab got closed
+    # before Save would otherwise be invisible until its 24 h TTL lapsed.
+    # Only worth a query when the pilot flag is on and a project is
+    # active; the lookup is a single indexed read on a tiny table. A
+    # failure here must never 500 the page, so swallow and fall back to
+    # an empty list (banner just doesn't render).
+    pending_drafts: list = []
+    if recorder_enabled:
+        pid = session.get("project_id")
+        if pid:
+            try:
+                pending_drafts = _db.list_pending_session_drafts(pid)
+            except Exception:
+                pending_drafts = []
+    return {"t": g.t, "lang": g.lang, "recorder_enabled": recorder_enabled,
+            "pending_drafts": pending_drafts}
 
 
 @app.template_filter('fromjson')

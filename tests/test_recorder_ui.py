@@ -117,6 +117,50 @@ class TestRecordedStepsBadge:
             assert tc_recorded_idx < badge_idx < tc_plain_idx
 
 
+class TestSessionRecorderModalToggle:
+    """PR-E hotfix — the "Start session recording" modal must hide via the
+    ``hidden`` attribute the JS toggles.
+
+    The original markup set ``style="...display:flex..."`` inline on the
+    overlay. Inline declarations out-specify the user-agent
+    ``[hidden] { display: none }`` rule, so the overlay rendered on page
+    load and ``modal.hidden = true`` (Cancel / Launch / backdrop click)
+    silently failed — the popup could never close. Same gotcha PR-A/PR-H
+    fixed for the bulk toolbar and reset-project modal: scope the visible
+    layout to ``:not([hidden])`` and add an explicit
+    ``[hidden] { display: none !important }`` fallback.
+    """
+
+    def test_overlay_uses_class_not_inline_display(self, client, seeded_session):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get("/test-cases")
+        body = resp.get_data(as_text=True)
+        # The overlay wrapper exists, is hidden by default, and carries
+        # the layout class rather than an inline display.
+        assert 'id="ext-recorder-modal"' in body
+        assert 'class="ext-recorder-modal"' in body
+        modal_tag = body[body.index('id="ext-recorder-modal"'):
+                         body.index('id="ext-recorder-modal"') + 200]
+        assert "hidden" in modal_tag, "modal must start hidden"
+        assert "display:flex" not in modal_tag and "display: flex" not in modal_tag, (
+            "inline display on the overlay out-specifies the UA "
+            "[hidden] rule, so the hidden attribute can never hide it"
+        )
+
+    def test_overlay_css_scopes_visible_to_not_hidden(self, client, seeded_session):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get("/test-cases")
+        body = resp.get_data(as_text=True)
+        # The visible-state rule must be scoped to :not([hidden]) and an
+        # explicit [hidden] { display: none !important } must exist so the
+        # JS toggle wins regardless of source order / future edits.
+        assert ".ext-recorder-modal:not([hidden])" in body
+        assert ".ext-recorder-modal[hidden]" in body
+        hidden_rule_idx = body.index(".ext-recorder-modal[hidden]")
+        hidden_rule = body[hidden_rule_idx:hidden_rule_idx + 80]
+        assert "none" in hidden_rule and "!important" in hidden_rule
+
+
 class TestCliCommandPrefill:
     def test_command_includes_project_id(self, client, seeded_session):
         pid = seeded_session
