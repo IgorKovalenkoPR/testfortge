@@ -14,6 +14,42 @@
 // restart while the browser is still open.
 
 const STORAGE_KEY = 'tfg_recorder_state';
+// Persisted (survives browser restart, unlike session state) — the
+// TestForTge instance base URL. Auto-learned from the finish_url of any
+// web-initiated recording, and settable from the popup so a fresh
+// install can reach its instance before the first web session.
+const BASE_URL_KEY = 'tfg_base_url';
+
+function _normaliseBase(url) {
+  // Accept a full URL or bare host; return scheme://host[:port] with no
+  // trailing slash, or '' if it doesn't parse to an http(s) origin.
+  if (!url) return '';
+  let u = String(url).trim();
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    return parsed.origin;
+  } catch (e) {
+    return '';
+  }
+}
+
+async function readBaseUrl() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([BASE_URL_KEY], (items) => {
+      resolve((items && items[BASE_URL_KEY]) || '');
+    });
+  });
+}
+
+async function writeBaseUrl(url) {
+  const base = _normaliseBase(url);
+  if (!base) return '';
+  return new Promise((resolve) => {
+    chrome.storage.local.set({[BASE_URL_KEY]: base}, () => resolve(base));
+  });
+}
 
 async function readState() {
   return new Promise((resolve) => {
@@ -79,6 +115,12 @@ async function registerSession(payload, senderTabId) {
     active: true,
   };
   await writeState(state);
+  // Learn the TestForTge instance from the finish_url's origin so the
+  // popup's "Start" / "Open TestForTge" shortcuts know where to go on
+  // the next idle visit — without the operator configuring anything.
+  if (payload.finish_url) {
+    try { await writeBaseUrl(payload.finish_url); } catch (e) { /* best-effort */ }
+  }
   try {
     chrome.action.setBadgeText({text: 'REC'});
     chrome.action.setBadgeBackgroundColor({color: '#dc2626'});
@@ -176,6 +218,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'get_state': {
         const state = await readState();
         sendResponse(state || {active: false});
+        break;
+      }
+      case 'get_base_url': {
+        const base = await readBaseUrl();
+        sendResponse({base_url: base});
+        break;
+      }
+      case 'set_base_url': {
+        const base = await writeBaseUrl(msg.base_url);
+        if (base) sendResponse({ok: true, base_url: base});
+        else sendResponse({ok: false, error: 'invalid_url'});
         break;
       }
       case 'append_step': {

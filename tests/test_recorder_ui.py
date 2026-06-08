@@ -161,6 +161,32 @@ class TestSessionRecorderModalToggle:
         assert "none" in hidden_rule and "!important" in hidden_rule
 
 
+class TestExtensionDeepLinkHook:
+    """The extension popup opens `/test-cases#tfg-record=<url>` to kick
+    off recording. The page must carry the JS hook that reads that hash,
+    pre-fills the modal, and reuses the Launch path. Pinned here so the
+    popup→page contract can't silently drift."""
+
+    def test_autolaunch_hook_present(self, client, seeded_session):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get("/test-cases")
+        body = resp.get_data(as_text=True)
+        assert "tfg-record=" in body, (
+            "page must read the extension's #tfg-record=<url> deep link"
+        )
+        assert "maybeAutoLaunchFromHash" in body
+
+    def test_hook_inert_when_flag_off(self, client, seeded_session):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "0"}):
+            resp = client.get("/test-cases")
+        body = resp.get_data(as_text=True)
+        # The hook lives in the always-present script but guards on the
+        # modal existing; with the flag off the modal isn't rendered, so
+        # the auto-launch can never fire. Pin that the surface is gone.
+        assert 'id="ext-recorder-modal"' not in body
+        assert 'id="ext-recorder-start"' not in body
+
+
 class TestCliCommandPrefill:
     def test_command_includes_project_id(self, client, seeded_session):
         pid = seeded_session
