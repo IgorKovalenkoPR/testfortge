@@ -39,14 +39,36 @@
       border-color: #ea580c;
     }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button.secondary { background: #f1f5f9; }
+    button + button { margin-top: 6px; }
     code {
       background: #f1f5f9;
       padding: 1px 5px;
       border-radius: 3px;
       font-size: 0.82em;
     }
+    label { font-size: 0.8em; color: #475569; display: block; margin: 8px 0 3px; }
+    input[type="url"] {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 0.85em;
+      padding: 7px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      font-family: monospace;
+    }
     .step-count { color: #0369a1; font-weight: 600; }
     .hint { font-size: 0.78em; color: #94a3b8; margin-top: 8px; }
+    .err { color: #dc2626; }
+    .instance-row { font-size: 0.76em; color: #94a3b8; margin-top: 10px;
+                    display: flex; gap: 6px; align-items: baseline;
+                    flex-wrap: wrap; }
+    .instance-row a { color: #0369a1; cursor: pointer; }
+    /* Belt-and-braces: the JS toggles these via the `hidden` attribute.
+       An explicit !important rule keeps `hidden` winning even if a
+       future style adds a competing display. (Same class of bug that
+       bit the web recorder modal.) */
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -56,11 +78,34 @@
     <p id="status-line">Loading…</p>
   </div>
 
-  <button id="stop-btn" class="primary" disabled>Stop recording</button>
-  <p class="hint">
-    To start a new recording, click <strong>Start session recording</strong>
-    on the <code>/test-cases</code> page in TestForTge.
-  </p>
+  <!-- Active-recording controls -->
+  <button id="stop-btn" class="primary" disabled hidden>Stop recording</button>
+
+  <!-- Idle controls: start a new recording without leaving the browser -->
+  <div id="idle-controls" hidden>
+    <label for="sut-url">Site to record</label>
+    <input type="url" id="sut-url" placeholder="https://app.example.com/login"
+           autocomplete="off" spellcheck="false">
+    <p id="idle-status" class="hint" style="min-height:1em;"></p>
+    <button id="start-btn" class="primary">● Start recording</button>
+    <button id="open-tfg-btn" class="secondary">Open TestForTge /test-cases ↗</button>
+
+    <div class="instance-row">
+      <span>Instance: <code id="base-display">— not set —</code></span>
+      <a id="base-edit">change</a>
+    </div>
+    <div id="base-edit-row" hidden style="margin-top:6px;">
+      <input type="url" id="base-url"
+             placeholder="https://testfortge.onrender.com"
+             autocomplete="off" spellcheck="false">
+      <button id="base-save" class="secondary">Save instance</button>
+    </div>
+
+    <p class="hint">
+      Starting opens <code>/test-cases</code> with this URL pre-filled and
+      launches the recorder there — so it binds to your project and login.
+    </p>
+  </div>
 
   <script src="popup.js"></script>
 </body>

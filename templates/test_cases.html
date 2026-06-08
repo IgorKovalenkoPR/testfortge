@@ -1032,6 +1032,32 @@ function filterSuite(suite, btn) {
             launchBtn.disabled = false;
         }
     });
+
+    // Deep-link from the browser extension's popup. The popup opens
+    // `/test-cases#tfg-record=<sut-url>` so recording can be kicked off
+    // without the operator finding this page manually. We pre-fill the
+    // Start URL, open the modal, and reuse the exact Launch path above —
+    // so the /api/recorder-session/start call still happens here,
+    // same-origin, with the session cookie + active project intact
+    // (the popup can't make that call itself: the cookie is
+    // SameSite=Lax). Hash (not query) keeps the SUT URL out of server
+    // logs; we scrub it after so a refresh doesn't relaunch.
+    (function maybeAutoLaunchFromHash() {
+        const m = /(?:^|[#&])tfg-record=([^&]+)/.exec(window.location.hash || '');
+        if (!m) return;
+        let sut = '';
+        try { sut = decodeURIComponent(m[1]); } catch (e) { sut = ''; }
+        // Scrub immediately so a manual refresh can't re-trigger.
+        try {
+            history.replaceState({}, '',
+                window.location.pathname + window.location.search);
+        } catch (e) { /* best-effort */ }
+        if (!/^https?:\/\//i.test(sut)) return;
+        urlInput.value = sut;
+        modal.hidden = false;
+        setStatus('Launching recorder from extension…', '#2563eb');
+        launchBtn.click();
+    })();
 })();
 </script>
 {% endblock %}

@@ -1,19 +1,41 @@
 # TestForTge Recorder Extension
 
 Browser extension that captures manual testing sessions and turns them
-into TestForTge test cases. Pilot release (`v0.1.0`).
+into TestForTge test cases. Pilot release (`v0.2.0`).
 
 This is the **real "Web Recorder"** UX:
 
 1. You install the extension once.
-2. On `/test-cases` in TestForTge you click **🎬 Start session
-   recording**, enter a Start URL.
+2. Start a recording **either** from `/test-cases` in TestForTge
+   (**🎬 Start session recording**) **or** straight from the
+   extension's toolbar popup (type the site URL → **Start recording**).
 3. A new tab opens at that URL with a **floating REC overlay**.
 4. You walk through the scenario — kliki, форми, навігація.
-5. You click **Stop** on the overlay.
+5. You click **Stop** on the overlay (or in the popup).
 6. The extension uploads the captured steps to TestForTge → the
    **review-session** page opens automatically → you tick which TCs
    to save and pick suite tags (Smoke / Regression / E2E).
+
+### The toolbar popup
+
+Clicking the extension icon shows:
+
+- **While recording** — live step count + elapsed timer + **Stop**.
+- **While idle** — a **Site to record** field, a **Start recording**
+  button, and an **Open TestForTge** shortcut.
+
+> **Why Start from the popup still opens a TestForTge tab:** the
+> `/api/recorder-session/start` endpoint binds the recording to your
+> *active project*, which it reads from the TestForTge session cookie.
+> That cookie is `SameSite=Lax`, so a cross-site request from the
+> extension can't carry it. Instead the popup opens
+> `/test-cases#tfg-record=<url>`; the page (where the cookie + project
+> are valid) pre-fills the recorder and launches it for you. One extra
+> tab, zero manual clicks.
+
+The popup remembers your TestForTge **instance** automatically after the
+first recording (learned from the server's `finish_url`). You can also
+set it manually via **change** next to "Instance".
 
 ## Install — Chrome (Dev Mode, pilot)
 
