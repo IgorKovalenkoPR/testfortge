@@ -117,6 +117,17 @@ DEFAULT_LINKS_PER_PAGE = 20
 # every step keeps us well under that even on slow networks.
 HEARTBEAT_STEP_S = 1.0
 
+# Live-frame paint settle. ``page.goto(wait_until="domcontentloaded")``
+# returns before CSS / images / fonts render, so a screenshot taken
+# immediately is often blank or all-black (worst on heavy or
+# dark-themed SPAs — exactly what made the live view look "broken").
+# Before the first live frame we wait for the ``load`` event (capped so
+# a never-loading page can't stall the walk) plus a short fixed settle.
+# Both waits are best-effort: a page that never fires ``load`` still
+# gets captured after LIVE_PAINT_MIN_MS.
+LIVE_PAINT_LOAD_CAP_MS = int(os.environ.get("LIVE_PAINT_LOAD_CAP_MS", "8000"))
+LIVE_PAINT_MIN_MS = int(os.environ.get("LIVE_PAINT_MIN_MS", "700"))
+
 # JS used to harvest internal links on a page. We keep it tight: only
 # anchor href values that resolve onto the same registrable domain,
 # trimmed and dedup'd. Returns an array of absolute URLs so callers
@@ -443,6 +454,23 @@ class LiveExecutor:
         except OSError as exc:
             _logger.debug("strip push failed: %s", exc)
 
+    def _settle_for_paint(self, page) -> None:
+        """Best-effort wait so the first live frame isn't a pre-paint
+        blank/black shot. Waits for the ``load`` event (capped well under
+        the nav timeout) then a short fixed settle. Never raises — a page
+        that never reaches ``load`` (or a fake page in tests that lacks
+        ``wait_for_load_state``) just falls through to the fixed settle.
+        """
+        try:
+            cap = min(self.navigation_timeout_ms, LIVE_PAINT_LOAD_CAP_MS)
+            page.wait_for_load_state("load", timeout=cap)
+        except Exception:
+            pass
+        try:
+            page.wait_for_timeout(LIVE_PAINT_MIN_MS)
+        except Exception:
+            pass
+
     def _screenshot(self, page, run_dir: str, live_dir: str,
                      tc_id: str, label: str, slot_idx: int) -> str:
         """Save a per-page screenshot, mirror to ``_live/latest.png``,
@@ -457,7 +485,11 @@ class LiveExecutor:
         try:
             page.screenshot(path=abs_path, full_page=False)
         except Exception as exc:
-            _logger.debug("live screenshot failed: %s", exc)
+            # WARNING (not DEBUG): a failed capture is the difference
+            # between a working live view and a permanently black one,
+            # so make it visible in logs that aren't level-filtered.
+            _logger.warning("live screenshot failed (%s): %s",
+                             type(exc).__name__, exc)
             return ""
         if live_dir:
             try:
@@ -725,6 +757,10 @@ class LiveExecutor:
             try:
                 page.goto(url, wait_until="domcontentloaded",
                            timeout=self.navigation_timeout_ms)
+                # Let the page actually paint before the first live frame
+                # — `domcontentloaded` fires too early and yields a black
+                # shot on heavy/dark SPAs.
+                self._settle_for_paint(page)
                 shot = self._screenshot(page, run_dir, live_dir,
                                           tc_id, "page", slot_idx_base)
                 steps.append(StepResult(
@@ -791,6 +827,16 @@ class LiveExecutor:
                     )
             collect_console_errors(console_errors, page_errors,
                                     final_url, tc_id, note=self._note)
+
+            # Second live frame after the heuristic battery. By now the
+            # page is fully rendered and the form / CTA scans may have
+            # scrolled or interacted with it, so this frame is more
+            # representative — and on a single-page walk it's what keeps
+            # the live view from looking frozen on one early shot. Pushed
+            # to the same ring slot so the strip reflects the latest
+            # state; failures are swallowed inside `_screenshot`.
+            self._screenshot(page, run_dir, live_dir,
+                             tc_id, "page_after", slot_idx_base)
 
             # PR-D′: for every finding that names a CSS selector, try
             # to capture an *annotated* screenshot — the raw page shot

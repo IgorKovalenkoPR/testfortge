@@ -278,6 +278,72 @@ class TestLiveExecutorRun:
                     for f in ex.findings)
 
 
+class TestLivePaintSettle:
+    """The live view rendered black because the only walk frame was
+    captured right after `domcontentloaded` (pre-paint). `_walk_one` now
+    settles for paint before the first frame and captures a second frame
+    after the heuristic battery so a single-page walk doesn't look
+    frozen on one early shot."""
+
+    def test_settle_never_raises(self, tmp_storage):
+        from engine.live_executor import LiveExecutor
+        ex = LiveExecutor(storage_root=tmp_storage,
+                          base_url="https://example.com/")
+
+        # A page that never loads AND whose settle wait explodes must not
+        # propagate — the walk has to continue and capture *something*.
+        class _RaisingPage:
+            def wait_for_load_state(self, *a, **k):
+                raise RuntimeError("never loads")
+
+            def wait_for_timeout(self, *a, **k):
+                raise RuntimeError("boom")
+
+        ex._settle_for_paint(_RaisingPage())  # no exception = pass
+
+        # A page missing wait_for_load_state entirely (older fake) still
+        # falls through to the fixed settle.
+        class _NoLoadStatePage:
+            def __init__(self):
+                self.waited = False
+
+            def wait_for_timeout(self, *a, **k):
+                self.waited = True
+
+        p = _NoLoadStatePage()
+        ex._settle_for_paint(p)
+        assert p.waited is True
+
+    def test_walk_captures_initial_and_post_heuristics_frame(
+            self, fake_pw, tmp_storage):
+        fake_pw()
+        from engine.live_executor import LiveExecutor
+        ex = LiveExecutor(storage_root=tmp_storage,
+                          base_url="https://example.com/", max_pages=1)
+        report = ex.run(start_urls=["https://example.com/"])
+        run_dir = os.path.join(tmp_storage, "automation_runs",
+                               report.run_id, "LIVE-PAGE-001")
+        # Both the painted-on-load frame and the after-heuristics frame
+        # land on disk, and the live mirror is populated.
+        assert os.path.isfile(os.path.join(run_dir, "page.png"))
+        assert os.path.isfile(os.path.join(run_dir, "page_after.png"))
+        assert os.path.isfile(os.path.join(
+            tmp_storage, "automation_runs", "_live", "latest.png"))
+
+    def test_failed_navigation_skips_second_frame(self, fake_pw,
+                                                   tmp_storage):
+        # When goto fails there's no painted page — neither frame should
+        # be written, and the walk must still not crash.
+        fake_pw(fail_on={"goto"})
+        from engine.live_executor import LiveExecutor
+        ex = LiveExecutor(storage_root=tmp_storage,
+                          base_url="https://example.com/", max_pages=1)
+        report = ex.run(start_urls=["https://example.com/"])
+        run_dir = os.path.join(tmp_storage, "automation_runs",
+                               report.run_id, "LIVE-PAGE-001")
+        assert not os.path.isfile(os.path.join(run_dir, "page_after.png"))
+
+
 # ── PR-B: page screenshot fan-out into findings ─────────────────────
 
 
