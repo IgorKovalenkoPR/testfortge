@@ -89,3 +89,64 @@ def test_postgres_url_bypasses_guard(reset_engine, monkeypatch):
     monkeypatch.delenv("FLASK_DEBUG", raising=False)
     # Doesn't have to resolve — we call the inner assertion directly.
     db._assert_prod_safety("postgresql+psycopg2://user:pass@host:5432/dbname")
+
+
+class TestInitDbAtomicity:
+    """A DB outage at boot (``create_all`` fails) must leave the module
+    globals unset so a later lazy call retries the FULL setup — not
+    short-circuit on a half-built engine that never ran ``create_all``.
+    This is what lets the web service survive the recurring Render
+    free-tier Postgres expiry: boot in degraded mode, recover lazily.
+    """
+
+    def test_create_all_failure_leaves_globals_none(
+            self, reset_engine, tmp_path, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        monkeypatch.setenv("DATABASE_URL",
+                           f"sqlite:///{tmp_path / 'boom.db'}")
+        monkeypatch.setenv("FLASK_DEBUG", "1")
+        monkeypatch.delenv("TESTFORTGE_DB", raising=False)
+
+        def _boom(*_a, **_k):
+            raise OperationalError("SELECT 1", {}, Exception("db down"))
+
+        monkeypatch.setattr(db.Base.metadata, "create_all", _boom)
+
+        with pytest.raises(OperationalError):
+            db.init_db()
+
+        # The whole point: nothing published on failure.
+        assert db._engine is None
+        assert db._Session is None
+
+    def test_retry_after_failure_succeeds(
+            self, reset_engine, tmp_path, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        monkeypatch.setenv("DATABASE_URL",
+                           f"sqlite:///{tmp_path / 'retry.db'}")
+        monkeypatch.setenv("FLASK_DEBUG", "1")
+        monkeypatch.delenv("TESTFORTGE_DB", raising=False)
+
+        real_create_all = db.Base.metadata.create_all
+        calls = {"n": 0}
+
+        def _flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OperationalError("SELECT 1", {}, Exception("db down"))
+            return real_create_all(*a, **k)
+
+        monkeypatch.setattr(db.Base.metadata, "create_all", _flaky)
+
+        # First boot: DB "down".
+        with pytest.raises(OperationalError):
+            db.init_db()
+        assert db._engine is None
+
+        # DB recovers — lazy retry must rebuild from scratch.
+        db.init_db()
+        assert db._engine is not None
+        assert db._Session is not None
+        assert db.ping() is True

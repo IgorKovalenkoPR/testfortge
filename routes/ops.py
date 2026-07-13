@@ -1,12 +1,30 @@
 """TestFortge — Operations endpoints (Wave D observability).
 
-  * GET /healthz  — liveness/readiness probe (no secrets, no CSRF)
+  * GET /healthz  — **liveness** probe (process up + dirs writable, no DB)
+  * GET /readyz   — **readiness** probe (liveness checks PLUS database)
   * GET /metrics  — JSON snapshot of job-queue depth + session counts
 
-Both endpoints are deliberately **unauthenticated** so container
+All three endpoints are deliberately **unauthenticated** so container
 orchestrators (k8s, Docker healthcheck, uptime pingers) can hit them
 without secrets. They intentionally expose **no user data** — only
 infrastructure-level counts and paths.
+
+Liveness vs readiness — why they are split
+------------------------------------------
+``/healthz`` is what the platform health-check pings (see
+``render.yaml`` → ``healthCheckPath: /healthz``). It answers a single
+question: *is this process alive and able to serve HTTP?* It deliberately
+does **not** touch the database, because a transient/expired DB must not
+take the whole web service offline. On Render's free tier the Postgres
+add-on expires roughly every 30 days ("Suspended by Render"); when the
+health-check was DB-gated, that expiry flipped ``/healthz`` to 503 and
+Render then refused to route ANY traffic — even to pages that need no
+DB — leaving the site stuck on the "Application loading" interstitial.
+
+``/readyz`` keeps the deeper contract: it returns 503 the moment the DB
+(or any liveness check) is unhappy, so an external monitor / a fronting
+load balancer can alert or drain traffic without killing the service.
+Point uptime pingers at ``/readyz`` when you want DB-aware alerting.
 
 If you ever deploy behind a LB/CDN that proxies the public internet,
 put these behind an internal listener or an IP allowlist. For the
@@ -65,24 +83,59 @@ def register(app: Flask) -> None:
     # Capture process start so /metrics can report uptime cheaply.
     _boot_ts = time.time()
 
-    @app.route("/healthz", methods=["GET"])
-    def healthz():
-        """Cheap liveness probe.
+    def _liveness_checks() -> dict[str, bool]:
+        """Filesystem checks that decide whether the process can serve.
 
-        Returns 200 when the Flask process is up and both the session
-        and storage directories exist + are writable. Anything else
-        returns 503 with a JSON body listing the failed checks so
-        orchestrators get actionable output, not just a status code.
+        These are the checks that, if failed, mean the container itself
+        is broken and no amount of retrying a downstream dependency will
+        help. Kept DB-free on purpose — see the module docstring.
         """
-        checks = {
+        return {
             "session_dir_writable": _check_writable(
                 app.config.get("SESSION_FILE_DIR", "")),
             "storage_dir_writable": _check_writable(
                 app.config.get("STORAGE_FOLDER", "")),
             "upload_dir_writable": _check_writable(
                 app.config.get("UPLOAD_FOLDER", "")),
-            "database_reachable": _db.ping(),
         }
+
+    @app.route("/healthz", methods=["GET"])
+    def healthz():
+        """Cheap **liveness** probe (no database).
+
+        Returns 200 when the Flask process is up and the session,
+        storage and upload directories exist + are writable. Anything
+        else returns 503 with a JSON body listing the failed checks so
+        orchestrators get actionable output, not just a status code.
+
+        Deliberately does NOT ping the database: this is the path the
+        platform health-check hits, and a DB outage must degrade
+        functionality gracefully rather than take the whole service
+        down. Use ``/readyz`` for a DB-aware probe.
+        """
+        checks = _liveness_checks()
+        ok = all(checks.values())
+        status_code = 200 if ok else 503
+        return jsonify({
+            "status": "ok" if ok else "degraded",
+            "checks": checks,
+            "uptime_seconds": round(time.time() - _boot_ts, 1),
+        }), status_code
+
+    @app.route("/readyz", methods=["GET"])
+    def readyz():
+        """**Readiness** probe — liveness checks PLUS the database.
+
+        Returns 200 only when the process is live AND a ``SELECT 1``
+        against the configured database succeeds. Returns 503 with a
+        JSON body listing every check (including ``database_reachable``)
+        otherwise. Intended for external monitors / fronting load
+        balancers that want DB-aware alerting or traffic draining
+        without tearing the service down the way a failed platform
+        health-check would.
+        """
+        checks = _liveness_checks()
+        checks["database_reachable"] = _db.ping()
         ok = all(checks.values())
         status_code = 200 if ok else 503
         return jsonify({

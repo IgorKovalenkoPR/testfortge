@@ -39,7 +39,7 @@ def _split_paths(raw: str) -> Tuple[str, ...]:
 _USER = os.environ.get("TESTFORTGE_BASIC_USER", "").strip()
 _PASSWORD = os.environ.get("TESTFORTGE_BASIC_PASSWORD", "").strip()
 _PUBLIC_PATHS = _split_paths(
-    os.environ.get("TESTFORTGE_BASIC_PUBLIC_PATHS", "/healthz")
+    os.environ.get("TESTFORTGE_BASIC_PUBLIC_PATHS", "/healthz,/readyz")
 )
 
 
