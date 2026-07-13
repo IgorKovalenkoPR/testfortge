@@ -397,6 +397,15 @@ def _apply_security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     resp.headers.setdefault("Permissions-Policy",
                             "geolocation=(), microphone=(), camera=()")
+    # HSTS — only when we know TLS terminates in front of us
+    # (``BEHIND_HTTPS=1``). Emitting it over plain HTTP (e.g. local dev)
+    # would wrongly pin the loopback host to HTTPS. Two years + preload
+    # matches the hstspreload.org submission requirements; includeSubDomains
+    # is safe because the whole *.onrender.com host is HTTPS-only.
+    if _config.BEHIND_HTTPS:
+        resp.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload")
     return resp
 
 

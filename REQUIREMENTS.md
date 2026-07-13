@@ -5,9 +5,11 @@
 > чек-лістів → виконання (мануального або через Playwright) →
 > репортингу багів → оцінки QA-зусиль. Працює локально або у контейнері.
 
-**Статус:** v1.1 (201 тест, 100% green; unit+integration+functional+E2E).
+**Статус:** активна розробка (933 тести passing + 2 skipped; unit+integration+functional+async+E2E). Розгорнуто на Render (Postgres + web + MCP-сервіс).
 **Ліцензія:** внутрішня / не визначена.
-**Stack:** Python 3.11+ / Flask 3.1 / Flask-Session / Flask-WTF / Playwright 1.49 / Anthropic SDK 0.97 (опційно) / gunicorn.
+**Stack:** Python 3.11–3.14 / Flask 3.1 / Flask-Session / Flask-WTF / Playwright 1.49 / Anthropic SDK (опційно) / gunicorn / SQLAlchemy 2 (Postgres у prod, SQLite локально).
+
+> **Примітка про актуальність.** Цей документ описує ядро платформи, але **відстає** від коду: додано, зокрема, HTTP Basic Auth, Web Recorder (+ браузерне розширення), Live Executor, QA Walkthrough, MCP-сервіс, керування проєктами в БД та ендпоінт `/readyz`. Найсвіжіший опис функціоналу — **вбудований Guide (`/guide`)**.
 
 ---
 
@@ -31,9 +33,9 @@
 ### 1.3. Генерація тест-артефактів
 | Артефакт | Формат виводу | Маршрут |
 |---|---|---|
-| Тест-кейси | Markdown, HTML, CSV, XLSX | `/export/<fmt>` (fmt ∈ md / html / csv-testcases / xlsx-testcases) |
-| Чек-лісти | Markdown, HTML, CSV, XLSX | `/export/<fmt>` (csv-checklist / xlsx-checklist) |
-| Tracебасильність | HTML | вбудовано у `/test-cases` |
+| Тест-кейси | Markdown, HTML, CSV, XLSX | `/export/<fmt>` (fmt ∈ `markdown` / `html` / `csv-testcases` / `xlsx-testcases`) |
+| Чек-лісти | Markdown, HTML, CSV, XLSX | `/export/<fmt>` (`csv-checklist` / `xlsx-checklist`) |
+| Traceability | HTML | вбудовано у `/test-cases` |
 
 Кожен тест-кейс має: ID, summary (нормалізоване «verify that…»), steps, expected result, priority, category. Ревьюється QA Team Lead-модулем, що фіксить voice/duplicate-id/page-number artifacts.
 
@@ -82,17 +84,22 @@
 **`GET /load-project/<folder>`** — відновити зі snapshot.
 **`POST /delete-project/<folder>`** — видалити snapshot.
 
-### 1.10. Operations Endpoints (no-auth, no-CSRF)
-| Маршрут | Призначення | Формат |
-|---|---|---|
-| `GET /healthz` | Liveness + write-probe до session/storage/upload dirs | JSON, 200/503 |
-| `GET /metrics` | JobQueue depth, by_status, by_kind, in_flight, limits | JSON |
+### 1.10. Operations Endpoints (no-CSRF)
+| Маршрут | Призначення | Формат | Auth |
+|---|---|---|---|
+| `GET /healthz` | **Liveness** — write-probe до session/storage/upload dirs (**без БД**) | JSON, 200/503 | завжди відкритий (public allowlist) |
+| `GET /readyz` | **Readiness** — checks `/healthz` ПЛЮС `database_reachable` (`SELECT 1`) | JSON, 200/503 | завжди відкритий (public allowlist) |
+| `GET /metrics` | JobQueue depth, by_status, by_kind, in_flight, limits | JSON | Basic Auth (якщо увімкнено) + опційний `X-Ops-Token` |
+
+`/healthz` і `/readyz` — у дефолтному allowlist `TESTFORTGE_BASIC_PUBLIC_PATHS`, тож проби працюють без секретів. `/metrics` проходить через Basic Auth gate (коли той активний) — на prod він **не** публічний.
 
 ### 1.11. i18n
 Підтримувані мови: **en** (default), **ua**. Перемикач через `?lang=en|ua` — зберігається у сесії. Некоректні коди → fallback до `en`.
 
 ### 1.12. Допоміжні сторінки (docs / static)
-`/guide`, `/techniques`, `/tools`, `/requirements`, `/recommendations`, `/status_report`, `/test_metrics` — статичні/шаблонні освітні сторінки з методологіями QA.
+**`GET /guide`** — вбудований User Guide: карткове меню модулів (Dashboard, Estimation, Test Cases, Checklist, Test Execution, Bug Reports, Tedgie, Projects, Pro tips), кожна картка відкриває панель з workflow, ключовими контролами й типовими помилками.
+
+> Шаблони `techniques.html`, `tools.html`, `requirements.html`, `recommendations.html`, `status_report.html`, `test_metrics.html` існують у `templates/`, але **наразі не зареєстровані як маршрути** (легасі/заплановані освітні сторінки). Не покладайтеся на прямі URL до них.
 
 ---
 
@@ -163,6 +170,9 @@
 
 ## 4. Security Posture
 
+### 4.0. HTTP Basic Auth gate
+Коли задано `TESTFORTGE_BASIC_USER` + `TESTFORTGE_BASIC_PASSWORD`, кожен запит (окрім allowlist `TESTFORTGE_BASIC_PUBLIC_PATHS`, дефолт `/healthz,/readyz`) вимагає `Authorization: Basic`. Це друга лінія захисту для будь-якого не-loopback деплою (LAN/VPN/prod). На Render gate активний.
+
 ### 4.1. Session cookies
 - `HttpOnly=True` — захист від XSS-крадіжки токенів.
 - `SameSite=Lax` — базовий CSRF-захист.
@@ -175,17 +185,22 @@
 - Вимикається тільки у `TESTING=True` режимі тестів.
 - Вихід: `CSRFError` → `403`.
 
-### 4.3. CSP-заголовки (з `app.py`)
+### 4.3. Заголовки безпеки (з `app.py`)
 ```
 default-src 'self';
 img-src 'self' data: blob:;
-script-src 'self' https://unpkg.com;
-style-src 'self' 'unsafe-inline';
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+font-src 'self' https://fonts.gstatic.com data:;
+script-src 'self' 'nonce-<per-request>' https://unpkg.com;
+connect-src 'self';
 frame-ancestors 'none';
 ```
 Плюс: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: strict-origin-when-cross-origin`,
-`Permissions-Policy` забороняє geolocation/microphone/camera.
+`Permissions-Policy` забороняє geolocation/microphone/camera, та
+`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
+(HSTS — надсилається лише коли `BEHIND_HTTPS=1`). Inline-скрипти
+дозволені лише з per-request nonce.
 
 ### 4.4. Path-traversal захист
 - Asset serving (`/automation/asset/<path>`): validator `SAFE_ASSET_RE` + `realpath`-перевірка, що результат всередині `STORAGE_ROOT`.
@@ -292,14 +307,14 @@ curl http://localhost:5000/healthz
 - HEALTHCHECK прив'язано до `/healthz`.
 
 ### 7.3. CI
-`.github/workflows/tests.yml` — matrix Python 3.11 / 3.12 / 3.13 на `ubuntu-latest`, повний прогін 188 тестів при push / PR.
+`.github/workflows/tests.yml` — matrix Python на `ubuntu-latest`, повний прогін набору тестів (933 passing) при push / PR. Встановлюються обидва requirements-файли (web + `mcp_server/`).
 
 ---
 
 ## 8. Відомі обмеження / Non-goals
 
 - **In-memory only job queue.** Jobs зникають при рестарті процесу (by design — синхронізовано з session wipe). Для багато-інстансного deployment потрібен Redis/Celery (не в поточному scope).
-- **Немає автентифікації користувачів.** Припускається single-tenant / trusted-network deployment. Multi-user — окрема віха (requires users model + auth layer).
+- **Немає per-user автентифікації.** Є лише єдиний shared **HTTP Basic Auth** gate (§4.0) — не окремі облікові записи. Припускається single-tenant / trusted-network deployment. Multi-user — окрема віха (requires users model + auth layer).
 - **Без RBAC.** Всі сесії рівноправні.
 - **LLM-провайдер** — залежить від конфігурації `engine/chatbot.py` (OpenAI або інший ключ). Не описано тут.
 - **Email/Notifications** — немає. Статус задач polling-only.
@@ -310,11 +325,11 @@ curl http://localhost:5000/healthz
 
 ## 9. Версіонування та статистика
 
-- **Коміти у main:** 5
-- **Тести:** 188 (unit + integration + functional + async + ops + rate-limit)
-- **LOC (app):** `app.py` ~140, `routes/` ~9 модулів × 100–300 рядків, `engine/` ~20 модулів.
-- **Шаблони:** 20 HTML-файлів.
-- **Підтримувані Python-версії:** 3.11, 3.12, 3.13 (перевірено у CI).
+- **Тести:** 933 passing + 2 skipped (unit + integration + functional + async + ops + security + rate-limit + E2E).
+- **routes/**: dashboard, chat, generation, execution, execution_live, bugs, automation, estimation, projects, guide, ops (+ recorder API).
+- **engine/**: ~40+ модулів (генерація, оцінка, краулер, executor, recorder, i18n, chatbot, knowledge base тощо).
+- **Шаблони:** ~22 HTML-файли.
+- **Підтримувані Python-версії:** 3.11–3.14 (перевірено у CI / локально).
 
 ---
 
