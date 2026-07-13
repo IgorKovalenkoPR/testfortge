@@ -1641,10 +1641,14 @@ input[type="text"]:focus, textarea:focus, select:focus {
 
 /* ── Tedgie chat mascot ────────────────────────────────────────── */
 .qa-chat-toggle.qa-chat-mascot {
-    /* Override default circular icon button so the armadillo stands out. */
+    /* Override default circular icon button so the full-body armadillo
+       reads clearly — taller rounded badge, sized for the portrait art. */
+    width: 78px;
+    height: 92px;
+    border-radius: 26px;
     background: #FFF8EB;
     border: 2px solid #1F3864;
-    padding: 4px;
+    padding: 4px 6px;
 }
 .qa-chat-toggle.qa-chat-mascot:hover { background: #FFF3D6; }
 .qa-chat-mascot-img {
@@ -1667,8 +1671,8 @@ input[type="text"]:focus, textarea:focus, select:focus {
     gap: 10px;
 }
 .qa-chat-mascot-sm {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     object-fit: contain;
     flex: 0 0 auto;
 }
