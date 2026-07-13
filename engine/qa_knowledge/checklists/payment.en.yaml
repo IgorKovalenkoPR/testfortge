@@ -8,7 +8,7 @@ sections:
       - objective: "Verify that items are added to the cart successfully"
         category: Positive
         priority: High
-      - objective: "Verify that the cart is shows the item count and order total that match the sum of cart lines"
+      - objective: "Verify that the cart shows the item count and order total that match the sum of cart lines"
         category: Positive
         priority: High
       - objective: "Verify that changing quantity updates the line subtotal and the cart total immediately"
@@ -23,7 +23,7 @@ sections:
       - objective: "Verify that the empty cart state is displayed when all items are removed"
         category: Negative
         priority: Medium
-      - objective: "Verify that adding the same item twice is increased the quantity, not duplicated"
+      - objective: "Verify that adding the same item twice increases the quantity instead of duplicating the line"
         category: "Edge Case"
         priority: Medium
   - name: "Checkout — Positive"
@@ -44,7 +44,7 @@ sections:
       - objective: "Verify that order confirmation page/email is received after purchase"
         category: Positive
         priority: High
-      - objective: "Verify that the the order total equals sum(items) + tax + shipping, matching the backend calculation"
+      - objective: "Verify that the order total equals sum(items) + tax + shipping, matching the backend calculation"
         category: Positive
         priority: High
   - name: "Checkout — Negative"

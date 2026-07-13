@@ -80,6 +80,6 @@ sections:
       - objective: "Verify that double submission is prevented (double-click protection)"
         category: "Edge Case"
         priority: High
-      - objective: "Verify that the the form can be submitted using only Tab to reach the submit button and Enter to trigger it"
+      - objective: "Verify that the form can be submitted using only Tab to reach the submit button and Enter to trigger it"
         category: "Edge Case"
         priority: Medium

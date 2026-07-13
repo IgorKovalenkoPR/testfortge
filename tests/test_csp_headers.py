@@ -60,3 +60,25 @@ class TestCSPNonce:
         # for consistency.
         assert f'nonce="{nonce}"' in body, \
             "rendered template did not interpolate csp_nonce"
+
+
+class TestHSTS:
+    """Strict-Transport-Security must ride only on HTTPS-fronted deploys.
+    Emitting it over plain HTTP (local dev) would wrongly pin loopback to
+    HTTPS; withholding it on prod (BEHIND_HTTPS=1) leaves a downgrade gap.
+    ``_apply_security_headers`` reads ``config.BEHIND_HTTPS`` per request,
+    so monkeypatching the module attribute flips the branch cleanly.
+    """
+
+    def test_absent_when_not_behind_https(self, client, monkeypatch):
+        monkeypatch.setattr("config.BEHIND_HTTPS", False)
+        resp = client.get("/healthz")
+        assert "Strict-Transport-Security" not in resp.headers
+
+    def test_present_when_behind_https(self, client, monkeypatch):
+        monkeypatch.setattr("config.BEHIND_HTTPS", True)
+        resp = client.get("/healthz")
+        hsts = resp.headers.get("Strict-Transport-Security", "")
+        assert "max-age=63072000" in hsts
+        assert "includeSubDomains" in hsts
+        assert "preload" in hsts
