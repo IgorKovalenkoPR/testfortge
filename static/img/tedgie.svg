@@ -1,136 +1,206 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Tedgie — TestForTge armadillo mascot">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" width="240" height="300" role="img" aria-label="Tedgie — TestForTge armadillo mascot">
   <defs>
-    <!-- Red armor plate gradient (lighter top, deeper red bottom) -->
-    <linearGradient id="armorGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#E84B3C"/>
-      <stop offset="100%" stop-color="#B0241A"/>
+    <!-- Bright red armour (shell plates, cap, ears) -->
+    <linearGradient id="armor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#EC4B3D"/>
+      <stop offset="100%" stop-color="#C42B22"/>
     </linearGradient>
-    <!-- Cream belly + limbs gradient -->
-    <linearGradient id="bellyGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#F5D8B0"/>
-      <stop offset="100%" stop-color="#E8BC85"/>
+    <!-- Deep maroon (band shadows, inner segments) -->
+    <linearGradient id="armorDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#8A211C"/>
+      <stop offset="100%" stop-color="#5E1310"/>
     </linearGradient>
-    <!-- T-shirt (black) gradient -->
-    <linearGradient id="shirtGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#2B2B2B"/>
-      <stop offset="100%" stop-color="#0F0F0F"/>
+    <!-- Cream / beige body, limbs, face -->
+    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#F4DCB8"/>
+      <stop offset="100%" stop-color="#E3BE89"/>
+    </linearGradient>
+    <!-- Black t-shirt -->
+    <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#2B2B2B"/>
+      <stop offset="100%" stop-color="#0E0E0E"/>
+    </linearGradient>
+    <!-- Maroon-purple inner ear -->
+    <linearGradient id="earIn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#6E2338"/>
+      <stop offset="100%" stop-color="#491627"/>
     </linearGradient>
   </defs>
 
-  <!-- ░░ TAIL ░░ (segmented red, peeking out behind body, bottom-right) -->
-  <path d="M70 78 q14 -4 18 -16 q3 -8 -2 -14"
-        fill="none" stroke="url(#armorGrad)" stroke-width="9"
-        stroke-linecap="round"/>
-  <path d="M74 76 l3 -3 M78 73 l3 -3 M82 69 l3 -3 M85 64 l3 -3 M86 58 l3 -3"
-        stroke="#7A150E" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+  <!-- ░░ GROUND SHADOW ░░ -->
+  <ellipse cx="118" cy="285" rx="80" ry="12" fill="#000000" opacity="0.10"/>
 
-  <!-- ░░ HIND LEG (left) ░░ -->
-  <ellipse cx="34" cy="86" rx="7" ry="5" fill="url(#bellyGrad)"/>
-  <ellipse cx="58" cy="86" rx="7" ry="5" fill="url(#bellyGrad)"/>
-  <!-- toe lines -->
-  <path d="M30 88 l1 2 M34 89 l0 2 M38 88 l-1 2
-           M54 88 l1 2 M58 89 l0 2 M62 88 l-1 2"
-        stroke="#A87238" stroke-width="1" stroke-linecap="round" fill="none"/>
-
-  <!-- ░░ BODY (cream belly under shirt) ░░ -->
-  <ellipse cx="46" cy="62" rx="22" ry="20" fill="url(#bellyGrad)"/>
-
-  <!-- ░░ ARMOR-PLATED BACK ░░ — three stacked banded plates -->
-  <!-- top hump -->
-  <path d="M22 50 q0 -16 24 -16 q24 0 24 16 v6 H22 z"
-        fill="url(#armorGrad)"/>
-  <!-- middle band -->
-  <ellipse cx="46" cy="58" rx="26" ry="6" fill="url(#armorGrad)"/>
-  <!-- lower band -->
-  <ellipse cx="46" cy="65" rx="25" ry="5" fill="url(#armorGrad)"/>
-  <!-- band separators -->
-  <path d="M22 56 q24 4 48 0 M22 63 q24 4 48 0"
-        stroke="#7A150E" stroke-width="1.2" fill="none" opacity="0.8"/>
-  <!-- armor speckles -->
-  <g fill="#7A150E" opacity="0.55">
-    <circle cx="32" cy="48" r="1"/>
-    <circle cx="40" cy="44" r="1"/>
-    <circle cx="50" cy="44" r="1"/>
-    <circle cx="58" cy="48" r="1"/>
-    <circle cx="34" cy="58" r="0.9"/>
-    <circle cx="46" cy="56" r="0.9"/>
-    <circle cx="56" cy="59" r="0.9"/>
+  <!-- ══════════ TAIL (behind body, curling to lower-right) ══════════ -->
+  <path d="M150 232 q46 12 60 40 q4 8 -4 10 q-10 3 -18 -6 q-22 -22 -46 -30 z"
+        fill="url(#belly)"/>
+  <!-- tail red banded top -->
+  <path d="M150 230 q40 8 56 30 q-6 -3 -14 -1 q-18 -16 -44 -20 z" fill="url(#armor)"/>
+  <g fill="url(#armorDark)">
+    <ellipse cx="176" cy="248" rx="9" ry="6" transform="rotate(28 176 248)"/>
+    <ellipse cx="196" cy="262" rx="7" ry="5" transform="rotate(35 196 262)"/>
+  </g>
+  <g fill="#5E1310" opacity="0.7">
+    <circle cx="164" cy="244" r="2"/>
+    <circle cx="186" cy="256" r="1.8"/>
+    <circle cx="204" cy="268" r="1.5"/>
   </g>
 
-  <!-- ░░ HEAD ░░ — slightly off-center, leans left -->
-  <ellipse cx="30" cy="36" rx="18" ry="16" fill="url(#armorGrad)"/>
-  <!-- head freckles / spots -->
+  <!-- ══════════ BACK SHELL — stacked banded plates ══════════ -->
+  <!-- filler crescent so no gaps show the body through -->
+  <path d="M116 82 q72 4 74 82 q2 40 -22 74 q-6 -76 -64 -124 z" fill="url(#armorDark)"/>
+  <g stroke="#4C0F0D" stroke-width="1" stroke-linejoin="round">
+    <!-- plate 7 (lowest, into tail) -->
+    <g transform="translate(150 234) rotate(122)">
+      <path d="M-26 0 Q-26 -18 0 -20 Q26 -18 26 0 Z" fill="url(#armorDark)"/>
+    </g>
+    <!-- plate 6 -->
+    <g transform="translate(166 214) rotate(106)">
+      <path d="M-27 0 Q-27 -19 0 -21 Q27 -19 27 0 Z" fill="url(#armor)"/>
+      <path d="M-27 0 Q0 7 27 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
+    </g>
+    <!-- plate 5 -->
+    <g transform="translate(173 189) rotate(92)">
+      <path d="M-28 0 Q-28 -20 0 -22 Q28 -20 28 0 Z" fill="url(#armorDark)"/>
+    </g>
+    <!-- plate 4 -->
+    <g transform="translate(172 162) rotate(78)">
+      <path d="M-28 0 Q-28 -20 0 -22 Q28 -20 28 0 Z" fill="url(#armor)"/>
+      <path d="M-28 0 Q0 7 28 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
+    </g>
+    <!-- plate 3 -->
+    <g transform="translate(162 131) rotate(60)">
+      <path d="M-27 0 Q-27 -19 0 -21 Q27 -19 27 0 Z" fill="url(#armorDark)"/>
+    </g>
+    <!-- plate 2 -->
+    <g transform="translate(147 108) rotate(44)">
+      <path d="M-26 0 Q-26 -18 0 -20 Q26 -18 26 0 Z" fill="url(#armor)"/>
+      <path d="M-26 0 Q0 7 26 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
+    </g>
+    <!-- plate 1 (top, tucked behind head/neck) -->
+    <g transform="translate(129 89) rotate(26)">
+      <path d="M-23 0 Q-23 -16 0 -18 Q23 -16 23 0 Z" fill="url(#armor)"/>
+      <path d="M-23 0 Q0 6 23 0" fill="none" stroke="#7A150E" stroke-width="1.5"/>
+    </g>
+  </g>
+  <!-- speckles on the shell -->
+  <g fill="#5E1310" opacity="0.6">
+    <circle cx="140" cy="108" r="2"/>
+    <circle cx="158" cy="126" r="1.8"/>
+    <circle cx="178" cy="172" r="2"/>
+    <circle cx="180" cy="200" r="1.8"/>
+    <circle cx="166" cy="150" r="1.6"/>
+  </g>
+
+  <!-- ══════════ HIND LEGS ══════════ -->
+  <g fill="url(#belly)">
+    <path d="M84 236 q-6 26 -2 42 q1 6 8 6 q7 0 8 -6 q3 -22 -2 -42 z"/>
+    <path d="M132 236 q-4 26 0 42 q1 6 8 6 q7 0 8 -6 q4 -20 -2 -42 z"/>
+    <ellipse cx="90" cy="282" rx="12" ry="6"/>
+    <ellipse cx="146" cy="282" rx="12" ry="6"/>
+  </g>
+  <g stroke="#B98A4E" stroke-width="1.3" stroke-linecap="round" fill="none">
+    <path d="M83 284 l-1 3 M90 285 l0 3 M97 284 l1 3"/>
+    <path d="M139 284 l-1 3 M146 285 l0 3 M153 284 l1 3"/>
+  </g>
+
+  <!-- ══════════ BODY (beige, under shirt) ══════════ -->
+  <ellipse cx="108" cy="188" rx="60" ry="72" fill="url(#belly)"/>
+
+  <!-- right arm (down at side) -->
+  <path d="M158 158 q22 12 20 44 q-1 12 -12 12 q-9 0 -11 -10 q-4 -26 -14 -38 z"
+        fill="url(#belly)"/>
+
+  <!-- ══════════ T-SHIRT ══════════ -->
+  <path d="M60 150
+           q-2 -14 14 -20
+           q-6 14 4 22
+           q14 -12 30 -12
+           q16 0 30 12
+           q10 -8 4 -22
+           q16 6 14 20
+           l-6 20
+           q-2 2 -8 -2
+           l-2 60
+           q-32 12 -64 0
+           l-2 -60
+           q-6 4 -8 2 z"
+        fill="url(#shirt)"/>
+  <!-- collar showing beige -->
+  <path d="M92 132 q16 12 32 0 q-3 10 -16 10 q-13 0 -16 -10 z" fill="url(#belly)"/>
+
+  <!-- ══════════ TESTFORT SHIELD on the shirt ══════════ -->
+  <g transform="translate(108 188) scale(1.9)">
+    <path d="M-11 -10 l11 -4 l11 4 v7 c0 9 -5 14 -11 16 c-6 -2 -11 -7 -11 -16 z"
+          fill="#111" stroke="#E23A2B" stroke-width="1.5"/>
+    <text x="0" y="-1" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+          font-size="5" font-weight="800" fill="#FFFFFF" letter-spacing="0.2">TEST</text>
+    <text x="0" y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+          font-size="5" font-weight="800" fill="#E23A2B" letter-spacing="0.2">FORT</text>
+  </g>
+
+  <!-- ══════════ LEFT ARM (waving, palm out) ══════════ -->
+  <path d="M58 152 q-18 -6 -26 -30 q-4 -12 4 -16 q9 -4 14 6 q8 18 22 26 z"
+        fill="url(#belly)"/>
+  <ellipse cx="34" cy="112" rx="12" ry="13" fill="url(#belly)"/>
+  <ellipse cx="34" cy="114" rx="6.5" ry="8" fill="#F5A794" opacity="0.55"/>
+  <g stroke="#B98A4E" stroke-width="1.3" stroke-linecap="round" fill="none">
+    <path d="M28 101 l-2 -4 M34 99 l0 -5 M40 101 l2 -4"/>
+  </g>
+
+  <!-- ══════════ HEAD ══════════ -->
+  <ellipse cx="92" cy="82" rx="50" ry="46" fill="url(#belly)"/>
+
+  <!-- ░░ EARS ░░ (tall, rabbit-like, leaning back-right) -->
+  <!-- front ear -->
+  <path d="M84 50 Q90 6 110 0 Q113 26 104 50 Z" fill="url(#armor)"/>
+  <path d="M91 48 Q97 16 108 9 Q108 28 100 47 Z" fill="url(#earIn)"/>
+  <!-- back ear -->
+  <path d="M110 52 Q132 10 156 10 Q144 37 126 52 Z" fill="url(#armor)"/>
+  <path d="M117 50 Q134 20 148 18 Q139 37 124 49 Z" fill="url(#earIn)"/>
+
+  <!-- ░░ RED CAP over the head ░░ -->
+  <path d="M50 76
+           q6 -42 52 -46
+           q52 -2 60 42
+           q3 18 -8 34
+           q-14 -20 -40 -18
+           q-4 -14 -18 -14
+           q-16 0 -22 12
+           q-16 -2 -24 6
+           q-4 -8 0 -16 z"
+        fill="url(#armor)"/>
+  <!-- red muzzle bridge dipping toward the nose -->
+  <path d="M52 78 q-8 10 -6 22 q10 4 18 -2 q0 -12 -12 -20 z" fill="url(#armor)"/>
+  <!-- cap freckles -->
   <g fill="#7A150E" opacity="0.6">
-    <circle cx="22" cy="32" r="1"/>
-    <circle cx="26" cy="28" r="1"/>
-    <circle cx="32" cy="26" r="1"/>
-    <circle cx="20" cy="38" r="1"/>
-    <circle cx="28" cy="40" r="1"/>
-    <circle cx="36" cy="34" r="1"/>
-    <circle cx="34" cy="42" r="1"/>
+    <circle cx="70" cy="52" r="2"/>
+    <circle cx="84" cy="44" r="2"/>
+    <circle cx="100" cy="42" r="2"/>
+    <circle cx="62" cy="64" r="1.8"/>
+    <circle cx="78" cy="60" r="1.8"/>
+    <circle cx="116" cy="52" r="1.8"/>
+    <circle cx="128" cy="66" r="1.8"/>
   </g>
 
-  <!-- ░░ EARS ░░ — long, pointy, leaning back -->
-  <path d="M34 22 q4 -10 12 -10 q-2 6 -6 12 z" fill="url(#armorGrad)"/>
-  <path d="M34 22 q4 -10 12 -10 q-2 6 -6 12 z" fill="#F2A6A0" opacity="0.5"/>
-  <path d="M22 22 q-6 -8 -2 -14 q6 4 8 12 z" fill="url(#armorGrad)"/>
-  <path d="M22 22 q-6 -8 -2 -14 q6 4 8 12 z" fill="#F2A6A0" opacity="0.5"/>
-
-  <!-- ░░ SNOUT ░░ -->
-  <ellipse cx="14" cy="40" rx="7" ry="5" fill="url(#armorGrad)"/>
-  <!-- nose -->
-  <ellipse cx="9" cy="40" rx="3" ry="2.4" fill="#7A150E"/>
-  <ellipse cx="9" cy="39.4" rx="1" ry="0.6" fill="#FFFFFF" opacity="0.6"/>
+  <!-- ░░ SNOUT + NOSE ░░ -->
+  <ellipse cx="46" cy="98" rx="16" ry="12" fill="url(#belly)"/>
+  <ellipse cx="38" cy="99" rx="7" ry="6" fill="#6E1A16"/>
+  <ellipse cx="36" cy="96.5" rx="2.4" ry="1.6" fill="#FFFFFF" opacity="0.55"/>
 
   <!-- ░░ EYE ░░ -->
-  <ellipse cx="24" cy="36" rx="3.6" ry="3.6" fill="#FFFFFF"/>
-  <ellipse cx="24" cy="36" rx="3" ry="3" fill="#2B6FA8"/>
-  <circle cx="24" cy="36" r="1.6" fill="#0E1F2E"/>
-  <circle cx="24.7" cy="35.3" r="0.7" fill="#FFFFFF"/>
+  <g>
+    <ellipse cx="86" cy="86" rx="15" ry="16" fill="#FFFFFF"/>
+    <ellipse cx="86" cy="87" rx="11.5" ry="13" fill="#24384B"/>
+    <circle cx="86" cy="88" r="6" fill="#0E1A26"/>
+    <circle cx="90" cy="83" r="3.2" fill="#FFFFFF"/>
+    <circle cx="82" cy="92" r="1.6" fill="#FFFFFF" opacity="0.7"/>
+  </g>
   <!-- eyebrow -->
-  <path d="M21 31.5 q3 -1.2 6 0.2" stroke="#7A150E" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+  <path d="M74 66 q10 -5 22 1" stroke="#6E1512" stroke-width="3.4" stroke-linecap="round" fill="none"/>
 
   <!-- ░░ CHEEK BLUSH ░░ -->
-  <ellipse cx="20" cy="44" rx="3" ry="1.8" fill="#F5A095" opacity="0.7"/>
+  <ellipse cx="64" cy="104" rx="7" ry="4.2" fill="#F0876A" opacity="0.65"/>
 
   <!-- ░░ SMILE ░░ -->
-  <path d="M11 44 q3 3 7 1.5" stroke="#2B0A0A" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-
-  <!-- ░░ T-SHIRT (black) ░░ -->
-  <path d="M22 58
-           q0 -4 6 -6
-           q4 -2 18 -2
-           q14 0 18 2
-           q6 2 6 6
-           v22
-           q-12 4 -24 4
-           q-12 0 -24 -4 z"
-        fill="url(#shirtGrad)"/>
-  <!-- collar -->
-  <path d="M40 54 q6 4 12 0 q-1 4 -6 4 q-5 0 -6 -4 z"
-        fill="url(#bellyGrad)"/>
-
-  <!-- ░░ TESTFORT SHIELD on the shirt ░░ -->
-  <g transform="translate(46 70)">
-    <!-- shield outline -->
-    <path d="M-9 -8 l9 -3 l9 3 v6 c0 7 -4 11 -9 13 c-5 -2 -9 -6 -9 -13 z"
-          fill="#0F0F0F" stroke="#E03A2A" stroke-width="1.4"/>
-    <!-- TEST in white -->
-    <text x="0" y="-1" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
-          font-size="4.2" font-weight="800" fill="#FFFFFF" letter-spacing="0.2">TEST</text>
-    <!-- FORT in red -->
-    <text x="0" y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
-          font-size="4.2" font-weight="800" fill="#E03A2A" letter-spacing="0.2">FORT</text>
-  </g>
-
-  <!-- ░░ ARMS (cream paws) ░░ -->
-  <!-- left arm waving -->
-  <ellipse cx="22" cy="68" rx="6" ry="5" fill="url(#bellyGrad)" transform="rotate(-25 22 68)"/>
-  <!-- right arm down -->
-  <ellipse cx="72" cy="74" rx="6" ry="5" fill="url(#bellyGrad)" transform="rotate(25 72 74)"/>
-  <!-- claws -->
-  <g stroke="#A87238" stroke-width="1" fill="none" stroke-linecap="round">
-    <path d="M16 70 l-2 2 M18 72 l-1 3 M20 73 l0 3"/>
-    <path d="M76 76 l3 2 M75 79 l2 2 M73 80 l1 3"/>
-  </g>
+  <path d="M52 106 q9 8 20 3" stroke="#3A100C" stroke-width="2.2" stroke-linecap="round" fill="none"/>
 </svg>
