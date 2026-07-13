@@ -60,6 +60,13 @@ services:
       --timeout 7200 --graceful-timeout 30
       --access-logfile - --error-logfile -
       app:app
+    # /healthz is a DB-FREE liveness probe on purpose: it returns 200 as
+    # long as the process is up and its dirs are writable. A DB outage
+    # (e.g. the free-tier Postgres expiring ~every 30 days) must NOT flip
+    # this to 503 — otherwise Render stops routing ALL traffic and the
+    # site hangs on the "Application loading" interstitial. DB-aware
+    # monitoring lives at /readyz (see routes/ops.py). Do NOT point
+    # healthCheckPath at /readyz.
     healthCheckPath: /healthz
     envVars:
       # Postgres connection string injected by Render from the

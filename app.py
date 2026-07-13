@@ -49,15 +49,24 @@ log = get_logger("testfortge")
 
 app = Flask(__name__)
 _config.apply(app)
-# Bring up the persistence layer immediately after config so every
-# subsequent import (route modules, helpers) can rely on a live engine.
-# `init_db` is idempotent and will create the schema if missing — it's
-# the only DDL hook we run at boot.
+# Bring up the persistence layer immediately after config. `init_db` is
+# idempotent and creates the schema if missing — it's the only DDL hook
+# we run at boot.
+#
+# A DB outage at boot must NOT crash the process. Render's free-tier
+# Postgres expires ~every 30 days ("Suspended by Render"); if we re-raise
+# here the gunicorn worker dies, /healthz never answers, and Render parks
+# the whole site on the "Application loading" interstitial indefinitely.
+# Instead we log loudly and boot anyway: /healthz (liveness, DB-free)
+# stays green so traffic is routed, non-DB routes work, and DB-backed
+# routes retry init_db lazily and degrade to a 500 until the DB returns.
+# /readyz reports the real DB status for monitoring.
 try:
     _db.init_db()
-except Exception:  # pragma: no cover — surface DB outage at startup
-    log.exception("Database initialisation failed")
-    raise
+except Exception:  # pragma: no cover — surface DB outage but stay up
+    log.exception(
+        "Database initialisation failed at boot — starting in degraded "
+        "mode (DB-backed routes will retry lazily; see /readyz).")
 
 
 def _start_snapshot_catchup_thread() -> None:

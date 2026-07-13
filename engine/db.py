@@ -161,7 +161,16 @@ def _assert_prod_safety(url: str) -> None:
 
 
 def init_db() -> None:
-    """Create the engine + tables. Safe to call multiple times."""
+    """Create the engine + tables. Safe to call multiple times.
+
+    **Atomic on failure.** The module globals ``_engine`` / ``_Session``
+    are published only after ``create_all`` (the first real connection)
+    succeeds. If the database is unreachable at boot — e.g. Render's
+    free-tier Postgres has expired — this raises with the globals left
+    at ``None``, so a later lazy call (via :func:`session_scope` /
+    :func:`get_engine`) retries the full setup instead of
+    short-circuiting on a half-built engine that never ran ``create_all``.
+    """
     global _engine, _Session
     if _engine is not None:
         return
@@ -169,10 +178,14 @@ def init_db() -> None:
     _assert_prod_safety(url)
     log.info("Initialising DB engine: %s",
              "sqlite" if url.startswith("sqlite") else "postgresql")
-    _engine = _build_engine(url)
-    _Session = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
-    Base.metadata.create_all(_engine)
-    _ensure_walkthrough_columns(_engine)
+    engine = _build_engine(url)
+    # create_all opens the first connection — this is where an outage
+    # surfaces. Keep it off the module globals until it (and the
+    # follow-up ALTERs) have gone through.
+    Base.metadata.create_all(engine)
+    _ensure_walkthrough_columns(engine)
+    _engine = engine
+    _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
 def _ensure_walkthrough_columns(engine: Engine) -> None:

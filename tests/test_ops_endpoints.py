@@ -1,8 +1,10 @@
-"""Tests for Wave D operations endpoints (/healthz and /metrics).
+"""Tests for Wave D operations endpoints (/healthz, /readyz and /metrics).
 
 Covers:
   * /healthz returns 200 with all checks true in the normal test setup
   * /healthz returns 503 when a required dir is missing/unwritable
+  * /healthz stays 200 when the DB is down (liveness is DB-free)
+  * /readyz mirrors /healthz but ALSO gates on the database
   * /metrics shape — job_queue.by_status has all four states keyed
   * /metrics reflects submitted jobs of different kinds
 """
@@ -35,6 +37,47 @@ class TestHealthz:
             assert data["checks"]["session_dir_writable"] is False
         finally:
             app.config["SESSION_FILE_DIR"] = original
+
+    def test_liveness_is_db_free(self, client):
+        """/healthz must not report a database check at all — a DB
+        outage must never influence liveness."""
+        data = client.get("/healthz").get_json()
+        assert "database_reachable" not in data["checks"]
+
+    def test_stays_ok_when_db_down(self, client, monkeypatch):
+        """The whole point of the split: a dead database keeps /healthz
+        green so the platform health-check keeps routing traffic instead
+        of parking the service on the loading interstitial forever."""
+        monkeypatch.setattr("engine.db.ping", lambda: False)
+        resp = client.get("/healthz")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+
+class TestReadyz:
+    def test_ok_when_db_up(self, client):
+        resp = client.get("/readyz")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert data["checks"]["database_reachable"] is True
+        assert all(data["checks"].values())
+
+    def test_503_when_db_down(self, client, monkeypatch):
+        monkeypatch.setattr("engine.db.ping", lambda: False)
+        resp = client.get("/readyz")
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert data["status"] == "degraded"
+        assert data["checks"]["database_reachable"] is False
+        # Liveness sub-checks are still reported for actionable output.
+        assert "session_dir_writable" in data["checks"]
+
+    def test_never_gated_by_ops_token(self, client, monkeypatch):
+        """Like /healthz, /readyz must stay reachable without the ops
+        token so external probes work without secrets."""
+        monkeypatch.setenv("OPS_ENDPOINTS_TOKEN", "any")
+        assert client.get("/readyz").status_code in (200, 503)
 
 
 class TestMetrics:

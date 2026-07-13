@@ -202,8 +202,12 @@ Status endpoint кожного виду (`/automation/status/<id>`, `/estimation
 ## 5. Observability
 
 ### 5.1. Health
-**`GET /healthz`** — 200 при успіху, 503 при деградації. Checks:
+**`GET /healthz`** — **liveness** (без БД): 200 при успіху, 503 при деградації. Checks:
 - `session_dir_writable`, `storage_dir_writable`, `upload_dir_writable` — write-probe (створення + видалення тестового файлу).
+
+Навмисно **не** пінгує БД — це шлях, який опитує health-check платформи (`render.yaml` → `healthCheckPath: /healthz`). Збій БД не повинен класти весь сервіс.
+
+**`GET /readyz`** — **readiness**: ті ж checks, що й `/healthz`, ПЛЮС `database_reachable` (`SELECT 1`). 200 лише коли все, включно з БД, здорове; інакше 503. Для зовнішніх моніторів / балансувальника з DB-aware алертами.
 
 ### 5.2. Metrics
 **`GET /metrics`** — JSON:

@@ -57,11 +57,16 @@ prints one line per project. Idempotent and safe to re-run.
 
 ## Production hardening
 
-TestForTge ships two operations endpoints — `/healthz` (liveness probe)
-and `/metrics` (job-queue + DB counts). `/healthz` is **always open** so
-container orchestrators (k8s, Docker healthcheck, uptime pingers) can
-reach it without secrets. `/metrics` is open by default too, but should
-be locked down on any deployment reachable from the public internet.
+TestForTge ships three operations endpoints — `/healthz` (liveness probe,
+**no DB**), `/readyz` (readiness probe — liveness **plus** a `SELECT 1`
+against the database) and `/metrics` (job-queue + DB counts). `/healthz`
+and `/readyz` are **always open** so container orchestrators (k8s, Docker
+healthcheck, uptime pingers) can reach them without secrets. The platform
+health-check points at `/healthz` on purpose: a database outage must
+degrade functionality gracefully, not take the whole service offline —
+use `/readyz` for DB-aware external monitoring. `/metrics` is open by
+default too, but should be locked down on any deployment reachable from
+the public internet.
 
 There are three ways to lock it down — pick at least one:
 
