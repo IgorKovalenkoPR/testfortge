@@ -436,10 +436,10 @@ python -m playwright install chromium</pre>
           SPA navigation is captured. Overlay shows live step count
           and timer.</li>
       <li>Click <strong>Stop</strong> on the overlay. The extension
-          uploads captured steps and opens the review tab in the same
-          browser. From there, the flow is identical to the CLI
-          path: tick <em>Save</em>, pick suite tag, click
-          <em>Save selected</em>.</li>
+          uploads captured steps <em>plus deep-capture telemetry</em>
+          (see below) and opens the review tab in the same browser.
+          From there, the flow is identical to the CLI path: tick
+          <em>Save</em>, pick suite tag, click <em>Save selected</em>.</li>
     </ol>
     <p>Each captured click carries up to 5 ranked locator alternates
        (<code>data-testid</code> > <code>id</code> > <code>role</code>
@@ -447,10 +447,32 @@ python -m playwright install chromium</pre>
        priority ladder the runner uses at replay time, so PR-A's
        multi-locator fallback works for extension-captured flows
        byte-identically to CLI-captured ones.</p>
-    <p><strong>What's not yet captured:</strong> Shadow DOM internals,
-       iframe-nested events, drag-and-drop sequences, file contents.
-       The host element is captured but internals skipped — pilot
-       trade-offs, not bugs.</p>
+
+    <h4>Deep capture — network, console &amp; DOM (extension v0.4.0+)</h4>
+    <p>Beyond clicks and navigation, the extension records the session's
+       live <strong>network requests</strong> (method, URL, status,
+       failures), the page's real <strong>console</strong> (logs,
+       warnings, errors, uncaught exceptions), and periodic
+       <strong>DOM snapshots</strong> — all via the Chrome DevTools
+       Protocol. On the review page a <em>Session telemetry</em> panel
+       shows this evidence, and failed requests (4xx/5xx) + console
+       errors are surfaced as <strong>bug-report candidates</strong> at
+       the top.</p>
+    <ul>
+      <li><strong>The yellow banner is expected.</strong> Deep capture
+          attaches a debugger session, so Chrome shows a
+          <em>"TestForTge Recorder started debugging this browser"</em>
+          bar until you hit Stop — the same bar Playwright codegen and
+          the DevTools Recorder raise.</li>
+      <li>If the debugger can't attach (DevTools already open on the
+          tab, a <code>chrome://</code> page, or you dismiss the bar),
+          step capture keeps working and the review page notes that deep
+          capture was unavailable.</li>
+    </ul>
+    <p><strong>What's not yet captured:</strong> network response
+       <em>bodies</em> (status + URL only, for now), Shadow DOM
+       internals, iframe-nested events, drag-and-drop sequences, file
+       contents. Pilot trade-offs, not bugs.</p>
 
     <h4>CLI vs extension — when to use which</h4>
     <ul>
@@ -462,6 +484,38 @@ python -m playwright install chromium</pre>
           when you need to re-record from a saved codegen capture
           file (<code>--from-file</code>).</li>
     </ul>
+
+    <h4>Active browser control — drive a real browser via MCP (v0.4.0+)</h4>
+    <p>The recorder extension can also be <strong>driven remotely</strong>:
+       an AI agent, through TestForTge's MCP server, can navigate, read
+       the page, click and fill in the operator's <em>real,
+       already-logged-in</em> browser — the same shape as the Claude in
+       Chrome extension, limited to safe structured actions. Separate
+       pilot gate: <code>BROWSER_CONTROL_ENABLED=1</code> on the host.</p>
+    <ol>
+      <li>The agent calls the MCP tool
+          <code>browser_control_start(project_id, start_url)</code> and
+          gets back a one-time <em>open_url</em>.</li>
+      <li>The operator opens that URL in Chrome (extension installed).
+          The toolbar shows a purple <strong>🕹 Live control active</strong>
+          badge. <em>Nothing is drivable until this step</em> — no silent
+          takeover; the control token lives in the URL fragment so the
+          site never sees it.</li>
+      <li>The agent drives with <code>browser_navigate</code>,
+          <code>browser_read_page</code> (returns <code>ref_N</code>
+          handles for each element), <code>browser_click(ref)</code>,
+          <code>browser_fill(ref, text)</code>,
+          <code>browser_wait(ms)</code>;
+          <code>browser_control_status</code> reports whether the
+          browser is still attached.</li>
+      <li>Stop any time from the popup (<strong>Stop live control</strong>)
+          or by closing the tab.</li>
+    </ol>
+    <p><strong>Safety:</strong> structured verbs only — there is
+       deliberately <em>no arbitrary-JS</em> command; each command is
+       bound to the session token + project; and unlike deep capture
+       this path is debugger-free, so driving raises no banner. Full
+       details in the extension's <code>README.md</code>.</p>
 
     <h4>Suite tags — what they mean</h4>
     <ul>

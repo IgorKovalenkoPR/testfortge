@@ -8,6 +8,19 @@
       "port": 5000
     },
     {
+      "name": "qa-forge-pilot",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5000,
+      "env": {
+        "FLASK_DEBUG": "1",
+        "RECORDER_ENABLED": "1",
+        "BROWSER_CONTROL_ENABLED": "1",
+        "TESTFORTGE_BASIC_USER": "",
+        "TESTFORTGE_BASIC_PASSWORD": ""
+      }
+    },
+    {
       "name": "marketing",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5173", "--directory", "marketing"],
