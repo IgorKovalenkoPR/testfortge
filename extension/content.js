@@ -317,6 +317,81 @@
       kind: 'action',
       assertion_type: '',
     });
+    // A goto marks a fresh page — grab a DOM snapshot once it settles so
+    // the review page can show what the tester was looking at (page
+    // title, visible-text digest, and the interactive controls with
+    // their locators). This is the content-script half of "read DOM":
+    // the CDP side (network + console) lives in background.js.
+    captureSnapshotSoon();
+  }
+
+  // ── DOM snapshot (the "read DOM" telemetry channel) ────────────
+
+  let _snapshotTimer = null;
+
+  function captureSnapshotSoon() {
+    if (!isActive) return;
+    // Debounce + let the page paint. SPA routes and full loads both
+    // fire this; a short settle window catches client-rendered content
+    // without waiting so long the tester has already moved on.
+    if (_snapshotTimer) clearTimeout(_snapshotTimer);
+    _snapshotTimer = setTimeout(() => {
+      _snapshotTimer = null;
+      try { captureSnapshot(); } catch (e) { /* best-effort */ }
+    }, 500);
+  }
+
+  const INTERACTIVE_SELECTOR =
+      'a[href], button, input, textarea, select, [role], [onclick], ' +
+      '[contenteditable="true"], summary';
+
+  function isVisible(el) {
+    if (!el || !el.getClientRects || !el.getClientRects().length) return false;
+    const st = window.getComputedStyle(el);
+    if (!st) return true;
+    return st.visibility !== 'hidden' && st.display !== 'none' &&
+           parseFloat(st.opacity || '1') > 0.01;
+  }
+
+  function captureSnapshot() {
+    if (!isActive || !document.body) return;
+    const interactive = [];
+    const seen = new Set();
+    const nodes = document.querySelectorAll(INTERACTIVE_SELECTOR);
+    for (const el of nodes) {
+      if (interactive.length >= 80) break;
+      if (isOverlayEvent(el)) continue;
+      if (!isVisible(el)) continue;
+      const cands = deriveCandidates(el);
+      if (!cands.length) continue;
+      const locator = cands[0].value;
+      if (seen.has(locator)) continue;
+      seen.add(locator);
+      const role = pickRole(el);
+      const name = pickAccessibleName(el);
+      const text = (el.textContent || '').trim().slice(0, 80);
+      interactive.push({
+        tag: el.tagName.toLowerCase(),
+        role: role || '',
+        name: name || '',
+        text: name ? '' : text,
+        locator,
+        label: labelFromCandidates(cands),
+      });
+    }
+    const digest = (document.body.innerText || '')
+        .replace(/\s+/g, ' ').trim().slice(0, 2000);
+    chrome.runtime.sendMessage({
+      type: 'append_snapshot',
+      snapshot: {
+        url: window.location.href.split('#')[0],
+        title: (document.title || '').slice(0, 200),
+        at: Date.now(),
+        interactive,
+        text_digest: digest,
+        element_count: interactive.length,
+      },
+    }, () => { void chrome.runtime.lastError; });
   }
 
   document.addEventListener('click', (e) => {

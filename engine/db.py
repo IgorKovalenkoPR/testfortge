@@ -252,13 +252,37 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
             "ALTER TABLE test_case ADD COLUMN suite "
             "VARCHAR(20) NOT NULL DEFAULT ''",
         ))
-    if not additions:
+
+    # PR-F (deep-capture telemetry) column on ``session_draft``. Same
+    # idempotent probe: a project that booted before PR-F has the table
+    # without ``telemetry_json``, and reading SessionDraft via the ORM
+    # would raise "no such column". Probed separately because it's a
+    # different table; a missing table (fresh install) just skips —
+    # ``create_all`` above made it with the column already present.
+    sd_additions: list[tuple[str, str]] = []
+    try:
+        sd_existing = {c["name"] for c in insp.get_columns("session_draft")}
+    except SQLAlchemyError as exc:
+        log.debug("session_draft column probe skipped: %s", exc)
+        sd_existing = None
+    if sd_existing is not None and "telemetry_json" not in sd_existing:
+        sd_additions.append((
+            "telemetry_json",
+            "ALTER TABLE session_draft ADD COLUMN telemetry_json "
+            "TEXT NOT NULL DEFAULT ''",
+        ))
+
+    if not additions and not sd_additions:
         return
 
     try:
         with engine.begin() as conn:
             for col_name, sql in additions:
                 log.info("walkthrough migration: adding test_case.%s",
+                         col_name)
+                conn.execute(text(sql))
+            for col_name, sql in sd_additions:
+                log.info("walkthrough migration: adding session_draft.%s",
                          col_name)
                 conn.execute(text(sql))
     except SQLAlchemyError as exc:  # pragma: no cover — best-effort
@@ -653,6 +677,14 @@ class SessionDraft(Base):
     # "suggested_suite", "steps": [...AutomationStep dicts...]}].
     proposed_tcs_json: Mapped[str] = mapped_column(Text, nullable=False,
                                                     default="")
+    # PR-F — deep-capture telemetry recorded live via the extension's
+    # chrome.debugger (CDP) session: {"network": [...], "console": [...],
+    # "dom_snapshots": [...], "meta": {...}}. Empty string for CLI-staged
+    # sessions and pre-PR-F recordings, so the review page just hides the
+    # telemetry panel rather than erroring. NOT NULL DEFAULT '' mirrors
+    # the walkthrough columns' back-fill pattern.
+    telemetry_json: Mapped[str] = mapped_column(Text, nullable=False,
+                                                 default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True)
     expires_at: Mapped[datetime] = mapped_column(
@@ -1847,7 +1879,8 @@ SESSION_DRAFT_TTL_HOURS = int(
 
 
 def create_session_draft(project_id: str, token: str,
-                           proposed_tcs: list[dict]) -> int | None:
+                           proposed_tcs: list[dict],
+                           telemetry: dict | None = None) -> int | None:
     """Persist a new draft for later review. Returns the row id.
 
     ``token`` is the operator-facing handle that appears in the review
@@ -1856,11 +1889,23 @@ def create_session_draft(project_id: str, token: str,
     ``ProposedTC`` dicts that ``session_segmenter`` produced + the
     ``suggested_suite`` field from ``suite_classifier``.
 
+    ``telemetry`` (PR-F) is the optional deep-capture blob the extension
+    records via CDP: ``{"network", "console", "dom_snapshots", "meta"}``.
+    ``None`` / empty leaves the column '' and the review page hides the
+    telemetry panel. The caller is responsible for capping sizes before
+    it reaches here.
+
     Returns ``None`` when the project doesn't exist — keeps the call
     site free of try/except for the FK-violation case.
     """
     if not (project_id and token and isinstance(proposed_tcs, list)):
         return None
+    tele_json = ""
+    if telemetry:
+        try:
+            tele_json = json.dumps(telemetry, ensure_ascii=False)
+        except (TypeError, ValueError):
+            tele_json = ""
     with session_scope() as sess:
         proj = sess.get(Project, project_id)
         if proj is None:
@@ -1871,6 +1916,7 @@ def create_session_draft(project_id: str, token: str,
             token=token,
             project_id=project_id,
             proposed_tcs_json=json.dumps(proposed_tcs, ensure_ascii=False),
+            telemetry_json=tele_json,
             created_at=now,
             expires_at=now + ttl,
             consumed=False,
@@ -1921,11 +1967,20 @@ def get_session_draft(token: str) -> dict | None:
             proposed = json.loads(row.proposed_tcs_json or "[]")
         except (ValueError, TypeError):
             proposed = []
+        # PR-F — decode the deep-capture blob. getattr guards the window
+        # between deploy and migration where the ORM object may lack the
+        # attribute (defensive; the ALTER runs on boot so this is rare).
+        try:
+            tele_raw = getattr(row, "telemetry_json", "") or ""
+            telemetry = json.loads(tele_raw) if tele_raw else None
+        except (ValueError, TypeError):
+            telemetry = None
         return {
             "id": row.id,
             "token": row.token,
             "project_id": row.project_id,
             "proposed_tcs": proposed if isinstance(proposed, list) else [],
+            "telemetry": telemetry if isinstance(telemetry, dict) else None,
             "created_at": row.created_at.isoformat() if row.created_at else "",
             "expires_at": row.expires_at.isoformat() if row.expires_at else "",
         }

@@ -43,6 +43,34 @@ class TestSessionDraftLifecycle:
         # Subsequent fetch returns None — single-use guarantee.
         assert db.get_session_draft(token) is None
 
+    def test_telemetry_round_trip(self, project):
+        """PR-F — the deep-capture blob persists and comes back on read."""
+        token = "tok_tele_001"
+        tele = {
+            "network": [{"method": "GET", "url": "https://x/api",
+                          "status": 500, "ok": False, "error": ""}],
+            "console": [{"level": "error", "text": "boom", "source": "console"}],
+            "dom_snapshots": [{"url": "https://x/", "title": "Home",
+                                "interactive": [], "element_count": 0}],
+            "meta": {"debugger_ok": True, "debugger_error": ""},
+            "counts": {"network": 1, "console": 1, "console_errors": 1,
+                        "network_failures": 1, "dom_snapshots": 1},
+        }
+        db.create_session_draft(project, token, [], telemetry=tele)
+        draft = db.get_session_draft(token)
+        assert draft is not None
+        assert draft["telemetry"] is not None
+        assert draft["telemetry"]["counts"]["console_errors"] == 1
+        assert draft["telemetry"]["network"][0]["status"] == 500
+
+    def test_telemetry_absent_is_none(self, project):
+        """No telemetry arg → column stays '' → read yields None (panel
+        hidden), never a crash."""
+        db.create_session_draft(project, "tok_no_tele", [])
+        draft = db.get_session_draft("tok_no_tele")
+        assert draft is not None
+        assert draft["telemetry"] is None
+
     def test_missing_token_returns_none(self, project):
         assert db.get_session_draft("nonexistent-token") is None
         assert db.consume_session_draft("nonexistent-token") is False

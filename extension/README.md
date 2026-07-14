@@ -1,7 +1,25 @@
 # TestForTge Recorder Extension
 
 Browser extension that captures manual testing sessions and turns them
-into TestForTge test cases. Pilot release (`v0.2.0`).
+into TestForTge test cases. Pilot release (`v0.3.0`).
+
+Since `v0.3.0` the recorder does **deep capture** via the Chrome
+DevTools Protocol (`chrome.debugger`): alongside the clicks / fills /
+navigation it already recorded, it now streams the SUT's **network
+requests** (method, URL, status, failures), the page's real **console**
+(logs, warnings, errors, uncaught exceptions), and periodic **DOM
+snapshots** (page title + visible-text digest + interactive controls
+with their locators). All of it lands on the review page, where failed
+requests and console errors are flagged as bug-report candidates.
+
+> **Heads-up — the yellow banner.** Deep capture attaches a debugger
+> session to the tab being recorded, so Chrome shows a
+> *"TestForTge Recorder started debugging this browser"* bar for the
+> duration. This is expected (it's the same bar Playwright codegen and
+> the DevTools Recorder raise) and disappears the moment you hit **Stop**.
+> If the debugger can't attach (DevTools already open on the tab, a
+> `chrome://` page, or you dismiss the bar), step capture keeps working
+> and the review page notes that deep capture was unavailable.
 
 This is the **real "Web Recorder"** UX:
 
@@ -90,6 +108,9 @@ pending). Until then, use Developer mode unpacked install:
 | Changing a `<select>` | `action: "select"` + selected value |
 | Form submit | Synthetic boundary marker for the LLM segmenter |
 | `history.pushState` / hash-change navigation | `action: "goto"` |
+| **Network requests** (deep capture) | `telemetry.network[]` — method, URL, status, mime, redirects, failures |
+| **Console + uncaught exceptions** (deep capture) | `telemetry.console[]` — level, text, source |
+| **DOM snapshots** (deep capture) | `telemetry.dom_snapshots[]` — title, text digest, interactive controls + locators |
 
 Each click/fill carries up to 5 ranked locator alternates
 (`data-testid > id > role > label > placeholder > alt > title > text >
@@ -98,11 +119,18 @@ uses, so the runner re-uses promotion across runs.
 
 ## What doesn't get captured (yet)
 
+- **Network response bodies** — status + URL are captured; bodies are
+  not (they can be large and require an extra CDP round-trip). Planned
+  for a follow-up: fetch bodies lazily, capped, for failed / non-2xx
+  XHR + fetch only.
 - **Shadow DOM elements** — host element is captured, internals skipped.
 - **iframe-nested events** — pilot recorder runs in the top frame only.
 - **Drag-and-drop sequences** — only the start/end clicks.
 - **File uploads** — file input value, but not file contents.
 - **Custom keyboard shortcuts** beyond what triggers a click/change.
+- **Active driving** — this release only *observes*. Commanding the
+  browser (navigate / click / read / eval on demand, MCP-style) is the
+  planned Phase 2 build.
 
 These are explicit pilot trade-offs, not bugs. Track in follow-up PRs.
 
@@ -157,6 +185,7 @@ TestForTge UI                       Browser tab (any SUT)
 | `storage` | Persist recording state between service-worker restarts |
 | `tabs` | Open the review tab after Stop |
 | `scripting` | Inject the overlay into the SUT tab |
+| `debugger` | Deep capture — attach a CDP session to stream the SUT's network + console (v0.3.0+) |
 | `host_permissions: <all_urls>` | Record any site the tester opens |
 
 The extension does **not** read TestForTge cookies, sniff form values

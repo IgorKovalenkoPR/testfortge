@@ -227,6 +227,104 @@ class TestRecorderSessionFinish:
         assert resp.headers.get("Access-Control-Allow-Origin") == "*"
 
 
+class TestRecorderTelemetry:
+    """PR-F — the /finish endpoint accepts an optional deep-capture blob
+    (network + console + DOM), sanitises + caps it server-side, and the
+    review page renders it."""
+
+    def _start(self, client, pid):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.post("/api/recorder-session/start",
+                                json={"project_id": pid})
+        return resp.get_json()["token"]
+
+    def _finish(self, client, token, steps, telemetry=None):
+        from engine import session_segmenter as _seg
+        body = {"token": token, "steps": steps}
+        if telemetry is not None:
+            body["telemetry"] = telemetry
+        with mock.patch.object(_seg, "_call_llm", return_value=[]):
+            with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+                return client.post("/api/recorder-session/finish", json=body)
+
+    def test_telemetry_stored_and_returned(self, client, ext_project):
+        token = self._start(client, ext_project)
+        tele = {
+            "network": [
+                {"method": "GET", "url": "https://x/ok", "status": 200,
+                 "ok": True, "type": "xhr"},
+                {"method": "POST", "url": "https://x/bad", "status": 500,
+                 "ok": False, "type": "fetch"},
+            ],
+            "console": [
+                {"level": "log", "text": "hi", "source": "console"},
+                {"level": "error", "text": "kaboom", "source": "exception"},
+            ],
+            "dom_snapshots": [
+                {"url": "https://x/", "title": "Home",
+                 "interactive": [{"tag": "button", "locator": "role=button",
+                                   "name": "Go"}], "element_count": 1},
+            ],
+            "meta": {"debugger_ok": True, "debugger_error": ""},
+        }
+        resp = self._finish(client, token, [_make_step()], telemetry=tele)
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        # Counts are computed server-side, not trusted from the client.
+        assert body["telemetry_counts"]["network"] == 2
+        assert body["telemetry_counts"]["network_failures"] == 1
+        assert body["telemetry_counts"]["console_errors"] == 1
+
+        draft_token = body["review_url"].rsplit("/", 1)[-1]
+        draft = db.get_session_draft(draft_token)
+        assert draft["telemetry"] is not None
+        assert len(draft["telemetry"]["network"]) == 2
+        assert draft["telemetry"]["dom_snapshots"][0]["title"] == "Home"
+
+    def test_telemetry_capped_server_side(self, client, ext_project):
+        """A client that ignores its own caps can't bloat the row — the
+        server clips network to 500 entries."""
+        token = self._start(client, ext_project)
+        net = [{"method": "GET", "url": f"https://x/{i}", "status": 200,
+                 "ok": True} for i in range(900)]
+        resp = self._finish(client, token, [_make_step()],
+                             telemetry={"network": net})
+        assert resp.status_code == 200
+        assert resp.get_json()["telemetry_counts"]["network"] == 500
+
+    def test_malformed_telemetry_ignored(self, client, ext_project):
+        """Garbage telemetry doesn't break finish — it's dropped to
+        None and the draft is created regardless."""
+        token = self._start(client, ext_project)
+        resp = self._finish(client, token, [_make_step()],
+                             telemetry="not-a-dict")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+    def test_no_telemetry_still_works(self, client, ext_project):
+        """Older extension that omits telemetry entirely — unchanged
+        happy path."""
+        token = self._start(client, ext_project)
+        resp = self._finish(client, token, [_make_step()])
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+    def test_debugger_failure_note_preserved(self, client, ext_project):
+        """When the debugger couldn't attach, no net/console captured but
+        the meta error is kept so the review page can explain the thin
+        panel."""
+        token = self._start(client, ext_project)
+        tele = {"network": [], "console": [], "dom_snapshots": [],
+                "meta": {"debugger_ok": False,
+                          "debugger_error": "Cannot attach to chrome://"}}
+        resp = self._finish(client, token, [_make_step()], telemetry=tele)
+        assert resp.status_code == 200
+        draft_token = resp.get_json()["review_url"].rsplit("/", 1)[-1]
+        draft = db.get_session_draft(draft_token)
+        assert draft["telemetry"]["meta"]["debugger_ok"] is False
+        assert "chrome://" in draft["telemetry"]["meta"]["debugger_error"]
+
+
 class TestUiTrigger:
     """The /test-cases page must surface the 🎬 Start session recording
     button when RECORDER_ENABLED=1 and hide it when off. Without the

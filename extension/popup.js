@@ -61,10 +61,27 @@ function sendMsg(msg) {
     const count = state.steps_buffer ? state.steps_buffer.length : 0;
     const elapsedMs = state.started_at ? (Date.now() - state.started_at) : 0;
     const elapsedSec = Math.floor(elapsedMs / 1000);
+    // Deep-capture (CDP) status line — network + console counts, or a
+    // note when the debugger couldn't attach.
+    const tele = state.telemetry || {};
+    const meta = tele.meta || {};
+    const netN = (tele.network || []).length;
+    const conN = (tele.console || []).length;
+    let deep;
+    if (meta.debugger_ok) {
+      deep = `🔎 Deep capture: <strong>on</strong> — ` +
+             `${netN} req, ${conN} console`;
+    } else if (meta.debugger_error) {
+      deep = `🔎 Deep capture: <span class="err">off</span> ` +
+             `(debugger unavailable)`;
+    } else {
+      deep = `🔎 Deep capture: starting…`;
+    }
     statusLine.innerHTML =
         `<strong>● Recording</strong><br>` +
         `Steps captured: <span class="step-count">${count}</span><br>` +
-        `Elapsed: ${elapsedSec}s`;
+        `Elapsed: ${elapsedSec}s<br>` +
+        `<small>${deep}</small>`;
     idle.hidden = true;
     stopBtn.hidden = false;
     stopBtn.disabled = false;

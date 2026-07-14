@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "TestForTge Recorder",
   "short_name": "TFG Recorder",
-  "version": "0.2.0",
-  "description": "Capture manual testing sessions and turn them into TestForTge test cases. Pilot release.",
+  "version": "0.3.0",
+  "description": "Capture manual testing sessions — clicks, navigation, DOM, network requests and console — and turn them into TestForTge test cases. Pilot release.",
 
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
 
   "host_permissions": [

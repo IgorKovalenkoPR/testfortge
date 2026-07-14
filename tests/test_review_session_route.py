@@ -168,6 +168,47 @@ class TestReviewGet:
         assert 'value="Regression"' in body
         assert 'value="Smoke"' in body
 
+    def test_renders_telemetry_panel(self, client, staged_draft):
+        """PR-F — a draft carrying deep-capture telemetry renders the
+        session-health banner + network/console panel."""
+        pid = staged_draft["project_id"]
+        tele = {
+            "network": [
+                {"method": "GET", "url": "https://app/api/me", "status": 200,
+                 "ok": True, "type": "xhr", "error": ""},
+                {"method": "POST", "url": "https://app/api/pay",
+                 "status": 500, "ok": False, "type": "fetch", "error": ""},
+            ],
+            "console": [
+                {"level": "error", "text": "TypeError: undefined is not a fn",
+                 "source": "exception", "url": ""},
+            ],
+            "dom_snapshots": [
+                {"url": "https://app/checkout", "title": "Checkout",
+                 "interactive": [], "element_count": 3},
+            ],
+            "meta": {"debugger_ok": True, "debugger_error": ""},
+            "counts": {"network": 2, "console": 1, "console_errors": 1,
+                        "network_failures": 1, "dom_snapshots": 1},
+        }
+        token = "tok_review_tele"
+        db.create_session_draft(pid, token, [
+            {"summary": "Pay", "intent": "checkout",
+             "suggested_suite": "E2E", "rationale": "",
+             "steps": [{"action": "click", "target": "role=button"}]},
+        ], telemetry=tele)
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get(f"/test-cases/review-session/{token}")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Session telemetry" in body
+        # Error banner counts the failure + console error.
+        assert "issue(s) detected" in body
+        # Evidence surfaces.
+        assert "https://app/api/pay" in body
+        assert "TypeError" in body
+        assert "Checkout" in body
+
     def test_missing_token_returns_404_with_banner(self, client,
                                                     staged_draft):
         with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
