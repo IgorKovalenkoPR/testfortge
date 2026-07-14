@@ -1,7 +1,11 @@
 # TestForTge Recorder Extension
 
 Browser extension that captures manual testing sessions and turns them
-into TestForTge test cases. Pilot release (`v0.3.0`).
+into TestForTge test cases. Pilot release (`v0.4.0`).
+
+Since `v0.4.0` it is also an **MCP-driven active browser driver** — an
+agent can navigate, read the page, click and fill in the operator's real
+logged-in browser (see *Active browser control* below).
 
 Since `v0.3.0` the recorder does **deep capture** via the Chrome
 DevTools Protocol (`chrome.debugger`): alongside the clicks / fills /
@@ -128,11 +132,68 @@ uses, so the runner re-uses promotion across runs.
 - **Drag-and-drop sequences** — only the start/end clicks.
 - **File uploads** — file input value, but not file contents.
 - **Custom keyboard shortcuts** beyond what triggers a click/change.
-- **Active driving** — this release only *observes*. Commanding the
-  browser (navigate / click / read / eval on demand, MCP-style) is the
-  planned Phase 2 build.
+- **Arbitrary JS (`eval`)** — active control (below) is deliberately
+  limited to structured verbs; there is no remote `eval`.
 
 These are explicit pilot trade-offs, not bugs. Track in follow-up PRs.
+
+## Active browser control (MCP-driven) — `v0.4.0+`
+
+The extension can also act as a **remotely-driven executor**, so an agent
+(via TestForTge's MCP server) can drive the operator's real,
+already-logged-in browser — the same shape as the Claude in Chrome
+extension, scoped to structured actions.
+
+**How it works**
+
+```
+MCP client (agent)                 Flask                Extension (this)
+  browser_control_start ─► mint session (DB)
+      ◄─ open_url (token in #fragment)
+  [operator opens open_url in Chrome] ──────────────►  register_control
+                                                        start poll loop
+  browser_navigate/read_page/    enqueue cmd (DB)
+  click/fill/wait  ───────────►      │
+                                POST /api/browser/poll ◄── poll (~1s)
+                                     ──► command ───────►  execute:
+                                                            navigate = tabs.update
+                                                            read_page/click/fill
+                                                              = content script
+                                                            wait = timer
+                                POST /api/browser/result ◄── result
+      ◄─ tool returns result (DB)
+```
+
+**Turn it on**
+
+1. Host env: `BROWSER_CONTROL_ENABLED=1` (separate from `RECORDER_ENABLED`
+   — enabling the recorder does *not* expose the drive surface).
+2. (Optional) `TFG_INSTANCE_URL=https://<your-instance>` on the **MCP
+   server** process so the handoff URL carries the poll/result endpoints.
+   When unset the extension falls back to the instance it learned from a
+   prior recording.
+
+**Flow**
+
+1. Agent calls `browser_control_start(project_id, start_url)` → gets
+   `{token, open_url}`.
+2. Operator opens `open_url` in Chrome (extension installed). The token
+   lives in the URL fragment, so the SUT never sees it. The toolbar shows
+   a purple **🕹 Live control active** badge; the popup offers **Stop**.
+3. Agent drives with `browser_navigate`, `browser_read_page` (returns
+   `ref_N` handles), `browser_click(ref)`, `browser_fill(ref, text)`,
+   `browser_wait(ms)`; `browser_control_status(token)` reports liveness.
+
+**Safety model**
+
+- Nothing is drivable until the operator explicitly opens the handoff URL
+  — no silent takeover.
+- Structured verbs only; **no arbitrary JS**.
+- Each command is bound to the session token + project; a token can only
+  drive the browser whose operator opened its handoff URL.
+- Unlike deep capture, control is **debugger-free** — no yellow banner.
+- Operator stops any time via the popup, or by closing the tab (the
+  session then goes stale and expires).
 
 ## How it works (architecture)
 
