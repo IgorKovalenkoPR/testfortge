@@ -56,6 +56,15 @@ def _recorder_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
+def _browser_control_enabled() -> bool:
+    """PR-F Phase 2 — separate gate for the active-driver channel. Off by
+    default; the poll/result endpoints 403 until an operator opts in with
+    BROWSER_CONTROL_ENABLED=1, so enabling the recorder doesn't silently
+    expose a remote-drive surface."""
+    return os.environ.get("BROWSER_CONTROL_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 # ── PR-E browser-extension helpers ─────────────────────────────
 #
 # In-memory ``token → {project_id, created_at}`` mapping for active
@@ -1348,6 +1357,67 @@ def register(app: Flask) -> None:
                 _ext.exempt(_fn)
             except Exception as exc:  # pragma: no cover — defensive
                 _log.debug("recorder-session csrf.exempt skipped: %s", exc)
+
+    # ── PR-F Phase 2: browser-control channel (extension ↔ Flask) ──
+    #
+    # Only two endpoints live here — the ones the EXTENSION calls:
+    #   * /poll   — extension pulls its next queued command
+    #   * /result — extension posts a command's result
+    # The controller side (mint a session, enqueue a command, read the
+    # result) is the MCP server talking to the shared DB directly, so it
+    # needs no HTTP endpoint here. Both are CSRF-exempt + CORS-open for
+    # the same reason the recorder endpoints are: the extension calls
+    # them cross-origin from whatever SUT the operator is driving, with
+    # no TestForTge cookie. The control token in the body is the auth.
+
+    @app.route("/api/browser/poll", methods=["POST", "OPTIONS"])
+    def api_browser_poll():
+        """Extension pulls its next command. Body: ``{"token": "<ctl>"}``.
+        Returns ``{"command": {command_id, verb, params} | null}``. Also
+        bumps the session's liveness so the controller can see the browser
+        is attached. Short-poll (returns immediately) to avoid holding a
+        sync worker — the extension re-polls on a short interval."""
+        if request.method == "OPTIONS":
+            return _recorder_cors_preflight()
+        if not _browser_control_enabled():
+            return _json_with_cors({"error": "control_disabled"}, 403)
+        payload = request.get_json(silent=True) or {}
+        token = (payload.get("token") or "").strip()
+        if not token:
+            return _json_with_cors({"error": "bad_request"}, 400)
+        # Liveness first — a poll for a stale/sealed token returns 404 so
+        # the extension knows to tear its loop down.
+        if not _db.touch_browser_control_session(token):
+            return _json_with_cors({"error": "unknown_or_stopped"}, 404)
+        cmd = _db.dequeue_browser_command(token)
+        return _json_with_cors({"command": cmd})
+
+    @app.route("/api/browser/result", methods=["POST", "OPTIONS"])
+    def api_browser_result():
+        """Extension reports a command's outcome. Body:
+        ``{"command_id", "ok": bool, "result": {...}, "error": "..."}``."""
+        if request.method == "OPTIONS":
+            return _recorder_cors_preflight()
+        if not _browser_control_enabled():
+            return _json_with_cors({"error": "control_disabled"}, 403)
+        payload = request.get_json(silent=True) or {}
+        command_id = (payload.get("command_id") or "").strip()
+        if not command_id:
+            return _json_with_cors({"error": "bad_request"}, 400)
+        ok = bool(payload.get("ok"))
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        error = str(payload.get("error") or "")
+        wrote = _db.complete_browser_command(command_id, ok, result, error)
+        if not wrote:
+            return _json_with_cors({"error": "unknown_or_terminal"}, 404)
+        return _json_with_cors({"ok": True})
+
+    if _ext is not None:
+        for _fn in (api_browser_poll, api_browser_result):
+            try:
+                _ext.exempt(_fn)
+            except Exception as exc:  # pragma: no cover — defensive
+                _log.debug("browser-control csrf.exempt skipped: %s", exc)
 
     # ── PR-D: session-review route (CLI staging → operator confirm) ─
 

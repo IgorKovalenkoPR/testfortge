@@ -697,6 +697,71 @@ class SessionDraft(Base):
     project = relationship("Project", back_populates="session_drafts")
 
 
+class BrowserControlSession(Base):
+    """PR-F Phase 2 — a live browser-control session.
+
+    The recorder extension can also act as a remotely-driven CDP
+    executor: an MCP tool (a different process, sharing this DB)
+    enqueues :class:`BrowserCommand` rows, the extension long/short-polls
+    Flask for them, executes each against the bound tab, and writes the
+    result back. This table is the trust anchor — a command is only
+    accepted for a token that has a live, unexpired control session, and
+    the session is bound to exactly one project so an agent can't drive a
+    browser it wasn't authorised against.
+
+    ``last_seen_at`` is bumped on every poll so ``browser_control_status``
+    can tell a caller whether the operator's browser is actually attached
+    (vs. a stale token whose tab was closed).
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False,
+                                        unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Sealed on explicit Stop — a sealed session refuses new commands.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                          default=True, server_default="1")
+
+    project = relationship("Project")
+
+
+class BrowserCommand(Base):
+    """PR-F Phase 2 — one queued browser command + its result.
+
+    Lifecycle: ``pending`` → ``dispatched`` (extension picked it up) →
+    ``done`` / ``error`` (result written). The controller (MCP tool)
+    enqueues then polls this row for the terminal state. Commands
+    auto-expire so an abandoned session's queue can't accrete forever.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    command_id: Mapped[str] = mapped_column(String(40), nullable=False,
+                                              unique=True, index=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    verb: Mapped[str] = mapped_column(String(32), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False,
+                                         default="pending", index=True)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    error: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    done_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
+
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
 
 def _slugify(name: str, fallback: str = "project") -> str:
@@ -1877,6 +1942,19 @@ def list_site_profiles(project_id: str, limit: int = 50) -> list[dict]:
 SESSION_DRAFT_TTL_HOURS = int(
     os.environ.get("SESSION_DRAFT_TTL_HOURS", "24"))
 
+# PR-F Phase 2 — browser-control TTLs. A control session lives up to an
+# hour (a long QA session), an individual command 10 minutes (plenty for
+# a slow page + the extension's poll interval). Both env-tunable so tests
+# and demos can shorten them.
+BROWSER_CONTROL_TTL_MINUTES = int(
+    os.environ.get("BROWSER_CONTROL_TTL_MINUTES", "60"))
+BROWSER_COMMAND_TTL_MINUTES = int(
+    os.environ.get("BROWSER_COMMAND_TTL_MINUTES", "10"))
+# A control session is "live" (browser attached) if it polled within
+# this window. Beyond it, browser_control_status reports stale.
+BROWSER_CONTROL_LIVE_SECONDS = int(
+    os.environ.get("BROWSER_CONTROL_LIVE_SECONDS", "20"))
+
 
 def create_session_draft(project_id: str, token: str,
                            proposed_tcs: list[dict],
@@ -2075,6 +2153,248 @@ def purge_expired_session_drafts() -> int:
         return removed
 
 
+# ── PR-F Phase 2 — browser control queue ──────────────────────────
+#
+# A DB-backed command queue is the right cross-process channel here: the
+# MCP server (the controller) is a separate process from Flask (which the
+# extension polls), and both share this database. The controller enqueues
+# a command + polls its row for the result; the extension polls Flask for
+# pending commands + writes results back. No sockets, no shared memory.
+
+def _dt_is_past(dt, now=None) -> bool:
+    """tz-safe 'is dt strictly in the past'. SQLite drops tzinfo on
+    round-trip while Postgres keeps it, so normalise both sides."""
+    if dt is None:
+        return False
+    now = now or _utcnow()
+    if dt.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    elif dt.tzinfo is not None and now.tzinfo is None:
+        dt = dt.replace(tzinfo=None)
+    return dt < now
+
+
+def _seconds_since(dt) -> float | None:
+    """Seconds elapsed since ``dt`` (tz-safe), or None when dt is None."""
+    if dt is None:
+        return None
+    now = _utcnow()
+    a, b = dt, now
+    if a.tzinfo is None and b.tzinfo is not None:
+        b = b.replace(tzinfo=None)
+    elif a.tzinfo is not None and b.tzinfo is None:
+        a = a.replace(tzinfo=None)
+    return (b - a).total_seconds()
+
+
+def create_browser_control_session(project_id: str, token: str) -> int | None:
+    """Register a live control session bound to a project. Returns row id,
+    or None when the project doesn't exist / args are empty."""
+    if not (project_id and token):
+        return None
+    with session_scope() as sess:
+        if sess.get(Project, project_id) is None:
+            return None
+        now = _utcnow()
+        ttl = timedelta(minutes=max(1, BROWSER_CONTROL_TTL_MINUTES))
+        row = BrowserControlSession(
+            token=token, project_id=project_id,
+            created_at=now, expires_at=now + ttl,
+            last_seen_at=now, active=True)
+        sess.add(row)
+        sess.flush()
+        return row.id
+
+
+def get_browser_control_session(token: str) -> dict | None:
+    """Resolve a control token → session dict, or None when missing /
+    sealed / expired. Includes a computed ``live`` flag (did the browser
+    poll within BROWSER_CONTROL_LIVE_SECONDS)."""
+    if not token:
+        return None
+    with session_scope() as sess:
+        row = sess.execute(select(BrowserControlSession).where(
+            BrowserControlSession.token == token)).scalar_one_or_none()
+        if row is None or not row.active:
+            return None
+        if _dt_is_past(row.expires_at):
+            sess.delete(row)
+            return None
+        age = _seconds_since(row.last_seen_at)
+        live = age is not None and age <= max(1, BROWSER_CONTROL_LIVE_SECONDS)
+        return {
+            "token": row.token,
+            "project_id": row.project_id,
+            "live": bool(live),
+            "last_seen_seconds": age,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+            "expires_at": row.expires_at.isoformat() if row.expires_at else "",
+        }
+
+
+def touch_browser_control_session(token: str) -> bool:
+    """Bump ``last_seen_at`` — called on every extension poll so the
+    controller can tell the browser is still attached. Returns False when
+    the session is gone / sealed / expired."""
+    if not token:
+        return False
+    with session_scope() as sess:
+        row = sess.execute(select(BrowserControlSession).where(
+            BrowserControlSession.token == token)).scalar_one_or_none()
+        if row is None or not row.active or _dt_is_past(row.expires_at):
+            return False
+        row.last_seen_at = _utcnow()
+        return True
+
+
+def stop_browser_control_session(token: str) -> bool:
+    """Seal the session (Stop pressed / operator left) and drop its
+    still-pending commands so a late poll can't replay them."""
+    if not token:
+        return False
+    with session_scope() as sess:
+        row = sess.execute(select(BrowserControlSession).where(
+            BrowserControlSession.token == token)).scalar_one_or_none()
+        if row is None:
+            return False
+        row.active = False
+        pending = sess.execute(select(BrowserCommand).where(
+            BrowserCommand.token == token,
+            BrowserCommand.status == "pending")).scalars().all()
+        for c in pending:
+            c.status = "error"
+            c.error = "session_stopped"
+            c.done_at = _utcnow()
+        return True
+
+
+# Structured verbs the executor understands. No ``eval`` — arbitrary JS
+# is deliberately out of scope (see the Phase 2 design decision).
+BROWSER_COMMAND_VERBS = frozenset({
+    "navigate", "read_page", "click", "fill", "wait",
+})
+
+
+def enqueue_browser_command(token: str, verb: str,
+                             params: dict | None = None) -> str | None:
+    """Queue a command for a live control session. Returns a fresh
+    ``command_id`` the caller polls on, or None when the token is invalid
+    / sealed / expired or the verb is unknown."""
+    if not token or verb not in BROWSER_COMMAND_VERBS:
+        return None
+    try:
+        params_json = json.dumps(params or {}, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return None
+    with session_scope() as sess:
+        sess_row = sess.execute(select(BrowserControlSession).where(
+            BrowserControlSession.token == token)).scalar_one_or_none()
+        if (sess_row is None or not sess_row.active
+                or _dt_is_past(sess_row.expires_at)):
+            return None
+        now = _utcnow()
+        cmd_id = _uuid()
+        row = BrowserCommand(
+            command_id=cmd_id, token=token, verb=verb,
+            params_json=params_json, status="pending",
+            created_at=now,
+            expires_at=now + timedelta(
+                minutes=max(1, BROWSER_COMMAND_TTL_MINUTES)))
+        sess.add(row)
+        sess.flush()
+        return cmd_id
+
+
+def dequeue_browser_command(token: str) -> dict | None:
+    """Atomically hand the oldest pending, unexpired command for a token
+    to the caller (marks it ``dispatched``). Returns None when the queue
+    is empty. Called by the extension's poll endpoint."""
+    if not token:
+        return None
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(BrowserCommand)
+            .where(BrowserCommand.token == token,
+                   BrowserCommand.status == "pending")
+            .order_by(BrowserCommand.created_at.asc())
+        ).scalars().all()
+        for row in rows:
+            if _dt_is_past(row.expires_at):
+                row.status = "error"
+                row.error = "expired"
+                row.done_at = _utcnow()
+                continue
+            row.status = "dispatched"
+            row.dispatched_at = _utcnow()
+            return {
+                "command_id": row.command_id,
+                "verb": row.verb,
+                "params": json.loads(row.params_json or "{}"),
+            }
+        return None
+
+
+def complete_browser_command(command_id: str, ok: bool,
+                              result: dict | None = None,
+                              error: str = "") -> bool:
+    """Write a command's terminal result. Returns False when the command
+    is unknown or already terminal (so a duplicate result POST is a
+    no-op, not a corruption)."""
+    if not command_id:
+        return False
+    try:
+        result_json = json.dumps(result or {}, ensure_ascii=False)
+    except (TypeError, ValueError):
+        result_json = "{}"
+    with session_scope() as sess:
+        row = sess.execute(select(BrowserCommand).where(
+            BrowserCommand.command_id == command_id)).scalar_one_or_none()
+        if row is None or row.status in ("done", "error"):
+            return False
+        row.status = "done" if ok else "error"
+        row.result_json = result_json if ok else "{}"
+        row.error = "" if ok else (str(error) or "command_failed")[:500]
+        row.done_at = _utcnow()
+        return True
+
+
+def get_browser_command(command_id: str) -> dict | None:
+    """Fetch a command's current state — the controller polls this until
+    ``status`` is terminal."""
+    if not command_id:
+        return None
+    with session_scope() as sess:
+        row = sess.execute(select(BrowserCommand).where(
+            BrowserCommand.command_id == command_id)).scalar_one_or_none()
+        if row is None:
+            return None
+        try:
+            result = json.loads(row.result_json or "{}")
+        except (ValueError, TypeError):
+            result = {}
+        return {
+            "command_id": row.command_id,
+            "token": row.token,
+            "verb": row.verb,
+            "status": row.status,
+            "result": result,
+            "error": row.error or "",
+        }
+
+
+def purge_expired_browser_control() -> int:
+    """Sweep expired control sessions + commands. Returns rows removed."""
+    removed = 0
+    with session_scope() as sess:
+        for model in (BrowserCommand, BrowserControlSession):
+            rows = sess.execute(select(model)).scalars().all()
+            for r in rows:
+                if _dt_is_past(r.expires_at):
+                    sess.delete(r)
+                    removed += 1
+    return removed
+
+
 def count_records() -> dict:
     """Cheap top-level counts — used by /metrics and admin checks."""
     with session_scope() as sess:
@@ -2127,6 +2447,13 @@ __all__ = [
     "list_pending_session_drafts",
     "consume_session_draft", "purge_expired_session_drafts",
     "SESSION_DRAFT_TTL_HOURS",
+    # PR-F Phase 2 browser control
+    "BrowserControlSession", "BrowserCommand", "BROWSER_COMMAND_VERBS",
+    "create_browser_control_session", "get_browser_control_session",
+    "touch_browser_control_session", "stop_browser_control_session",
+    "enqueue_browser_command", "dequeue_browser_command",
+    "complete_browser_command", "get_browser_command",
+    "purge_expired_browser_control",
     # aggregates
     "count_records",
 ]

@@ -514,6 +514,220 @@ async function stopRecording() {
   };
 }
 
+// ── PR-F Phase 2 — active-driver control channel ──────────────────
+//
+// A control session turns this tab into a remotely-driven executor: an
+// MCP tool enqueues commands in TestForTge's DB, the extension polls
+// Flask for them, runs each here, and posts the result back. Unlike deep
+// capture this path is debugger-FREE — navigate uses chrome.tabs.update,
+// read_page/click/fill go through the content script, wait is a timer —
+// so pure driving raises no yellow banner and never fights a DevTools
+// session. State is mirrored to storage.session so a worker restart
+// mid-drive can rehydrate and keep polling.
+
+const CONTROL_KEY = 'tfg_control_state';
+const CONTROL_POLL_MS = 1000;
+
+let CONTROL = null;            // {token, poll_url, result_url, tab_id, active}
+let _controlPollTimer = null;
+let _controlBusy = false;      // one command at a time — no overlap
+
+function _controlStorageGet() {
+  return new Promise((resolve) => {
+    chrome.storage.session.get([CONTROL_KEY], (items) => {
+      resolve(items[CONTROL_KEY] || null);
+    });
+  });
+}
+function _controlStorageSet(state) {
+  return new Promise((resolve) => {
+    chrome.storage.session.set({[CONTROL_KEY]: state}, resolve);
+  });
+}
+function _controlStorageClear() {
+  return new Promise((resolve) => {
+    chrome.storage.session.remove([CONTROL_KEY], resolve);
+  });
+}
+
+async function registerControl(payload, tabId) {
+  let pollUrl = payload.poll_url || '';
+  let resultUrl = payload.result_url || '';
+  // The MCP handoff may omit the URLs when the server didn't know its own
+  // instance URL — fall back to the base we learned from a prior
+  // recording so the channel still works out of the box.
+  if (!pollUrl || !resultUrl) {
+    const base = await readBaseUrl();
+    if (base) {
+      pollUrl = pollUrl || (base + '/api/browser/poll');
+      resultUrl = resultUrl || (base + '/api/browser/result');
+    }
+  }
+  CONTROL = {
+    token: payload.token,
+    poll_url: pollUrl,
+    result_url: resultUrl,
+    tab_id: tabId || null,
+    active: true,
+    started_at: Date.now(),
+  };
+  await _controlStorageSet(CONTROL);
+  startControlLoop();
+  try {
+    chrome.action.setBadgeText({text: 'CTL'});
+    chrome.action.setBadgeBackgroundColor({color: '#7c3aed'});
+  } catch (e) { /* */ }
+  return CONTROL;
+}
+
+function startControlLoop() {
+  if (_controlPollTimer) return;
+  _controlPollTimer = setInterval(() => {
+    controlPollOnce().catch(() => { /* keep looping */ });
+  }, CONTROL_POLL_MS);
+}
+
+function stopControlLoop() {
+  if (_controlPollTimer) {
+    clearInterval(_controlPollTimer);
+    _controlPollTimer = null;
+  }
+}
+
+async function teardownControl() {
+  stopControlLoop();
+  CONTROL = null;
+  _controlBusy = false;
+  await _controlStorageClear();
+  try { chrome.action.setBadgeText({text: ''}); } catch (e) { /* */ }
+}
+
+async function controlPollOnce() {
+  if (!CONTROL || !CONTROL.active || !CONTROL.poll_url) return;
+  if (_controlBusy) return;  // a command is still running — don't stack
+  let cmd = null;
+  try {
+    const r = await fetch(CONTROL.poll_url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: CONTROL.token}),
+    });
+    if (r.status === 404) {  // session sealed / expired server-side
+      await teardownControl();
+      return;
+    }
+    if (!r.ok) return;
+    const body = await r.json().catch(() => ({}));
+    cmd = body && body.command;
+  } catch (e) {
+    return;  // network blip — next tick retries
+  }
+  if (!cmd) return;
+  _controlBusy = true;
+  try {
+    const result = await dispatchControl(cmd);
+    await postControlResult(cmd.command_id, result);
+  } finally {
+    _controlBusy = false;
+  }
+}
+
+async function dispatchControl(cmd) {
+  const verb = cmd.verb;
+  const params = cmd.params || {};
+  try {
+    if (verb === 'wait') {
+      const ms = Math.max(0, Math.min(Number(params.ms) || 0, 30000));
+      await new Promise((res) => setTimeout(res, ms));
+      return {ok: true, result: {waited_ms: ms}};
+    }
+    if (verb === 'navigate') {
+      return await controlNavigate(params.url);
+    }
+    // read_page / click / fill — delegate to the content script.
+    if (!CONTROL || !CONTROL.tab_id) {
+      return {ok: false, error: 'no_bound_tab'};
+    }
+    const resp = await sendControlExec(CONTROL.tab_id, verb, params);
+    if (resp && resp.__error) return {ok: false, error: resp.__error};
+    return {ok: true, result: resp || {}};
+  } catch (e) {
+    return {ok: false, error: (e && e.message) ? e.message : String(e)};
+  }
+}
+
+function sendControlExec(tabId, verb, params) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, {type: 'control_exec', verb, params},
+          (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({__error: 'content_unreachable: ' +
+                             chrome.runtime.lastError.message});
+          return;
+        }
+        resolve(resp);
+      });
+    } catch (e) {
+      resolve({__error: String(e)});
+    }
+  });
+}
+
+function controlNavigate(url) {
+  return new Promise((resolve) => {
+    if (!CONTROL || !CONTROL.tab_id) {
+      resolve({ok: false, error: 'no_bound_tab'});
+      return;
+    }
+    if (!/^https?:\/\//i.test(url || '')) {
+      resolve({ok: false, error: 'bad_url'});
+      return;
+    }
+    const tabId = CONTROL.tab_id;
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(val);
+    };
+    const timer = setTimeout(
+        () => finish({ok: true, result: {url, note: 'load_timeout'}}), 15000);
+    function listener(updTabId, info, tab) {
+      if (updTabId !== tabId) return;
+      if (info.status === 'complete') {
+        finish({ok: true, result: {url: tab.url || url, title: tab.title || ''}});
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.update(tabId, {url}, () => {
+      if (chrome.runtime.lastError) {
+        finish({ok: false, error: chrome.runtime.lastError.message});
+      }
+    });
+  });
+}
+
+async function postControlResult(commandId, dispatchResult) {
+  if (!CONTROL || !CONTROL.result_url) return;
+  const ok = !!(dispatchResult && dispatchResult.ok);
+  const body = {
+    command_id: commandId,
+    ok,
+    result: ok ? (dispatchResult.result || {}) : {},
+    error: ok ? '' : (dispatchResult.error || 'command_failed'),
+  };
+  try {
+    await fetch(CONTROL.result_url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+  } catch (e) { /* best-effort; controller times out if this is lost */ }
+}
+
 // ── Message router ──────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -571,6 +785,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ok});
         break;
       }
+      case 'register_control': {
+        const c = await registerControl({
+          token: msg.token,
+          poll_url: msg.poll_url,
+          result_url: msg.result_url,
+          start_url: msg.start_url,
+        }, sender.tab && sender.tab.id);
+        sendResponse({ok: true, state: {token: c.token, active: c.active}});
+        break;
+      }
+      case 'get_control_state': {
+        sendResponse(CONTROL || {active: false});
+        break;
+      }
+      case 'stop_control': {
+        await teardownControl();
+        sendResponse({ok: true});
+        break;
+      }
       case 'stop_recording': {
         const res = await stopRecording();
         sendResponse(res);
@@ -590,5 +823,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(async () => {
   await detachDebugger();
   await clearState();
+  await _controlStorageClear();
   try { chrome.action.setBadgeText({text: ''}); } catch (e) { /* */ }
 });
+
+// Rehydrate an in-flight control session if the service worker was
+// evicted and restarted mid-drive — reload the state and resume polling
+// so the MCP controller doesn't see the browser silently go dark.
+(async function _rehydrateControl() {
+  try {
+    const c = await _controlStorageGet();
+    if (c && c.active) {
+      CONTROL = c;
+      startControlLoop();
+      try {
+        chrome.action.setBadgeText({text: 'CTL'});
+        chrome.action.setBadgeBackgroundColor({color: '#7c3aed'});
+      } catch (e) { /* */ }
+    }
+  } catch (e) { /* best-effort */ }
+})();

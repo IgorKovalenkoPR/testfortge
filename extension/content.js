@@ -42,6 +42,54 @@
     return null;
   }
 
+  // PR-F Phase 2 — control-session handoff. Same fragment mechanism as
+  // recording, different params: a control token + the poll/result URLs
+  // the background worker uses to talk to Flask. When present, this tab
+  // becomes a remotely-driven executor (navigate / read_page / click /
+  // fill / wait) for an MCP controller.
+  const CONTROL_PARAM_TOKEN = 'testfortge-control-token';
+  const CONTROL_PARAM_POLL = 'testfortge-poll-url';
+  const CONTROL_PARAM_RESULT = 'testfortge-result-url';
+
+  function readControlHandoff() {
+    const sources = [window.location.hash, window.location.search];
+    for (const src of sources) {
+      if (!src) continue;
+      const params = new URLSearchParams(src.replace(/^[#?]/, ''));
+      const token = params.get(CONTROL_PARAM_TOKEN);
+      if (token) {
+        return {
+          token,
+          poll_url: params.get(CONTROL_PARAM_POLL) || '',
+          result_url: params.get(CONTROL_PARAM_RESULT) || '',
+        };
+      }
+    }
+    return null;
+  }
+
+  const controlHandoff = readControlHandoff();
+  if (controlHandoff) {
+    chrome.runtime.sendMessage({
+      type: 'register_control',
+      token: controlHandoff.token,
+      poll_url: controlHandoff.poll_url,
+      result_url: controlHandoff.result_url,
+      start_url: window.location.href,
+    });
+    // Scrub the control params from the URL so the SUT never sees them.
+    try {
+      const clean = new URL(window.location.href);
+      for (const p of [CONTROL_PARAM_TOKEN, CONTROL_PARAM_POLL,
+                        CONTROL_PARAM_RESULT]) {
+        clean.hash = clean.hash
+            .replace(new RegExp('&?' + p + '=[^&]*'), '');
+      }
+      clean.hash = clean.hash.replace(/^#&?/, '#').replace(/^#$/, '');
+      window.history.replaceState({}, '', clean.toString());
+    } catch (e) { /* best-effort */ }
+  }
+
   const handoff = readHandoff();
   if (handoff) {
     // Tell background to bind this tab to the recording session.
@@ -560,5 +608,98 @@
       overlayShadow = null;
       stepCountEl = null;
     }
+  });
+
+  // ── 7. Active-driver executors (PR-F Phase 2) ──────────────────
+  //
+  // The background worker forwards each MCP command here as a
+  // `control_exec` message. We answer with the structured result the
+  // controller reads back. `read_page` assigns a fresh ref_N to every
+  // visible interactive element and remembers it; `click` / `fill`
+  // resolve those refs. Refs live for the lifetime of this content
+  // script instance (i.e. until the next full navigation) — the agent
+  // re-reads the page after navigating, exactly like read_page in the
+  // Claude in Chrome flow.
+
+  let _refCounter = 0;
+  const _refMap = new Map();  // ref_N -> element
+
+  function buildReadPage() {
+    _refCounter = 0;
+    _refMap.clear();
+    const elements = [];
+    const nodes = document.querySelectorAll(INTERACTIVE_SELECTOR);
+    for (const el of nodes) {
+      if (elements.length >= 200) break;
+      if (isOverlayEvent(el)) continue;
+      if (!isVisible(el)) continue;
+      const ref = 'ref_' + (++_refCounter);
+      _refMap.set(ref, el);
+      const name = pickAccessibleName(el);
+      elements.push({
+        ref,
+        tag: el.tagName.toLowerCase(),
+        role: pickRole(el) || '',
+        name: name || '',
+        text: name ? '' : (el.textContent || '').trim().slice(0, 80),
+      });
+    }
+    return {
+      url: window.location.href,
+      title: (document.title || '').slice(0, 200),
+      elements,
+      text_digest: (document.body ? document.body.innerText : '')
+          .replace(/\s+/g, ' ').trim().slice(0, 2000),
+    };
+  }
+
+  function resolveRef(ref) {
+    const el = _refMap.get(ref);
+    if (el && el.isConnected) return el;
+    return null;
+  }
+
+  function execControl(verb, params) {
+    params = params || {};
+    if (verb === 'read_page') {
+      return buildReadPage();
+    }
+    if (verb === 'click') {
+      const el = resolveRef(params.ref);
+      if (!el) return {__error: 'ref_not_found: ' + params.ref};
+      try { el.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) { /* */ }
+      el.click();
+      return {clicked: true, ref: params.ref};
+    }
+    if (verb === 'fill') {
+      const el = resolveRef(params.ref);
+      if (!el) return {__error: 'ref_not_found: ' + params.ref};
+      const tag = el.tagName ? el.tagName.toLowerCase() : '';
+      try { el.focus(); } catch (e) { /* */ }
+      if (tag === 'input' || tag === 'textarea') {
+        el.value = params.text != null ? String(params.text) : '';
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+      } else if (el.isContentEditable) {
+        el.textContent = params.text != null ? String(params.text) : '';
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+      } else {
+        return {__error: 'not_fillable: ' + tag};
+      }
+      return {filled: true, ref: params.ref};
+    }
+    return {__error: 'unknown_verb: ' + verb};
+  }
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== 'control_exec') return;
+    let out;
+    try {
+      out = execControl(msg.verb, msg.params);
+    } catch (e) {
+      out = {__error: (e && e.message) ? e.message : String(e)};
+    }
+    sendResponse(out);
+    return true;  // async-safe channel close
   });
 })();

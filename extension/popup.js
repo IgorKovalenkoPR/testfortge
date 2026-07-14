@@ -92,6 +92,37 @@ function sendMsg(msg) {
   const baseResp = await sendMsg({type: 'get_base_url'});
   baseUrl = (baseResp && baseResp.base_url) || '';
 
+  // ── Live-control mode (Phase 2 active driver) takes precedence ────
+  // When an MCP-driven control session is bound to a tab, surface it +
+  // a Stop button and hide the recorder controls (they're a different
+  // mode). The card polls so "last command" stays fresh.
+  const controlCard = document.getElementById('control-card');
+  const controlLine = document.getElementById('control-line');
+  const stopControlBtn = document.getElementById('stop-control-btn');
+
+  function renderControl(cs) {
+    controlCard.hidden = false;
+    statusCard.hidden = true;
+    idle.hidden = true;
+    stopBtn.hidden = true;
+    const secs = cs.started_at
+        ? Math.floor((Date.now() - cs.started_at) / 1000) : 0;
+    controlLine.innerHTML =
+        `<strong style="color:#7c3aed;">🕹 Live control active</strong><br>` +
+        `<span class="hint" style="color:#6d28d9;">Driven by an MCP agent · ${secs}s</span>`;
+  }
+
+  const controlState = await sendMsg({type: 'get_control_state'});
+  if (controlState && controlState.active) {
+    renderControl(controlState);
+    stopControlBtn.addEventListener('click', async () => {
+      stopControlBtn.disabled = true;
+      await sendMsg({type: 'stop_control'});
+      window.close();
+    });
+    return;  // control mode owns the popup; skip recorder rendering
+  }
+
   const state = await sendMsg({type: 'get_state'});
   if (state && state.active) {
     renderActive(state);

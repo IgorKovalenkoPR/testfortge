@@ -15,6 +15,15 @@ Write tools (v1.5):
 * :func:`trigger_test_execution` — spawn a detached ``runner_worker``
   subprocess, mirroring the Flask ``/test-execution`` dispatch path
 
+Browser-control tools (PR-F Phase 2 — active driver):
+
+* :func:`browser_control_start` / :func:`browser_control_status` /
+  :func:`browser_control_stop` — session lifecycle
+* :func:`browser_navigate` / :func:`browser_read_page` /
+  :func:`browser_click` / :func:`browser_fill` / :func:`browser_wait`
+  — drive the operator's real browser through the recorder extension
+  over the DB-backed command queue in :mod:`engine.db`
+
 The tools return plain JSON-serialisable dicts/lists so the MCP layer
 ships them to the client without further conversion. Datetime columns
 arrive already ISO-formatted (see :func:`engine.db._row_to_dict`).
@@ -50,6 +59,16 @@ MCP_SESSION_ID = "mcp-server"
 # but lives here as a constant so it works even when the MCP server
 # boots without Flask config loaded.
 MCP_MAX_CONCURRENT_RUNS = 3
+
+# PR-F Phase 2 — active browser driver. The Flask instance base URL, used
+# to build the operator-facing handoff link so the extension knows where
+# to poll / post results. Optional: when unset, the extension falls back
+# to the instance it already learned from a prior recording.
+TFG_INSTANCE_URL = os.environ.get("TFG_INSTANCE_URL", "").rstrip("/")
+# How long a browser_* tool waits for the extension to execute + return a
+# result before giving up. A slow page load can eat several seconds; the
+# extension polls on a ~1 s interval, so keep headroom.
+BROWSER_CMD_TIMEOUT_S = float(os.environ.get("BROWSER_CMD_TIMEOUT_S", "20"))
 
 
 def _build_transport_security() -> TransportSecuritySettings:
@@ -687,6 +706,174 @@ def _register_recorder_locators(project_id: str, steps: list[dict]) -> int:
         except Exception:
             continue
     return touched
+
+
+# ── PR-F Phase 2 — active browser driver ───────────────────────────
+#
+# These tools let an agent drive the operator's real, logged-in browser
+# through the recorder extension — the same capability the Claude in
+# Chrome extension exposes, built on the extension's existing CDP
+# session. The channel is the DB-backed command queue in engine.db: a
+# tool enqueues a command and blocks on its result row while the
+# extension (polling Flask) executes it against the bound tab.
+#
+# Consent + safety: nothing is drivable until the operator opens the
+# handoff URL from browser_control_start in a browser that has the
+# extension installed and BROWSER_CONTROL_ENABLED set. Only structured
+# verbs exist — there is deliberately no arbitrary-JS `eval`.
+
+
+def _await_browser_command(command_id: str) -> dict:
+    """Block until a queued command reaches a terminal state or times
+    out. Returns ``{ok, result}`` or ``{ok: False, error}``."""
+    import time as _t
+    deadline = _t.monotonic() + BROWSER_CMD_TIMEOUT_S
+    while True:
+        cmd = db.get_browser_command(command_id)
+        if cmd is None:
+            return {"ok": False, "error": "command_lost"}
+        if cmd["status"] == "done":
+            return {"ok": True, "result": cmd.get("result") or {}}
+        if cmd["status"] == "error":
+            return {"ok": False, "error": cmd.get("error") or "command_failed"}
+        if _t.monotonic() >= deadline:
+            return {"ok": False, "error": "timeout",
+                    "hint": "browser did not respond — is the control tab "
+                            "still open and attached? Check browser_control_status."}
+        _t.sleep(0.25)
+
+
+def _enqueue_and_await(token: str, verb: str, params: dict) -> dict:
+    """Validate the session is live, enqueue a command, await its result."""
+    sess = db.get_browser_control_session(token)
+    if sess is None:
+        return {"ok": False, "error": "unknown_or_stopped_session"}
+    if not sess.get("live"):
+        return {"ok": False, "error": "browser_not_attached",
+                "hint": "Ask the operator to open the open_url from "
+                        "browser_control_start; then retry."}
+    cmd_id = db.enqueue_browser_command(token, verb, params)
+    if cmd_id is None:
+        return {"ok": False, "error": "enqueue_failed"}
+    return _await_browser_command(cmd_id)
+
+
+@mcp.tool()
+def browser_control_start(project_id: str, start_url: str) -> dict:
+    """Begin a live browser-control session bound to a project.
+
+    Mints a control token and returns an ``open_url`` — the operator
+    opens it in Chrome (with the TestForTge Recorder extension, and the
+    host running BROWSER_CONTROL_ENABLED=1). Once open, the extension
+    attaches and starts executing the ``browser_*`` commands you issue
+    with this token.
+
+    Args:
+        project_id: 32-char hex id from :func:`list_projects`.
+        start_url: http(s) URL the control tab should open at.
+
+    Returns ``{ok, token, open_url, next}`` — poll
+    :func:`browser_control_status` until ``live`` is true, then drive.
+    """
+    if not project_id or not start_url:
+        raise ValueError("browser_control_start: project_id and start_url required")
+    if not start_url.lower().startswith(("http://", "https://")):
+        raise ValueError("browser_control_start: start_url must be http(s)")
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(32)
+    if db.create_browser_control_session(project_id, token) is None:
+        return {"ok": False, "error": "unknown_project"}
+    frag = f"testfortge-control-token={token}"
+    if TFG_INSTANCE_URL:
+        frag += f"&testfortge-poll-url={TFG_INSTANCE_URL}/api/browser/poll"
+        frag += f"&testfortge-result-url={TFG_INSTANCE_URL}/api/browser/result"
+    sep = "&" if "#" in start_url else "#"
+    open_url = f"{start_url}{sep}{frag}"
+    return {
+        "ok": True,
+        "token": token,
+        "open_url": open_url,
+        "instance_url": TFG_INSTANCE_URL,
+        "next": "Ask the operator to open open_url in Chrome (extension "
+                "installed, BROWSER_CONTROL_ENABLED=1). Then call "
+                "browser_control_status(token) until live=true.",
+    }
+
+
+@mcp.tool()
+def browser_control_status(token: str) -> dict:
+    """Report whether a control session is live (browser attached).
+
+    ``live`` is true when the extension polled within the liveness window
+    — i.e. the operator's tab is open and driving. ``last_seen_seconds``
+    is how long ago the last poll was.
+    """
+    if not token:
+        raise ValueError("browser_control_status: token required")
+    sess = db.get_browser_control_session(token)
+    if sess is None:
+        return {"ok": False, "active": False, "error": "unknown_or_stopped"}
+    return {
+        "ok": True,
+        "active": True,
+        "live": sess.get("live", False),
+        "project_id": sess.get("project_id", ""),
+        "last_seen_seconds": sess.get("last_seen_seconds"),
+    }
+
+
+@mcp.tool()
+def browser_navigate(token: str, url: str) -> dict:
+    """Navigate the controlled tab to ``url`` (http(s)). Returns the
+    landed URL + title once the page load settles."""
+    if not url or not url.lower().startswith(("http://", "https://")):
+        raise ValueError("browser_navigate: url must be http(s)")
+    return _enqueue_and_await(token, "navigate", {"url": url})
+
+
+@mcp.tool()
+def browser_read_page(token: str) -> dict:
+    """Snapshot the controlled page for the agent to reason over.
+
+    Returns ``{url, title, elements: [{ref, role, name, text, tag}, ...],
+    text_digest}``. Each ``ref`` (``ref_1`` …) is a handle you pass to
+    :func:`browser_click` / :func:`browser_fill`. This is the analogue of
+    the Claude in Chrome ``read_page`` accessibility tree.
+    """
+    return _enqueue_and_await(token, "read_page", {})
+
+
+@mcp.tool()
+def browser_click(token: str, ref: str) -> dict:
+    """Click the element identified by ``ref`` (from browser_read_page)."""
+    if not ref:
+        raise ValueError("browser_click: ref required (from browser_read_page)")
+    return _enqueue_and_await(token, "click", {"ref": ref})
+
+
+@mcp.tool()
+def browser_fill(token: str, ref: str, text: str) -> dict:
+    """Type ``text`` into the input/textarea identified by ``ref``."""
+    if not ref:
+        raise ValueError("browser_fill: ref required (from browser_read_page)")
+    return _enqueue_and_await(token, "fill", {"ref": ref, "text": text or ""})
+
+
+@mcp.tool()
+def browser_wait(token: str, ms: int = 1000) -> dict:
+    """Pause the driver for ``ms`` milliseconds (clamped 0–30000) — e.g.
+    to let an async view settle before the next browser_read_page."""
+    ms = max(0, min(int(ms or 0), 30_000))
+    return _enqueue_and_await(token, "wait", {"ms": ms})
+
+
+@mcp.tool()
+def browser_control_stop(token: str) -> dict:
+    """End a control session: seal it and drop its pending commands. The
+    operator can also just close the tab (the session then goes stale)."""
+    if not token:
+        raise ValueError("browser_control_stop: token required")
+    return {"ok": bool(db.stop_browser_control_session(token))}
 
 
 # ── Entry ──────────────────────────────────────────────────────────
