@@ -29,6 +29,118 @@
         {{ t.get('review_session_expires', 'Link expires') }}: <small>{{ draft.expires_at }}</small>
     </div>
 
+    {# ── PR-F — deep-capture telemetry ──────────────────────────────
+       The extension records network + console + DOM live via CDP. Show
+       a session-health banner (failed requests / console errors read as
+       bug candidates) and a collapsible panel with the raw evidence. #}
+    {% if draft.telemetry %}
+    {% set tele = draft.telemetry %}
+    {% set counts = tele.counts or {} %}
+    {% set n_errors = (counts.console_errors or 0) + (counts.network_failures or 0) %}
+
+    {% if not tele.meta.debugger_ok and not tele.network and not tele.console %}
+    <div class="card" style="margin-top:12px;padding:12px 16px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;font-size:0.9em;">
+        ⚠ {{ t.get('review_session_deepcapture_off',
+            'Deep capture (network + console) was unavailable for this session — the debugger could not attach (DevTools open on the tab, a chrome:// page, or the banner was dismissed). Steps were still recorded.') }}
+        {% if tele.meta.debugger_error %}<br><small style="color:#b45309;"><code>{{ tele.meta.debugger_error }}</code></small>{% endif %}
+    </div>
+    {% elif n_errors > 0 %}
+    <div class="card" style="margin-top:12px;padding:12px 16px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;">
+        <strong>⚠ {{ n_errors }}</strong>
+        {{ t.get('review_session_errors_detected',
+            'issue(s) detected during this session') }}
+        —
+        <span>{{ counts.network_failures or 0 }} {{ t.get('review_session_failed_requests', 'failed request(s)') }}</span>,
+        <span>{{ counts.console_errors or 0 }} {{ t.get('review_session_console_errors', 'console error(s)') }}</span>.
+        <small style="display:block;margin-top:4px;color:#b91c1c;">
+            {{ t.get('review_session_errors_hint',
+                'These are candidates for bug reports — expand the panel below to inspect.') }}
+        </small>
+    </div>
+    {% endif %}
+
+    <details class="card" style="margin-top:12px;padding:0;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+        <summary style="cursor:pointer;padding:12px 16px;background:#f8fafc;font-weight:600;color:#334155;">
+            🔎 {{ t.get('review_session_telemetry_title', 'Session telemetry') }}
+            <span style="font-weight:400;color:#64748b;font-size:0.9em;">
+                ({{ counts.network or 0 }} {{ t.get('review_session_requests', 'requests') }},
+                 {{ counts.console or 0 }} {{ t.get('review_session_console_msgs', 'console msgs') }},
+                 {{ counts.dom_snapshots or 0 }} {{ t.get('review_session_snapshots', 'DOM snapshots') }})
+            </span>
+        </summary>
+        <div style="padding:14px 16px;">
+
+            {# Network requests — failures highlighted. #}
+            {% if tele.network %}
+            <h4 style="margin:0 0 6px 0;font-size:0.95em;color:#334155;">
+                {{ t.get('review_session_network', 'Network requests') }}
+            </h4>
+            <div style="max-height:280px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82em;font-family:monospace;">
+                    <thead>
+                        <tr style="background:#f8fafc;color:#64748b;text-align:left;">
+                            <th style="padding:5px 8px;">{{ t.get('review_session_status', 'Status') }}</th>
+                            <th style="padding:5px 8px;">{{ t.get('review_session_method', 'Method') }}</th>
+                            <th style="padding:5px 8px;">{{ t.get('review_session_url', 'URL') }}</th>
+                            <th style="padding:5px 8px;">{{ t.get('review_session_type', 'Type') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in tele.network %}
+                        {% set is_fail = (r.ok == false) or (r.status and r.status >= 400) %}
+                        <tr style="border-top:1px solid #f1f5f9;{% if is_fail %}background:#fef2f2;{% endif %}">
+                            <td style="padding:4px 8px;font-weight:600;{% if is_fail %}color:#dc2626;{% elif r.status %}color:#16a34a;{% else %}color:#94a3b8;{% endif %}">
+                                {% if r.error %}✕{% else %}{{ r.status or '—' }}{% endif %}
+                            </td>
+                            <td style="padding:4px 8px;color:#475569;">{{ r.method }}</td>
+                            <td style="padding:4px 8px;color:#334155;word-break:break-all;">
+                                {{ r.url|truncate(90) }}
+                                {% if r.error %}<em style="color:#dc2626;"> ({{ r.error }})</em>{% endif %}
+                            </td>
+                            <td style="padding:4px 8px;color:#94a3b8;">{{ r.type }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {# Console — errors + warnings colour-coded. #}
+            {% if tele.console %}
+            <h4 style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+                {{ t.get('review_session_console', 'Console output') }}
+            </h4>
+            <div style="max-height:240px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;background:#0f172a;padding:8px 10px;">
+                {% for c in tele.console %}
+                {% set col = '#f87171' if c.level in ('error', 'assert') else ('#fbbf24' if c.level in ('warning', 'warn') else '#94a3b8') %}
+                <div style="font-family:monospace;font-size:0.8em;line-height:1.5;color:{{ col }};word-break:break-word;">
+                    <span style="opacity:0.7;text-transform:uppercase;">[{{ c.level }}]</span>
+                    {{ c.text|truncate(300) }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# DOM snapshots — one line per captured page. #}
+            {% if tele.dom_snapshots %}
+            <h4 style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+                {{ t.get('review_session_dom', 'DOM snapshots') }}
+            </h4>
+            <ul style="margin:0;padding-left:18px;color:#475569;font-size:0.85em;">
+                {% for s in tele.dom_snapshots %}
+                <li style="margin:3px 0;">
+                    <strong>{{ s.title or s.url|truncate(60) }}</strong>
+                    — {{ s.element_count }} {{ t.get('review_session_controls', 'interactive controls') }}
+                    <br><small style="color:#94a3b8;word-break:break-all;">{{ s.url|truncate(90) }}</small>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+
+        </div>
+    </details>
+    {% endif %}
+
     <form id="review-form" method="POST" action="{{ url_for('test_cases_review_session_save', token=token) }}"
           style="margin-top:16px;">
         {# CSRF token for the form-encoded fallback. The JS fetch in

@@ -82,6 +82,117 @@ def _purge_oldest_recorder_session() -> None:
     _RECORDER_SESSIONS.pop(oldest_token, None)
 
 
+# PR-F — server-side sanitiser for the extension's deep-capture blob.
+# Never trust the extension's own caps: a buggy or hostile client could
+# POST an unbounded telemetry object. We re-cap every count + string
+# length here so one recording can't bloat the SessionDraft row or the
+# review page, and coerce types defensively against schema drift.
+_TELE_NET_CAP = 500
+_TELE_CONSOLE_CAP = 500
+_TELE_SNAPSHOT_CAP = 25
+_TELE_STR_CAP = 2000
+
+
+def _sanitise_recorder_telemetry(raw) -> dict | None:
+    """Coerce + cap the ``telemetry`` field from /finish. Returns a
+    normalised dict, or ``None`` when there's nothing worth storing."""
+    if not isinstance(raw, dict):
+        return None
+
+    def _s(v, cap=_TELE_STR_CAP):
+        return str(v if v is not None else "")[:cap]
+
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    def _clip(seq, cap):
+        return seq[-cap:] if isinstance(seq, list) else []
+
+    net = []
+    for item in _clip(raw.get("network"), _TELE_NET_CAP):
+        if not isinstance(item, dict):
+            continue
+        ok = item.get("ok")
+        net.append({
+            "method": _s(item.get("method"), 12),
+            "url": _s(item.get("url"), 500),
+            "type": _s(item.get("type"), 40),
+            "status": _int(item.get("status")),
+            "ok": (bool(ok) if ok is not None else None),
+            "mime": _s(item.get("mime"), 80),
+            "error": _s(item.get("error"), 200),
+            "redirects": _int(item.get("redirects")),
+        })
+
+    con = []
+    for item in _clip(raw.get("console"), _TELE_CONSOLE_CAP):
+        if not isinstance(item, dict):
+            continue
+        con.append({
+            "level": _s(item.get("level"), 16),
+            "text": _s(item.get("text")),
+            "source": _s(item.get("source"), 24),
+            "url": _s(item.get("url"), 500),
+        })
+
+    snaps = []
+    for item in _clip(raw.get("dom_snapshots"), _TELE_SNAPSHOT_CAP):
+        if not isinstance(item, dict):
+            continue
+        inter_raw = item.get("interactive")
+        inter = []
+        for e in (inter_raw[:80] if isinstance(inter_raw, list) else []):
+            if not isinstance(e, dict):
+                continue
+            inter.append({
+                "tag": _s(e.get("tag"), 20),
+                "role": _s(e.get("role"), 40),
+                "name": _s(e.get("name"), 120),
+                "text": _s(e.get("text"), 120),
+                "locator": _s(e.get("locator"), 300),
+                "label": _s(e.get("label"), 200),
+            })
+        snaps.append({
+            "url": _s(item.get("url"), 500),
+            "title": _s(item.get("title"), 200),
+            "text_digest": _s(item.get("text_digest")),
+            "interactive": inter,
+            "element_count": len(inter),
+        })
+
+    meta_raw = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+    meta = {
+        "debugger_ok": bool(meta_raw.get("debugger_ok")),
+        "debugger_error": _s(meta_raw.get("debugger_error"), 200),
+    }
+
+    # Nothing captured AND no debugger-status to report → don't store a
+    # row-bloating empty blob. But if the debugger failed to attach we
+    # DO keep the meta so the review page can explain the thin panel.
+    if not (net or con or snaps or meta["debugger_error"]):
+        return None
+
+    con_errors = sum(1 for c in con if c["level"] in ("error", "assert"))
+    net_fails = sum(1 for n in net
+                     if n["ok"] is False or (n["status"] and n["status"] >= 400))
+    return {
+        "network": net,
+        "console": con,
+        "dom_snapshots": snaps,
+        "meta": meta,
+        "counts": {
+            "network": len(net),
+            "console": len(con),
+            "console_errors": con_errors,
+            "network_failures": net_fails,
+            "dom_snapshots": len(snaps),
+        },
+    }
+
+
 def _recorder_cors_headers() -> dict:
     """CORS headers for the recorder API endpoints.
 
@@ -1193,21 +1304,30 @@ def register(app: Flask) -> None:
                 "error": "segmenter_returned_empty",
             }, 500)
 
+        # PR-F — decode the optional deep-capture blob. Sanitised +
+        # capped server-side so a busy or hostile client can't bloat the
+        # row. ``None`` when the extension sent nothing (older extension,
+        # or debugger never attached and had no error to report).
+        telemetry = _sanitise_recorder_telemetry(payload.get("telemetry"))
+
         # Use the same draft-token shape PR-D uses so the review URL
         # is indistinguishable from a CLI-staged session. Generated
         # fresh per finish — the recorder token from /start is never
         # written to DB.
         import secrets as _secrets
         draft_token = _secrets.token_urlsafe(32)
-        row_id = _db.create_session_draft(pid, draft_token, proposed)
+        row_id = _db.create_session_draft(pid, draft_token, proposed,
+                                           telemetry=telemetry)
         if row_id is None:
             return _json_with_cors({"error": "draft_persist_failed"}, 500)
 
         base = request.host_url.rstrip("/")
+        counts = (telemetry or {}).get("counts", {})
         return _json_with_cors({
             "ok": True,
             "review_url": f"{base}/test-cases/review-session/{draft_token}",
             "proposed_tc_count": len(proposed),
+            "telemetry_counts": counts,
         })
 
     # Both /api/recorder-session/{start,finish} carry their own auth
