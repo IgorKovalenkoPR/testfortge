@@ -376,6 +376,82 @@ def _reconstruct_partial_payload(run_id: str, config_path: str,
     }
 
 
+# ── Cannot-execute / all-failed infrastructure guard ──────────────
+#
+# Confirmed via reproduction (2026-07-15): a Test Execution run where
+# the automation layer reports a non-passing status for EVERY item
+# does NOT mean the suite found N distinct product defects. The
+# simulator alone cannot produce an all-failed run — its fail
+# probability is capped at 45% (engine/qa_testers.py:596); an
+# all-failed outcome is imposed by _reconcile_with_automation copying
+# the runner's per-item status 1:1. When the whole suite fails to
+# pass, the honest QA reading is an infrastructure / environment /
+# coverage problem (Base URL unset or unreachable, UA/geo block, or a
+# generic test pack that does not map to the site under test) — a
+# cannot-execute condition (ISTQB: Blocked), not N real defects with N
+# bugs. The guard below reclassifies such a run to Blocked and raises
+# ONE summary bug instead of one misleading Failed + bug per item.
+#
+# A run smaller than this is left alone — a 3-item smoke test that
+# legitimately fails all 3 is a real signal, not infrastructure noise.
+_INFRA_GUARD_MIN_SUITE = 10
+
+
+def _make_cannot_execute_summary_bug(n_blocked: int, site_url: str,
+                                     reporter: str = "") -> dict:
+    """Build the ONE summary bug that replaces the per-item bug pile
+    when the all-failed infrastructure guard fires.
+
+    Same dict shape the rest of the bug pipeline consumes; ``id`` and
+    ``environment`` are filled in by the per-env loop downstream.
+    """
+    site = (site_url or "").strip() or "the application under test"
+    return {
+        "id": "",
+        "title": (f"Test run could not validate the application — "
+                  f"{n_blocked} item(s) unexecutable (infrastructure/"
+                  f"environment issue, not distinct defects)"),
+        "severity": "Major",
+        "priority": "High",
+        "status": "Open",
+        "environment": "",
+        "preconditions": (
+            f"A Test Execution run was started against {site}."),
+        "steps_to_reproduce": (
+            "1. Start a Test Execution run against the target.\n"
+            "2. Observe that no item produces a passing result.\n"
+            "3. Review the per-item Blocked comments and the run "
+            "environment (Base URL, reachability, credentials)."),
+        "actual_result": (
+            f"The run produced 0 passing checks across {n_blocked} "
+            f"executed item(s) — every item failed to validate. A "
+            f"whole-suite failure of this shape indicates the "
+            f"application could not be reached or driven (wrong/unset "
+            f"Base URL, environment down, UA/geo block, or a generic "
+            f"test pack that does not map to {site}) — NOT {n_blocked} "
+            f"distinct product defects. The items were recorded as "
+            f"Blocked (could not be executed)."),
+        "expected_result": (
+            "The run should reach the application and validate items, "
+            "producing a realistic pass/fail mix. Verify the Base URL, "
+            "environment availability/credentials, and that the test "
+            "pack matches the site under test, then re-run."),
+        "frequency": "Always",
+        "affects_version": "",
+        "found_in_build": "",
+        "attachments": [],
+        "linked_item_id": "",
+        "linked_item_type": "live_executor",
+        "reporter": reporter or "",
+        "assignee": "",
+        "created_at": datetime.now().isoformat(),
+        "component": "TestRunInfra",
+        "labels": ["live_executor", "source:live_executor",
+                   "defect:cannot_execute", "infra"],
+        "comment": "",
+    }
+
+
 def _reconcile_with_automation(execution: dict,
                                 automation_assets: dict,
                                 env_type: str) -> None:
@@ -426,6 +502,10 @@ def _reconcile_with_automation(execution: dict,
     new_bugs: list[dict] = []
     drop_item_ids: set[str] = set()
     promote_to_failed: dict[str, str] = {}  # item_id -> "Failed"/"Blocked"
+    # Items the runner could not genuinely execute (runner "blocked", or
+    # a "failed" with no failure evidence). These become ISTQB Blocked
+    # and NEVER auto-file a bug — see the split in the loop below.
+    cannot_execute_ids: set[str] = set()
 
     # Status mapping: runner uses lowercase, simulator uses Title.
     runner_to_sim = {
@@ -465,12 +545,45 @@ def _reconcile_with_automation(execution: dict,
             ev["failure_step"] = None
             ev["failure_screenshots"] = []
         else:
-            # Playwright says Failed/Blocked but simulator said
-            # otherwise. Promote the verdict; ensure a bug exists.
-            r["status"] = runner_status
-            promote_to_failed[item_id] = runner_status
+            # Runner reports Failed/Blocked while the simulator said
+            # otherwise. We MUST distinguish a genuine, evidence-backed
+            # product failure from a cannot-execute condition — the
+            # latter is the root cause of the "0 pass / all fail / one
+            # bug per item" runs (2026-07-15 investigation):
+            #
+            #   * runner "blocked"                      -> cannot-execute
+            #   * runner "failed" WITH failure evidence -> genuine Failed
+            #   * runner "failed" WITHOUT any evidence  -> cannot-execute
+            #
+            # Cannot-execute items are recorded as ISTQB Blocked and
+            # NEVER auto-file a bug; any simulator bug they carried is
+            # dropped. Only an evidence-backed Failed keeps/synthesizes
+            # a bug.
             fstep = ev.get("failure_step") or {}
             comment = (fstep.get("comment") or "").strip()
+            has_evidence = bool(
+                ev.get("failure_step") or ev.get("failure_screenshots"))
+            genuine_failure = (runner_status == "Failed" and has_evidence)
+
+            if not genuine_failure:
+                # Cannot-execute -> Blocked, no bug.
+                r["status"] = "Blocked"
+                r["comment"] = (
+                    comment
+                    or "Automation could not execute this item — "
+                       "recorded as Blocked (not a product defect).")
+                r["source"] = "real_check"
+                cannot_execute_ids.add(item_id)
+                # Drop any simulator bug for this item and clear a
+                # pending reference so no bug is filed.
+                drop_item_ids.add(item_id)
+                if r.get("bug_id", "").startswith("__pending_"):
+                    r["bug_id"] = ""
+                continue
+
+            # Genuine, evidence-backed failure — promote + ensure a bug.
+            r["status"] = "Failed"
+            promote_to_failed[item_id] = "Failed"
             if comment:
                 r["comment"] = comment
             r["source"] = "real_check"
@@ -507,27 +620,64 @@ def _reconcile_with_automation(execution: dict,
                 # loop later replaces with the assigned bug ID.
                 r["bug_id"] = f"__pending_synth_{item_id}"
 
-    # Drop simulator bugs for TCs Playwright passed.
+    # Drop simulator bugs for items Playwright passed OR could not
+    # execute (cannot-execute items must never carry a bug).
     if drop_item_ids:
         execution["bugs"] = [
             b for b in bugs
             if b.get("linked_item_id") not in drop_item_ids
         ]
         bugs = execution["bugs"]
-    # Add synth bugs for Playwright-only failures.
+    # Add synth bugs for evidence-backed Playwright-only failures.
     if new_bugs:
         execution["bugs"] = list(bugs) + new_bugs
-    # Recompute stats from the reconciled results.
+        bugs = execution["bugs"]
+
+    # Count the reconciled verdicts.
     passed = sum(1 for r in results if r.get("status") == "Passed")
     failed = sum(1 for r in results if r.get("status") == "Failed")
     blocked = sum(1 for r in results if r.get("status") == "Blocked")
     total = passed + failed + blocked
+
+    # ── All-failed infrastructure guard ──────────────────────────
+    # If NOTHING passed across a substantial suite, the run did not
+    # find N distinct defects — it could not validate the app at all
+    # (unset/unreachable Base URL, environment down, UA/geo block, or a
+    # generic pack that does not map to the site). Record every
+    # remaining Failed as Blocked (ISTQB: could not be executed) and
+    # replace the per-item bug pile with ONE summary infrastructure
+    # bug. See _make_cannot_execute_summary_bug + the 2026-07-15 note.
+    if total >= _INFRA_GUARD_MIN_SUITE and passed == 0:
+        site_url = (execution.get("stats") or {}).get("site_url") or ""
+        reporter = ""
+        for r in results:
+            if not reporter:
+                reporter = r.get("tester_name", "") or ""
+            if r.get("status") == "Failed":
+                r["status"] = "Blocked"
+                r["source"] = "real_check"
+                cannot_execute_ids.add(r.get("item_id") or "")
+                if not (r.get("comment") or "").strip():
+                    r["comment"] = (
+                        "Run could not validate this item — whole-suite "
+                        "execution failure (see the run's summary bug).")
+                if r.get("bug_id", "").startswith("__pending_"):
+                    r["bug_id"] = ""
+        blocked = failed + blocked
+        failed = 0
+        execution["bugs"] = [
+            _make_cannot_execute_summary_bug(
+                n_blocked=blocked, site_url=site_url, reporter=reporter)
+        ]
+        execution["_bug_alias"] = {}
+
     execution["stats"] = {
         "total": total,
         "passed": passed,
         "failed": failed,
         "blocked": blocked,
         "pass_rate": round(passed / total * 100, 1) if total else 0,
+        "cannot_execute": len(cannot_execute_ids),
         "sources": (execution.get("stats") or {}).get("sources") or {},
         "site_url": (execution.get("stats") or {}).get("site_url") or "",
         "reconciled_with_automation": True,
