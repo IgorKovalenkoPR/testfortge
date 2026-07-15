@@ -476,6 +476,12 @@ TRANSLATIONS = {
     "bug_save": "Save Bug Report",
     "bug_saved": "Bug report created successfully",
     "bug_export": "Export Bug Reports",
+    # Run filter (scope the listing to one Test Execution run)
+    "bug_run_filter_label": "Run:",
+    "bug_run_all": "All runs",
+    "bug_run_latest": "Latest run",
+    "bug_run_apply": "Apply",
+    "bug_run_clear": "Clear run filter",
     "bug_frequency": "Frequency",
     "bug_affects_version": "Affects Version",
     "bug_found_in_build": "Found in Build",

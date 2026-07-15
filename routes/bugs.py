@@ -82,25 +82,91 @@ def _bug_row_to_session_dict(row: dict) -> dict:
     return out
 
 
-def _hydrate_bugs(project_id: str | None) -> list:
+def _hydrate_bugs(project_id: str | None,
+                  run_id: int | None = None) -> list:
     """Return the list of ``BugReport`` dataclass instances to render
     on ``/bug-reports``. DB-first so ``db_id`` is populated; falls
     back to session ``bug_reports_data`` only when the DB read fails
     or no project is active yet (legacy / pre-project flow).
+
+    ``run_id`` scopes the DB read to a single Test Execution run (the
+    run filter — see :func:`bug_reports_page`). The session fallback
+    is intentionally *not* run-scoped: run scoping is a DB-era feature
+    and the fallback only fires when there is no DB-backed project, so
+    the run dropdown never renders in that mode anyway.
     """
     if project_id:
         try:
-            rows = _db.list_bugs(project_id) or []
+            rows = _db.list_bugs(project_id, run_id=run_id) or []
         except Exception as exc:  # pragma: no cover — DB outage shouldn't 500
             log.warning("hydrate_bugs: list_bugs failed: %s", exc)
             rows = []
-        if rows:
+        # When a run is explicitly requested we honour an empty result
+        # (that run genuinely filed no bugs) rather than leaking the
+        # session cache from a different scope.
+        if rows or run_id is not None:
             # DB list_bugs is ordered desc by created_at; the template
             # has always shown newest-first, so we keep that order.
             return [dict_to_bug(_bug_row_to_session_dict(r)) for r in rows]
     # Session fallback — older flow that wrote bug_reports_data directly.
     bugs_data = session.get("bug_reports_data", []) or []
     return [dict_to_bug(b) for b in bugs_data]
+
+
+def _run_filter_options(project_id: str,
+                        counts: dict | None = None) -> list[dict]:
+    """Build the run-filter dropdown data for ``/bug-reports``.
+
+    Returns a list of ``{"id", "label", "bug_count"}`` dicts, newest
+    run first — only runs that actually filed at least one bug are
+    included, so the dropdown doesn't fill with empty passes. The
+    label reads e.g. ``"Run #42 · testfort.com · 2026-07-13 14:30"``
+    so the operator can tell runs apart by site + time at a glance.
+
+    ``counts`` (``{run_id: bug_count}`` from
+    :func:`engine.db.count_bugs_by_run`) is accepted pre-computed so
+    the caller can reuse it for the unfiltered project total without a
+    second grouped query.
+    """
+    try:
+        runs = _db.list_execution_runs(project_id) or []
+        if counts is None:
+            counts = _db.count_bugs_by_run(project_id) or {}
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("run_filter_options failed: %s", exc)
+        return []
+
+    opts: list[dict] = []
+    for r in runs:
+        rid = r.get("id")
+        if rid is None:
+            continue
+        n = counts.get(rid, 0)
+        if not n:
+            continue  # skip runs that produced no bugs
+        # Host from base_url for a compact, recognisable label.
+        host = ""
+        base_url = r.get("base_url") or ""
+        if base_url:
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(base_url).netloc or base_url
+            except Exception:  # pragma: no cover — defensive
+                host = base_url
+        started = (r.get("started_at") or "")
+        if isinstance(started, str) and len(started) >= 16:
+            started = started[:16].replace("T", " ")
+        label_bits = [f"Run #{rid}"]
+        if host:
+            label_bits.append(host)
+        if started:
+            label_bits.append(str(started))
+        opts.append({
+            "id": rid,
+            "label": " · ".join(label_bits),
+            "bug_count": n,
+        })
+    return opts
 
 
 def _bug_dict_to_db_row(bug_dict: dict) -> dict:
@@ -222,7 +288,40 @@ def register(app: Flask) -> None:
         # bulk-edit checkboxes need it). Session ``bug_reports_data``
         # stays as the fallback for the legacy / pre-project flow.
         pid = ensure_active_project()
-        bugs = _hydrate_bugs(pid)
+
+        # Run filter (this PR): scope the listing to a single Test
+        # Execution run so the operator can look at just the latest
+        # pass instead of every bug the project ever accumulated
+        # across repeated runs. ``run`` is a query-string param so a
+        # scoped view is bookmarkable, exactly like ``source`` below.
+        #   * ``run=latest``   — the most recent run that filed a bug
+        #   * ``run=<int>``    — that specific run id
+        #   * absent / "all"   — no run scoping (historical default)
+        # Invalid / stale ids fall back to the unscoped view rather
+        # than silently showing zero bugs.
+        # One grouped count query, reused for both the dropdown option
+        # counts and the unfiltered project total below.
+        try:
+            run_counts = _db.count_bugs_by_run(pid) if pid else {}
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("count_bugs_by_run failed: %s", exc)
+            run_counts = {}
+        run_options = _run_filter_options(pid, run_counts) if pid else []
+        run_raw = (request.args.get("run") or "").strip().lower()
+        run_id: int | None = None
+        run_filter = ""  # echoed to the template for active-state
+        if run_raw and run_raw != "all":
+            if run_raw == "latest":
+                if run_options:
+                    run_id = run_options[0]["id"]
+                    run_filter = "latest"
+            elif run_raw.isdigit():
+                candidate = int(run_raw)
+                if any(o["id"] == candidate for o in run_options):
+                    run_id = candidate
+                    run_filter = str(candidate)
+
+        bugs = _hydrate_bugs(pid, run_id=run_id)
 
         # Sprint 5 follow-up: filter by bug source. PR #12 started
         # writing walkthrough findings as bugs with
@@ -261,10 +360,21 @@ def register(app: Flask) -> None:
             "major": sum(1 for b in bugs if b.severity == "Major"),
         }
 
+        # Unfiltered project bug total for the "Reset Project bugs"
+        # affordance. Reset deletes EVERY bug on the project regardless
+        # of the active source/run filter, so its button + confirm
+        # dialog must show the true count — not ``stats.total``, which
+        # now reflects the filtered view. Falls back to the filtered
+        # count in the session-only path (no DB project, no run_counts).
+        project_bug_total = sum(run_counts.values()) if run_counts \
+            else stats["total"]
+
         return render_template("bug_reports.html", bugs=bugs, stats=stats,
                                severities=BUG_SEVERITIES, priorities=BUG_PRIORITIES,
                                statuses=BUG_STATUSES, frequencies=BUG_FREQUENCIES,
-                               source_filter=source_filter)
+                               source_filter=source_filter,
+                               run_options=run_options, run_filter=run_filter,
+                               project_bug_total=project_bug_total)
 
     @app.route("/bugs/bulk", methods=["POST"])
     def bugs_bulk():

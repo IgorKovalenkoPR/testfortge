@@ -1480,15 +1480,48 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
 
 
 def list_bugs(project_id: str | None = None,
-              source: str | None = None) -> list[dict]:
+              source: str | None = None,
+              run_id: int | None = None) -> list[dict]:
+    """List bug rows, newest-first.
+
+    ``run_id`` scopes the listing to a single Test Execution run — the
+    ``/bug-reports`` run filter uses it so an operator who has hammered
+    the same project across many runs can look at just the run they
+    care about instead of the whole historical pile. Only bugs the
+    runner filed against that run carry a ``run_id``; manually-filed /
+    Tedgie bugs have ``run_id IS NULL`` and are therefore excluded when
+    a specific run is requested (the caller offers an "All runs" option
+    for the unscoped view).
+    """
     with session_scope() as sess:
         stmt = select(BugReport).order_by(BugReport.created_at.desc())
         if project_id:
             stmt = stmt.where(BugReport.project_id == project_id)
         if source:
             stmt = stmt.where(BugReport.source == source)
+        if run_id is not None:
+            stmt = stmt.where(BugReport.run_id == run_id)
         rows = sess.execute(stmt).scalars().all()
         return [_row_to_dict(r) for r in rows]
+
+
+def count_bugs_by_run(project_id: str) -> dict[int | None, int]:
+    """Return ``{run_id: bug_count}`` for a project in one round-trip.
+
+    Powers the per-run bug counts in the ``/bug-reports`` run-filter
+    dropdown so each option reads e.g. "Run #42 — 18 bugs" without an
+    N+1 query. The ``None`` key (when present) counts manually-filed /
+    Tedgie bugs that aren't tied to any run.
+    """
+    if not project_id:
+        return {}
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(BugReport.run_id, func.count(BugReport.id))
+            .where(BugReport.project_id == project_id)
+            .group_by(BugReport.run_id)
+        ).all()
+        return {rid: int(cnt) for rid, cnt in rows}
 
 
 # ── PR-H: cross-run dedup helpers ─────────────────────────────────
@@ -2426,7 +2459,7 @@ __all__ = [
     # checklist
     "save_checklist", "load_checklist",
     # bugs
-    "save_bug", "list_bugs", "VALID_BUG_SOURCES",
+    "save_bug", "list_bugs", "count_bugs_by_run", "VALID_BUG_SOURCES",
     # estimation
     "save_estimation", "list_estimations", "list_estimations_by_owner",
     "latest_estimation",
