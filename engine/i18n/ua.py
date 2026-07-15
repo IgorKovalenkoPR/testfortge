@@ -521,6 +521,12 @@ TRANSLATIONS = {
     "bug_save": "Зберегти баг-репорт",
     "bug_saved": "Баг-репорт створено успішно",
     "bug_export": "Експорт баг-репортів",
+    # Фільтр за прогоном (обмежити список одним прогоном Test Execution)
+    "bug_run_filter_label": "Прогін:",
+    "bug_run_all": "Усі прогони",
+    "bug_run_latest": "Останній прогін",
+    "bug_run_apply": "Застосувати",
+    "bug_run_clear": "Скинути фільтр прогону",
     "bug_frequency": "Частота відтворення",
     "bug_affects_version": "Версія, де знайдено",
     "bug_found_in_build": "Знайдено в збірці",

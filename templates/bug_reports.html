@@ -25,7 +25,10 @@
             style="color:#b91c1c; border-color:#fecaca;">
         <i data-lucide="trash-2" class="icon-sm"></i>
         {{ t.get('bug_reset_button', 'Reset Project bugs') }}
-        {% if bugs %}({{ stats.total }}){% endif %}
+        {# Unfiltered project total — reset wipes every bug regardless
+           of the active source/run filter, so the count must not track
+           the filtered ``stats.total``. #}
+        {% if project_bug_total|default(0) %}({{ project_bug_total }}){% endif %}
     </button>
 </div>
 
@@ -48,7 +51,7 @@
                 'This deletes every bug attached to the active project. The project itself, its test cases, and its checklists are NOT touched. The action cannot be undone.') }}
         </p>
         <p style="color:#1e293b;font-size:0.95em;">
-            <strong>{{ stats.total if stats else 0 }}</strong>
+            <strong>{{ project_bug_total|default(0) }}</strong>
             {{ t.get('bug_reset_count_suffix', 'bug(s) will be deleted.') }}
         </p>
         <form method="POST" action="{{ url_for('bugs_reset') }}"
@@ -100,17 +103,17 @@
     <span style="font-size:0.85em;color:#475569;font-weight:600;">
         {{ t.get('bug_source_filter_label', 'Source:') }}
     </span>
-    <a href="{{ url_for('bug_reports_page') }}"
+    <a href="{{ url_for('bug_reports_page', run=(run_filter or None)) }}"
        class="btn btn-sm {% if not source_filter %}btn-primary{% else %}btn-secondary{% endif %}"
        {% if not source_filter %}aria-current="page"{% endif %}>
         {{ t.get('bug_source_all', 'All') }}
     </a>
-    <a href="{{ url_for('bug_reports_page', source='walkthrough') }}"
+    <a href="{{ url_for('bug_reports_page', source='walkthrough', run=(run_filter or None)) }}"
        class="btn btn-sm {% if source_filter == 'walkthrough' %}btn-primary{% else %}btn-secondary{% endif %}"
        {% if source_filter == 'walkthrough' %}aria-current="page"{% endif %}>
         🧭 {{ t.get('bug_source_walkthrough', 'Walkthrough only') }}
     </a>
-    <a href="{{ url_for('bug_reports_page', source='manual_tc') }}"
+    <a href="{{ url_for('bug_reports_page', source='manual_tc', run=(run_filter or None)) }}"
        class="btn btn-sm {% if source_filter == 'manual_tc' %}btn-primary{% else %}btn-secondary{% endif %}"
        {% if source_filter == 'manual_tc' %}aria-current="page"{% endif %}>
         📝 {{ t.get('bug_source_manual_tc', 'TC / manual only') }}
@@ -123,6 +126,65 @@
     </span>
     {% endif %}
 </div>
+
+{# ── Run filter (this PR) ─────────────────────────────────────────
+   Scope the listing to a single Test Execution run so the operator
+   isn't staring at every bug the project ever accumulated across
+   repeated runs. Rendered only when at least one run actually filed
+   a bug (``run_options`` non-empty) — a manual-only project keeps the
+   toolbar uncluttered. A plain GET <form> keeps the scoped view
+   bookmarkable and preserves the active ``source`` selection via a
+   hidden field so the two filters compose. No JS beyond auto-submit
+   on change (with a no-JS Apply fallback). #}
+{% if run_options %}
+<div class="bug-run-filter"
+     style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;
+            padding:6px 10px;border:1px solid #e2e8f0;
+            border-radius:8px;background:#f8fafc;align-items:center;">
+    <form method="get" action="{{ url_for('bug_reports_page') }}"
+          style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0;">
+        {% if source_filter %}
+        <input type="hidden" name="source" value="{{ source_filter }}">
+        {% endif %}
+        <label for="bug-run-select"
+               style="font-size:0.85em;color:#475569;font-weight:600;">
+            🎯 {{ t.get('bug_run_filter_label', 'Run:') }}
+        </label>
+        <select id="bug-run-select" name="run" class="form-select"
+                onchange="this.form.submit()"
+                style="font-size:0.85em;padding:4px 8px;border:1px solid #cbd5e1;
+                       border-radius:6px;max-width:420px;">
+            <option value="all" {% if not run_filter %}selected{% endif %}>
+                {{ t.get('bug_run_all', 'All runs') }}
+            </option>
+            <option value="latest" {% if run_filter == 'latest' %}selected{% endif %}>
+                {{ t.get('bug_run_latest', 'Latest run') }}
+            </option>
+            {% for opt in run_options %}
+            <option value="{{ opt.id }}" {% if run_filter == opt.id|string %}selected{% endif %}>
+                {{ opt.label }} — {{ opt.bug_count }} {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
+            </option>
+            {% endfor %}
+        </select>
+        <noscript>
+            <button type="submit" class="btn btn-sm btn-secondary">
+                {{ t.get('bug_run_apply', 'Apply') }}
+            </button>
+        </noscript>
+        {% if run_filter %}
+        <a href="{{ url_for('bug_reports_page', source=(source_filter or None)) }}"
+           class="btn btn-sm btn-secondary">
+            {{ t.get('bug_run_clear', 'Clear run filter') }}
+        </a>
+        <span style="font-size:0.78em;color:#64748b;margin-left:auto;">
+            {{ t.get('bug_source_filtered_count', 'showing') }}
+            <strong>{{ stats.total }}</strong>
+            {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
+        </span>
+        {% endif %}
+    </form>
+</div>
+{% endif %}
 
 {# ── Export + Select-all toolbar ──
    PR-H originally bundled Reset Project here. PR-J split Reset out
@@ -301,12 +363,12 @@
 
 {% else %}
 <div class="card">
-    {% if source_filter %}
+    {% if source_filter or run_filter %}
     {# Filter narrowed the listing to zero — disambiguate from the
        "nothing reported yet" baseline so the operator doesn't think
-       the pack is empty. #}
+       the pack is empty. Covers both the source and run filters. #}
     <p>{{ t.get('bug_no_bugs_for_filter',
-                 'No bug reports match the current source filter.') }}</p>
+                 'No bug reports match the current filter.') }}</p>
     <a href="{{ url_for('bug_reports_page') }}" class="btn btn-secondary">
         {{ t.get('bug_clear_source_filter', 'Clear filter') }}
     </a>

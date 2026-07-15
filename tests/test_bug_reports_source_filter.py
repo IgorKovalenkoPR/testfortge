@@ -273,8 +273,10 @@ class TestFilterUi:
         body = client.get("/bug-reports?source=manual_tc").get_data(
             as_text=True)
         # Filter-aware empty message + clear link, not the cold
-        # "Run test execution to report bugs" copy.
-        assert "No bug reports match the current source filter" in body
+        # "Run test execution to report bugs" copy. (Copy is now
+        # filter-agnostic — "current filter" — since the run filter
+        # shares this empty state.)
+        assert "No bug reports match the current filter" in body
         assert "Clear filter" in body
         # The "Run test execution" CTA must NOT appear here — it's
         # the wrong message for a filter dead-end.
