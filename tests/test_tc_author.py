@@ -528,6 +528,51 @@ class TestAuthorLLMPath:
         assert "objectives to expand" in prompt.lower() \
             or "OBJECTIVE, not" in prompt
 
+    def test_call_fits_inside_an_achievable_timeout(self, monkeypatch):
+        """The SDK call must carry its own timeout, not llm_client's 60 s.
+
+        An 8k-token authoring response needs ~2 minutes at Sonnet's output
+        rate. On the 60 s default the call times out, burns all three
+        retries, and silently falls back to the deterministic expansion —
+        i.e. the agent never runs in production while every unit test
+        (which stubs the SDK) still passes.
+        """
+        captured: dict = {}
+
+        def _fake(**kwargs):
+            captured.update(kwargs)
+            return _FakeResp(json.dumps(_LLM_PAYLOAD))
+
+        monkeypatch.setattr(tc_author, "call_messages", _fake)
+        tc_author.author_test_cases(strategy=_strategy(), force_llm=True)
+
+        from engine.llm_client import DEFAULT_TIMEOUT
+        assert "timeout" in captured, \
+            "author must pass an explicit timeout to call_messages"
+        assert captured["timeout"] > DEFAULT_TIMEOUT
+        # Output tokens must be emittable inside that window. 40 tok/s is
+        # a deliberately pessimistic floor for Sonnet.
+        assert captured["max_tokens"] / 40 < captured["timeout"]
+
+    def test_kill_switch_forces_the_deterministic_path(self, monkeypatch):
+        monkeypatch.setenv("TC_AUTHOR_ENABLED", "0")
+        monkeypatch.setattr(
+            tc_author, "call_messages",
+            lambda **kw: pytest.fail("LLM must not be called when disabled"))
+        result = tc_author.author_test_cases(strategy=_strategy(),
+                                             force_llm=True)
+        assert result.source == "deterministic"
+        assert len(result.cases) == 3
+
+    @pytest.mark.parametrize("value,enabled", [
+        ("1", True), ("", True), ("true", True), ("on", True),
+        ("0", False), ("false", False), ("no", False), ("off", False),
+        ("OFF", False),
+    ])
+    def test_kill_switch_parsing(self, monkeypatch, value, enabled):
+        monkeypatch.setenv("TC_AUTHOR_ENABLED", value)
+        assert tc_author._author_enabled() is enabled
+
     def test_empty_case_list_falls_back(self, monkeypatch):
         monkeypatch.setattr(
             tc_author, "call_messages",
@@ -733,3 +778,37 @@ class TestKnowledgeBaseCompliance:
         assert not offenders, (
             "shipped templates must assert, not hedge: "
             + "; ".join(offenders))
+
+
+# ── Route-level wiring ───────────────────────────────────────────────
+
+class TestTestCasesRoute:
+    """POST /test-cases must actually surface the authored pack.
+
+    Every other test in this file stubs the SDK and calls the engine
+    directly, so all of them would still pass if the route never reached
+    the author agent. This one closes that gap.
+    """
+
+    def test_prompt_only_input_renders_authored_cases(self, client,
+                                                      monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            tc_author, "call_messages",
+            lambda **kw: _FakeResp(json.dumps(_LLM_PAYLOAD)))
+
+        resp = client.post("/test-cases", data={
+            "input_text": "HR module lets a recruiter manage job positions.\n"
+                          "A recruiter can create and delete a position.",
+            "custom_prompt": "Write test cases for the HR module",
+        }, follow_redirects=True)
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert ('Verify that User can filter Job Positions using the '
+                '&#34;Internal&#34; filter' in body
+                or "Verify that User can filter Job Positions" in body)
+        assert ("Verify that User cannot create Job Position without the "
+                "required fields filling" in body)
+        # The hedged expected result was normalised before render.
+        assert "should not be created" not in body
