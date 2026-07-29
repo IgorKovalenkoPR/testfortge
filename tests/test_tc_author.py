@@ -588,6 +588,47 @@ class TestGenerateFromStrategyAuthored:
         # Checklist still comes from the Medium/Low strategy checks.
         assert len(cls) == 1
 
+    def test_artifacts_only_path_needs_no_url_or_strategy(self, monkeypatch):
+        # Prompt-only / attachment-only input must still reach the author.
+        from engine.testcase_generator import generate_from_artifacts
+
+        monkeypatch.setattr(
+            tc_author, "call_messages",
+            lambda **kw: _FakeResp(json.dumps(_LLM_PAYLOAD)))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        tcs = generate_from_artifacts(tc_author.Artifacts(
+            custom_prompt="Write cases for the HR module",
+            requirements=["A recruiter can open a job position"],
+        ))
+        assert len(tcs) == 2
+        assert {tc.section for tc in tcs} == {"Job Positions grid",
+                                              "Job Position creation"}
+        for tc in tcs:
+            assert tc.test_steps.startswith("1. ")
+            assert not tc_author.has_weak_modal(tc.expected_result)
+
+    def test_artifacts_only_path_yields_nothing_without_llm(self, monkeypatch):
+        from engine.testcase_generator import generate_from_artifacts
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # No strategy matrix means nothing for the deterministic fallback
+        # to expand; the legacy knowledge-base path owns this input shape.
+        assert generate_from_artifacts(
+            tc_author.Artifacts(custom_prompt="anything")) == []
+        assert generate_from_artifacts(None) == []
+
+    def test_authored_ids_are_stable_across_regenerates(self, monkeypatch):
+        from engine.testcase_generator import generate_from_artifacts
+        monkeypatch.setattr(
+            tc_author, "call_messages",
+            lambda **kw: _FakeResp(json.dumps(_LLM_PAYLOAD)))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        arts = tc_author.Artifacts(custom_prompt="Write cases")
+        first = [tc.id for tc in generate_from_artifacts(arts)]
+        second = [tc.id for tc in generate_from_artifacts(arts)]
+        assert first == second
+        # Distinct sections get distinct section numbers.
+        assert len({i.split("_")[0] for i in first}) == 2
+
     def test_authoring_exception_falls_back_to_deterministic(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 

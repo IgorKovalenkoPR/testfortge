@@ -439,6 +439,39 @@ def _run_site_aware(url: str, pid: str | None,
     }
 
 
+def _run_authored_without_url(custom_prompt: str,
+                              raw_lines: list[str] | None) -> list[dict]:
+    """Author test cases when the input has no URL to crawl.
+
+    Prompt-only and attachment-only input would otherwise never reach the
+    Test Case Author agent — the authored stream hangs off the site-aware
+    branch, which only runs on a detected URL. ``raw_lines`` already
+    carries the parsed text of every uploaded attachment (see
+    ``parse_page_input``), so the agent has the requirements to work
+    from; what it lacks is a control inventory, which it reports as a gap
+    rather than inventing.
+
+    Returns TC dicts to append to the legacy stream, or ``[]`` when the
+    LLM is unreachable (the legacy knowledge-base path owns baseline
+    coverage either way).
+    """
+    if not (raw_lines or custom_prompt):
+        return []
+    try:
+        from engine.tc_author import Artifacts
+        from engine.testcase_generator import generate_from_artifacts
+        artifacts = Artifacts(
+            custom_prompt=custom_prompt or "",
+            requirements=[ln.strip() for ln in (raw_lines or [])
+                          if (ln or "").strip()][:120],
+        )
+        tcs = generate_from_artifacts(artifacts)
+    except Exception as exc:  # pragma: no cover — best-effort
+        _log.warning("authoring without URL failed: %s", exc)
+        return []
+    return [tc_to_dict(tc) for tc in tcs]
+
+
 def _persist_test_cases(tc_dicts: list[dict]) -> None:
     """Mirror the in-session TC list into Postgres for the active project.
 
@@ -643,6 +676,14 @@ def register(app: Flask) -> None:
                             "strategy_source": (site_out.get("strategy") or {})
                                                 .get("source", ""),
                         }
+                else:
+                    # No URL to crawl — still author from the prompt and
+                    # the attachment text, which raw_lines already
+                    # carries. Without this, prompt-only and
+                    # attachment-only input never reaches the author
+                    # agent and falls back to canned templates.
+                    tcd.extend(_run_authored_without_url(custom_prompt,
+                                                         raw_lines))
 
                 if pid and tcd:
                     try: _db.save_test_cases(pid, tcd)
@@ -1684,6 +1725,21 @@ def register(app: Flask) -> None:
                                           raw_requirements=raw_reqs_for_persona)
             trace = generate_traceability(new_stories, tc_list) if tc_list else []
             tc_dicts = [tc_to_dict(tc) for tc in tc_list]
+
+            # Append the authored stream, matching what the sync POST
+            # does — site-aware when the input names a URL, artifacts-only
+            # otherwise. Without this the async endpoint silently returns
+            # a thinner pack than the sync one for the same input.
+            url = _detect_first_url(raw_lines)
+            if url:
+                site_out = _run_site_aware(url, pid, custom_prompt,
+                                           raw_lines=raw_lines)
+                if site_out:
+                    tc_dicts.extend(site_out.get("tc_dicts") or [])
+            else:
+                tc_dicts.extend(_run_authored_without_url(custom_prompt,
+                                                          raw_lines))
+
             # Persist INSIDE the worker so the polling /status endpoint
             # never has to do a DB round-trip. On free-tier Postgres a
             # cold connection can take 1–2 s and was visibly stalling the
