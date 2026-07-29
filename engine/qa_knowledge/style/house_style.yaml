@@ -1,0 +1,293 @@
+version: 1
+name: TestFort / QArea manual test-case house style
+locale: en
+
+# ─────────────────────────────────────────────────────────────────────
+# Provenance
+# ─────────────────────────────────────────────────────────────────────
+# Distilled from a real QA-team deliverable: the Odoo Test Plan
+# spreadsheet (41 test sheets, 4,808 test-case rows, 8 modules).
+# Every rule below is backed by a measured pattern in that corpus, not
+# by a textbook. The measurements are quoted inline as `evidence:` so a
+# future maintainer can tell a house convention from an invention.
+#
+# This file is prompt material: engine/tc_author.py pastes it into the
+# cached system block of the Test Case Author agent. Keep it declarative
+# and compact — it is read by a model, not compiled.
+# ─────────────────────────────────────────────────────────────────────
+
+summary_grammar:
+  canonical: 'Verify that <Actor> can <action> via the "<Control label>" <control type>'
+  evidence: >-
+    2,649 of 4,808 titles are "Verify that User can …"; 101 are
+    "Verify that User cannot …". Role-specific actors appear where the
+    permission matters: Manager (35), Sales Head (39), Admin, Recruiter,
+    HR Head, Lead.
+  rules:
+    - Always open with "Verify that". No other opener appears in the corpus.
+    - >-
+      Name the actor explicitly — "User", or the specific role when the
+      case only holds for that role ("Manager", "Admin", "Sales Head",
+      "User with special rights", "User without special rights").
+    - >-
+      Use "can" for positive cases and "cannot" for negative ones. Never
+      "should", "must", "shall", "is able to" or "verify the ability to".
+    - >-
+      Quote UI labels exactly as they appear on screen, including the
+      control type after the label: the "Create" button, the
+      "Department" drop-down, the "Private" checkbox, the "Search More"
+      button, the "More" drop-down.
+    - >-
+      When the control is reachable only from a specific surface, say
+      where: 'via the "Delete" button from the kanban record context
+      menu', 'via the "Duplicate" button from the "More" drop-down'.
+    - >-
+      For a case that asserts absence, use the presence grammar plus the
+      guarding state: 'Verify that the "Recruitment Done" button is not
+      displayed on the kanban record while Job Position is not in
+      recruitment'.
+    - Do not restate the module or page name that the section header already carries.
+    - One assertion per title. A title containing "and" that joins two independent checks must be split.
+  length: 60-160 characters is the corpus norm; hard ceiling 220.
+  alternate_grammars:
+    error_message_cases:
+      pattern: '<Page or surface>: <attempted action>'
+      examples:
+        - 'Employee Create page: Trying to proceed with all the required fields empty'
+        - 'Application Create page: Trying to proceed with invalid data in the "Salary" fields'
+        - 'Employee Create page: Go to another module without saving after modified record'
+        - 'Job Position Edit page: Trying to remove followers'
+      evidence: The dedicated "Error messages" sheet (ERMSG01) uses this form for all 25+ cases.
+    ui_interface_cases:
+      pattern: 'Verify that <element> is displaying <qualifier>'
+      examples:
+        - 'Verify that smart buttons are displaying correctly'
+        - 'Verify displaying "Save" and "Discard" buttons'
+        - 'Verify that datepicker icon is displaying in the date fields'
+      evidence: The UI sheet (UINTFC0) uses this form; expected result carries the visual spec.
+
+preconditions:
+  style: >-
+    A terse declaration of required STATE, not a list of steps. Present
+    tense, passive or copular. One clause per fact, separated by ". " or
+    numbered when there are three or more.
+  evidence: >-
+    Top corpus values are state declarations: "Application is created"
+    (140), "Employee is created" (97), "User is logged in." (93),
+    "Project is created" (73), "Job Position is created and is in
+    recruitment", "Manager X User" (228 — the role-matrix marker).
+  rules:
+    - >-
+      Never put navigation into preconditions. Navigation is step 1 of
+      the steps column.
+    - >-
+      Use the plural form when the case needs several records to be
+      meaningful: grid filtering / grouping / pagination cases say
+      "Job Positions are created", not "Job Position is created".
+    - >-
+      Qualify the state when the case depends on it: "Job Position is
+      created and is in recruitment", "Timesheet is created and sent to
+      Manager for approving by User".
+    - >-
+      Facts that hold for every case in the section belong in the
+      section-level precondition, not repeated per case. The corpus puts
+      "User is logged in Odoo and has access to HR module" in the column
+      header, then leaves most per-case cells empty.
+    - >-
+      Name the role when the case is role-scoped: "Manager X User",
+      "User has no special rights".
+    - Leave empty when the case genuinely needs no prior state.
+
+steps:
+  style: Numbered, imperative, one user action per step. No assertions inside steps.
+  evidence: >-
+    Step counts: 2 steps (1,108 cases), 3 (813), 4 (639), 5 (432);
+    only 270 cases exceed 5. Median is 3.
+  target_count: 2-5 steps; go to 6-8 only for genuine multi-screen flows.
+  rules:
+    - >-
+      Step 1 is always navigation, written as a breadcrumb with "->" or
+      ">" separators and the view in parentheses when it matters:
+      "1. Go to HR module -> Job Positions grid (kanban view)".
+    - >-
+      Every subsequent step names one real control with its exact quoted
+      label and the verb that operates it: 'Click on the "Create"
+      button', 'Expand the "Department" dropdown and select the
+      Department', 'Mark the "Private" checkbox', 'Press the "Enter" key'.
+    - >-
+      Verb vocabulary observed in the corpus: Go to, Click on, Expand,
+      Select, Fill in, Enter, Mark, Unmark, Mark/unmark, Press, Pay
+      attention to, Try to find, Change, Drag and drop, Upload, Confirm,
+      Leave … empty, Scroll, Hover over.
+    - >-
+      "Pay attention to <element>" and "Try to find <element>" are the
+      house verbs for observation-only steps (display checks and
+      absence checks) — use them instead of "Verify …" or "Check …",
+      which belong in the expected-result column.
+    - >-
+      Do not write generic placeholders. "Navigate to the relevant page",
+      "Perform the action", "Observe the result" are forbidden — they
+      carry no information and make the case unexecutable by a tester who
+      did not write it.
+    - >-
+      For negative cases, the step that breaks the rule is explicit:
+      "Leave the required fields empty", "Enter an invalid email address
+      into the 'Email' field", "Set Deadline in the past".
+    - Do not number the steps in the payload text; numbering is applied by the exporter.
+
+expected_result:
+  style: >-
+    Declarative present tense, third person, stating the observable
+    system state. No modal verbs.
+  evidence: >-
+    Corpus expected results read "User can filter Job Positions using
+    filters", "The required fields are highlighted", "Odoo Warning is
+    displayed", "Time is not added to Timesheet if …". The words
+    "should", "must" and "shall" do not appear as the assertion verb
+    anywhere in the 4,808 rows.
+  rules:
+    - >-
+      Banned: "should", "should be", "must", "shall", "is expected to",
+      "ought to". These make the assertion unfalsifiable — the tester
+      cannot tell a pass from a fail.
+    - >-
+      For a simple capability check, mirroring the title is acceptable and
+      is the corpus norm (1,818 of 4,808 rows do exactly this). Do not
+      pad it with invented detail.
+    - >-
+      For a negative case, assert BOTH halves: the action is blocked AND
+      the user-visible feedback. "User cannot create Job Position without
+      required field filling. A warning is displayed." Where the exact
+      message text is known, quote it: 'The "You must define an Applied
+      Job and a Contact Name for this applicant." warning is displayed'.
+    - >-
+      When there are two or more independent post-conditions, number
+      them: "1. User cannot create New Group without the required fields
+      filling | 2. A warning is displayed".
+    - >-
+      Add the persistence assertion when the case writes data: "Employee
+      is not created", "Time is not added to Timesheet", "the record is
+      still present in the grid".
+    - >-
+      For UI/display cases, carry the visual spec: 'The "Create" button
+      is blue and the font is white', 'Applied filters become orange',
+      'Smart button icons are lilac and the buttons become orange on
+      hover'.
+    - Never leave this column empty.
+
+test_data:
+  style: Concrete values, named per field, only when the case depends on them.
+  rules:
+    - >-
+      The corpus most often encodes the interesting data in the TITLE
+      ("with cyrillic Name, Surname or Father's name", "with negative and
+      very big values of the Duration", "with Deadline in the past",
+      "with Date from Future"). Do that, and repeat the exact value in
+      test_data.
+    - Write "Field: value" pairs, comma-separated. Quote strings that contain spaces.
+    - Leave empty for pure navigation and display cases.
+
+sections:
+  style: >-
+    Group cases by the UI surface they exercise, in the order a tester
+    walks the module. Sections are the spreadsheet's grouping rows.
+  evidence: >-
+    Recruitment sheet section order: "Job Positions grid" → "Kanban
+    view" → "List view" → "Job Position creation" → "Job Position
+    details page". HR sheet: "Employees grid" → "Employee page" → "Job
+    positions grid".
+  canonical_order:
+    - <Object>s grid            # the list/index surface
+    - Kanban view               # per-view sub-sections of the grid
+    - List view
+    - Form view
+    - <Object> creation         # the create form
+    - <Object> details page     # the read/edit form
+    - <Object> deletion
+    - Error messages            # systematic negative sweep, own section
+    - UI interface              # display/visual sweep, own section
+  rules:
+    - >-
+      Name the section after the surface, not after the test type —
+      "Job Position creation", not "Positive tests".
+    - >-
+      Cross-cutting negative and visual sweeps get their own dedicated
+      section (the corpus gives them whole sheets: ERMSG01 "Error
+      messages", UINTFC0 "UI interface", PRFMNC001 "Performance").
+    - 6-40 cases per section is the corpus norm.
+
+categories:
+  field: Positive / Negative
+  evidence: >-
+    The corpus carries a binary Positive/Negative column encoded 1.0 /
+    0.0. Distribution across marked rows: 4,091 positive to 270 negative
+    (94:6) — because the systematic negative sweep is factored out into
+    the dedicated "Error messages" sheet rather than sprinkled through
+    the functional sheets.
+  rules:
+    - >-
+      Positive = the case asserts the system DOES what it is supposed to.
+      Negative = the case asserts the system REFUSES what it must refuse,
+      or hides what it must hide.
+    - >-
+      A case titled "cannot", "is not displayed", "warning is displayed",
+      "without required fields", "invalid" is Negative. Everything else
+      is Positive.
+    - >-
+      Edge / boundary cases carry the Negative flag when they assert a
+      rejection and Positive when they assert acceptance of a legal
+      extreme (e.g. "can fill in the 'Last Name Ru' field with cyrillic
+      Name" is Positive).
+    - >-
+      Do NOT chase a fixed positive:negative ratio. Derive negatives from
+      the mandatory pairing rules in coverage_rules.yaml — every
+      permission, required-field, state-guard and format-validated field
+      owes exactly one negative counterpart.
+
+priority:
+  scale: High / Medium / Low
+  mapping:
+    High: >-
+      Blocks the module if broken — create/save/delete of the main
+      object, login, permission enforcement, money movement, state
+      transitions.
+    Medium: Secondary controls, filters, grouping, duplication, print, export.
+    Low: Cosmetic and convenience — tooltips, hover states, back-to-top, column ordering.
+  evidence: >-
+    The user-story sheets carry an explicit severity scale S1 Critical /
+    S2 Major / S3 Minor / S4 Trivial; S1 is used for create, save,
+    login and access-provision stories.
+
+execution_result_vocabulary:
+  values: [Passed, "Passed but", Failed, Blocked, Unchecked, "-"]
+  evidence: >-
+    Observed verbatim in every executed sheet. "Passed but" marks a pass
+    with a filed cosmetic/minor defect; "-" marks not-applicable for that
+    role column; "Blocked" marks a case that could not run.
+  rules:
+    - Every Failed or "Passed but" row carries a bug-tracker URL in the Comments column.
+    - Every executed row carries an evidence link (screenshot or video).
+
+anti_patterns:
+  - text: Generic step text ("Navigate to the relevant page", "Perform the action", "Observe the result")
+    why: Not executable by anyone but the author; hides the fact that no analysis happened.
+  - text: '"should" / "must" in the expected result'
+    why: Unfalsifiable. The tester cannot decide pass or fail.
+  - text: Expected result identical to the title on a NEGATIVE case
+    why: Loses the feedback assertion — the half most likely to be broken.
+  - text: Multiple independent assertions in one title joined by "and"
+    why: A single Failed row then cannot say which half broke.
+  - text: Navigation in the preconditions column
+    why: Splits the reproduction path across two columns.
+  - text: Unquoted or paraphrased control labels ("the create button", "the department field")
+    why: The tester cannot find the control; the label is the locator.
+  - text: Inventing UI that the artifacts do not evidence
+    why: >-
+      Produces cases that fail for the wrong reason. When the control
+      inventory does not name a control, write the case against what IS
+      evidenced, or omit it.
+  - text: One test case per requirement sentence
+    why: >-
+      The corpus writes 20-40 cases per form because it enumerates
+      controls, not sentences. Sentence-per-case under-covers by an
+      order of magnitude.

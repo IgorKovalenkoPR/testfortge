@@ -23,7 +23,7 @@ cases:
       - "Verify each image is loaded (no broken image icons)"
       - "Verify images have appropriate alt attributes"
     test_data: ""
-    expected_result: "All images should be loaded successfully. No broken image placeholders should be visible. Images should have alt text."
+    expected_result: "All images are loaded successfully. No broken image placeholders are visible. Images have alt text."
     category: Positive
     priority: High
     section: "General Web"
@@ -60,7 +60,7 @@ cases:
       - "Check the page load time in the Network tab"
       - "Check for JavaScript errors in the Console tab"
     test_data: ""
-    expected_result: "Page should load within 3 seconds. No JavaScript errors should appear in the console."
+    expected_result: "Page loads within 3 seconds. No JavaScript errors appear in the console."
     category: Positive
     priority: High
     section: "Performance"
@@ -72,7 +72,7 @@ cases:
       - "Click the padlock to verify certificate validity"
       - "Verify no mixed content warnings"
     test_data: ""
-    expected_result: "Page should be served over HTTPS. Certificate should be valid. No mixed content (HTTP resources on HTTPS page)."
+    expected_result: "Page is served over HTTPS. Certificate is valid. No mixed content (HTTP resources on HTTPS page)."
     category: Security
     priority: High
     section: "Security"
@@ -84,7 +84,7 @@ cases:
       - "Verify focus indicators are visible on focused elements"
       - "Verify all images have descriptive alt text"
     test_data: ""
-    expected_result: "Page should be fully navigable via keyboard. Focus indicators should be visible. All images should have alt text."
+    expected_result: "Page is fully navigable via keyboard. Focus indicators are visible. All images have alt text."
     category: Positive
     priority: Medium
     section: "Accessibility"

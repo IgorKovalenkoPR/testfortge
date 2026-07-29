@@ -11,7 +11,7 @@ cases:
       - "Submit the search (press Enter or click Search button)"
       - "Review the results"
     test_data: "Search term matching existing data (e.g. 'software testing')"
-    expected_result: "Search results should be displayed. Results should be relevant to the search term. Result count should be accurate."
+    expected_result: "Search results are displayed. Results are relevant to the search term. Result count is accurate."
     category: Positive
     priority: High
     section: Search
@@ -21,7 +21,7 @@ cases:
       - "Enter a search term that does not match any existing data"
       - "Submit the search"
     test_data: "Search term: 'xyznonexistent123456'"
-    expected_result: "'No results found' message should be displayed. No errors should occur. Search UI should remain intact."
+    expected_result: "'No results found' message is displayed. No errors occur. Search UI remains intact."
     category: Negative
     priority: High
     section: Search
@@ -32,7 +32,7 @@ cases:
       - "Enter an SQL injection payload in the search field and submit"
       - "Observe the page behavior after each submission"
     test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
-    expected_result: "Payloads should be sanitized. No script execution or database error should occur. Search should return empty results or an error message."
+    expected_result: "Payloads are sanitized. No script execution or database error occurs. Search returns empty results or an error message."
     category: Security
     priority: High
     section: Search

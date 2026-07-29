@@ -14,7 +14,7 @@ cases:
       - "Verify 'Thank you' is displayed"
       - "Scroll up to the top"
     test_data: "Name: Olena Marchenko, Email: tester@example.com, Message: Smoke test from TestForTge"
-    expected_result: "Form should be submitted successfully. Success confirmation should be displayed. Data should be saved."
+    expected_result: "Form is submitted successfully. Success confirmation is displayed. Data is saved."
     category: Positive
     priority: High
     section: Forms
@@ -26,7 +26,7 @@ cases:
       - "Click the 'Submit' button"
       - "Verify 'required' is displayed"
     test_data: "All fields empty"
-    expected_result: "Form should not be submitted. Validation error messages should be displayed for each required field."
+    expected_result: "Form is not submitted. Validation error messages are displayed for each required field."
     category: Negative
     priority: High
     section: Forms
@@ -37,7 +37,7 @@ cases:
       - "Click the Submit/Save button"
       - "Observe the validation error"
     test_data: "Invalid emails: 'test@', '@domain.com', 'plaintext', 'test @example'"
-    expected_result: "Email field should reject invalid formats. Clear error message should be displayed."
+    expected_result: "Email field rejects invalid formats. Clear error message is displayed."
     category: Negative
     priority: High
     section: Forms
@@ -48,7 +48,7 @@ cases:
       - "Enter SQL injection payload in text fields and submit"
       - "Observe the behavior"
     test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
-    expected_result: "Payloads should be sanitized. No script execution or database errors should occur."
+    expected_result: "Payloads are sanitized. No script execution or database errors occur."
     category: Security
     priority: High
     section: Forms
@@ -60,7 +60,7 @@ cases:
       - "Enter special characters and Unicode in all text fields"
       - "Submit the form after each test"
     test_data: "Min: 'A', Max: 255 chars, Special: @#$%^&*(), Unicode: test"
-    expected_result: "Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur."
+    expected_result: "Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption occurs."
     category: "Edge Case"
     priority: Medium
     section: Forms
