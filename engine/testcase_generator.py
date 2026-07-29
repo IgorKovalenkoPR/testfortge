@@ -1232,6 +1232,30 @@ def _testing_type_label(category: str) -> str:
 _AUTHORED_SECTION_BASE = 10
 
 
+def _authored_pack(cases: list) -> list[TestCase]:
+    """Assign stable sections + IDs to a list of ``AuthoredCase``.
+
+    Section numbers are allocated in first-appearance order so a
+    regenerate over the same artifacts reproduces the same IDs. A section
+    whose name matches a strategy category reuses that category's
+    reserved number; everything else (UI-surface names such as "Job
+    Positions grid") is allocated from :data:`_AUTHORED_SECTION_BASE` up.
+    """
+    out: list[TestCase] = []
+    section_nums: dict[str, int] = {}
+    counters: dict[int, int] = {}
+    for case in cases:
+        section = case.section or "Functional"
+        if section not in section_nums:
+            section_nums[section] = _CATEGORY_SECTION_NUM.get(
+                section, _AUTHORED_SECTION_BASE + len(section_nums))
+        sn = section_nums[section]
+        idx = counters.get(sn, 0) + 1
+        counters[sn] = idx
+        out.append(_authored_to_testcase(case, section_num=sn, idx=idx))
+    return out
+
+
 def _authored_to_testcase(case, *, section_num: int, idx: int) -> TestCase:
     """Convert an :class:`engine.tc_author.AuthoredCase` into a TestCase."""
     return TestCase(
@@ -1252,6 +1276,44 @@ def _authored_to_testcase(case, *, section_num: int, idx: int) -> TestCase:
         url_pattern=case.url_pattern,
         trigger="walkthrough_url_match" if case.url_pattern else "manual",
     )
+
+
+def generate_from_artifacts(artifacts, *, profile=None,
+                            strategy=None) -> list[TestCase]:
+    """Author test cases from artifacts alone — no URL required.
+
+    This is the path for prompt-only and attachment-only input. There is
+    no crawler control inventory to ground on, so the author agent works
+    from the requirement lines (which already carry the parsed text of
+    every uploaded attachment) plus the operator prompt, and reports
+    anything it could not evidence under ``AuthoringResult.gaps``.
+
+    Returns an empty list when the LLM is unreachable: with no strategy
+    matrix there is nothing for the deterministic fallback to expand, and
+    the legacy knowledge-base path already owns baseline coverage for
+    this input shape.
+    """
+    if artifacts is None:
+        return []
+    try:
+        from .tc_author import author_test_cases
+        result = author_test_cases(profile=profile, strategy=strategy,
+                                   artifacts=artifacts)
+    except Exception as exc:  # pragma: no cover — defensive
+        from .log import get_logger
+        get_logger(__name__).warning(
+            "generate_from_artifacts: authoring failed: %s", exc)
+        return []
+    if result.source != "llm" or not result.cases:
+        return []
+
+    test_cases = _authored_pack(result.cases)
+    try:
+        from .qa_team_lead import review_test_cases
+        test_cases, _ = review_test_cases(test_cases)
+    except Exception:  # pragma: no cover — review is best-effort
+        pass
+    return test_cases
 
 
 def generate_from_strategy(profile, strategy, *, artifacts=None
@@ -1320,17 +1382,7 @@ def generate_from_strategy(profile, strategy, *, artifacts=None
                 "falling back to deterministic expansion: %s", exc)
 
     if authored is not None:
-        section_nums: dict[str, int] = {}
-        for case in authored.cases:
-            section = case.section or "Functional"
-            if section not in section_nums:
-                section_nums[section] = _CATEGORY_SECTION_NUM.get(
-                    section, _AUTHORED_SECTION_BASE + len(section_nums))
-            sn = section_nums[section]
-            idx = tc_counter.get(sn, 0) + 1
-            tc_counter[sn] = idx
-            test_cases.append(_authored_to_testcase(
-                case, section_num=sn, idx=idx))
+        test_cases.extend(_authored_pack(authored.cases))
     else:
         for category in _CATEGORY_PREFIX:
             checks = strategy.matrix.get(category) or []
