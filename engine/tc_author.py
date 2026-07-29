@@ -51,7 +51,35 @@ from engine.log import get_logger
 _logger = get_logger(__name__)
 
 _AUTHOR_MODEL = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
-_AUTHOR_MAX_TOKENS = int(os.environ.get("TC_AUTHOR_MAX_TOKENS", "16000"))
+
+# Output budget. ~8k tokens is 30-45 authored cases, which matches what
+# the coverage model asks for from a form with a dozen controls, and it
+# completes inside _AUTHOR_TIMEOUT at Sonnet's output rate.
+_AUTHOR_MAX_TOKENS = int(os.environ.get("TC_AUTHOR_MAX_TOKENS", "8000"))
+
+# Per-attempt timeout, passed explicitly because llm_client defaults to
+# 60 s. That default is right for Recon (1.5k output) and Strategy (4k),
+# but an 8k-token authoring response needs ~2 minutes at Sonnet's output
+# rate — on the default the call would time out, burn all three retries,
+# and silently fall back to the deterministic expansion, so the agent
+# would effectively never run in production.
+#
+# Safe to be this generous: authoring always happens on a JobQueue worker
+# thread, not in the request. The sync POST blocks for at most
+# SYNC_GEN_BUDGET_S (90 s) and then hands off to the background drain.
+_AUTHOR_TIMEOUT = int(os.environ.get("TC_AUTHOR_TIMEOUT_S", "300"))
+
+
+def _author_enabled() -> bool:
+    """Kill switch for the authored stream.
+
+    Default on — authoring is the point of the module. Set
+    ``TC_AUTHOR_ENABLED=0`` to fall back to the deterministic expansion
+    across the whole app without a code deploy, matching how the other
+    feature flags on this service are operated.
+    """
+    return (os.environ.get("TC_AUTHOR_ENABLED", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
 
 # Ceiling on how many cases we accept from one call. The coverage model
 # is deliberately expansive (a create form with 12 controls owes 30-45
@@ -483,6 +511,7 @@ def _build_user_prompt(profile, strategy, artifacts: Artifacts) -> str:
 
 def _call_llm(profile, strategy, artifacts: Artifacts, grounding: str) -> str:
     resp = call_messages(
+        timeout=_AUTHOR_TIMEOUT,
         model=_AUTHOR_MODEL,
         max_tokens=_AUTHOR_MAX_TOKENS,
         system=_system_blocks(grounding),
@@ -1043,6 +1072,10 @@ def author_test_cases(*, profile=None, strategy=None,
         raises: an LLM failure degrades to the deterministic expansion.
     """
     arts = artifacts or Artifacts()
+
+    if not _author_enabled():
+        _logger.info("tc_author: disabled via TC_AUTHOR_ENABLED")
+        return _deterministic_result(profile, strategy)
 
     api_key_set = bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
     if not api_key_set and not force_llm:
