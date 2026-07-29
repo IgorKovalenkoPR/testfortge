@@ -89,6 +89,11 @@ _NUMBER_CONTEXT_PATTERNS = [
 ]
 _NUMBER_CONTEXT_RE = [re.compile(p, re.IGNORECASE) for p in _NUMBER_CONTEXT_PATTERNS]
 
+# Leading "3. " on a step line — stripped before a step is linted so the
+# ordinal never looks like part of the instruction, and re-applied when
+# the step list is rewritten.
+_STEP_NUM_PREFIX_RE = re.compile(r"^\s*\d+\s*[.)\]:-]\s*")
+
 
 def _is_trailing_page_number(text: str) -> tuple[bool, str]:
     """Check if text has a trailing page number. Returns (has_page_num, cleaned_text)."""
@@ -156,15 +161,24 @@ def _strip_page_numbers_from_text(text: str) -> str:
 def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> tuple[list, ReviewReport]:
     """Review and fix test cases. Returns (fixed_cases, report).
 
-    The QA Team Lead checks:
-      1. Summary starts with "Verify that" (passive voice)
-      2. Expected Result uses "should/should be" (not "is/are")
-      3. Preconditions use passive voice
-      4. No page numbers in summaries, steps, or test data
-      5. Test steps are numbered and actionable
-      6. No duplicate test case IDs
-      7. Each test case has at least 2 steps
-      8. Expected result is not empty
+    The QA Team Lead checks, in the order the rules run:
+      0. No PDF underscore-fill artifacts in any text field
+      1. Summary starts with "Verify that"
+      2. Expected Result asserts in declarative present tense — no
+         "should" / "must" / "shall"
+      3. No page-number artifacts in the summary
+      4. No page-number artifacts in the steps
+      5. No duplicate test case IDs
+      6. Expected result is not empty
+      7. Preconditions carry state, not navigation
+      8. A Negative case asserts the user-visible feedback, not only the
+         refusal
+      9. No generic placeholder steps ("Perform the action")
+     10. At least two steps — navigation plus one action
+     11. The summary asserts too; no hedging in the title
+
+    Rules 2 and 8-11 encode the house style measured from the reference
+    corpus; see ``engine/qa_knowledge/style/house_style.yaml``.
     """
     if report is None:
         report = ReviewReport()
@@ -205,17 +219,19 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
                 report.items_fixed += 1
                 report.findings[-1].auto_fixed = True
 
-        # Rule 2: Expected Result must use "should/should be"
+        # Rule 2: Expected Result must assert, not hedge — no weak modals
         expected = getattr(tc, "expected_result", "")
-        if expected and not _uses_should(expected):
+        if expected and _has_weak_modal(expected):
             report.findings.append(ReviewFinding(
                 severity="Major", category="Expected Result Voice",
-                message=f"Expected result uses 'is/are' instead of 'should/should be'",
+                message="Expected result hedges with 'should/must/shall' "
+                        "instead of asserting in declarative present tense",
                 item_id=tc_id,
             ))
             # Auto-fix
             if hasattr(tc, "expected_result"):
                 tc.expected_result = _fix_expected_result_voice(expected)
+                expected = tc.expected_result
                 report.items_fixed += 1
                 report.findings[-1].auto_fixed = True
 
@@ -276,6 +292,73 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
             ))
             if hasattr(tc, "preconditions"):
                 tc.preconditions = preconditions.replace("User is at ", "")
+                report.items_fixed += 1
+                report.findings[-1].auto_fixed = True
+
+        # Rule 8: a Negative case must assert the user-visible feedback,
+        # not only that the action was refused.
+        category = (getattr(tc, "category", "") or "").strip().lower()
+        if category == "negative" and expected \
+                and not _asserts_feedback(expected):
+            report.findings.append(ReviewFinding(
+                severity="Major", category="Missing Feedback Assertion",
+                message="Negative case does not assert what the user sees "
+                        "(highlighted field / warning / nothing persisted)",
+                item_id=tc_id,
+            ))
+            if hasattr(tc, "expected_result"):
+                tc.expected_result = _append_feedback_assertion(expected)
+                report.items_fixed += 1
+                report.findings[-1].auto_fixed = True
+
+        # Rule 9: no generic placeholder steps. These are unexecutable by
+        # anyone but the author, and they are what the pre-tc_author
+        # site-aware path emitted for every single case.
+        raw_steps = getattr(tc, "test_steps", "") or ""
+        if isinstance(raw_steps, str) and raw_steps.strip():
+            lines = [ln for ln in raw_steps.splitlines() if ln.strip()]
+            kept = [ln for ln in lines
+                    if not _is_generic_step(_STEP_NUM_PREFIX_RE.sub("", ln))]
+            if len(kept) != len(lines):
+                report.findings.append(ReviewFinding(
+                    severity="Major", category="Generic Step",
+                    message=f"{len(lines) - len(kept)} placeholder step(s) "
+                            f"carry no information "
+                            f"('Perform the action', 'Observe the result')",
+                    item_id=tc_id,
+                ))
+                # Only strip them when at least two real steps survive —
+                # a case with one step is worse than one with a vague step.
+                if len(kept) >= 2 and hasattr(tc, "test_steps"):
+                    tc.test_steps = "\n".join(
+                        f"{i + 1}. {_STEP_NUM_PREFIX_RE.sub('', ln)}"
+                        for i, ln in enumerate(kept))
+                    raw_steps = tc.test_steps
+                    report.items_fixed += 1
+                    report.findings[-1].auto_fixed = True
+
+        # Rule 10: at least two steps. A single-step case is either an
+        # unexpanded objective or a checklist item filed in the wrong pack.
+        step_count = len([ln for ln in (raw_steps or "").splitlines()
+                          if ln.strip()])
+        if step_count < 2:
+            report.findings.append(ReviewFinding(
+                severity="Major", category="Insufficient Steps",
+                message=f"Test case has {step_count} step(s); a case needs "
+                        f"navigation plus at least one action",
+                item_id=tc_id,
+            ))
+
+        # Rule 11: the summary must assert too — no hedging in the title.
+        if summary and _has_weak_modal(summary):
+            report.findings.append(ReviewFinding(
+                severity="Minor", category="Summary Voice",
+                message="Summary hedges with 'should/must/shall'; the house "
+                        "grammar is 'Verify that <Actor> can/cannot ...'",
+                item_id=tc_id,
+            ))
+            if hasattr(tc, "summary"):
+                tc.summary = _fix_expected_result_voice(summary)
                 report.items_fixed += 1
                 report.findings[-1].auto_fixed = True
 
@@ -429,57 +512,72 @@ def _ensure_verify_that(text: str) -> str:
     return f"Verify that {t}"
 
 
-def _uses_should(text: str) -> bool:
-    """Check if text uses 'should/should be' voice."""
-    # At least one "should" in the text indicates correct voice
-    return "should" in text.lower()
+def _has_weak_modal(text: str) -> bool:
+    """True when the expected result hedges instead of asserting.
+
+    "should" / "must" / "shall" make the assertion unfalsifiable — the
+    tester cannot decide pass from fail. The 4,808-row reference corpus
+    (Odoo Test Plan) never uses one as the assertion verb; it writes
+    declarative present tense throughout ("The required fields are
+    highlighted", "Odoo Warning is displayed").
+
+    Delegates to :mod:`engine.tc_author` so the linter and the author
+    agent share one definition of the rule.
+    """
+    from .tc_author import has_weak_modal
+    return has_weak_modal(text)
 
 
 def _fix_expected_result_voice(text: str) -> str:
-    """Convert 'is/are' voice to 'should/should be' in expected result.
+    """Rewrite a hedged expected result into the house declarative voice.
 
     Transforms patterns like:
-      'User is authenticated' → 'User should be authenticated'
-      'Results are displayed' → 'Results should be displayed'
-      'Form is not submitted' → 'Form should not be submitted'
-      'Data is persisted' → 'Data should be persisted'
-      'No errors occur' → 'No errors should occur'
+      'User should be authenticated'    → 'User is authenticated'
+      'Results should be displayed'     → 'Results are displayed'
+      'Form should not be submitted'    → 'Form is not submitted'
+      'The server should reject it'     → 'The server rejects it'
+      'No errors should occur'          → 'No errors occur'
+
+    This is the exact inverse of what this helper used to do: it
+    previously converted declarative text *into* "should" voice, which
+    put every generated case in conflict with the client-accepted house
+    style. See ``qa_knowledge/style/house_style.yaml`` →
+    ``expected_result``.
     """
-    result = text
+    from .tc_author import normalise_expected_result
+    return normalise_expected_result(text)
 
-    # "is not" → "should not be"
-    result = re.sub(r"\bis not\b", "should not be", result)
-    # "are not" → "should not be"
-    result = re.sub(r"\bare not\b", "should not be", result)
-    # "is NOT" → "should NOT be"
-    result = re.sub(r"\bis NOT\b", "should NOT be", result)
 
-    # "No X is/are" → "No X should be"
-    result = re.sub(r"\b(No\s+\w+)\s+is\b", r"\1 should be", result)
-    result = re.sub(r"\b(No\s+\w+)\s+are\b", r"\1 should be", result)
+def _asserts_feedback(text: str) -> bool:
+    """True when a negative case's expected result names the feedback.
 
-    # "X is VERB-ed" → "X should be VERB-ed" (passive constructions)
-    result = re.sub(
-        r"\b(\w+)\s+is\s+((?:not\s+)?[a-z]+ed)\b",
-        r"\1 should be \2", result
-    )
-    result = re.sub(
-        r"\b(\w+)\s+are\s+((?:not\s+)?[a-z]+ed)\b",
-        r"\1 should be \2", result
-    )
+    A negative case owes two assertions: the action is refused, AND the
+    user can see why. The corpus writes both halves — "User cannot create
+    Job Position without required field filling. A warning is displayed."
+    Dropping the second half loses the half most likely to be broken: 8
+    of the 25 rows on the corpus's dedicated error-message sheet failed
+    precisely on missing or misdirected feedback.
+    """
+    from .tc_author import asserts_feedback
+    return asserts_feedback(text)
 
-    # Remaining "is" → "should be" (for patterns not yet caught)
-    # Only if the sentence doesn't already have "should"
-    sentences = result.split(". ")
-    fixed_sentences = []
-    for s in sentences:
-        if "should" not in s.lower():
-            # "X is Y" → "X should be Y" (remaining simple cases)
-            s = re.sub(r"\b(\w+)\s+is\s+", r"\1 should be ", s, count=1)
-        fixed_sentences.append(s)
-    result = ". ".join(fixed_sentences)
 
-    # "No X occur" / "No X occurs" → "No X should occur"
-    result = re.sub(r"\b(No\s+\w+)\s+occur(?:s)?\b", r"\1 should occur", result)
+def _append_feedback_assertion(text: str) -> str:
+    """Add the missing "and this is what the user sees" half.
 
-    return result
+    Shared with :mod:`engine.tc_author` so the reviewer and the author
+    agent produce byte-identical repairs.
+    """
+    from .tc_author import append_feedback_assertion
+    return append_feedback_assertion(text)
+
+
+def _is_generic_step(text: str) -> bool:
+    """True for step text that carries no information.
+
+    "Navigate to the relevant page", "Perform the action", "Observe the
+    result" — unexecutable by anyone but the author, and a reliable
+    signal that no analysis of the actual UI happened.
+    """
+    from .tc_author import is_generic_step
+    return is_generic_step(text)

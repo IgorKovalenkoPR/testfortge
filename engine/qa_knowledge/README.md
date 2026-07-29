@@ -15,7 +15,14 @@ engine/qa_knowledge/
     <area>.<locale>.yaml    e.g. auth.en.yaml, payment.en.yaml
   testcases/
     <area>.<locale>.yaml    e.g. auth.en.yaml, seo.en.yaml
+  style/
+    house_style.yaml        writing standard for the LLM author agent
+    coverage_rules.yaml     coverage model for the LLM author agent
 ```
+
+`style/` is **not** loaded by `LOADER` and is not schema-validated — it
+is prompt material, read as raw text by `engine.tc_author` and pasted
+into a cached system block. See "Style assets" below.
 
 The loader validates every file on construction. Bad YAML or a
 violation of the schema raises `RuntimeError` at boot — broken
@@ -65,6 +72,41 @@ cases:
     testing_type: SEO        # optional — only set for SEO / Usability / Localization
                              # to bypass the heuristic in testcase_generator
 ```
+
+## Style assets (`style/`)
+
+Two files teach the **Test Case Author agent** (`engine/tc_author.py`)
+how to write, and what to cover. Both were reverse-engineered from a
+real accepted client deliverable — the Odoo Test Plan spreadsheet, 41
+test sheets / 4,808 test-case rows / 8 modules — and every rule carries
+the measured pattern that backs it as an inline `evidence:` note.
+
+| File | Answers |
+|---|---|
+| `house_style.yaml` | **How** to write a case: title grammar, precondition idiom, step verbs, expected-result voice, section naming, category rules, anti-patterns. |
+| `coverage_rules.yaml` | **Which** cases must exist: per-surface control enumeration, per-control-type scenario sets, mandatory positive/negative pairings, cross-cutting sweeps. |
+
+Editing either changes generated output with no Python change. They are
+loaded as **raw text**, not parsed YAML, because the `evidence:` comments
+are the part that stops the model treating a house convention as
+negotiable.
+
+Two rules from `house_style.yaml` are also enforced in code, so they hold
+on every path including the no-API-key fallback:
+
+- **Declarative expected results.** `should` / `must` / `shall` are
+  banned — they leave the tester unable to decide pass from fail. The
+  reference corpus never uses one as the assertion verb.
+  `engine.tc_author.normalise_expected_result` rewrites them, and
+  `engine.qa_team_lead` review rule 2 applies it.
+- **Negative cases assert the feedback too.** A refusal case must state
+  both that the action was blocked *and* what the user sees. On the
+  corpus's dedicated error-message sheet, 8 of 25 rows failed precisely
+  on missing or misdirected feedback. Review rule 8 repairs cases that
+  only assert the refusal.
+
+`tests/test_tc_author.py` guards both, and asserts that no shipped
+template under `testcases/` hedges.
 
 ## Conventions
 

@@ -11,7 +11,7 @@ cases:
       - "Navigate to the cart page"
       - "Verify the item shows the same name, price, and image that are stored on the product page"
     test_data: "Any available product"
-    expected_result: "Product should be added to the cart. Cart count should be updated. Product details in the cart match the product page fields exactly."
+    expected_result: "Product is added to the cart. Cart count is updated. Product details in the cart match the product page fields exactly."
     category: Positive
     priority: High
     section: "Payment & Checkout"
@@ -24,7 +24,7 @@ cases:
       - "Complete the purchase"
       - "Verify order confirmation"
     test_data: "Valid card: 4242 4242 4242 4242, Exp: 12/28, CVC: 123"
-    expected_result: "Order should be placed successfully. Confirmation page/email should be received. Cart should be cleared."
+    expected_result: "Order is placed successfully. Confirmation page/email is received. Cart is cleared."
     category: Positive
     priority: High
     section: "Payment & Checkout"
@@ -35,7 +35,7 @@ cases:
       - "Attempt to complete the purchase"
       - "Observe the error handling"
     test_data: "Declined card: 4000 0000 0000 0002, Expired: 01/20"
-    expected_result: "Payment should be declined. Clear error message should be displayed. Cart should be preserved for retry."
+    expected_result: "Payment is declined. Clear error message is displayed. Cart is preserved for retry."
     category: Negative
     priority: High
     section: "Payment & Checkout"
@@ -46,7 +46,7 @@ cases:
       - "Verify payment was processed only once"
       - "Check for duplicate charges"
     test_data: ""
-    expected_result: "Only one charge should be processed. No duplicate orders should be created."
+    expected_result: "Only one charge is processed. No duplicate orders are created."
     category: "Edge Case"
     priority: High
     section: "Payment & Checkout"

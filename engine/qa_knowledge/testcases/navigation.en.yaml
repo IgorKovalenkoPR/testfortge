@@ -21,7 +21,7 @@ cases:
       - "Enter a non-existent URL path in the browser address bar"
       - "Observe the page that loads"
     test_data: "Non-existent path: /this-page-does-not-exist-12345"
-    expected_result: "A 404 error page should be displayed. The page should be styled and user-friendly, not a raw server error."
+    expected_result: "A 404 error page is displayed. The page is styled and user-friendly, not a raw server error."
     category: Negative
     priority: High
     section: Navigation

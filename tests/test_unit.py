@@ -503,16 +503,42 @@ class TestQATeamLeadReview:
     """QA Team Lead must catch and fix documentation quality issues."""
 
     def test_review_fixes_expected_result_voice(self):
+        """A hedged expected result is rewritten to assert.
+
+        The rule runs in this direction (declarative wins) because the
+        reference corpus — 4,808 QA-team-authored rows in the Odoo Test
+        Plan — never hedges: it writes "The required fields are
+        highlighted", not "should be highlighted". A "should" leaves the
+        tester unable to decide pass from fail. See
+        ``engine/qa_knowledge/style/house_style.yaml``.
+        """
+        from engine.qa_team_lead import review_test_cases
+        from types import SimpleNamespace
+        tc = SimpleNamespace(
+            id="SC1_001", summary="Verify that login works",
+            expected_result="User should be authenticated. Session should "
+                            "be created.",
+            preconditions="App is accessible.", test_steps="1. Login",
+        )
+        fixed, report = review_test_cases([tc])
+        assert fixed[0].expected_result == ("User is authenticated. "
+                                            "Session is created.")
+        assert report.items_fixed > 0
+
+    def test_review_leaves_declarative_expected_result_alone(self):
         from engine.qa_team_lead import review_test_cases
         from types import SimpleNamespace
         tc = SimpleNamespace(
             id="SC1_001", summary="Verify that login works",
             expected_result="User is authenticated. Session is created.",
-            preconditions="App is accessible.", test_steps="1. Login",
+            preconditions="App is accessible.",
+            test_steps="1. Open the login page\n2. Submit valid credentials",
         )
         fixed, report = review_test_cases([tc])
-        assert "should" in fixed[0].expected_result
-        assert report.items_fixed > 0
+        assert fixed[0].expected_result == ("User is authenticated. "
+                                            "Session is created.")
+        assert not [f for f in report.findings
+                    if f.category == "Expected Result Voice"]
 
     def test_review_fixes_missing_verify_that(self):
         from engine.qa_team_lead import review_test_cases

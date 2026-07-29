@@ -347,8 +347,47 @@ def _detect_first_url(raw_lines: list[str]) -> str | None:
     return None
 
 
+def _build_artifacts(url: str, custom_prompt: str,
+                     raw_lines: list[str] | None,
+                     site_analysis) -> "object":
+    """Assemble the grounding bundle for the Test Case Author agent.
+
+    Everything the operator supplied plus everything the crawler saw:
+    the prompt steers scope, the requirement lines and attachment text
+    describe intent, and the per-page control inventory supplies the
+    exact UI labels the authored steps must quote. Without the inventory
+    the agent can only write cases against named requirements, which is
+    what produced generic steps before.
+    """
+    from engine.tc_author import Artifacts
+
+    pages: list[dict] = []
+    for p in getattr(site_analysis, "pages", None) or []:
+        if getattr(p, "error", None):
+            continue
+        pages.append({
+            "url": p.url,
+            "title": (p.title or "")[:160],
+            "h1": (p.h1 or "")[:160],
+            "headings": [h[:90] for h in (p.headings or [])[:10]],
+            "nav_links": [n[:70] for n in (p.nav_links or [])[:14]],
+            "buttons": [b[:70] for b in (p.buttons or [])[:18]],
+            "forms": p.forms or [],
+        })
+
+    requirements = [ln.strip() for ln in (raw_lines or []) if (ln or "").strip()]
+
+    return Artifacts(
+        url=url,
+        custom_prompt=custom_prompt or "",
+        requirements=requirements[:120],
+        pages=pages,
+    )
+
+
 def _run_site_aware(url: str, pid: str | None,
-                    custom_prompt: str) -> dict | None:
+                    custom_prompt: str,
+                    raw_lines: list[str] | None = None) -> dict | None:
     """crawl_site → recon_site → build_strategy → generate_from_strategy.
 
     Returns ``None`` when the crawl itself failed (SSRF block, network
@@ -368,7 +407,6 @@ def _run_site_aware(url: str, pid: str | None,
     Only the ``site_profile`` row is persisted here — it has no
     overlap with the legacy stream.
     """
-    _ = custom_prompt  # reserved — strategy prompt could weave it in later
     from engine.site_crawler import crawl_site
     try:
         site_analysis = crawl_site(url)
@@ -379,7 +417,8 @@ def _run_site_aware(url: str, pid: str | None,
         return None
     profile = recon_site(site_analysis)
     strategy = build_strategy(profile)
-    tcs, cls = generate_from_strategy(profile, strategy)
+    artifacts = _build_artifacts(url, custom_prompt, raw_lines, site_analysis)
+    tcs, cls = generate_from_strategy(profile, strategy, artifacts=artifacts)
 
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
     cl_dicts = [cl_to_dict(cl) for cl in cls]
@@ -588,7 +627,8 @@ def register(app: Flask) -> None:
                 site_aware_meta: dict = {}
                 url = _detect_first_url(raw_lines)
                 if url:
-                    site_out = _run_site_aware(url, pid, custom_prompt)
+                    site_out = _run_site_aware(url, pid, custom_prompt,
+                                               raw_lines=raw_lines)
                     if site_out:
                         tcd.extend(site_out.get("tc_dicts") or [])
                         # crawl_errors from the recon crawler land in
@@ -811,7 +851,8 @@ def register(app: Flask) -> None:
                 site_aware_meta: dict = {}
                 url = _detect_first_url(raw_lines)
                 if url:
-                    site_out = _run_site_aware(url, pid, custom_prompt)
+                    site_out = _run_site_aware(url, pid, custom_prompt,
+                                               raw_lines=raw_lines)
                     if site_out:
                         cld.extend(site_out.get("cl_dicts") or [])
                         for e in site_out.get("crawl_errors") or []:

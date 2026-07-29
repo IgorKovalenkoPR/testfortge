@@ -309,7 +309,7 @@ def _browser_findings_to_test_cases(findings: list[dict]) -> list[TCTemplate]:
 
         if status == "Failed":
             summary = f"Verify that {desc} is fixed"
-            expected = f"The issue should be resolved. Current state: {desc}"
+            expected = f"The issue is resolved. Current state: {desc}"
             tc_cat = "Negative"
         else:
             summary = f"Verify that {desc}"
@@ -410,7 +410,7 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
                    f"Perform the action: {short_action}",
                    "Observe the result"],
             test_data="Valid input data",
-            expected_result=f"The feature should be functioning as specified. Expected behavior should be observed.",
+            expected_result=f"The feature functions as specified, and the expected behaviour is observed.",
             category="Positive", priority="High", section=section,
         ),
         TCTemplate(
@@ -421,7 +421,7 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
                    "Attempt to perform the action",
                    "Observe the error handling"],
             test_data="Invalid/empty input data",
-            expected_result="Invalid input should be rejected. User-friendly error message should be displayed. No data corruption should occur.",
+            expected_result="Invalid input is rejected. A user-friendly error message is displayed. No data corruption occurs.",
             category="Negative", priority="High", section=section,
         ),
         TCTemplate(
@@ -432,7 +432,7 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
                    "Test with special characters and Unicode",
                    "Test with empty/null values"],
             test_data="Min: 1 char, Max: max length, Special: !@#$%^&*(), Empty: ''",
-            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur.",
+            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption occur.",
             category="Edge Case", priority="Medium", section=section,
         ),
     ]
@@ -448,7 +448,7 @@ def _ac_to_test_case(criterion: str, action: str, section: str) -> TCTemplate:
                f"Perform the action: {short_action}",
                f"Validate criterion: {short_cr}"],
         test_data="Valid data matching the criterion",
-        expected_result=f"{short_cr}. The system should behave as specified.",
+        expected_result=f"{short_cr}. The system behaves as specified.",
         category="Positive", priority="High", section=section,
     )
 
@@ -475,17 +475,17 @@ def _ac_negative_test_case(criterion: str, action: str, section: str) -> TCTempl
         steps = ["Navigate to the feature under test",
                  f"Attempt the action that the spec forbids: {short_action}",
                  "Observe how the system responds"]
-        expected = (f"The system should enforce the restriction. The action "
-                    f"should be blocked with a clear, user-facing error.")
+        expected = (f"The system enforces the restriction. The action is "
+                    f"blocked, and a clear, user-facing error is displayed.")
     else:
         summary = (f"Verify that the system rejects input that violates "
                    f"'{short_cr[:70]}'")
         steps = ["Navigate to the feature under test",
                  f"Provide input/state that contradicts: {short_cr}",
                  "Observe error handling and system behavior"]
-        expected = ("The system should reject the invalid input gracefully. "
-                    "An appropriate, user-facing error message should be "
-                    "displayed; no data should be persisted.")
+        expected = ("The system rejects the invalid input gracefully. An "
+                    "appropriate, user-facing error message is displayed, "
+                    "and no data is persisted.")
 
     return TCTemplate(
         summary=summary,
@@ -524,7 +524,7 @@ def _story_test_cases(story, section: str) -> list[TCTemplate]:
                    "Test with special characters and Unicode",
                    "Test with empty/null values"],
             test_data="Min: 1 char, Max: max length, Special: !@#$%^&*(), Empty: ''",
-            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption should occur.",
+            expected_result="Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption occur.",
             category="Edge Case", priority="Medium", section=section,
         ))
     else:
@@ -697,7 +697,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                 steps = [f"Open {url}",
                          f"Fill the form fields ({', '.join(named)}) with valid values",
                          "Click the submit / sign-in button",
-                         "Observe the response — successful auth should redirect or unlock content"]
+                         "Observe the response — successful auth redirects or unlocks content"]
                 expected = "Form submits successfully, the server returns 2xx and the user is redirected to the post-auth page or sees a success state."
                 category = "Positive"
             else:
@@ -815,7 +815,7 @@ def _flow_test_cases(flow_key: str) -> list[TCTemplate]:
                     "Observe the system state, UI messaging and any emails/notifications",
                 ],
                 test_data=ref_text if category != "Security" else "",
-                expected_result=f"{raw}. The system should behave as stated without data loss or double-charging.",
+                expected_result=f"{raw}. The system behaves as stated, with no data loss and no double-charging.",
                 category=category,
                 priority="High",
                 section=section,

@@ -11,7 +11,7 @@ cases:
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: testuser@example.com, Password: ValidPass123!"
-    expected_result: "User should be authenticated successfully. User should be redirected to the dashboard/homepage. Session cookie should be set."
+    expected_result: "User is authenticated successfully. User is redirected to the dashboard/homepage. Session cookie is set."
     category: Positive
     priority: High
     section: Authentication
@@ -23,7 +23,7 @@ cases:
       - "Enter a password that does not match the stored hash"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: testuser@example.com, Password: WrongPass999"
-    expected_result: "Login should be rejected. Generic error message should be displayed (e.g. 'Invalid credentials'). No information about which field is wrong should be revealed."
+    expected_result: "Login is rejected. Generic error message is displayed (e.g. 'Invalid credentials'). No information about which field is wrong is revealed."
     category: Negative
     priority: High
     section: Authentication
@@ -34,7 +34,7 @@ cases:
       - "Enter a password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: (empty), Password: ValidPass123!"
-    expected_result: "Form should not be submitted. Validation error should be displayed for the email field."
+    expected_result: "Form is not submitted. Validation error is displayed for the email field."
     category: Negative
     priority: High
     section: Authentication
@@ -45,7 +45,7 @@ cases:
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: 'test@', '@domain.com', 'plaintext', 'test @example.com'"
-    expected_result: "Form validation should be triggered. Error message should indicate invalid email format."
+    expected_result: "Form validation is triggered. Error message indicates invalid email format."
     category: Negative
     priority: High
     section: Authentication
@@ -58,7 +58,7 @@ cases:
       - "Repeat failed login 5+ times consecutively"
       - "Observe the system behavior"
     test_data: "Email: testuser@example.com, Password: WrongPass (repeated 5+ times)"
-    expected_result: "Account lockout should be activated, or CAPTCHA should be displayed, or rate-limiting should be applied after the threshold is exceeded."
+    expected_result: "Account lockout is activated, or CAPTCHA is displayed, or rate-limiting is applied after the threshold is exceeded."
     category: Security
     priority: High
     section: Authentication
@@ -69,7 +69,7 @@ cases:
       - "Enter any value in the password field"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: ' OR 1=1 --, Password: anything"
-    expected_result: "Input should be sanitized. No database error should be exposed. Login should be rejected with a generic error message."
+    expected_result: "Input is sanitized. No database error is exposed. Login is rejected with a generic error message."
     category: Security
     priority: High
     section: Authentication
@@ -80,7 +80,7 @@ cases:
       - "Observe the redirect"
       - "Attempt to access a protected page directly via URL"
     test_data: ""
-    expected_result: "User should be logged out. Session should be destroyed. Protected pages should not be accessible. User should be redirected to the login page."
+    expected_result: "User is logged out. Session is destroyed. Protected pages are not accessible. User is redirected to the login page."
     category: Positive
     priority: High
     section: Authentication

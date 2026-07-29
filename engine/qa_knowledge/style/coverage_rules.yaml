@@ -1,0 +1,384 @@
+version: 1
+name: Test-case coverage model (control enumeration + mandatory pairings)
+locale: en
+
+# ─────────────────────────────────────────────────────────────────────
+# What this file is
+# ─────────────────────────────────────────────────────────────────────
+# house_style.yaml says HOW to write a case. This file says WHICH cases
+# must exist. It is the coverage model reverse-engineered from the Odoo
+# Test Plan corpus (4,808 cases), where the driver of volume is not the
+# requirement count but systematic enumeration:
+#
+#   * every control on a surface gets a case,
+#   * every view variant of a surface is walked separately,
+#   * every privileged action gets a with-rights / without-rights pair,
+#   * every state machine gets one case per legal transition plus one
+#     per forbidden transition,
+#   * every validated field gets a valid / empty / invalid / boundary set.
+#
+# engine/tc_author.py pastes this into the cached system block. The
+# `must_pair` blocks are the mandatory-negative derivation rules — they
+# replace ratio targets (see house_style.yaml → categories).
+# ─────────────────────────────────────────────────────────────────────
+
+enumeration_order:
+  - list_surface        # grid / index / table
+  - view_variants       # kanban, list, form, calendar, gantt
+  - create_form
+  - detail_form
+  - record_actions
+  - state_machine
+  - permissions
+  - error_messages
+  - cross_cutting
+
+# ─────────────────────────────────────────────────────────────────────
+# 1. List / grid surface
+# ─────────────────────────────────────────────────────────────────────
+list_surface:
+  applies_when: The artifacts evidence a table, grid, list or index of records.
+  checks:
+    - id: reach
+      objective: Navigate to the grid from the primary menu
+      category: Positive
+      priority: High
+    - id: open_record
+      objective: Open a record's detail page by clicking the row / card
+      category: Positive
+      priority: High
+    - id: start_create
+      objective: Start creation via the "Create" / "New" / "Add" control
+      category: Positive
+      priority: High
+    - id: filters
+      objective: Apply each predefined filter and confirm the row set narrows
+      category: Positive
+      priority: Medium
+      note: Name the actual filter labels found in the artifacts, e.g. 'e.g. "Internal", "External"'.
+    - id: group_by
+      objective: Apply each Group By option and confirm records group
+      category: Positive
+      priority: Medium
+    - id: search_simple
+      objective: Search by the primary text column
+      category: Positive
+      priority: High
+    - id: search_advanced
+      objective: Search via Advanced Search with parameter drop-downs
+      category: Positive
+      priority: Medium
+    - id: save_filter
+      objective: Save the current filter set as a favourite
+      category: Positive
+      priority: Low
+    - id: sort
+      objective: Sort by each sortable column, ascending and descending
+      category: Positive
+      priority: Medium
+    - id: pagination
+      objective: Switch to the next and previous page via the pager
+      category: Positive
+      priority: Medium
+    - id: column_picker
+      objective: Add and remove columns via the field selector
+      category: Positive
+      priority: Low
+    - id: multi_select
+      objective: Mark and unmark records via the row checkboxes
+      category: Positive
+      priority: Medium
+    - id: bulk_actions
+      objective: Run each bulk action on a multi-row selection
+      category: Positive
+      priority: Medium
+      note: One case per action in the "More" / bulk menu — delete, mass edit, export, related-task creation.
+    - id: open_new_tab
+      objective: Open selected records in new browser tabs
+      category: Positive
+      priority: Low
+    - id: empty_state
+      objective: Load the grid with zero matching records
+      category: Negative
+      priority: Medium
+    - id: counter
+      objective: Confirm the record counter matches the visible row count
+      category: Positive
+      priority: Low
+  must_pair:
+    - when: A filter or search returns no rows
+      derive: 'Negative — no rows are rendered, an explicit empty-state message replaces the table, no console error.'
+
+# ─────────────────────────────────────────────────────────────────────
+# 2. View variants
+# ─────────────────────────────────────────────────────────────────────
+view_variants:
+  applies_when: The surface offers more than one rendering of the same data.
+  rule: >-
+    Each view is its own SECTION, walked independently. Controls that
+    exist only in one view (inline kanban editing, list-view checkboxes,
+    form-view record switcher) are enumerated in that view's section
+    only. This is where the corpus generates most of its volume — the
+    Recruitment sheet walks "Kanban view" and "List view" as separate
+    section blocks over the same Job Position object.
+  per_view_checks:
+    - Switch to the view via the view switcher
+    - Confirm the record data renders in the view's own layout
+    - Exercise every inline action the view exposes on a record
+    - Exercise the record context menu of that view
+    - Confirm view-specific empty state
+
+# ─────────────────────────────────────────────────────────────────────
+# 3. Create form
+# ─────────────────────────────────────────────────────────────────────
+create_form:
+  applies_when: The artifacts evidence a create / add / new-record form.
+  checks:
+    - id: happy_path
+      objective: Create the record with only the required fields filled
+      category: Positive
+      priority: High
+    - id: required_empty
+      objective: Attempt to save with the required fields left empty
+      category: Negative
+      priority: High
+    - id: required_highlight
+      objective: Confirm required fields are visually marked before submission
+      category: Positive
+      priority: Medium
+    - id: per_field_fill
+      objective: Fill in each field and confirm the value is accepted
+      category: Positive
+      priority: Medium
+      fan_out: one case per field in the artifacts' field inventory
+    - id: save
+      objective: Persist via the "Save" control and confirm the record appears in the grid
+      category: Positive
+      priority: High
+    - id: discard
+      objective: Abandon via the "Discard" / "Cancel" control and confirm nothing is persisted
+      category: Positive
+      priority: High
+    - id: unsaved_guard
+      objective: Navigate away with unsaved changes
+      category: Negative
+      priority: Medium
+      note: Expected — a confirmation dialog appears; leaving discards, staying preserves the edits.
+    - id: breadcrumbs
+      objective: Confirm the breadcrumb trail reflects the create context and returns to the grid
+      category: Positive
+      priority: Low
+  per_control_type:
+    text_input:
+      - {objective: 'Enter a valid value', category: Positive}
+      - {objective: 'Leave empty when required', category: Negative}
+      - {objective: 'Enter a value at the maximum allowed length', category: Positive}
+      - {objective: 'Enter a value one character over the maximum', category: Negative}
+      - {objective: 'Enter non-Latin characters (Cyrillic, CJK) and reopen the record', category: Positive}
+      - {objective: 'Enter leading and trailing whitespace only', category: Negative}
+    email_input:
+      - {objective: 'Enter a valid address', category: Positive}
+      - {objective: 'Enter an address with no @, no domain, or a trailing dot', category: Negative}
+    numeric_input:
+      - {objective: 'Enter a value inside the allowed range', category: Positive}
+      - {objective: 'Enter the minimum and the maximum allowed values', category: Positive}
+      - {objective: 'Enter a negative value and a very large value', category: Negative}
+      - {objective: 'Enter letters into the numeric field', category: Negative}
+      - {objective: 'Enter a decimal where only integers are allowed', category: Negative}
+    date_input:
+      - {objective: 'Pick a date via the date-picker', category: Positive}
+      - {objective: 'Type the date directly in the accepted format', category: Positive}
+      - {objective: 'Enter a date in the past where only future dates are legal', category: Negative}
+      - {objective: 'Enter a date in the future where only past dates are legal', category: Negative}
+      - {objective: 'Enter an end date earlier than the start date', category: Negative}
+    dropdown:
+      - {objective: 'Select an existing value from the drop-down', category: Positive}
+      - {objective: 'Filter the drop-down by typing a prefix', category: Positive}
+      - {objective: 'Open the full picker via "Search More" and select from it', category: Positive}
+      - {objective: 'Create a new related record via "Create and Edit"', category: Positive}
+      - {objective: 'Attempt "Create and Edit" without the required permission', category: Negative}
+      - {objective: 'Clear the selection', category: Positive}
+      note: >-
+        This four-to-five case set per relational drop-down is the single
+        largest volume driver in the corpus. Apply it to every relational
+        field, not just the first one.
+    checkbox:
+      - {objective: 'Mark and unmark the checkbox', category: Positive}
+      - {objective: 'Confirm the dependent fields appear or hide with the checkbox state', category: Positive}
+    file_upload:
+      - {objective: 'Upload a file of an accepted type and size', category: Positive}
+      - {objective: 'Upload a file of a rejected type', category: Negative}
+      - {objective: 'Upload a file over the size limit', category: Negative}
+      - {objective: 'Remove an uploaded file and upload the same file again', category: Positive}
+    rich_text:
+      - {objective: 'Enter formatted text and confirm formatting survives a reload', category: Positive}
+      - {objective: 'Paste markup / script content and confirm it is rendered inert', category: Negative}
+  must_pair:
+    - when: A field is required
+      derive: 'Negative — save is blocked, the field is highlighted, and the error message names that field.'
+    - when: A field has a format rule (email, phone, URL, numeric, date)
+      derive: 'Negative — one case per violated format rule, asserting both rejection and the field-level message.'
+    - when: A field has a length or range limit
+      derive: 'Positive at the limit, Negative one unit beyond it (boundary value analysis).'
+    - when: A relational drop-down offers inline creation
+      derive: 'Negative — the same action attempted by an actor without the creating permission.'
+
+# ─────────────────────────────────────────────────────────────────────
+# 4. Detail / edit form
+# ─────────────────────────────────────────────────────────────────────
+detail_form:
+  checks:
+    - {objective: 'Enter edit mode via the "Edit" control', category: Positive, priority: High}
+    - {objective: 'Confirm every field is pre-populated with the stored value', category: Positive, priority: High}
+    - {objective: 'Change one field, save, reload, and confirm only that field changed', category: Positive, priority: High}
+    - {objective: 'Change one field, discard, and confirm the stored value is intact', category: Positive, priority: High}
+    - {objective: 'Open each tab and confirm its content renders', category: Positive, priority: Medium, fan_out: one case per tab}
+    - {objective: 'Confirm each smart button is displayed with a correct counter', category: Positive, priority: Medium}
+    - {objective: 'Follow each smart button to its target grid', category: Positive, priority: Medium, fan_out: one case per smart button}
+    - {objective: 'Confirm the counter updates after adding and removing a related record', category: Positive, priority: Medium}
+    - {objective: 'Add and delete an attachment', category: Positive, priority: Medium}
+    - {objective: 'Add, view and remove followers', category: Positive, priority: Medium}
+    - {objective: 'Post a message and log an internal note', category: Positive, priority: Medium}
+    - {objective: 'Confirm tooltips appear on hover over annotated fields', category: Positive, priority: Low}
+    - {objective: 'Switch to the next and previous record via the record switcher', category: Positive, priority: Low}
+    - {objective: 'Print / export the record from the print menu', category: Positive, priority: Medium}
+    - {objective: 'Duplicate the record and confirm the copy is independent of the original', category: Positive, priority: Medium}
+    - {objective: 'Delete the record through the confirmation dialog', category: Positive, priority: High}
+    - {objective: 'Cancel the delete confirmation and confirm the record survives', category: Negative, priority: High}
+    - {objective: 'Open the detail URL of a deleted record directly', category: Negative, priority: Medium}
+
+# ─────────────────────────────────────────────────────────────────────
+# 5. State machine
+# ─────────────────────────────────────────────────────────────────────
+state_machine:
+  applies_when: >-
+    The artifacts evidence stages, statuses, workflow buttons or a
+    kanban column set — e.g. the corpus's Appraisal flow
+    New → Plan in Progress → Waiting Appreciation → Done, plus Cancelled.
+  checks:
+    - {objective: 'Advance the record through each legal transition via its own control', category: Positive, priority: High, fan_out: one case per transition}
+    - {objective: 'Confirm the transition control is NOT displayed while the record is in a state that forbids it', category: Negative, priority: High, fan_out: one case per guarded control}
+    - {objective: 'Attempt a transition whose entry conditions are unmet', category: Negative, priority: High}
+    - {objective: 'Confirm fields auto-filled by a transition carry the right value and are read-only', category: Positive, priority: Medium}
+    - {objective: 'Reset the record to its initial state where the flow allows it', category: Positive, priority: Medium}
+    - {objective: 'Attempt to leave a terminal state', category: Negative, priority: High}
+    - {objective: 'Confirm actions on a locked / approved record are refused', category: Negative, priority: High}
+  must_pair:
+    - when: A control drives a transition
+      derive: >-
+        Negative — the same control in a state where the transition is
+        illegal. The corpus writes these as pairs: 'can start recruitment
+        via "Launch Recruitment"' (Positive) next to '"Launch
+        Recruitment" is not displayed while Job Position is in
+        recruitment' (Negative).
+
+# ─────────────────────────────────────────────────────────────────────
+# 6. Permissions / roles
+# ─────────────────────────────────────────────────────────────────────
+permissions:
+  applies_when: The artifacts evidence more than one role, an access level, or an admin surface.
+  rule: >-
+    Build a role × action matrix and emit a symmetric pair for every
+    privileged action. The corpus carries 228 cases whose precondition is
+    the bare role marker "Manager X User", and pairs every
+    "User with special rights can …" with
+    "User without special rights cannot …".
+  checks:
+    - {objective: 'Confirm the privileged actor can perform the action', category: Positive, priority: High}
+    - {objective: 'Confirm the unprivileged actor cannot perform the action', category: Negative, priority: High}
+    - {objective: 'Confirm the restricted tab / field / menu is hidden from the unprivileged actor', category: Negative, priority: High}
+    - {objective: 'Confirm the unprivileged actor cannot reach the restricted surface by its direct URL', category: Negative, priority: High}
+    - {objective: 'Confirm each actor sees only the records their scope allows', category: Positive, priority: High}
+  must_pair:
+    - when: Any action is permission-gated
+      derive: 'Exactly one Negative counterpart per gated action, per role that lacks the permission.'
+
+# ─────────────────────────────────────────────────────────────────────
+# 7. Error messages (systematic negative sweep — own section)
+# ─────────────────────────────────────────────────────────────────────
+error_messages:
+  rule: >-
+    Factor the systematic negative sweep into its own section rather than
+    sprinkling it through the functional sections. Title grammar is
+    '<Surface>: <attempted action>' (see house_style.yaml).
+  matrix_axes:
+    surface: every create form, edit form, modal, and search/filter dialog
+    provocation:
+      - Proceed with ALL required fields empty
+      - Proceed with ANY ONE required field empty
+      - Proceed with invalid data in a numeric field
+      - Proceed with invalid data in a date field
+      - Proceed with invalid data in an email field
+      - Leave the surface without saving after modifying a record
+      - Remove a record
+      - Remove a follower / related line
+      - Submit a nested modal (e.g. inline related-record creation) with required fields empty
+  expected_shapes:
+    all_required_empty: 'All the empty required fields are highlighted, and the error message names them.'
+    one_required_empty: 'The empty required field is highlighted, and the error message names that field.'
+    invalid_data: 'The field with invalid data is highlighted, and the error message names it.'
+    destructive: 'A confirmation dialog is displayed before the action is applied.'
+    unsaved: 'A confirmation dialog is displayed; the record is unchanged unless the user confirms.'
+  note: >-
+    The corpus's own failures cluster here — 8 of 25 error-message rows
+    are Failed, mostly "field is not highlighted" or "the message names
+    the wrong field". This section earns its keep.
+
+# ─────────────────────────────────────────────────────────────────────
+# 8. Cross-cutting sweeps (each its own section)
+# ─────────────────────────────────────────────────────────────────────
+cross_cutting:
+  ui_interface:
+    rule: One section that walks the visual contract of each surface type.
+    checks:
+      - Page / grid title is displayed
+      - Every documented action control is displayed on the surface it belongs to
+      - Control styling matches the design spec (colour, weight, state)
+      - Applied filters are visually marked
+      - Icons and images render (no broken-image placeholders)
+      - Tooltips render for annotated fields
+      - Drop-down lists render fully and their links resolve
+      - Date fields expose the date-picker icon
+      - Links open the intended page or modal
+      - Layout holds at the supported viewport widths
+  localization:
+    applies_when: The artifacts evidence more than one language or a locale switcher.
+    checks:
+      - Every visible string is translated on each supported locale
+      - Non-Latin input round-trips through save and reload
+      - Date, number and currency formats follow the active locale
+      - No layout overflow from longer translated strings
+  performance:
+    applies_when: The artifacts evidence data grids, reports or heavy pages.
+    checks:
+      - Grid renders within the agreed budget at production data volume
+      - View switching and drag-and-drop stay responsive
+      - Report generation completes and does not time out
+      - Repeated navigation does not degrade over a session
+  accessibility:
+    checks:
+      - Every interactive element is reachable by keyboard in a logical order
+      - Every input has a programmatically associated label
+      - Text contrast meets WCAG 2.1 AA
+      - Images carry meaningful alternative text
+      - Focus is visible and is moved to the first invalid field on a failed submit
+
+# ─────────────────────────────────────────────────────────────────────
+# Sizing
+# ─────────────────────────────────────────────────────────────────────
+sizing:
+  guidance: >-
+    Coverage is driven by the control inventory, not by a target count.
+    For calibration: the corpus averages ~117 cases per module sheet, a
+    single create form with 8 fields and 4 relational drop-downs
+    typically yields 30-45 cases, and a grid surface yields 12-20.
+  rules:
+    - >-
+      Never emit fewer than one case per evidenced control. If the
+      artifacts list 12 buttons, 12 buttons get cases.
+    - >-
+      Do not invent controls to hit a number. Under-evidenced surfaces
+      get fewer cases and an explicit gap note.
+    - >-
+      Prefer splitting a broad case into two narrow ones over merging two
+      assertions into one title.

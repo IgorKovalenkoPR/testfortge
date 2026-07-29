@@ -1128,24 +1128,30 @@ _CATEGORY_SECTION_NUM: dict[str, int] = {
 
 
 def _check_to_testcase(check, *, category: str, section_num: int,
-                       idx: int) -> TestCase:
+                       idx: int, profile=None) -> TestCase:
     """Convert a :class:`engine.test_strategy.CheckSpec` into a TC.
 
-    Steps are split out of ``objective`` heuristically — for "Verify X"
-    objectives we generate a 3-step pattern (navigate, perform action,
-    assert). The Live Executor (Stage 3) will rewrite these for
-    Playwright execution; for now they read as good manual TCs.
+    The body is written by :func:`engine.tc_author.expand_check`, which
+    builds a real breadcrumb navigation step from ``url_pattern``, an
+    action step that quotes the objective's own phrasing, an observation
+    step, and a declarative expected result with the negative-feedback
+    half added for refusal cases.
+
+    Before this routed through ``tc_author`` every site-aware TC shared
+    one hard-coded three-step body ("Navigate to the matching page /
+    Perform the action described in the objective / Observe …"), so a
+    40-case pack contained one case repeated 40 times with different
+    titles. The house style bans exactly that (see
+    ``qa_knowledge/style/house_style.yaml`` → ``anti_patterns``).
     """
-    technique_note = (
-        f" (ISTQB technique: {check.istqb_technique})"
-        if check.istqb_technique else ""
+    from .tc_author import expand_check
+
+    authored = expand_check(
+        check,
+        profile=profile,
+        section=category,
+        testing_type=_testing_type_label(category),
     )
-    steps = [
-        ("1. Navigate to the matching page"
-         + (f" ({check.url_pattern})" if check.url_pattern else "")),
-        f"2. Perform the action described in the objective{technique_note}",
-        "3. Observe the rendered state and any console / network errors",
-    ]
     # ``SA`` prefix ("Site-Aware") keeps site-aware IDs disjoint from
     # legacy ``SC1_001`` IDs so the two streams concatenate cleanly
     # without a renumbering pass on every regenerate.
@@ -1153,14 +1159,17 @@ def _check_to_testcase(check, *, category: str, section_num: int,
         id=f"SA{section_num}_{idx:03d}",
         section=category,
         section_num=section_num,
-        summary=check.objective,
-        preconditions=check.rationale or "Site is reachable; primary "
-                                          "browser is supported.",
-        test_steps="\n".join(steps),
-        test_data="",
-        expected_result="The behaviour matches the objective; no "
-                        "console errors or visible regressions appear.",
-        category=_category_label(category),
+        # The check's objective is the authored title. ``expand_check``
+        # canonicalises the opener onto "Verify that …"; keep the raw
+        # objective when it already complied so IDs and titles survive a
+        # regenerate byte-for-byte.
+        summary=authored.summary or check.objective,
+        preconditions=authored.preconditions,
+        test_steps="\n".join(f"{i + 1}. {s}"
+                             for i, s in enumerate(authored.steps)),
+        test_data=authored.test_data,
+        expected_result=authored.expected_result,
+        category=authored.category,
         priority=check.priority,
         status="Unchecked",
         testing_type=_testing_type_label(category),
@@ -1216,18 +1225,63 @@ def _testing_type_label(category: str) -> str:
     }.get(category, "Functional")
 
 
-def generate_from_strategy(profile, strategy) -> tuple[list[TestCase],
-                                                         list[ChecklistItem]]:
+# Site-aware section numbers 1-8 are reserved for the strategy
+# categories (see _CATEGORY_SECTION_NUM). Authored sections are named
+# after UI surfaces ("Job Positions grid", "Employee creation") and get
+# numbers from here up, in first-appearance order.
+_AUTHORED_SECTION_BASE = 10
+
+
+def _authored_to_testcase(case, *, section_num: int, idx: int) -> TestCase:
+    """Convert an :class:`engine.tc_author.AuthoredCase` into a TestCase."""
+    return TestCase(
+        id=f"SA{section_num}_{idx:03d}",
+        section=case.section,
+        section_num=section_num,
+        summary=case.summary,
+        preconditions=case.preconditions,
+        test_steps="\n".join(f"{i + 1}. {s}"
+                             for i, s in enumerate(case.steps)),
+        test_data=case.test_data,
+        expected_result=case.expected_result,
+        comment=case.comment,
+        category=case.category,
+        priority=case.priority,
+        status="Unchecked",
+        testing_type=case.testing_type or "Functional",
+        url_pattern=case.url_pattern,
+        trigger="walkthrough_url_match" if case.url_pattern else "manual",
+    )
+
+
+def generate_from_strategy(profile, strategy, *, artifacts=None
+                           ) -> tuple[list[TestCase], list[ChecklistItem]]:
     """Stage-2 entry point: turn a (SiteProfile, TestStrategy) pair
     into a Test Case pack and a Checklist pack ready to persist.
 
-    Routing rule:
-      * priority == "High"  → TestCase  (worth the detail)
-      * priority in {"Medium","Low"} → ChecklistItem (lighter form)
+    Two paths, same return shape:
 
-    Returns ``(test_cases, checklist_items)``. The order across
-    categories follows :data:`_CATEGORY_PREFIX` iteration order so
-    successive regenerates produce stable IDs.
+    * **Authored** — when ``artifacts`` carry something to ground on and
+      the LLM is reachable, :func:`engine.tc_author.author_test_cases`
+      writes control-level cases grouped into UI-surface sections. The
+      strategy matrix becomes the coverage spine rather than a 1:1
+      source of cases, so a form with 12 controls yields ~30 cases
+      instead of the 2 checks the strategy listed for it.
+    * **Deterministic** — no artifacts, no API key, or an LLM failure,
+      and we fall back to 1:1 expansion of the matrix with the same
+      priority routing this function has always used:
+      ``High`` → TestCase (worth the detail), ``Medium``/``Low`` →
+      ChecklistItem (lighter form).
+
+    The Checklist pack always comes from the ``Medium``/``Low`` checks.
+    Checklist and Test Cases are two separate client deliverables (the
+    reference corpus ships a Smoke Checklist sheet *and* detailed TC
+    sheets per module), so overlap between them is intended.
+
+    Returns ``(test_cases, checklist_items)``. Ordering follows
+    :data:`_CATEGORY_PREFIX` iteration order for the deterministic path
+    and the author's own section order for the authored path, so
+    successive regenerates produce stable IDs either way.
     """
     test_cases: list[TestCase] = []
     checklist: list[ChecklistItem] = []
@@ -1237,27 +1291,60 @@ def generate_from_strategy(profile, strategy) -> tuple[list[TestCase],
     if strategy is None or not getattr(strategy, "matrix", None):
         return test_cases, checklist
 
-    # Iterate in canonical category order so IDs are deterministic
-    # regardless of dict insertion order in ``strategy.matrix``.
+    # ── Checklist: Medium/Low checks, canonical category order ──
     for category in _CATEGORY_PREFIX:
         checks = strategy.matrix.get(category) or []
-        if not checks:
-            continue
-        section_num = _CATEGORY_SECTION_NUM[category]
         prefix = _CATEGORY_PREFIX[category]
         for check in checks:
             if str(getattr(check, "priority", "Medium")).title() == "High":
+                continue
+            idx = cl_counter.get(prefix, 0) + 1
+            cl_counter[prefix] = idx
+            checklist.append(_check_to_checklist(
+                check, category=category, idx=idx,
+            ))
+
+    # ── Test Cases: authored when we can, 1:1 expansion otherwise ──
+    authored = None
+    if artifacts is not None:
+        try:
+            from .tc_author import author_test_cases
+            result = author_test_cases(profile=profile, strategy=strategy,
+                                       artifacts=artifacts)
+            if result.source == "llm" and result.cases:
+                authored = result
+        except Exception as exc:  # pragma: no cover — defensive
+            from .log import get_logger
+            get_logger(__name__).warning(
+                "generate_from_strategy: authoring failed, "
+                "falling back to deterministic expansion: %s", exc)
+
+    if authored is not None:
+        section_nums: dict[str, int] = {}
+        for case in authored.cases:
+            section = case.section or "Functional"
+            if section not in section_nums:
+                section_nums[section] = _CATEGORY_SECTION_NUM.get(
+                    section, _AUTHORED_SECTION_BASE + len(section_nums))
+            sn = section_nums[section]
+            idx = tc_counter.get(sn, 0) + 1
+            tc_counter[sn] = idx
+            test_cases.append(_authored_to_testcase(
+                case, section_num=sn, idx=idx))
+    else:
+        for category in _CATEGORY_PREFIX:
+            checks = strategy.matrix.get(category) or []
+            if not checks:
+                continue
+            section_num = _CATEGORY_SECTION_NUM[category]
+            for check in checks:
+                if str(getattr(check, "priority", "Medium")).title() != "High":
+                    continue
                 idx = tc_counter.get(section_num, 0) + 1
                 tc_counter[section_num] = idx
                 test_cases.append(_check_to_testcase(
                     check, category=category, section_num=section_num,
-                    idx=idx,
-                ))
-            else:
-                idx = cl_counter.get(prefix, 0) + 1
-                cl_counter[prefix] = idx
-                checklist.append(_check_to_checklist(
-                    check, category=category, idx=idx,
+                    idx=idx, profile=profile,
                 ))
 
     # QA Team Lead review — same auto-fix pass the legacy path uses
