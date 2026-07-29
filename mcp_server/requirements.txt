@@ -13,5 +13,15 @@
 # Pin to the modern FastMCP API (>=1.2). The SDK is pure-Python and
 # brings in pydantic, anyio, httpx — all already transitive deps of
 # anthropic + flask, so the install footprint here is small.
-mcp>=1.2.0
+#
+# Upper bound is load-bearing: mcp 2.0.0 removed the bundled
+# ``mcp.server.fastmcp`` package (FastMCP moved out to its own
+# distribution). ``mcp_server/server.py`` imports FastMCP from there, so
+# an unbounded ``mcp>=1.2.0`` resolved to 2.0.0 the day it shipped and
+# broke collection of every tests/test_mcp_* module — on main as much as
+# on any branch. Verified against the published wheels:
+# ``mcp/server/fastmcp/`` is present in 1.29.0 and absent in 2.0.0.
+# Lifting this bound means porting server.py to the standalone
+# ``fastmcp`` package first.
+mcp>=1.2.0,<2.0
 uvicorn>=0.30
