@@ -205,3 +205,88 @@ class TestGenerationModalEsc:
         assert page.evaluate(
             "() => document.activeElement && document.activeElement.id"
         ) == "tc-gen-button"
+
+
+class TestFetchHelperLoadOrder:
+    """The shared TFG helper must be usable by every page script.
+
+    Regression target, found the hard way: the generation scripts live in
+    ``{% block content %}`` while base.html loads static/js/app.js down in
+    ``{% block scripts %}``. Capturing ``window.TFG.readResponse`` at the
+    top of a page IIFE therefore threw a TypeError before the DOM
+    handlers were registered — killing submit AND the ESC handler on
+    /test-cases with no visible symptom other than "nothing happens".
+
+    String assertions in tests/test_csrf_expiry_recovery.py cannot catch
+    this; only executing the page can.
+    """
+
+    PAGES = ("/test-cases", "/checklist", "/estimation")
+
+    #: Broader sweep for the CSP-nonce trap. An inline <script> without
+    #: nonce="{{ csp_nonce }}" is refused outright since 466226e dropped
+    #: 'unsafe-inline', which killed the /estimation team-size override
+    #: and the /bug-reports bulk toolbar with no server-side symptom.
+    CSP_SWEEP_PAGES = PAGES + ("/bug-reports", "/test-execution", "/")
+
+    @pytest.mark.parametrize("path", CSP_SWEEP_PAGES)
+    def test_page_script_runs_without_console_errors(self, page,
+                                                     live_server, path):
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text)
+                if m.type == "error" else None)
+        page.goto(f"{live_server}{path}?lang=en", timeout=15_000)
+        page.wait_for_load_state("domcontentloaded")
+        assert not errors, f"{path} logged JS errors on load: {errors}"
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_tfg_helper_is_available_after_load(self, page, live_server,
+                                                path):
+        page.goto(f"{live_server}{path}?lang=en", timeout=15_000)
+        page.wait_for_load_state("load")
+        shape = page.evaluate(
+            "() => ({"
+            "  present: !!window.TFG,"
+            "  read: typeof (window.TFG||{}).readResponse,"
+            "  csrf: typeof (window.TFG||{}).isCsrfFailure,"
+            "  refresh: typeof (window.TFG||{}).refreshCsrfToken,"
+            "  headers: typeof (window.TFG||{}).jsonHeaders"
+            "})")
+        assert shape == {"present": True, "read": "function",
+                         "csrf": "function", "refresh": "function",
+                         "headers": "function"}, shape
+
+    def test_readResponse_survives_a_non_json_body(self, page, live_server):
+        """The exact failure mode: a text/plain 400 must not throw."""
+        page.goto(f"{live_server}/test-cases?lang=en", timeout=15_000)
+        page.wait_for_load_state("load")
+        result = page.evaluate(
+            """async () => {
+                const r = new Response('CSRF token missing or invalid.',
+                    {status: 400,
+                     headers: {'Content-Type': 'text/plain'}});
+                const res = await window.TFG.readResponse(r);
+                return {status: res.status, body: res.body,
+                        isCsrf: window.TFG.isCsrfFailure(res)};
+            }""")
+        assert result["status"] == 400
+        assert result["body"] is None          # unparseable, not a throw
+        assert result["isCsrf"] is True        # and correctly classified
+
+    def test_generate_button_handler_is_wired(self, page, live_server):
+        """If the IIFE died, submit falls through to a native POST."""
+        page.goto(f"{live_server}/test-cases?lang=en", timeout=15_000)
+        page.wait_for_load_state("load")
+        # The handler calls preventDefault; a dead IIFE would not.
+        prevented = page.evaluate(
+            """() => {
+                const f = document.getElementById('tc-gen-form');
+                const ev = new Event('submit', {cancelable: true,
+                                                bubbles: true});
+                f.dispatchEvent(ev);
+                return ev.defaultPrevented;
+            }""")
+        assert prevented, ("the /test-cases submit handler is not "
+                           "registered — the page script threw before "
+                           "addEventListener ran")

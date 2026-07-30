@@ -532,6 +532,45 @@ def _back_to_caller(default: str = "test_cases_page", extra_qs: str = "") -> str
     return target
 
 
+def _hydrate_from_db(kind: str) -> list[dict]:
+    """Reload the active project's pack from Postgres into the session.
+
+    Why this exists: on the free Render plan the service sleeps after
+    ~15 min and ``SESSION_TYPE=filesystem`` sits on an ephemeral disk, so
+    every cold start wipes the session store. ``before_request`` also
+    deliberately clears ``GENERATED_KEYS`` whenever the session predates
+    the current boot. Either way the /test-cases and /checklist pages
+    rendered their empty state and the operator saw a morning's work
+    apparently vanish — even though the pack was safely in Postgres the
+    whole time, written by ``_persist_test_cases`` on every generate.
+
+    /test-execution already restored from the DB like this; the two
+    generation pages did not. This closes that gap without a paid plan,
+    a second connection pool, or a new dependency.
+
+    ``kind`` is "tc" or "cl". Returns the rows loaded (empty on any
+    failure — a DB hiccup must not break the page render).
+    """
+    pid = session.get("project_id")
+    if not pid:
+        return []
+    loader_name = "load_test_cases" if kind == "tc" else "load_checklist"
+    session_key = "test_cases_data" if kind == "tc" else "checklist_data"
+    loader = getattr(_db, loader_name, None)
+    if loader is None:  # pragma: no cover — defensive
+        return []
+    try:
+        rows = loader(pid) or []
+    except Exception as exc:  # pragma: no cover — best-effort read
+        _log.warning("hydrate %s from DB failed: %s", kind, exc)
+        return []
+    if rows:
+        session[session_key] = rows
+        _log.info("hydrated %d %s rows from DB for project %s",
+                  len(rows), kind, pid)
+    return rows
+
+
 def _drain_tc_job_into_session() -> None:
     """If a previous POST left a tc_gen job_id in the session and that
     job is now finished, copy the result into the session keys the
@@ -833,9 +872,26 @@ def register(app: Flask) -> None:
         # flash, and nothing else moved the result into the session.
         _drain_tc_job_into_session()
         tc_data = session.get("test_cases_data", [])
+        # Nothing in the session — but the pack may still be in Postgres
+        # from before the last cold start. Reload it rather than showing
+        # the empty state, which reads as "my work is gone".
+        restored_from_db = False
+        if not tc_data:
+            tc_data = _hydrate_from_db("tc")
+            restored_from_db = bool(tc_data)
         trace_data = session.get("traceability_data", [])
         if tc_data:
             tc_list = reconstruct_test_cases(tc_data)
+            if restored_from_db:
+                # Say so explicitly: the traceability tab and user
+                # stories are session-only derivations and will be empty
+                # until the next generate, so silence here would look
+                # like a second, different bug.
+                flash(g.t.get(
+                    "tc_restored_from_db",
+                    "Restored %(n)d test cases saved for this project. "
+                    "Traceability and user stories are rebuilt on the "
+                    "next generation.") % {"n": len(tc_list)}, "info")
             return render_template("test_cases.html",
                                    test_cases=tc_list, traceability=trace_data,
                                    has_data=True, errors=[],
@@ -1024,8 +1080,19 @@ def register(app: Flask) -> None:
         # after the sync POST returned. Same bug as the TC path.
         _drain_cl_job_into_session()
         cl_data = session.get("checklist_data", [])
+        # Same cold-start recovery as /test-cases — the pack outlives the
+        # session because it lives in Postgres.
+        restored_from_db = False
+        if not cl_data:
+            cl_data = _hydrate_from_db("cl")
+            restored_from_db = bool(cl_data)
         if cl_data:
             cl_list = reconstruct_checklist(cl_data)
+            if restored_from_db:
+                flash(g.t.get(
+                    "cl_restored_from_db",
+                    "Restored %(n)d checklist items saved for this "
+                    "project.") % {"n": len(cl_list)}, "info")
             return render_template("checklist.html",
                                    checklist=cl_list, has_data=True, errors=[],
                                    resource_urls=extract_resource_urls())
@@ -1762,6 +1829,42 @@ def register(app: Flask) -> None:
             "tc_gen", _worker, meta={"session_id": sid})
         session["tc_gen_job_id"] = job_id
         return jsonify({"job_id": job_id, "status": "pending"})
+
+    @app.route("/api/pack-info", methods=["GET"])
+    def api_pack_info():
+        """How many rows the active project has saved in Postgres.
+
+        Lets the client tell two very different situations apart when a
+        job id stops resolving:
+
+        * the worker finished, wrote the pack, and *then* the process
+          died — reloading shows the work (see ``_hydrate_from_db``);
+        * the worker died mid-run — nothing was saved and a retry is the
+          only option.
+
+        Both looked identical before ("The generation job was lost"), so
+        the UI told users to redo work that was already on disk. The
+        probe matters because a blind reload would discard whatever they
+        had typed into the form.
+
+        ``kind`` is "tc" (default) or "cl".
+        """
+        kind = (request.args.get("kind") or "tc").strip().lower()
+        pid = session.get("project_id")
+        if not pid:
+            return jsonify({"count": 0, "project": None})
+        loader = getattr(_db,
+                         "load_test_cases" if kind != "cl"
+                         else "load_checklist", None)
+        if loader is None:  # pragma: no cover — defensive
+            return jsonify({"count": 0, "project": pid})
+        try:
+            rows = loader(pid) or []
+        except Exception as exc:
+            _log.warning("pack-info read failed: %s", exc)
+            return jsonify({"count": 0, "project": pid,
+                            "error": "db_unavailable"}), 200
+        return jsonify({"count": len(rows), "project": pid})
 
     @app.route("/test-cases/status/<job_id>", methods=["GET"])
     def test_cases_status(job_id):

@@ -75,6 +75,52 @@
     var consecErrors = 0;
     var stopped = false;
     var fallbackTriggered = false;
+    var csrfRetried = false;        // one automatic token refresh per submit
+
+    /* Response reading and CSRF recovery live in static/js/app.js
+     * (window.TFG) so every fetch-submitting page shares one
+     * implementation — see the comment block there for why.
+     *
+     * Dereferenced at CALL time, not here: this script sits in
+     * {% raw %}{% block content %}{% endraw %} and therefore runs
+     * before base.html loads app.js. Capturing window.TFG.* at the top
+     * of this IIFE threw a TypeError that killed the whole block —
+     * including the submit and ESC handlers. */
+    function readResponse(r)    { return window.TFG.readResponse(r); }
+    function isCsrfFailure(res) { return window.TFG.isCsrfFailure(res); }
+
+    /* Session expired mid-visit. Fetch a fresh token, patch the form,
+     * and replay the submit once. */
+    function refreshCsrfAndRetry() {
+        if (csrfRetried) return false;
+        csrfRetried = true;
+        window.TFG.refreshCsrfToken(form).then(function (ok) {
+            if (!ok) return showReloadRequired();
+            if (stageEl) stageEl.textContent =
+                "{{ t.get('cl_gen_stage_resuming', 'Session refreshed — resuming…') }}";
+            submitJob();
+        });
+        return true;
+    }
+
+    function showReloadRequired() {
+        stopAll();
+        if (overlay) overlay.hidden = true;
+        if (!errorEl) return;
+        errorEl.innerHTML = '';
+        errorEl.style.display = 'block';
+        var msg = document.createElement('div');
+        msg.textContent =
+            "{{ t.get('cl_gen_session_expired', 'Your session expired. Reload the page and generate again.') }}";
+        errorEl.appendChild(msg);
+        var reload = document.createElement('button');
+        reload.type = 'button';
+        reload.className = 'btn btn-primary';
+        reload.style.marginTop = '10px';
+        reload.textContent = "{{ t.get('cl_gen_reload', 'Reload page') }}";
+        reload.addEventListener('click', function () { window.location.reload(); });
+        errorEl.appendChild(reload);
+    }
 
     function tick() {
         var elapsed = Date.now() - startedAt;
@@ -147,13 +193,12 @@
             try { ctl.abort(); } catch (_) {}
         }, POLL_TIMEOUT_MS) : null;
 
-        var opts = { cache: 'no-store', credentials: 'same-origin' };
+        var opts = { cache: 'no-store', credentials: 'same-origin',
+                     headers: window.TFG.jsonHeaders() };
         if (ctl) opts.signal = ctl.signal;
 
         fetch('/checklist/status/' + jobId, opts)
-            .then(function (r) {
-                return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
-            })
+            .then(readResponse)
             .then(function (res) {
                 if (killTimer) clearTimeout(killTimer);
                 inFlight = null;
@@ -204,6 +249,7 @@
     function onSubmit(ev) {
         ev.preventDefault();
         stopped = false; fallbackTriggered = false; consecErrors = 0;
+        csrfRetried = false;
         startedAt = Date.now();
         if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
         tick();
@@ -217,14 +263,23 @@
                 "{{ t.get('cl_gen_watchdog', 'Generation is taking longer than expected — finishing directly.') }}");
         }, WATCHDOG_MS);
 
+        submitJob();
+    }
+
+    function submitJob() {
         var fd = new FormData(form);
         fetch('/checklist/run-async', {
-            method: 'POST', body: fd, credentials: 'same-origin'
+            method: 'POST', body: fd, credentials: 'same-origin',
+            headers: window.TFG.jsonHeaders()
         })
-        .then(function (r) {
-            return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
-        })
+        .then(readResponse)
         .then(function (res) {
+            // Expired session — refresh the token and replay once
+            // instead of reporting a network failure that did not happen.
+            if (isCsrfFailure(res)) {
+                if (refreshCsrfAndRetry()) return;
+                return showReloadRequired();
+            }
             if (!res.ok) {
                 // 400 = validation (no input / rate-limited). Don't
                 // retry — surface the server's explanation and stop.
@@ -233,8 +288,8 @@
                 // but the old code looped through fallbackToSync 5×.
                 stopAll();
                 if (overlay) overlay.hidden = true;
-                var msg = (res.body && (res.body.message || res.body.error))
-                    || 'Please add requirements (text, file, or URL) before generating.';
+                var msg = window.TFG.errorMessage(res,
+                    'Please add requirements (text, file, or URL) before generating.');
                 if (errorEl) {
                     errorEl.textContent = msg;
                     errorEl.style.display = 'block';
@@ -242,11 +297,17 @@
                 if (window.alert) { try { window.alert(msg); } catch (_) {} }
                 return;
             }
+            if (!res.body || !res.body.job_id) {
+                return fallbackToSync(
+                    "{{ t.get('cl_gen_bad_response', 'The server returned an unexpected response — try again.') }}");
+            }
             poll(res.body.job_id);
         })
         .catch(function () {
+            // A genuine transport failure — this message is now only
+            // shown when the request really did not complete.
             fallbackToSync(
-                "{{ t.get('cl_gen_offline_submit', 'Could not reach the server — retrying directly.') }}");
+                "{{ t.get('cl_gen_offline_submit', 'Could not reach the server — check your connection and try again.') }}");
         });
     }
     form.addEventListener('submit', onSubmit, false);
