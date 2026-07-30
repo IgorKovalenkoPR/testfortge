@@ -92,6 +92,25 @@ services:
         value: json
       # Basic Auth gate — fill these in the Render dashboard before deploy.
       # `sync: false` means Render will NOT pull them from a generated
+      # Keep Playwright OUT of the web worker on the free plan.
+      #
+      # Chromium needs ~250 MB on top of Flask + the LLM client + the
+      # crawl, and the instance has 512 MB with a single gunicorn worker.
+      # The worker was being OOM-killed ~110 s into a /test-cases
+      # generation; because JobQueue lives in that process's memory the
+      # job died with it, /test-cases/status/<id> answered 404, and the
+      # user got "The generation job was lost" after a two-minute wait
+      # with nothing saved.
+      #
+      # The requests-based crawl still runs, so the Test Case Author
+      # agent keeps its control inventory. What is lost here is only the
+      # browser-derived findings (performance, console errors, responsive
+      # layout) — and /test-execution still does a real browser pass in a
+      # detached subprocess that survives a gunicorn restart.
+      #
+      # Flip to 1 after moving to a paid plan with more RAM.
+      - key: TESTFORTGE_BROWSER_ENABLED
+        value: "0"
       # value or the file; they stay in the dashboard as secrets.
       - key: TESTFORTGE_BASIC_USER
         sync: false

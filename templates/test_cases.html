@@ -115,6 +115,77 @@
         return true;
     }
 
+    /* The job id stopped resolving. Ask the server whether the pack
+     * reached Postgres before the process died: the worker persists via
+     * _persist_test_cases *before* it reports DONE, so a restart in that
+     * window leaves the work saved and one reload away. Only when
+     * nothing was saved is a retry the right advice.
+     *
+     * The probe is what makes this safe — reloading blindly would throw
+     * away whatever the user typed into the form. */
+    function handleJobLost() {
+        stopAll();
+        fetch('/api/pack-info?kind=tc', {
+            cache: 'no-store', credentials: 'same-origin',
+            headers: window.TFG.jsonHeaders()
+        })
+        .then(readResponse)
+        .then(function (res) {
+            var count = (res.body && res.body.count) || 0;
+            if (count > 0) return showSavedPack(count);
+            showLostAndRetry();
+        })
+        .catch(function () { showLostAndRetry(); });
+    }
+
+    /* Good outcome: the run finished, the server restarted, the rows are
+     * on disk. Offer the reload that surfaces them. */
+    function showSavedPack(count) {
+        if (stageEl) stageEl.textContent =
+            "{{ t.get('tc_gen_stage_saved', 'Finished — the server restarted before the page updated.') }}";
+        if (!errorEl) return;
+        errorEl.innerHTML = '';
+        errorEl.style.display = 'block';
+        var msg = document.createElement('div');
+        msg.textContent = (
+            "{{ t.get('tc_gen_saved_pack', 'Generation finished and NUM test cases were saved for this project, but the server restarted before the page could update. Reload to see them.') }}"
+        ).replace('NUM', String(count));
+        errorEl.appendChild(msg);
+        var reload = document.createElement('button');
+        reload.type = 'button';
+        reload.className = 'btn btn-primary';
+        reload.style.marginTop = '10px';
+        reload.textContent = "{{ t.get('tc_gen_show_saved', 'Show saved test cases') }}";
+        reload.addEventListener('click', function () { window.location.reload(); });
+        errorEl.appendChild(reload);
+    }
+
+    /* Bad outcome: the worker died mid-run, nothing was persisted. */
+    function showLostAndRetry() {
+        fallbackTriggered = true;
+        if (stageEl) stageEl.textContent =
+            "{{ t.get('tc_gen_stage_fallback', 'Generation could not finish — try again.') }}";
+        if (!errorEl) return;
+        errorEl.innerHTML = '';
+        errorEl.style.display = 'block';
+        var msg = document.createElement('div');
+        msg.textContent =
+            "{{ t.get('tc_gen_worker_died', 'The server restarted before the run finished, so nothing was saved. This happens on the free plan when a generation exceeds the memory limit — try a narrower scope or fewer pages.') }}";
+        errorEl.appendChild(msg);
+        var retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn btn-primary';
+        retry.style.marginTop = '10px';
+        retry.textContent = "{{ t.get('tc_gen_retry', 'Retry generation') }}";
+        retry.addEventListener('click', function () {
+            errorEl.style.display = 'none';
+            overlay.hidden = true;
+            fallbackTriggered = false;
+            onSubmit(new Event('submit'));
+        });
+        errorEl.appendChild(retry);
+    }
+
     function showReloadRequired() {
         stopAll();
         if (overlay) overlay.hidden = true;
@@ -218,8 +289,13 @@
                 if (stopped) return;
 
                 if (res.status === 404 || (res.body && res.body.error === 'not_found')) {
-                    return fallbackToSync(
-                        "{{ t.get('tc_gen_lost', 'The generation job was lost — retrying directly.') }}");
+                    // The job id no longer resolves. On the free plan
+                    // that almost always means the gunicorn worker was
+                    // OOM-killed mid-run and took the in-memory
+                    // JobQueue with it. Two very different outcomes hide
+                    // behind the same 404, so ask before telling the
+                    // user to redo the work.
+                    return handleJobLost();
                 }
                 if (!res.ok) {
                     consecErrors += 1;
