@@ -90,8 +90,6 @@ services:
         value: INFO
       - key: LOG_FORMAT
         value: json
-      # Basic Auth gate — fill these in the Render dashboard before deploy.
-      # `sync: false` means Render will NOT pull them from a generated
       # Keep Playwright OUT of the web worker on the free plan.
       #
       # Chromium needs ~250 MB on top of Flask + the LLM client + the
@@ -111,6 +109,17 @@ services:
       # Flip to 1 after moving to a paid plan with more RAM.
       - key: TESTFORTGE_BROWSER_ENABLED
         value: "0"
+      # Web Recorder (Sprint 8 PR-B/E). Declared here because it was
+      # already set to 1 by hand on the live service while being absent
+      # from this blueprint — so a Manual Sync would have deleted it, and
+      # the code default is "0", silently switching the recorder off in
+      # production with no other symptom. Gates
+      # /api/recorder-session/{start,finish}, the /test-cases recorder UI
+      # and `tfg record` (app.py, routes/generation.py).
+      - key: RECORDER_ENABLED
+        value: "1"
+      # Basic Auth gate — fill these in the Render dashboard before deploy.
+      # `sync: false` means Render will NOT pull them from a generated
       # value or the file; they stay in the dashboard as secrets.
       - key: TESTFORTGE_BASIC_USER
         sync: false
@@ -148,10 +157,6 @@ services:
       # build to TC-driven-only without any code change.
       - key: WALKTHROUGH_MODE_ENABLED
         value: "1"
-      # Optional: turn on Tedgie AI mode by setting an Anthropic API key.
-      # Leave empty for rule-based fallback.
-      - key: ANTHROPIC_API_KEY
-        sync: false
 
   # ── MCP HTTP service ──────────────────────────────────────────────
   # Same container image as the Flask app (the Dockerfile installs both
@@ -197,6 +202,13 @@ services:
       # SQLite-prod safety check never trips. Leaving FLASK_DEBUG unset
       # keeps prod behaviour identical to the Flask service.
       - key: FLASK_DEBUG
+        value: "0"
+      # mcp_server/server.py gates its `record_steps_attach` tool on this
+      # flag. It has never been set on this service, so the tool is off;
+      # "0" states that explicitly instead of leaving it to the code
+      # default. Set to 1 only alongside the web service's recorder,
+      # since the two share the same DB rows.
+      - key: RECORDER_ENABLED
         value: "0"
       # Walkthrough trigger needs the same gate as the web service so
       # ``trigger_test_execution(mode="walkthrough")`` reaches a runner

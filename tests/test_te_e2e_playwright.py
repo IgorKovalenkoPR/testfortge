@@ -275,17 +275,28 @@ class TestFetchHelperLoadOrder:
         assert result["isCsrf"] is True        # and correctly classified
 
     def test_generate_button_handler_is_wired(self, page, live_server):
-        """If the IIFE died, submit falls through to a native POST."""
+        """If the IIFE died, submit falls through to a native POST.
+
+        fetch is stubbed for the duration: dispatching a real submit
+        otherwise starts an actual generation job, whose polling outlived
+        the fixture teardown and crashed the browser context. We only
+        care that a handler ran and cancelled the event.
+        """
         page.goto(f"{live_server}/test-cases?lang=en", timeout=15_000)
         page.wait_for_load_state("load")
-        # The handler calls preventDefault; a dead IIFE would not.
         prevented = page.evaluate(
             """() => {
-                const f = document.getElementById('tc-gen-form');
-                const ev = new Event('submit', {cancelable: true,
-                                                bubbles: true});
-                f.dispatchEvent(ev);
-                return ev.defaultPrevented;
+                const realFetch = window.fetch;
+                window.fetch = () => new Promise(() => {});   // never settles
+                try {
+                    const f = document.getElementById('tc-gen-form');
+                    const ev = new Event('submit', {cancelable: true,
+                                                    bubbles: true});
+                    f.dispatchEvent(ev);
+                    return ev.defaultPrevented;
+                } finally {
+                    window.fetch = realFetch;
+                }
             }""")
         assert prevented, ("the /test-cases submit handler is not "
                            "registered — the page script threw before "
