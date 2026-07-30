@@ -31,7 +31,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 import markupsafe
 import secrets
 
-from flask import Flask, Response, g, request, session
+from flask import Flask, Response, g, jsonify, request, session
 from flask_session import Session
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError, generate_csrf
@@ -190,14 +190,60 @@ if (os.environ.get("BEHIND_HTTPS") == "1"
 
 # ── Error handlers ───────────────────────────────────────────────
 
+def _wants_json() -> bool:
+    """True when the caller is a fetch/XHR rather than a browser form post.
+
+    Used by the CSRF handler so a JSON client gets a JSON body it can
+    actually branch on. Before this, every CSRF rejection came back as
+    ``text/plain``, the page scripts called ``r.json()`` on it
+    unconditionally, the resulting SyntaxError landed in their network
+    ``.catch()``, and the UI reported "Could not reach the server" — the
+    opposite of what happened, with a Retry button that re-posted the
+    same dead token forever.
+    """
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return True
+    accept = request.headers.get("Accept", "")
+    return "application/json" in accept and "text/html" not in accept
+
+
 @app.errorhandler(CSRFError)
 def _handle_csrf_error(e):
     log.warning("CSRF rejected: %s", e.description)
+    message = ("Your session expired. Reload the page and try again.")
+    if _wants_json():
+        # ``reload_required`` tells the client that retrying the same
+        # request is pointless — it needs a fresh token first.
+        return jsonify({
+            "error": "csrf",
+            "message": message,
+            "reload_required": True,
+        }), 400
     return Response(
-        "CSRF token missing or invalid. Reload the page and try again.",
+        message,
         status=400,
         content_type="text/plain; charset=utf-8",
     )
+
+
+@app.route("/api/csrf-token", methods=["GET"])
+def api_csrf_token():
+    """Mint a CSRF token for the current session.
+
+    Lets a page recover from an expired session without a manual reload:
+    the client re-fetches a token and replays the submit once. This is a
+    routine occurrence rather than an edge case on the free Render plan —
+    the service sleeps after ~15 minutes and ``SESSION_TYPE=filesystem``
+    lives on an ephemeral disk, so every cold start invalidates the token
+    held by any tab that was already open (see render.yaml's free-tier
+    notes).
+
+    GET, so the global CSRFProtect gate does not apply. The token is
+    scoped to the caller's own session cookie, so handing it out reveals
+    nothing another origin could use — and the Basic-Auth gate, when
+    enabled, still fronts this like every other route.
+    """
+    return jsonify({"token": generate_csrf()})
 
 
 @app.errorhandler(413)

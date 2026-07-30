@@ -602,3 +602,93 @@ function applyStatusColor(select) {
     // Initial state on page load (e.g. after browser-back to a scrolled page).
     update();
 })();
+
+
+/* ── Fetch + CSRF resilience helpers (window.TFG) ──────────────────
+ *
+ * Shared by every page that submits a form with fetch(). Extracted
+ * after a production bug on /test-cases: the modal reported
+ * "Could not reach the server — retrying directly." with Elapsed 0s
+ * while the server had in fact answered, clearly, 400 "session
+ * expired".
+ *
+ * Two mistakes combined:
+ *   1. The page called r.json() on every response. The CSRF handler
+ *      answered text/plain, so JSON.parse threw and the SyntaxError
+ *      landed in the network .catch() — which blamed connectivity.
+ *   2. Its Retry button re-posted the same dead token, so the error
+ *      was unrecoverable without a manual reload.
+ *
+ * The trigger is routine rather than exotic on the free Render plan:
+ * the service sleeps after ~15 min and SESSION_TYPE=filesystem sits on
+ * an ephemeral disk, so every cold start invalidates the csrf_token
+ * held by any tab that was already open.
+ *
+ * Four templates had copy-pasted the same pattern; they all use these
+ * helpers now so the next copy cannot reintroduce it.
+ */
+(function () {
+    'use strict';
+
+    var TFG = window.TFG = window.TFG || {};
+
+    /* Headers that make a request identifiably a fetch/XHR, so the
+     * server's error handlers answer in JSON. */
+    TFG.jsonHeaders = function () {
+        return { 'Accept': 'application/json',
+                 'X-Requested-With': 'XMLHttpRequest' };
+    };
+
+    /* Read a response without assuming its content type. Always
+     * resolves; never throws on a non-JSON body. */
+    TFG.readResponse = function (r) {
+        return r.text().then(function (raw) {
+            var body = null;
+            try { body = raw ? JSON.parse(raw) : null; } catch (_) { body = null; }
+            return { ok: r.ok, status: r.status, body: body, text: raw || '' };
+        });
+    };
+
+    /* True when a rejection is an expired/missing CSRF token — i.e.
+     * retrying the same payload is pointless until the token is
+     * refreshed. Falls back to sniffing the text body so it still
+     * works against an older server that answers text/plain. */
+    TFG.isCsrfFailure = function (res) {
+        if (!res || res.status !== 400) return false;
+        if (res.body && (res.body.error === 'csrf' || res.body.reload_required)) {
+            return true;
+        }
+        return /csrf|session expired/i.test(res.text || '');
+    };
+
+    /* Mint a fresh token and write it into the form's hidden field.
+     * Resolves true on success, false otherwise — callers decide
+     * whether to replay the submit or ask the user to reload. */
+    TFG.refreshCsrfToken = function (form) {
+        return fetch('/api/csrf-token', {
+            cache: 'no-store', credentials: 'same-origin',
+            headers: TFG.jsonHeaders()
+        })
+        .then(TFG.readResponse)
+        .then(function (res) {
+            var token = res.body && res.body.token;
+            if (!res.ok || !token) return false;
+            var field = form && form.querySelector('input[name="csrf_token"]');
+            if (!field) return false;
+            field.value = token;
+            return true;
+        })
+        .catch(function () { return false; });
+    };
+
+    /* Best available human-readable message for a failed response,
+     * preferring the server's own words over a generic guess. */
+    TFG.errorMessage = function (res, fallback) {
+        if (res && res.body && (res.body.message || res.body.error)) {
+            return res.body.message || res.body.error;
+        }
+        if (res && res.text) return String(res.text).slice(0, 300);
+        if (res && res.status) return 'Server returned HTTP ' + res.status + '.';
+        return fallback || 'Something went wrong.';
+    };
+})();

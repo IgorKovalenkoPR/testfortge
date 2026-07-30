@@ -123,11 +123,14 @@
         <small>{{ t.get('est_team_size_hint',
           'TestForTge suggests a headcount from the estimate. Override only if you have a fixed team — it feeds Brooks\'s-law communication overhead.') }}</small>
       </div>
-      <script>
-        // Toggle from "Suggested" badge to a manual input. Vanilla JS so
-        // this works regardless of any bundler/CSP rules. The hidden
+      <script nonce="{{ csp_nonce }}">
+        // Toggle from "Suggested" badge to a manual input. The hidden
         // input is still submitted on POST — its value attribute is the
         // suggestion, so a no-op override === picking the suggestion.
+        //
+        // The nonce is required: script-src dropped 'unsafe-inline' in
+        // 466226e, and without it CSP refused to execute this block, so
+        // the override button silently did nothing in production.
         (function () {
           var btn = document.getElementById('ts-override-btn');
           var view = document.getElementById('ts-suggested-view');
@@ -389,6 +392,7 @@
     var inFlight = null;
     var consecErrors = 0;
     var stopped = false;
+    var csrfRetried = false;   // one automatic token refresh per submit
 
     function tick() {
       var elapsed = Date.now() - startedAt;
@@ -440,12 +444,11 @@
       var killTimer = ctl ? setTimeout(function () {
         try { ctl.abort(); } catch (_) {}
       }, POLL_TIMEOUT_MS) : null;
-      var opts = { cache: 'no-store', credentials: 'same-origin' };
+      var opts = { cache: 'no-store', credentials: 'same-origin',
+                   headers: window.TFG.jsonHeaders() };
       if (ctl) opts.signal = ctl.signal;
       fetch('/estimation/status/' + jobId, opts)
-        .then(function (r) {
-          return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
-        })
+        .then(window.TFG.readResponse)
         .then(function (res) {
           if (killTimer) clearTimeout(killTimer);
           inFlight = null;
@@ -495,6 +498,7 @@
     function onSubmit(ev) {
       ev.preventDefault();
       stopped = false; consecErrors = 0;
+      csrfRetried = false;
       currentSrc = (input && input.value) || 'text';
       startedAt = Date.now();
       if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
@@ -508,21 +512,45 @@
           "{{ t.get('est_gen_watchdog', 'Estimation is taking longer than expected — try again.') }}");
       }, WATCHDOG_MS);
 
+      submitJob();
+    }
+
+    function sessionExpired() {
+      stopAll();
+      overlay.hidden = true;
+      var m = "{{ t.get('est_session_expired', 'Your session expired. Reload the page and run again.') }}";
+      if (window.alert) { try { window.alert(m); } catch (_) {} }
+    }
+
+    function submitJob() {
       var fd = new FormData(form);
       fetch('/estimation/run-async', {
-        method: 'POST', body: fd, credentials: 'same-origin'
+        method: 'POST', body: fd, credentials: 'same-origin',
+        headers: window.TFG.jsonHeaders()
       })
-      .then(function (r) {
-        return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; });
-      })
+      .then(window.TFG.readResponse)
       .then(function (res) {
+        // Expired session — mint a fresh token and replay once rather
+        // than blaming the transport for a request that did arrive.
+        if (window.TFG.isCsrfFailure(res)) {
+          if (csrfRetried) return sessionExpired();
+          csrfRetried = true;
+          return window.TFG.refreshCsrfToken(form).then(function (ok) {
+            if (ok) return submitJob();
+            sessionExpired();
+          });
+        }
         if (!res.ok) {
           stopAll();
           overlay.hidden = true;
-          var msg = (res.body && (res.body.message || res.body.error))
-            || 'Provide content for the active tab before running.';
+          var msg = window.TFG.errorMessage(res,
+            'Provide content for the active tab before running.');
           if (window.alert) { try { window.alert(msg); } catch (_) {} }
           return;
+        }
+        if (!res.body || !res.body.job_id) {
+          return fallbackToSync(
+            "{{ t.get('est_gen_bad_response', 'The server returned an unexpected response — try again.') }}");
         }
         poll(res.body.job_id);
       })
