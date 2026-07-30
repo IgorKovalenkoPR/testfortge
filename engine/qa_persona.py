@@ -115,6 +115,31 @@ _AREA_KEYWORDS = {
 }
 
 
+def browser_pass_enabled() -> bool:
+    """Whether generation may launch Playwright inside the web worker.
+
+    Default on, so nothing changes for a box with headroom. Set
+    ``TESTFORTGE_BROWSER_ENABLED=0`` where the instance cannot afford it.
+
+    Why this switch exists: on Render's free plan (512 MB, 1 gunicorn
+    worker) Chromium needs ~250 MB on top of Flask, the LLM client and
+    the crawl. The worker got OOM-killed ~110 s into a generation, and
+    because JobQueue lives in that process's memory the job vanished with
+    it — ``/test-cases/status/<id>`` then answered 404 and the UI could
+    only say "The generation job was lost". render.yaml already dropped
+    from 2 workers to 1 for the same reason.
+
+    Turning this off keeps the requests-based crawl, which is what
+    supplies the control inventory the Test Case Author agent needs. Only
+    the browser-derived findings (performance, console errors, responsive
+    layout) are lost, and /test-execution still runs a real browser pass
+    in a detached subprocess that survives a gunicorn restart.
+    """
+    import os
+    return (os.environ.get("TESTFORTGE_BROWSER_ENABLED", "1")
+            .strip().lower() not in ("0", "false", "no", "off"))
+
+
 def analyze_input(requirements: list[dict],
                   custom_prompt: str = "") -> AnalysisResult:
     """Analyze structured requirements to determine testing scope."""
@@ -215,7 +240,7 @@ def analyze_input(requirements: list[dict],
             # data we already have (generic templates if site_pages empty).
             result.crawl_errors.append(f"crawler exception: {exc}")
 
-    if result.url:
+    if result.url and browser_pass_enabled():
         try:
             from .browser_tester import get_or_run as browser_get_or_run
             from dataclasses import asdict
@@ -237,6 +262,11 @@ def analyze_input(requirements: list[dict],
             result.browser_findings = [asdict(f) for f in browser_report.findings]
         except Exception:
             pass
+    elif result.url:
+        result.crawl_errors.append(
+            "In-process browser pass skipped (TESTFORTGE_BROWSER_ENABLED=0) "
+            "— performance, console and responsive findings are omitted. "
+            "Run /test-execution for a real browser pass.")
 
     if result.url and not detected_areas:
         detected_areas = {"web_general"}

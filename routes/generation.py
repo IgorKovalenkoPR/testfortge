@@ -1830,6 +1830,42 @@ def register(app: Flask) -> None:
         session["tc_gen_job_id"] = job_id
         return jsonify({"job_id": job_id, "status": "pending"})
 
+    @app.route("/api/pack-info", methods=["GET"])
+    def api_pack_info():
+        """How many rows the active project has saved in Postgres.
+
+        Lets the client tell two very different situations apart when a
+        job id stops resolving:
+
+        * the worker finished, wrote the pack, and *then* the process
+          died — reloading shows the work (see ``_hydrate_from_db``);
+        * the worker died mid-run — nothing was saved and a retry is the
+          only option.
+
+        Both looked identical before ("The generation job was lost"), so
+        the UI told users to redo work that was already on disk. The
+        probe matters because a blind reload would discard whatever they
+        had typed into the form.
+
+        ``kind`` is "tc" (default) or "cl".
+        """
+        kind = (request.args.get("kind") or "tc").strip().lower()
+        pid = session.get("project_id")
+        if not pid:
+            return jsonify({"count": 0, "project": None})
+        loader = getattr(_db,
+                         "load_test_cases" if kind != "cl"
+                         else "load_checklist", None)
+        if loader is None:  # pragma: no cover — defensive
+            return jsonify({"count": 0, "project": pid})
+        try:
+            rows = loader(pid) or []
+        except Exception as exc:
+            _log.warning("pack-info read failed: %s", exc)
+            return jsonify({"count": 0, "project": pid,
+                            "error": "db_unavailable"}), 200
+        return jsonify({"count": len(rows), "project": pid})
+
     @app.route("/test-cases/status/<job_id>", methods=["GET"])
     def test_cases_status(job_id):
         # Polling endpoint — must stay cheap and never block. The browser
