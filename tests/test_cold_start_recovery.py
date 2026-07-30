@@ -154,3 +154,127 @@ class TestChecklistColdStart:
 
         monkeypatch.setattr(_db, "load_checklist", _boom)
         assert client.get("/checklist").status_code == 200
+
+
+class TestSessionStoreWipedEntirely:
+    """The harder cold start: the session store itself is gone.
+
+    A Render restart wipes the filesystem session store, so
+    ``session["project_id"]`` is empty — not just the generated keys. The
+    signed cookie survives (SECRET_KEY is stable per render.yaml), so the
+    project is still findable in Postgres by owner_sid, which is what the
+    project picker does via ``ensure_active_project``.
+
+    Hydration originally read ``session["project_id"]`` directly and so
+    bailed out in precisely this case: on prod the picker showed
+    "LLM-VERIFY 2026-07-30 (48 TC)" while the page rendered its empty
+    state. Reproduced 2026-07-30.
+
+    The project is created through the app here, not via _db directly, so
+    it carries whatever owner_sid the real request flow assigns — the
+    thing the recovery depends on.
+    """
+
+    @staticmethod
+    def _project_via_app(client) -> str:
+        """Create a project the way the picker does, return its id."""
+        resp = client.post("/projects/db/create",
+                           data={"project_name":
+                                 f"Wiped_{uuid.uuid4().hex[:8]}"},
+                           follow_redirects=True)
+        assert resp.status_code == 200, resp.status_code
+        with client.session_transaction() as sess:
+            pid = sess.get("project_id")
+        assert pid, "creating a project must set session['project_id']"
+        return pid
+
+    def test_pack_is_restored_with_no_project_id_in_session(self, client):
+        pid = self._project_via_app(client)
+        _db.save_test_cases(pid, TC_ROWS)
+
+        # Wipe the session the way a restart does — including project_id.
+        with client.session_transaction() as sess:
+            sess.pop("project_id", None)
+            for key in GENERATED_KEYS:
+                sess.pop(key, None)
+
+        body = client.get("/test-cases").get_data(as_text=True)
+        assert "Verify that User can open the Employee details page" in body, (
+            "hydration must resolve the project from Postgres by owner_sid, "
+            "not from session['project_id'] — that key is empty in exactly "
+            "the cold start this recovery exists for")
+
+    def test_pack_info_probe_also_resolves_the_project(self, client):
+        pid = self._project_via_app(client)
+        _db.save_test_cases(pid, TC_ROWS)
+        with client.session_transaction() as sess:
+            sess.pop("project_id", None)
+
+        body = client.get("/api/pack-info?kind=tc").get_json()
+        assert body["count"] == len(TC_ROWS)
+        assert body["project"] == pid
+
+    def test_resolver_does_not_create_a_project_on_a_read_path(self, client):
+        """ensure_active_project() auto-creates; the resolver must not."""
+        pid = self._project_via_app(client)
+        with client.session_transaction() as sess:
+            sess.pop("project_id", None)
+        # A GET that finds nothing must still not mint a project. Point the
+        # cookie at a session with no owned projects by using a fresh client.
+        fresh = client.application.test_client()
+        before = fresh.get("/test-cases").status_code
+        assert before == 200
+        with fresh.session_transaction() as sess:
+            assert not sess.get("project_id"), (
+                "a plain GET /test-cases created a project as a side "
+                "effect; hydration must use resolve_active_project()")
+
+
+class TestExplicitClearIsRespected:
+    """Recovery must not undo a deliberate "New session".
+
+    Caught by tests/test_functional.py::TestNewSession while building the
+    fix above: hydration restored the pack from Postgres on the very next
+    GET, so /new-session appeared to do nothing. Cold-start recovery and
+    an explicit clear look identical from the session's point of view —
+    both leave it without a pack — so /new-session stamps the clear with
+    the current boot to tell them apart.
+    """
+
+    def _seed(self, client) -> str:
+        resp = client.post("/projects/db/create",
+                           data={"project_name":
+                                 f"Cleared_{uuid.uuid4().hex[:8]}"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        with client.session_transaction() as sess:
+            pid = sess["project_id"]
+        _db.save_test_cases(pid, TC_ROWS)
+        return pid
+
+    def test_new_session_is_not_undone_by_hydration(self, client):
+        self._seed(client)
+        client.post("/new-session", follow_redirects=True)
+        body = client.get("/test-cases").get_data(as_text=True)
+        assert "Verify that User can open the Employee details page" \
+            not in body, ("hydration resurrected a pack the user "
+                          "explicitly cleared via /new-session")
+
+    def test_picking_a_project_again_re_enables_recovery(self, client):
+        pid = self._seed(client)
+        client.post("/new-session", follow_redirects=True)
+        # Choosing a project is a fresh intent — it supersedes the clear.
+        client.post(f"/projects/db/select/{pid}", follow_redirects=True)
+        body = client.get("/test-cases").get_data(as_text=True)
+        assert "Verify that User can open the Employee details page" in body
+
+    def test_a_restart_after_a_clear_re_enables_recovery(self, client):
+        """The marker is session state, so a restart drops it with the rest."""
+        self._seed(client)
+        client.post("/new-session", follow_redirects=True)
+        with client.session_transaction() as sess:
+            # Simulate the wipe: the marker goes too.
+            sess.pop("_pack_cleared_boot", None)
+            sess.pop("project_id", None)
+        body = client.get("/test-cases").get_data(as_text=True)
+        assert "Verify that User can open the Employee details page" in body

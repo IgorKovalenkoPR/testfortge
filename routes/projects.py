@@ -23,7 +23,8 @@ from engine import db as _db
 from engine.log import get_logger
 
 from ._shared import (
-    GENERATED_KEYS, cl_to_dict, get_session_id, tc_to_dict,
+    GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
+    tc_to_dict,
 )
 
 log = get_logger(__name__)
@@ -92,6 +93,10 @@ def _set_active_project(project_id: str, name: str,
         setup["base_url"] = base_url
     session["project_setup"] = setup
     session["project_id"] = project_id
+    # Picking, creating or loading a project supersedes an earlier
+    # "New session": drop the marker so /test-cases and /checklist are
+    # allowed to restore this project's saved pack again.
+    session.pop("_pack_cleared_boot", None)
 
 
 def _safe_next_target(default_endpoint: str = "index") -> str:
@@ -124,6 +129,17 @@ def register(app: Flask) -> None:
         for key in GENERATED_KEYS:
             session.pop(key, None)
         session.pop("project_id", None)
+        # Mark the clear as deliberate and stamp it with this boot.
+        #
+        # /test-cases and /checklist restore a saved pack from Postgres
+        # when the session has none, because a free-plan restart wipes the
+        # filesystem session store and the work would otherwise look lost.
+        # That recovery must not undo an explicit "New session" — without
+        # this marker the very next GET resurrected everything the user
+        # just asked to clear. The stamp is the discriminator: it lives in
+        # the session, so a genuine restart takes it with the rest and
+        # recovery resumes on the next boot.
+        session["_pack_cleared_boot"] = SERVER_START_TIME
         return redirect(url_for("index"))
 
     @app.route("/save-project", methods=["POST"])

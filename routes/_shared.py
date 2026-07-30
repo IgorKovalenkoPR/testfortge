@@ -376,6 +376,54 @@ def set_persistent_sid_cookie(response):
 
 # ── Active-project resolver (Phase 2) ────────────────────────────
 
+def resolve_active_project(session_obj=None) -> str:
+    """Active project id, or "" — never creating one as a side effect.
+
+    Same first two steps as :func:`ensure_active_project` (session pick,
+    then most-recent project owned by this session id in Postgres) but
+    without step 3's auto-create, so read-only paths can resolve the
+    project without writing to the DB.
+
+    Needed because the cold-start recovery in
+    ``routes/generation._hydrate_from_db`` originally read
+    ``session["project_id"]`` directly. On the free plan a restart wipes
+    the filesystem session store — the exact case hydration exists for —
+    so that key was empty, hydration bailed out, and /test-cases rendered
+    its empty state while the project picker (which goes through
+    ``ensure_active_project``) correctly showed the project and its pack
+    count. The work was in Postgres the whole time and still looked lost.
+    """
+    from engine import db as _db
+
+    sess = session_obj if session_obj is not None else session
+    pid = sess.get("project_id")
+    if pid:
+        return pid
+
+    sid = get_session_id(sess)
+    try:
+        if not hasattr(_db, "list_projects"):
+            return ""
+        existing = _db.list_projects(owner_sid=sid) or []
+        if not existing:
+            return ""
+        pick = existing[0]
+        pid = pick.get("id") if isinstance(pick, dict) else None
+        if not pid:
+            return ""
+        # Cache it so the rest of the request behaves as if the session
+        # had never been wiped.
+        sess["project_id"] = pid
+        if hasattr(sess, "modified"):
+            sess.modified = True
+        log.info("resolve_active_project: recovered project_id=%s from "
+                 "owner_sid=%s (session store was wiped)", pid, sid[:8])
+        return pid
+    except Exception as exc:
+        log.debug("resolve_active_project: owner_sid lookup failed: %s", exc)
+        return ""
+
+
 def ensure_active_project(session_obj=None) -> str:
     """Return the active project id, creating one if the user hasn't
     explicitly picked one yet.
@@ -529,6 +577,7 @@ def kpi_defect_density(metrics: dict | None) -> float:
 __all__ = [
     # constants
     "SAFE_FOLDER_RE", "SAFE_ASSET_RE", "URL_PATTERN", "GENERATED_KEYS",
+    "resolve_active_project",
     "SERVER_START_TIME",
     # dataclass <-> dict
     "reconstruct_stories", "reconstruct_test_cases", "reconstruct_checklist",
