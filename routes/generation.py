@@ -40,6 +40,7 @@ from ._shared import (
     reconstruct_stories, reconstruct_test_cases, reconstruct_checklist,
     tc_to_dict, cl_to_dict, story_to_dict, get_session_id,
     parse_page_input, extract_resource_urls, ensure_active_project,
+    resolve_active_project, SERVER_START_TIME,
 )
 
 # Hard cap on concurrent generation jobs per session — same threshold
@@ -551,7 +552,17 @@ def _hydrate_from_db(kind: str) -> list[dict]:
     ``kind`` is "tc" or "cl". Returns the rows loaded (empty on any
     failure — a DB hiccup must not break the page render).
     """
-    pid = session.get("project_id")
+    # An explicit "New session" must stay cleared. /new-session stamps
+    # the clear with the current boot; a restart takes that stamp with the
+    # rest of the session, so recovery resumes on the next boot but never
+    # undoes what the user just asked for.
+    if session.get("_pack_cleared_boot") == SERVER_START_TIME:
+        return []
+    # resolve_active_project(), not session["project_id"]: the cold start
+    # this function exists to survive is the same event that empties the
+    # session store, so reading the session directly made hydration miss
+    # every time it mattered.
+    pid = resolve_active_project()
     if not pid:
         return []
     loader_name = "load_test_cases" if kind == "tc" else "load_checklist"
@@ -1850,7 +1861,9 @@ def register(app: Flask) -> None:
         ``kind`` is "tc" (default) or "cl".
         """
         kind = (request.args.get("kind") or "tc").strip().lower()
-        pid = session.get("project_id")
+        # Same reason as _hydrate_from_db: a lost job is often reported
+        # right after the restart that wiped the session.
+        pid = resolve_active_project()
         if not pid:
             return jsonify({"count": 0, "project": None})
         loader = getattr(_db,
