@@ -491,7 +491,10 @@ pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consola
 }
 </style>
 
-<script>
+<script nonce="{{ csp_nonce }}">
+/* The nonce is required: script-src dropped 'unsafe-inline' in 466226e,
+   and without it CSP refused to execute this block — so the bulk-action
+   toolbar silently did nothing in production. */
 (function () {
     const form = document.getElementById('bug-bulk-form');
     if (!form) return;
