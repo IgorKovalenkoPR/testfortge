@@ -170,49 +170,149 @@ create_form:
       priority: Low
   per_control_type:
     text_input:
-      - {objective: 'Enter a valid value', category: Positive}
-      - {objective: 'Leave empty when required', category: Negative}
-      - {objective: 'Enter a value at the maximum allowed length', category: Positive}
-      - {objective: 'Enter a value one character over the maximum', category: Negative}
-      - {objective: 'Enter non-Latin characters (Cyrillic, CJK) and reopen the record', category: Positive}
-      - {objective: 'Enter leading and trailing whitespace only', category: Negative}
+      cases:
+        - objective: 'Enter a valid value'
+          category: Positive
+        - objective: 'Leave empty when required'
+          category: Negative
+          requires: required
+          title: 'Verify that User cannot submit the form without the "{label}" {noun} filled'
+          step: 'Leave the "{label}" {noun} empty'
+        - objective: 'Enter a value at the maximum allowed length'
+          category: Positive
+          requires: maxlength
+          title: 'Verify that the "{label}" {noun} accepts a value at the maximum allowed length'
+        - objective: 'Enter a value one character over the maximum'
+          category: Negative
+          requires: maxlength
+          title: 'Verify that the "{label}" {noun} rejects a value one character over the maximum'
+          step: 'Enter one character more than the maximum into the "{label}" {noun}'
+        - objective: 'Enter non-Latin characters and reopen the record'
+          category: Positive
+          title: 'Verify that the "{label}" {noun} accepts non-Latin characters and keeps them after a reload'
+        - objective: 'Enter a whitespace-only value'
+          category: Negative
+          requires: required
+          title: 'Verify that the "{label}" {noun} rejects a whitespace-only value'
+          step: 'Enter only spaces into the "{label}" {noun}'
     email_input:
-      - {objective: 'Enter a valid address', category: Positive}
-      - {objective: 'Enter an address with no @, no domain, or a trailing dot', category: Negative}
+      cases:
+        - objective: 'Enter a valid address'
+          category: Positive
+        - objective: 'Enter a malformed address'
+          category: Negative
+          title: 'Verify that the "{label}" {noun} rejects a malformed address'
+          step: 'Enter a malformed address into the "{label}" {noun}'
     numeric_input:
-      - {objective: 'Enter a value inside the allowed range', category: Positive}
-      - {objective: 'Enter the minimum and the maximum allowed values', category: Positive}
-      - {objective: 'Enter a negative value and a very large value', category: Negative}
-      - {objective: 'Enter letters into the numeric field', category: Negative}
-      - {objective: 'Enter a decimal where only integers are allowed', category: Negative}
+      cases:
+        - objective: 'Enter a value inside the allowed range'
+          category: Positive
+          requires: range
+        - objective: 'Enter the minimum allowed value'
+          category: Positive
+          requires: range
+          title: 'Verify that the "{label}" {noun} accepts the minimum allowed value'
+        - objective: 'Enter the maximum allowed value'
+          category: Positive
+          requires: range
+          title: 'Verify that the "{label}" {noun} accepts the maximum allowed value'
+        - objective: 'Enter a value below the minimum'
+          category: Negative
+          requires: range
+          title: 'Verify that the "{label}" {noun} rejects a value below the minimum'
+          step: 'Enter a value below the minimum into the "{label}" {noun}'
+        - objective: 'Enter a value above the maximum'
+          category: Negative
+          requires: range
+          title: 'Verify that the "{label}" {noun} rejects a value above the maximum'
+          step: 'Enter a value above the maximum into the "{label}" {noun}'
+        - objective: 'Enter letters into a numeric control'
+          category: Negative
+          title: 'Verify that the "{label}" {noun} rejects letters'
+          step: 'Enter letters into the "{label}" {noun}'
+        - objective: 'Enter a decimal where only integers are allowed'
+          category: Negative
+          requires: step
+          title: 'Verify that the "{label}" {noun} rejects a decimal value'
+          step: 'Enter a decimal value into the "{label}" {noun}'
     date_input:
-      - {objective: 'Pick a date via the date-picker', category: Positive}
-      - {objective: 'Type the date directly in the accepted format', category: Positive}
-      - {objective: 'Enter a date in the past where only future dates are legal', category: Negative}
-      - {objective: 'Enter a date in the future where only past dates are legal', category: Negative}
-      - {objective: 'Enter an end date earlier than the start date', category: Negative}
+      cases:
+        - objective: 'Pick a date via the date-picker'
+          category: Positive
+          title: 'Verify that User can pick a date in the "{label}" {noun} via the date-picker'
+        - objective: 'Type the date directly in the accepted format'
+          category: Positive
+          title: 'Verify that User can type a date directly into the "{label}" {noun} in the accepted format'
+        - objective: 'Enter a date outside the allowed range'
+          category: Negative
+          requires: range
+          title: 'Verify that the "{label}" {noun} rejects a date outside the allowed range'
+          step: 'Enter a date outside the allowed range into the "{label}" {noun}'
+        - objective: 'Enter an end date earlier than the start date'
+          category: Negative
+          requires: sibling_date
+          title: 'Verify that the form rejects an end date earlier than the start date'
     dropdown:
-      - {objective: 'Select an existing value from the drop-down', category: Positive}
-      - {objective: 'Filter the drop-down by typing a prefix', category: Positive}
-      - {objective: 'Open the full picker via "Search More" and select from it', category: Positive}
-      - {objective: 'Create a new related record via "Create and Edit"', category: Positive}
-      - {objective: 'Attempt "Create and Edit" without the required permission', category: Negative}
-      - {objective: 'Clear the selection', category: Positive}
       note: >-
-        This four-to-five case set per relational drop-down is the single
-        largest volume driver in the corpus. Apply it to every relational
-        field, not just the first one.
+        The select / type-ahead / clear set per relational control is the
+        largest volume driver in the corpus. The Odoo-specific pickers
+        below stay gated on evidence this inventory cannot supply, so they
+        never fire on a generic site.
+      cases:
+        - objective: 'Select an existing value'
+          category: Positive
+          requires: options
+          title: 'Verify that User can select an existing value from the "{label}" {noun}'
+        - objective: 'Filter by typing a prefix'
+          category: Positive
+          requires: options
+          title: 'Verify that User can filter the "{label}" {noun} by typing a prefix'
+        - objective: 'Clear the selection'
+          category: Positive
+          requires: not_required
+          title: 'Verify that User can clear the selection in the "{label}" {noun}'
+        - objective: 'Open the full picker via "Search More" and select from it'
+          category: Positive
+          requires: search_more_control
+        - objective: 'Create a related record via "Create and Edit"'
+          category: Positive
+          requires: inline_create_control
+        - objective: 'Attempt "Create and Edit" without the required permission'
+          category: Negative
+          requires: inline_create_control
     checkbox:
-      - {objective: 'Mark and unmark the checkbox', category: Positive}
-      - {objective: 'Confirm the dependent fields appear or hide with the checkbox state', category: Positive}
+      cases:
+        - objective: 'Mark and unmark the control'
+          category: Positive
+          title: 'Verify that User can mark and unmark the "{label}" {noun}'
+          step: 'Mark the "{label}" {noun}, then unmark it'
+        - objective: 'Confirm dependent controls follow the state'
+          category: Positive
+          requires: dependent_fields
     file_upload:
-      - {objective: 'Upload a file of an accepted type and size', category: Positive}
-      - {objective: 'Upload a file of a rejected type', category: Negative}
-      - {objective: 'Upload a file over the size limit', category: Negative}
-      - {objective: 'Remove an uploaded file and upload the same file again', category: Positive}
+      cases:
+        - objective: 'Upload a file of an accepted type and size'
+          category: Positive
+          title: 'Verify that User can upload an accepted file to the "{label}" {noun}'
+        - objective: 'Upload a file of a rejected type'
+          category: Negative
+          requires: accept
+          title: 'Verify that the "{label}" {noun} rejects a file of a disallowed type'
+        - objective: 'Upload a file over the size limit'
+          category: Negative
+          requires: max_size
+        - objective: 'Remove an uploaded file and upload it again'
+          category: Positive
+          title: 'Verify that User can remove a file from the "{label}" {noun} and upload the same file again'
     rich_text:
-      - {objective: 'Enter formatted text and confirm formatting survives a reload', category: Positive}
-      - {objective: 'Paste markup / script content and confirm it is rendered inert', category: Negative}
+      cases:
+        - objective: 'Enter formatted text and reload'
+          category: Positive
+          title: 'Verify that formatted text in the "{label}" {noun} survives a reload'
+        - objective: 'Paste markup or script content'
+          category: Negative
+          title: 'Verify that the "{label}" {noun} renders pasted markup inert'
+          step: 'Paste markup and script content into the "{label}" {noun}'
   must_pair:
     - when: A field is required
       derive: 'Negative — save is blocked, the field is highlighted, and the error message names that field.'

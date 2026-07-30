@@ -1075,31 +1075,31 @@ def author_test_cases(*, profile=None, strategy=None,
 
     if not _author_enabled():
         _logger.info("tc_author: disabled via TC_AUTHOR_ENABLED")
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     api_key_set = bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
     if not api_key_set and not force_llm:
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     grounding = _build_grounding(profile, arts)
     try:
         raw = _call_llm(profile, strategy, arts, grounding)
     except LLMUnavailable as exc:
         _logger.warning("tc_author: LLM unavailable, fallback: %s", exc)
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
     except Exception as exc:  # pragma: no cover — defensive
         _logger.warning("tc_author: LLM call failed: %s", exc)
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     parsed = _parse_llm_response(raw)
     if parsed is None:
         _logger.warning("tc_author: unparseable LLM response, fallback")
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     raw_cases = parsed.get("cases")
     if not isinstance(raw_cases, list) or not raw_cases:
         _logger.warning("tc_author: LLM returned no cases, fallback")
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     cases: list[AuthoredCase] = []
     findings: list[str] = []
@@ -1118,7 +1118,7 @@ def author_test_cases(*, profile=None, strategy=None,
 
     if not cases:
         _logger.warning("tc_author: every LLM case failed lint, fallback")
-        return _deterministic_result(profile, strategy)
+        return _deterministic_result(profile, strategy, arts)
 
     gaps = [str(g)[:300] for g in (parsed.get("gaps") or [])
             if isinstance(g, (str, int, float))]
@@ -1132,14 +1132,41 @@ def author_test_cases(*, profile=None, strategy=None,
     )
 
 
-def _deterministic_result(profile, strategy) -> AuthoringResult:
-    """1:1 expansion of the strategy matrix, no LLM involved.
+def _deterministic_result(profile, strategy,
+                         artifacts: "Artifacts | None" = None
+                         ) -> AuthoringResult:
+    """No-LLM path: rule engine first, 1:1 strategy expansion second.
 
-    Deliberately 1:1 — the fallback must not change the shape of the
-    pack, only the quality of each body, so a run without an API key
-    stays predictable and every ID stays stable across regenerates.
+    When the crawler captured a control inventory, :mod:`engine.tc_rules`
+    enumerates it against the coverage model and produces control-level
+    coverage — what the author agent is asked for, minus the judgement, at
+    zero cost. This is the primary path on the free plan, where a paid LLM
+    is not an option.
+
+    Falling back to the 1:1 strategy expansion keeps the older contract
+    for callers with no inventory to enumerate (prompt-only input, or a
+    site whose crawl failed): same pack shape, stable IDs, better bodies.
     """
     from engine.testcase_generator import _testing_type_label
+
+    if artifacts is not None and getattr(artifacts, "pages", None):
+        try:
+            from engine.tc_rules import enumerate_from_artifacts
+            rule_cases = enumerate_from_artifacts(artifacts)
+        except Exception as exc:  # pragma: no cover — defensive
+            _logger.warning("tc_author: rule engine failed: %s", exc)
+            rule_cases = []
+        if rule_cases:
+            _logger.info("tc_author: rule engine produced %d cases from the "
+                         "control inventory", len(rule_cases))
+            return AuthoringResult(
+                cases=rule_cases,
+                source="rules",
+                rationale=("Enumerated from the crawled control inventory "
+                           "against coverage_rules.yaml — no model "
+                           "involved, so every case is grounded in an "
+                           "attribute the page actually declares."),
+            )
 
     cases: list[AuthoredCase] = []
     if strategy is None or not getattr(strategy, "matrix", None):
@@ -1155,7 +1182,7 @@ def _deterministic_result(profile, strategy) -> AuthoringResult:
         cases=cases,
         source="deterministic",
         rationale=("Deterministic expansion — one case per strategy check. "
-                   "Set ANTHROPIC_API_KEY to author control-level coverage."),
+                   "No control inventory was available to enumerate."),
     )
 
 

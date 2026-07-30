@@ -1304,7 +1304,7 @@ def generate_from_artifacts(artifacts, *, profile=None,
         get_logger(__name__).warning(
             "generate_from_artifacts: authoring failed: %s", exc)
         return []
-    if result.source != "llm" or not result.cases:
+    if result.source not in ("llm", "rules") or not result.cases:
         return []
 
     test_cases = _authored_pack(result.cases)
@@ -1373,7 +1373,10 @@ def generate_from_strategy(profile, strategy, *, artifacts=None
             from .tc_author import author_test_cases
             result = author_test_cases(profile=profile, strategy=strategy,
                                        artifacts=artifacts)
-            if result.source == "llm" and result.cases:
+            # "rules" is the deterministic control-enumeration path — it
+            # produces the same section-per-surface shape as the LLM, so
+            # it replaces the TC stream the same way.
+            if result.source in ("llm", "rules") and result.cases:
                 authored = result
         except Exception as exc:  # pragma: no cover — defensive
             from .log import get_logger
