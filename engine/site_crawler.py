@@ -158,6 +158,17 @@ class _PageParser(HTMLParser):
         self._current_form: dict | None = None
         self._current_text = ""
         self._heading_text = ""
+        # Constraint + labelling capture (see _field docstring).
+        self._current_select: dict | None = None
+        self._pending_option: str | None = None
+        self._option_text = ""
+        self._label_for: str | None = None
+        self._label_text: str | None = None
+        # A <label> that wraps its control ("<label>Size <select>…") must
+        # stop collecting text once the control opens, or the option
+        # labels end up glued onto the field name.
+        self._label_closed = False
+        self._labels_by_for: dict[str, str] = {}
 
     def handle_starttag(self, tag: str, attrs: list[tuple]):
         attr_dict = dict(attrs)
@@ -192,25 +203,35 @@ class _PageParser(HTMLParser):
                     if self._current_form is not None and not self._current_form.get("submit_text"):
                         self._current_form["submit_text"] = val
             if self._current_form is not None:
-                self._current_form["fields"].append({
-                    "name": attr_dict.get("name", ""),
-                    "type": attr_dict.get("type", "text"),
-                    "placeholder": attr_dict.get("placeholder", ""),
-                })
+                self._current_form["fields"].append(
+                    self._field(attr_dict, attr_dict.get("type", "text")))
+                self._close_label_text()
         elif tag_lower == "textarea":
             if self._current_form is not None:
-                self._current_form["fields"].append({
-                    "name": attr_dict.get("name", ""),
-                    "type": "textarea",
-                    "placeholder": attr_dict.get("placeholder", ""),
-                })
+                self._current_form["fields"].append(
+                    self._field(attr_dict, "textarea"))
+                self._close_label_text()
         elif tag_lower == "select":
             if self._current_form is not None:
-                self._current_form["fields"].append({
-                    "name": attr_dict.get("name", ""),
-                    "type": "select",
-                    "placeholder": "",
-                })
+                self._close_label_text()
+                fld = self._field(attr_dict, "select")
+                fld["options"] = []
+                self._current_form["fields"].append(fld)
+                self._current_select = fld
+        elif tag_lower == "option":
+            # Real option values let a generated step name the choice
+            # instead of saying "select a value" — the difference between
+            # a runnable case and a placeholder.
+            if self._current_select is not None:
+                self._pending_option = attr_dict.get("value", "")
+                self._option_text = ""
+        elif tag_lower == "label":
+            # <label for="x"> is how a human names the control, so steps
+            # can quote the visible label instead of the machine-readable
+            # ``name`` attribute.
+            self._label_for = attr_dict.get("for", "")
+            self._label_text = ""
+            self._label_closed = False
         elif tag_lower == "form":
             # Capture human context the form sits inside so qa_persona
             # can build readable TC names instead of falling back to
@@ -231,6 +252,37 @@ class _PageParser(HTMLParser):
             name = attr_dict.get("name", "").lower()
             if name == "description":
                 self.meta_description = attr_dict.get("content", "")
+
+    def _close_label_text(self) -> None:
+        """Stop accumulating label text (a nested control just opened)."""
+        if self._label_text is not None:
+            self._label_closed = True
+
+    @staticmethod
+    def _field(attr_dict: dict, ftype: str) -> dict:
+        """Normalise one form control, keeping its constraints intact.
+
+        ``required`` / ``maxlength`` / ``min`` / ``max`` / ``pattern`` are
+        what let a deterministic generator decide which cases are
+        *justified*: a required-field negative is only honest when the
+        markup actually says required, and a boundary case needs a real
+        limit to sit on. This parser used to drop all of them, which left
+        every consumer guessing — and guessing is how a suite fills up
+        with cases that fail for the wrong reason.
+        """
+        out = {
+            "name": attr_dict.get("name", ""),
+            "type": (ftype or "text").lower(),
+            "placeholder": attr_dict.get("placeholder", ""),
+            "id": attr_dict.get("id", ""),
+            "required": ("required" in attr_dict
+                         or attr_dict.get("aria-required") == "true"),
+        }
+        for attr in ("maxlength", "minlength", "min", "max", "pattern", "step"):
+            val = attr_dict.get(attr)
+            if val not in (None, ""):
+                out[attr] = val
+        return out
 
     def handle_endtag(self, tag: str):
         tag_lower = tag.lower()
@@ -261,16 +313,53 @@ class _PageParser(HTMLParser):
                 if self._current_form is not None and not self._current_form.get("submit_text"):
                     self._current_form["submit_text"] = txt
             self._in_button = False
+        elif tag_lower == "option":
+            if self._current_select is not None:
+                shown = (self._option_text or "").strip() \
+                    or (self._pending_option or "").strip()
+                if shown and len(self._current_select["options"]) < 12:
+                    self._current_select["options"].append(shown)
+            self._pending_option = None
+            self._option_text = ""
+        elif tag_lower == "select":
+            self._current_select = None
+        elif tag_lower == "label":
+            text = " ".join((self._label_text or "").split())
+            if text:
+                if self._label_for:
+                    self._labels_by_for[self._label_for] = text[:80]
+                elif (self._current_form is not None
+                        and self._current_form["fields"]):
+                    # <label>Name <input></label> nesting: attribute it to
+                    # the control it wraps.
+                    last = self._current_form["fields"][-1]
+                    last.setdefault("label", text[:80])
+            self._label_for = None
+            self._label_text = None
+            self._label_closed = False
         elif tag_lower == "form":
             if self._current_form is not None:
+                # A <label for=...> may appear before its control, so run
+                # the for -> id match once the whole form has been seen.
+                for fld in self._current_form["fields"]:
+                    if fld.get("label"):
+                        continue
+                    fid = fld.get("id")
+                    if fid and fid in self._labels_by_for:
+                        fld["label"] = self._labels_by_for[fid]
                 self.forms.append(self._current_form)
                 self._current_form = None
+                self._current_select = None
 
     def handle_data(self, data: str):
         if self._in_title or self._in_h1 or self._in_a or self._in_button:
             self._current_text += data
         if self._in_heading:
             self._heading_text += data
+        if self._pending_option is not None:
+            self._option_text += data
+        if self._label_text is not None and not self._label_closed:
+            self._label_text += data
 
 
 # ── Fetcher ──────────────────────────────────────────────────────
