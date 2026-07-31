@@ -57,7 +57,18 @@ MAX_FORMS = int(os.environ.get("TC_RULES_MAX_FORMS", "8"))
 #: 60 sort cases alone, and a report that silently kept the first 40
 #: reads as "everything is covered" — so every cap logs when it bites.
 MAX_CASES_PER_GRID = int(os.environ.get("TC_RULES_MAX_PER_GRID", "40"))
-MAX_GRIDS = int(os.environ.get("TC_RULES_MAX_GRIDS", "6"))
+
+#: Whole-crawl grid budget. Was 6, which truncated any real admin app —
+#: and because the estimator priced every page's grids, the quote and the
+#: pack disagreed on any site with more than six. 24 puts the grid side
+#: at parity with the form side (24 x 40 = 960 = MAX_FORMS x
+#: MAX_CASES_PER_FORM), so truncation is now the exception it should be.
+MAX_GRIDS = int(os.environ.get("TC_RULES_MAX_GRIDS", "24"))
+
+#: Per-page grid budget. A page rendering eight tables is a report, not
+#: eight list surfaces. This used to live in the estimator alone, which
+#: meant the generator walked grids the estimate never charged for.
+MAX_GRIDS_PER_PAGE = int(os.environ.get("TC_RULES_MAX_GRIDS_PER_PAGE", "3"))
 #: Per-check fan-out (one case per sortable column, per filter, …).
 MAX_FAN_OUT = int(os.environ.get("TC_RULES_MAX_FAN_OUT", "6"))
 
@@ -80,6 +91,37 @@ def grid_checks() -> list[dict]:
     """The ``list_surface`` checks, or [] if the asset is unusable."""
     surface = load_rules().get("list_surface") or {}
     return [c for c in (surface.get("checks") or []) if isinstance(c, dict)]
+
+
+def plan_grid_coverage(grid_counts: list[int]) -> tuple[list[int], int]:
+    """How many grids per page get covered, and how many are left out.
+
+    The single statement of grid-coverage policy. Both consumers read it:
+    :func:`enumerate_from_pages`, which writes the cases, and
+    :mod:`engine.qa_estimator`, which prices them. They previously
+    carried a cap each — a whole-crawl one here and a per-page one there
+    — so on a grid-heavy site the estimate and the pack disagreed in
+    *both* directions at once: the quote covered pages the generator had
+    already stopped at, and the generator walked grids on a page the
+    quote had capped.
+
+    Returns ``(covered_per_page, skipped)``. A non-zero ``skipped`` is
+    real lost coverage and every caller is expected to surface it — the
+    estimator turns it into a row a human has to read.
+    """
+    covered: list[int] = []
+    budget = max(MAX_GRIDS, 0)
+    for count in grid_counts or []:
+        try:
+            available = max(int(count), 0)
+        except (TypeError, ValueError):
+            available = 0
+        take = min(available, MAX_GRIDS_PER_PAGE, budget)
+        covered.append(take)
+        budget -= take
+    total = sum(max(int(c or 0), 0) for c in (grid_counts or [])
+                if isinstance(c, (int, float)))
+    return covered, max(total - sum(covered), 0)
 
 
 # ── Crawler type → coverage-model control type ───────────────────────
@@ -779,23 +821,24 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
 
     out: list[AuthoredCase] = []
     forms_seen = 0
-    grids_seen = 0
-    capped_forms = capped_grids = False
+    capped_forms = False
 
-    for page in pages or []:
+    pages = list(pages or [])
+    # Decided once, up front, from the same policy the estimator prices
+    # with — never from a running counter that only this loop can see.
+    allowances, skipped_grids = plan_grid_coverage(
+        [len([t for t in (p.get("tables") or []) if isinstance(t, dict)])
+         for p in pages])
+    if skipped_grids:
+        _logger.info("tc_rules: %d grid(s) beyond the coverage budget "
+                     "(%d total / %d per page) — not enumerated",
+                     skipped_grids, MAX_GRIDS, MAX_GRIDS_PER_PAGE)
+
+    for page, allowance in zip(pages, allowances):
         controls = page.get("grid_controls") or {}
-        tables = page.get("tables") or []
+        tables = [t for t in (page.get("tables") or []) if isinstance(t, dict)]
         sections = grid_section_names(page, tables)
-        for table, section in zip(tables, sections):
-            if not isinstance(table, dict):
-                continue
-            if grids_seen >= MAX_GRIDS:
-                if not capped_grids:
-                    _logger.info("tc_rules: stopped after %d grids (cap)",
-                                 MAX_GRIDS)
-                    capped_grids = True
-                break
-            grids_seen += 1
+        for table, section in zip(tables[:allowance], sections):
             grid_cases = enumerate_grid(page, table, controls, section,
                                         checks)
             if len(grid_cases) > MAX_CASES_PER_GRID:
@@ -855,9 +898,9 @@ def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
 
 __all__ = [
     "enumerate_from_artifacts", "enumerate_from_pages", "enumerate_grid",
-    "count_grid_cases", "grid_checks",
+    "count_grid_cases", "grid_checks", "plan_grid_coverage",
     "control_type", "control_types", "field_label", "group_radios",
     "surface_name", "grid_section_name", "grid_section_names", "load_rules",
     "MAX_CASES_PER_FORM", "MAX_FORMS",
-    "MAX_CASES_PER_GRID", "MAX_GRIDS", "MAX_FAN_OUT",
+    "MAX_CASES_PER_GRID", "MAX_GRIDS", "MAX_GRIDS_PER_PAGE", "MAX_FAN_OUT",
 ]

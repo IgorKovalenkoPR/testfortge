@@ -364,7 +364,22 @@ class TestCapsAreLoudNotSilent:
             cases = tc_rules.enumerate_from_pages(_pages(html))
         # Two grids × the two checks a bare grid justifies.
         assert len(cases) == 4
-        assert "stopped after 2 grids" in caplog.text
+        # The count of what was dropped, not just that something was —
+        # the estimator prints the same number to the operator.
+        assert "3 grid(s) beyond the coverage budget" in caplog.text
+
+    def test_per_page_grid_cap_is_enforced(self, monkeypatch):
+        """The generator honours the per-page cap the estimator prices by.
+
+        It used to have no per-page limit at all, so a page with more
+        grids than the estimator charged for still had every one of them
+        enumerated — the pack shipped cases nobody had quoted.
+        """
+        monkeypatch.setattr(tc_rules, "MAX_GRIDS_PER_PAGE", 2)
+        one = ("<table><caption>C</caption><tr><th>A</th><th>B</th></tr>"
+               "<tr><td>1</td><td>2</td></tr></table>")
+        html = f"<html><body><h1>Many</h1>{one * 6}</body></html>"
+        assert len(tc_rules.enumerate_from_pages(_pages(html))) == 4
 
     def test_a_check_with_evidence_but_no_phrasing_warns(self, caplog):
         rule = {"id": "half_written", "category": "Positive",
