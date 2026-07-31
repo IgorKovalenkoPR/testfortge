@@ -91,6 +91,12 @@ def tc_to_dict(tc: TestCase) -> dict:
         # trip cleanly).
         "url_pattern":  getattr(tc, "url_pattern", "") or "",
         "trigger":      getattr(tc, "trigger", "manual") or "manual",
+        # PR-B / PR-D / PR-3 — carried so a generation round-trip through
+        # the session blob does not drop them on the way to save_test_cases.
+        "automation_steps_json": getattr(tc, "automation_steps_json", "") or "",
+        "suite":        getattr(tc, "suite", "") or "",
+        "tc_format":    getattr(tc, "tc_format", "manual") or "manual",
+        "gherkin":      getattr(tc, "gherkin", "") or "",
     }
 
 

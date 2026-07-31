@@ -2085,3 +2085,47 @@ input[type="text"]:focus, textarea:focus, select:focus {
 @media print {
     .qa-chat-toggle, .qa-chat-panel, .back-to-top { display: none !important; }
 }
+
+/* Inline radio row (test-case format knob). Wraps on narrow viewports
+   rather than overflowing — the two labels are long by design, because a
+   one-word label here ("BDD") does not tell the operator that the manual
+   columns are still written. */
+.radio-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.5rem;
+    margin: .25rem 0 .35rem;
+}
+.radio-inline {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: .4rem;
+    font-weight: 400;
+    font-size: .88rem;
+    cursor: pointer;
+    max-width: 34rem;
+}
+.radio-inline input[type="radio"] { margin-top: .2rem; flex: none; }
+
+/* BDD view on a test-case card. Monospace and scrollable: a Gherkin block
+   is whitespace-significant, and a long step must not stretch the card. */
+.tc-gherkin {
+    margin-top: 10px;
+    border: 1px dashed var(--border, #cbd5e1);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: #fafbfc;
+}
+.tc-gherkin summary { cursor: pointer; font-size: .88rem; font-weight: 600; }
+.gherkin-block {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .8rem;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+    margin: .4rem 0 0;
+    padding: .6rem .7rem;
+    background: #fff;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 4px;
+}

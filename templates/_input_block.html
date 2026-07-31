@@ -34,6 +34,30 @@
         <textarea name="custom_prompt" rows="3"
                   placeholder="{{ t.custom_prompt_hint }}">{{ request.form.get('custom_prompt', '') }}</textarea>
     </div>
+
+    {# Format knob — Test Cases only. A checklist row is one observation
+       with no steps to bind, so there is nothing for a runner to execute
+       and the module is manual-only by design. #}
+    {% if show_tc_format|default(false) %}
+    {% set current_format = request.form.get('tc_format', 'manual') %}
+    <div class="form-group">
+        <label>{{ t.get('tc_format_label', 'Test case format') }}</label>
+        <div class="radio-row">
+            <label class="radio-inline">
+                <input type="radio" name="tc_format" value="manual"
+                       {% if current_format != 'gherkin' %}checked{% endif %}>
+                {{ t.get('tc_format_manual', 'Manual — TestFort columns for a tester to walk') }}
+            </label>
+            <label class="radio-inline">
+                <input type="radio" name="tc_format" value="gherkin"
+                       {% if current_format == 'gherkin' %}checked{% endif %}>
+                {{ t.get('tc_format_gherkin', 'Manual + BDD — also carries Given/When/Then for the automation module') }}
+            </label>
+        </div>
+        <p class="hint">{{ t.get('tc_format_hint',
+            'The TestFort columns are written either way — BDD adds a Given/When/Then view derived from them, and marks the cases for the Automation module to pick up. Export the .feature files from the Export menu.') }}</p>
+    </div>
+    {% endif %}
 </div>
 
 <script nonce="{{ csp_nonce }}">
