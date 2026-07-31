@@ -374,6 +374,11 @@ def _build_artifacts(url: str, custom_prompt: str,
             "nav_links": [n[:70] for n in (p.nav_links or [])[:14]],
             "buttons": [b[:70] for b in (p.buttons or [])[:18]],
             "forms": p.forms or [],
+            # Grid inventory — drives the list_surface half of the
+            # deterministic coverage model (sorting, paging, filters,
+            # bulk actions). Without it those cases cannot be justified.
+            "tables": getattr(p, "tables", None) or [],
+            "grid_controls": getattr(p, "grid_controls", None) or {},
         })
 
     requirements = [ln.strip() for ln in (raw_lines or []) if (ln or "").strip()]

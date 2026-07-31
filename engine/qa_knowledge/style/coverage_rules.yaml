@@ -38,76 +38,216 @@ enumeration_order:
 # ─────────────────────────────────────────────────────────────────────
 list_surface:
   applies_when: The artifacts evidence a table, grid, list or index of records.
+
+  # Evidence tokens, resolved by engine/tc_rules._has_grid_evidence
+  # against what engine/site_crawler actually parsed out of the page. A
+  # check whose token the markup cannot satisfy is SKIPPED, never
+  # guessed — the same discipline create_form.per_control_type runs on.
+  # The five tokens at the bottom have no HTML signature at all, so on a
+  # crawled site they never fire; they stay here as the coverage model
+  # the LLM path reads, and as the record of what a richer artifact
+  # (a spec, a recorded session) would unlock.
+  evidence:
+    columns: The table declares two or more <th> column headers.
+    rows: The table body holds at least one data row.
+    row_links: A data cell holds a link out of the row.
+    checkboxes: Data rows carry a selection checkbox.
+    select_all: The header row carries a select-all checkbox.
+    sortable: A column header carries aria-sort, a sort class, or a header link.
+    pagination: A pager is rendered — rel=next/prev, a container the markup names a pager, or an aria-labelled page control.
+    search: A search input or a role="search" form is rendered.
+    filters: A control the markup itself names a filter is rendered.
+    bulk_actions: A picker the markup itself names a bulk / mass action is rendered.
+    create_control: A control labelled Create / New / Add is rendered.
+    group_by_control: No HTML signature — never fires on a crawled page.
+    advanced_search_control: No HTML signature — never fires on a crawled page.
+    save_filter_control: No HTML signature — never fires on a crawled page.
+    column_picker_control: No HTML signature — never fires on a crawled page.
+    record_counter: No HTML signature — never fires on a crawled page.
+
+  # `fan_out` names the inventory list to iterate: one case per sortable
+  # column, per filter, per bulk action, per create control. The
+  # placeholder it fills is fixed per list ({column}, {filter},
+  # {action}, {control}).
   checks:
     - id: reach
-      objective: Navigate to the grid from the primary menu
+      objective: Confirm the grid renders every column header it declares
       category: Positive
       priority: High
+      requires: columns
+      title: 'Verify that the "{grid}" grid is displayed with every column header it declares'
+      step: 'Pay attention to the header row of the "{grid}" grid'
+      expected: 'The "{grid}" grid is displayed, and the header row carries every declared column: {columns}.'
+    - id: row_rendering
+      objective: Confirm a data row is populated in every column
+      category: Positive
+      priority: Medium
+      requires: rows
+      title: 'Verify that a data row of the "{grid}" grid is populated in every column'
+      step: 'Pay attention to the first data row of the "{grid}" grid'
+      expected: 'The first data row renders a value in every column the grid declares, and no cell is left holding a raw placeholder such as "null" or "undefined".'
     - id: open_record
-      objective: Open a record's detail page by clicking the row / card
+      objective: Open a record from its row link
       category: Positive
       priority: High
+      requires: row_links
+      title: 'Verify that User can open a record from the "{grid}" grid by clicking its row link'
+      step: 'Click on the link in the first data row of the "{grid}" grid'
+      expected: 'The detail surface of the clicked row is opened, and the record it renders is the one that row named.'
+    - id: open_new_tab
+      objective: Open a row link in a new browser tab
+      category: Positive
+      priority: Low
+      requires: row_links
+      title: 'Verify that User can open a row of the "{grid}" grid in a new browser tab'
+      step: 'Middle-click the link in the first data row of the "{grid}" grid'
+      expected: 'The record is opened in a new browser tab, and the "{grid}" grid is left as it was in the original tab.'
     - id: start_create
       objective: Start creation via the "Create" / "New" / "Add" control
       category: Positive
       priority: High
-    - id: filters
-      objective: Apply each predefined filter and confirm the row set narrows
-      category: Positive
-      priority: Medium
-      note: Name the actual filter labels found in the artifacts, e.g. 'e.g. "Internal", "External"'.
-    - id: group_by
-      objective: Apply each Group By option and confirm records group
-      category: Positive
-      priority: Medium
+      requires: create_control
+      fan_out: create_controls
+      title: 'Verify that User can start record creation from the "{grid}" grid via the "{control}" control'
+      step: 'Click on the "{control}" control'
+      expected: 'The creation surface is opened with its inputs empty, and the "{grid}" grid is left unchanged behind it.'
     - id: search_simple
       objective: Search by the primary text column
       category: Positive
       priority: High
-    - id: search_advanced
-      objective: Search via Advanced Search with parameter drop-downs
+      requires: search
+      title: 'Verify that User can find a row of the "{grid}" grid by searching a value from its first column'
+      step: 'Enter a value taken from the first column of an existing row into the "{search}" control'
+      expected: 'The "{grid}" grid renders the matching row, and the rows that do not match it are no longer rendered.'
+    - id: empty_state
+      objective: Search for a value no record carries
+      category: Negative
+      priority: Medium
+      requires: search
+      title: 'Verify that the "{grid}" grid renders its empty state when the search matches no rows'
+      step: 'Enter a value no record carries into the "{search}" control'
+      expected: 'No data row is rendered. An explicit empty-state message replaces the rows of the "{grid}" grid, and the browser console raises no error.'
+    - id: filters
+      objective: Apply each predefined filter and confirm the row set narrows
       category: Positive
       priority: Medium
-    - id: save_filter
-      objective: Save the current filter set as a favourite
-      category: Positive
-      priority: Low
-    - id: sort
-      objective: Sort by each sortable column, ascending and descending
-      category: Positive
-      priority: Medium
-    - id: pagination
-      objective: Switch to the next and previous page via the pager
+      requires: filters
+      fan_out: filters
+      title: 'Verify that the "{filter}" filter narrows the "{grid}" grid to the matching rows'
+      step: 'Apply the "{filter}" filter'
+      expected: 'Only the rows matching the "{filter}" selection are rendered in the "{grid}" grid, and the applied filter is marked as active.'
+    - id: filters_cleared
+      objective: Clear an applied filter and confirm the full row set returns
       category: Positive
       priority: Medium
-    - id: column_picker
-      objective: Add and remove columns via the field selector
+      requires: filters
+      fan_out: filters
+      title: 'Verify that clearing the "{filter}" filter restores the full row set of the "{grid}" grid'
+      step: 'Apply the "{filter}" filter, then clear it'
+      expected: 'The "{grid}" grid renders the same rows it held before the filter was applied, and no filter is marked as active.'
+    - id: sort_ascending
+      objective: Sort by a sortable column, ascending
       category: Positive
-      priority: Low
+      priority: Medium
+      requires: sortable
+      fan_out: sortable_columns
+      title: 'Verify that User can sort the "{grid}" grid by the "{column}" column in ascending order'
+      step: 'Click on the "{column}" column header once'
+      expected: 'The rows are reordered by "{column}" from the lowest value to the highest, and the header marks the ascending direction.'
+    - id: sort_descending
+      objective: Sort by a sortable column, descending
+      category: Positive
+      priority: Medium
+      requires: sortable
+      fan_out: sortable_columns
+      title: 'Verify that User can sort the "{grid}" grid by the "{column}" column in descending order'
+      step: 'Click on the "{column}" column header twice'
+      expected: 'The rows are reordered by "{column}" from the highest value to the lowest, and the header marks the descending direction.'
+    - id: pagination_next
+      objective: Move to the next page via the pager
+      category: Positive
+      priority: Medium
+      requires: pagination
+      title: 'Verify that User can move to the next page of the "{grid}" grid via the pager'
+      step: 'Click on the next-page control of the pager'
+      expected: 'The next page of records is rendered in the "{grid}" grid, and the pager marks the new page as the current one.'
+    - id: pagination_previous
+      objective: Move back to the previous page via the pager
+      category: Positive
+      priority: Medium
+      requires: pagination
+      title: 'Verify that User can return to the previous page of the "{grid}" grid via the pager'
+      step: 'Move to the second page, then click on the previous-page control of the pager'
+      expected: 'The first page of records is rendered again in the "{grid}" grid, and the pager marks it as the current page.'
     - id: multi_select
       objective: Mark and unmark records via the row checkboxes
       category: Positive
       priority: Medium
+      requires: checkboxes
+      title: 'Verify that User can mark and unmark rows of the "{grid}" grid via the row checkboxes'
+      step: 'Mark the checkboxes of two rows, then unmark one of them'
+      expected: 'Both rows are marked after the first two clicks, and after the third only the row that stayed marked is selected.'
+    - id: select_all
+      objective: Select every row on the page via the header checkbox
+      category: Positive
+      priority: Medium
+      requires: select_all
+      title: 'Verify that the header checkbox of the "{grid}" grid marks every row on the current page'
+      step: 'Mark the checkbox in the header row of the "{grid}" grid'
+      expected: 'Every row rendered on the current page of the "{grid}" grid is marked, and the header checkbox is shown in its selected state.'
     - id: bulk_actions
       objective: Run each bulk action on a multi-row selection
       category: Positive
       priority: Medium
-      note: One case per action in the "More" / bulk menu — delete, mass edit, export, related-task creation.
-    - id: open_new_tab
-      objective: Open selected records in new browser tabs
-      category: Positive
-      priority: Low
-    - id: empty_state
-      objective: Load the grid with zero matching records
+      requires: bulk_actions
+      fan_out: bulk_actions
+      note: One case per action the bulk control offers — delete, mass edit, export, related-task creation.
+      title: 'Verify that User can run the "{action}" bulk action on a multi-row selection in the "{grid}" grid'
+      step: 'Mark two rows, then choose "{action}" from the bulk-action control'
+      expected: 'The "{action}" action is applied to both marked rows and to no other row, and the outcome that action defines is rendered.'
+    - id: bulk_actions_no_selection
+      objective: Trigger a bulk action with no row marked
       category: Negative
       priority: Medium
+      requires: bulk_actions
+      title: 'Verify that the "{grid}" grid refuses a bulk action while no row is marked'
+      step: 'Leave every row checkbox unmarked, then trigger the bulk-action control'
+      expected: 'No record is changed. The bulk-action control is disabled, or a message states that no row is selected.'
+    - id: group_by
+      objective: Apply each Group By option and confirm records group
+      category: Positive
+      priority: Medium
+      requires: group_by_control
+      title: 'Verify that User can group the "{grid}" grid by each Group By option'
+    - id: search_advanced
+      objective: Search via Advanced Search with parameter drop-downs
+      category: Positive
+      priority: Medium
+      requires: advanced_search_control
+      title: 'Verify that User can narrow the "{grid}" grid via Advanced Search'
+    - id: save_filter
+      objective: Save the current filter set as a favourite
+      category: Positive
+      priority: Low
+      requires: save_filter_control
+      title: 'Verify that User can save the current filter set of the "{grid}" grid as a favourite'
+    - id: column_picker
+      objective: Add and remove columns via the field selector
+      category: Positive
+      priority: Low
+      requires: column_picker_control
+      title: 'Verify that User can add and remove columns of the "{grid}" grid via the field selector'
     - id: counter
       objective: Confirm the record counter matches the visible row count
       category: Positive
       priority: Low
+      requires: record_counter
+      title: 'Verify that the record counter of the "{grid}" grid matches the visible row count'
   must_pair:
     - when: A filter or search returns no rows
       derive: 'Negative — no rows are rendered, an explicit empty-state message replaces the table, no console error.'
+    - when: A bulk action operates on the current selection
+      derive: 'Negative — the same action triggered with nothing selected is refused, and the control is disabled or the refusal is named.'
 
 # ─────────────────────────────────────────────────────────────────────
 # 2. View variants

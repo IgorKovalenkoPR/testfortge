@@ -53,6 +53,14 @@ _RULES_PATH = os.path.join(os.path.dirname(__file__), "qa_knowledge",
 MAX_CASES_PER_FORM = int(os.environ.get("TC_RULES_MAX_PER_FORM", "120"))
 MAX_FORMS = int(os.environ.get("TC_RULES_MAX_FORMS", "8"))
 
+#: Same guard on the grid side. A 30-column sortable grid would produce
+#: 60 sort cases alone, and a report that silently kept the first 40
+#: reads as "everything is covered" — so every cap logs when it bites.
+MAX_CASES_PER_GRID = int(os.environ.get("TC_RULES_MAX_PER_GRID", "40"))
+MAX_GRIDS = int(os.environ.get("TC_RULES_MAX_GRIDS", "6"))
+#: Per-check fan-out (one case per sortable column, per filter, …).
+MAX_FAN_OUT = int(os.environ.get("TC_RULES_MAX_FAN_OUT", "6"))
+
 
 # ── Rules asset ──────────────────────────────────────────────────────
 
@@ -184,6 +192,48 @@ def _has_evidence(token: str | None, field: dict, form: dict) -> bool:
     return False
 
 
+def _has_grid_evidence(token: str | None, table: dict,
+                       controls: dict) -> bool:
+    """Whether the parsed grid justifies a ``list_surface`` check.
+
+    Split from :func:`_has_evidence` because the two draw on different
+    inventories: a field case asks a control about itself, a grid case
+    asks the table *and* the controls the page renders around it.
+
+    Unknown tokens return False, so the checks the coverage model carries
+    for surfaces HTML cannot express — Group By, Advanced Search,
+    favourite filters, the column picker, the record counter — stay out
+    of a crawled site's pack instead of being invented.
+    """
+    if not token:
+        return True
+    table = table or {}
+    controls = controls or {}
+    if token == "columns":
+        return len(table.get("columns") or []) >= 2
+    if token == "rows":
+        return int(table.get("row_count") or 0) > 0
+    if token == "row_links":
+        return bool(table.get("row_links"))
+    if token == "checkboxes":
+        return bool(table.get("has_checkboxes"))
+    if token == "select_all":
+        return bool(table.get("select_all"))
+    if token == "sortable":
+        return bool(table.get("sortable_columns"))
+    if token == "pagination":
+        return bool(controls.get("pagination"))
+    if token == "search":
+        return bool(controls.get("search"))
+    if token == "filters":
+        return bool(controls.get("filters"))
+    if token == "bulk_actions":
+        return bool(controls.get("bulk_actions"))
+    if token == "create_control":
+        return bool(controls.get("create_controls"))
+    return False
+
+
 # ── Naming ───────────────────────────────────────────────────────────
 
 #: Trailing decoration real markup puts on labels: "Customer name:",
@@ -227,18 +277,88 @@ def surface_name(page: dict, form: dict, index: int) -> str:
     # Nothing on the page names itself — httpbin's form page has no <h1>
     # and no <title>, and "Form #1" tells a reader nothing. The URL path
     # is the last honest signal before falling back to an ordinal.
+    titled = _url_label(page)
+    if titled:
+        # "forms/post" already says form; "Forms post form" does not.
+        if "form" in titled.lower():
+            return titled
+        return titled + " form"
+    return f"Form #{index}"
+
+
+def _url_label(page: dict) -> str:
+    """The URL path, humanised — "/checkout/step-2" -> "Checkout step 2"."""
     path = re.sub(r"^https?://[^/]+", "",
                   str(page.get("url") or "")).strip("/")
-    if path:
-        words = [w for w in re.split(r"[/\-_.]+", path) if w]
-        if words:
-            label = " ".join(words).strip()
-            titled = (label[:1].upper() + label[1:])[:80]
-            # "forms/post" already says form; "Forms post form" does not.
-            if "form" in label.lower():
-                return titled
-            return titled + " form"
-    return f"Form #{index}"
+    if not path:
+        return ""
+    words = [w for w in re.split(r"[/\-_.]+", path) if w]
+    if not words:
+        return ""
+    label = " ".join(words).strip()
+    return (label[:1].upper() + label[1:])[:80]
+
+
+#: Words that already say "this is a record list" — appending " grid" to
+#: a caption that reads "Order list" would just stutter.
+_GRID_WORDS = ("grid", "list", "table", "index", "results")
+
+#: Section names go into every summary, so they stay shorter than the
+#: form-side cap: a grid title also carries a column or action name.
+_GRID_NAME_CAP = 60
+
+
+def grid_section_name(page: dict, table: dict, index: int) -> str:
+    """Section name for a grid, taken from what the page calls it.
+
+    A ``<caption>`` is the table naming itself and wins outright. Without
+    one the page heading is the next honest signal, but it names the
+    whole page rather than the grid, so it takes a " grid" suffix — on a
+    page carrying both a form and a grid the two sections have to be
+    tellable apart.
+    """
+    caption = " ".join(str(table.get("caption") or "").split())
+    if caption:
+        return caption[:_GRID_NAME_CAP]
+    for candidate in (page.get("h1"), page.get("title")):
+        text = " ".join(str(candidate or "").split())
+        if text:
+            return _with_grid_suffix(text)
+    titled = _url_label(page)
+    if titled:
+        return _with_grid_suffix(titled)
+    return f"Grid #{index}"
+
+
+def grid_section_names(page: dict, tables: list) -> list[str]:
+    """Section names for one page's grids, disambiguated.
+
+    Captionless grids all fall back to the page heading, so a page with
+    two of them produced two identical section names and, with them,
+    pairs of summaries a reader could not tell apart — w3schools'
+    html_tables page ships exactly that. An ordinal is the honest
+    discriminator: the page gives no other name to use.
+    """
+    names = [grid_section_name(page, t if isinstance(t, dict) else {}, i)
+             for i, t in enumerate(tables or [], start=1)]
+    totals: dict[str, int] = {}
+    for name in names:
+        totals[name] = totals.get(name, 0) + 1
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for name in names:
+        if totals[name] == 1:
+            out.append(name)
+            continue
+        seen[name] = seen.get(name, 0) + 1
+        out.append(f"{name} #{seen[name]}")
+    return out
+
+
+def _with_grid_suffix(text: str) -> str:
+    if any(word in text.lower() for word in _GRID_WORDS):
+        return text[:_GRID_NAME_CAP]
+    return (text[:_GRID_NAME_CAP - 5] + " grid")
 
 
 def _nav(page: dict, form: dict) -> str:
@@ -430,31 +550,218 @@ def _form_level_cases(page: dict, form: dict, section: str,
     return [normalise_case(c)[0] for c in out]
 
 
+# ── Grid cases ───────────────────────────────────────────────────────
+
+#: ``fan_out:`` names an inventory list; each entry fills one fixed
+#: placeholder and produces one case. Which list lives on the table and
+#: which on the surrounding controls is fixed here rather than in the
+#: YAML — the asset says *what* to iterate, this says *where it is*.
+_FAN_OUT_SPEC = {
+    "sortable_columns": ("column", "table"),
+    "filters": ("filter", "controls"),
+    "bulk_actions": ("action", "controls"),
+    "create_controls": ("control", "controls"),
+}
+
+#: A quoted value inside a summary; keeps the 220-char lint ceiling out
+#: of reach even with a long section name.
+_FAN_OUT_VALUE_CAP = 40
+
+
+def _fmt(template: Any, values: dict) -> str:
+    """Fill a YAML phrasing template, or return "" if it cannot be."""
+    text = str(template or "").strip()
+    if not text:
+        return ""
+    try:
+        return text.format(**values)
+    except (KeyError, IndexError, ValueError) as exc:
+        _logger.warning("tc_rules: unusable template %r (%s)", text[:60], exc)
+        return ""
+
+
+def _fan_out_values(rule: dict, table: dict,
+                    controls: dict) -> list[tuple[str, str] | None]:
+    """The (placeholder, value) pairs a check fans out over.
+
+    ``[None]`` means "emit exactly one case, no fan-out".
+    """
+    key = str(rule.get("fan_out") or "").strip()
+    if not key:
+        return [None]
+    spec = _FAN_OUT_SPEC.get(key)
+    if not spec:
+        _logger.warning("tc_rules: unknown fan_out list %r on check %r",
+                        key, rule.get("id"))
+        return []
+    placeholder, source = spec
+    inventory = (table if source == "table" else controls).get(key) or []
+    values = [" ".join(str(v).split())[:_FAN_OUT_VALUE_CAP]
+              for v in inventory if str(v).strip()]
+    if len(values) > MAX_FAN_OUT:
+        _logger.info("tc_rules: check %r fans out over %d %s, kept %d "
+                     "(cap %d)", rule.get("id"), len(values), key,
+                     MAX_FAN_OUT, MAX_FAN_OUT)
+        values = values[:MAX_FAN_OUT]
+    return [(placeholder, v) for v in values]
+
+
+def _grid_test_data(rule: dict, controls: dict, values: dict) -> str:
+    """Fill the Test Data column where the case turns on a named value."""
+    bits: list[str] = []
+    for placeholder, caption in (("column", "Column"), ("filter", "Filter"),
+                                 ("action", "Bulk action"),
+                                 ("control", "Control")):
+        if values.get(placeholder):
+            bits.append(f'{caption}: "{values[placeholder]}"')
+    rule_id = str(rule.get("id") or "")
+    if rule_id in ("reach", "row_rendering"):
+        bits.append("Columns: " + values["columns"])
+    elif rule_id.startswith("pagination"):
+        labels = [str(x) for x in (controls.get("pagination_labels") or [])]
+        if labels:
+            bits.append("Pager controls: " + " / ".join(labels[:6]))
+    return "; ".join(bits)
+
+
+def enumerate_grid(page: dict, table: dict, controls: dict, section: str,
+                   checks: list[dict]) -> list[AuthoredCase]:
+    """Every ``list_surface`` case the parsed grid actually justifies.
+
+    ``controls`` is page-level: the crawler walks a token stream, not a
+    tree, so "the pager below this table" is not knowable — what is
+    knowable is "this page renders a pager". On a page with two grids
+    both inherit it. The alternative, dropping the surrounding controls
+    entirely, would lose sorting, paging and bulk actions on every real
+    grid, which is most of what a list surface is.
+    """
+    row_count = int(table.get("row_count") or 0)
+    columns = [str(c) for c in (table.get("columns") or []) if str(c).strip()]
+    base: dict[str, Any] = {
+        "grid": section,
+        "columns": (", ".join(f'"{c}"' for c in columns[:8])
+                    or "the columns it declares"),
+        "row_count": row_count,
+        "search": (list(controls.get("search_labels") or []) or ["Search"])[0],
+        "column": "", "filter": "", "action": "", "control": "",
+    }
+    nav = _grid_nav(page, section)
+    precondition = (f"{section} is opened and holds at least one record."
+                    if row_count else f"{section} is opened.")
+
+    out: list[AuthoredCase] = []
+    for rule in checks:
+        if not isinstance(rule, dict):
+            continue
+        if not _has_grid_evidence(rule.get("requires"), table, controls):
+            continue
+        for pair in _fan_out_values(rule, table, controls):
+            values = dict(base)
+            if pair is not None:
+                values[pair[0]] = pair[1]
+            case = _grid_case(rule, values, controls, nav, precondition,
+                              section)
+            if case is not None:
+                out.append(case)
+    return out
+
+
+def _grid_case(rule: dict, values: dict, controls: dict, nav: str,
+               precondition: str, section: str) -> AuthoredCase | None:
+    """One grid case, or None when the asset cannot phrase it."""
+    summary = _fmt(rule.get("title"), values)
+    action = _fmt(rule.get("step"), values)
+    expected = _fmt(rule.get("expected"), values)
+    if not (summary and action and expected):
+        # The evidence was there but the phrasing was not. Emitting a
+        # half-written case would be worse than emitting none, so say so
+        # loudly instead of dropping it silently.
+        _logger.warning("tc_rules: check %r has evidence but no %s template",
+                        rule.get("id"),
+                        "title" if not summary
+                        else ("step" if not action else "expected"))
+        return None
+
+    case = AuthoredCase(
+        summary=summary,
+        preconditions=precondition,
+        steps=[nav, action],
+        test_data=_grid_test_data(rule, controls, values),
+        expected_result=expected,
+        category=str(rule.get("category") or "Positive").strip().title(),
+        priority=str(rule.get("priority") or "Medium").strip().title(),
+        section=section,
+        testing_type="Functional",
+    )
+    case, _ = normalise_case(case)
+    return case
+
+
+def _grid_nav(page: dict, section: str) -> str:
+    """Step 1: breadcrumb to the grid."""
+    url = str(page.get("url") or "").strip()
+    if url:
+        return f"Go to {url} -> {section}"
+    return navigation_step("")
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
     """Deterministic case pack from a crawler control inventory.
 
-    Returns [] when the inventory has no forms — there is nothing to
-    enumerate honestly, and a caller should keep whatever baseline
-    coverage it already has rather than receive invented cases.
+    Walks two surfaces per page, in the order ``enumeration_order``
+    declares: the data grids the crawler recognised, then the forms.
+    Returns [] when neither is present — there is nothing to enumerate
+    honestly, and a caller should keep whatever baseline coverage it
+    already has rather than receive invented cases.
     """
     rules = load_rules()
     per_type = (((rules.get("create_form") or {})
                  .get("per_control_type")) or {})
-    if not per_type:
-        _logger.warning("tc_rules: coverage model has no per_control_type")
+    grid_checks = [c for c in (((rules.get("list_surface") or {})
+                                .get("checks")) or []) if isinstance(c, dict)]
+    if not per_type and not grid_checks:
+        _logger.warning("tc_rules: coverage model has neither "
+                        "create_form.per_control_type nor list_surface.checks")
         return []
 
     out: list[AuthoredCase] = []
     forms_seen = 0
+    grids_seen = 0
+    capped_forms = capped_grids = False
 
     for page in pages or []:
+        controls = page.get("grid_controls") or {}
+        tables = page.get("tables") or []
+        sections = grid_section_names(page, tables)
+        for table, section in zip(tables, sections):
+            if not isinstance(table, dict):
+                continue
+            if grids_seen >= MAX_GRIDS:
+                if not capped_grids:
+                    _logger.info("tc_rules: stopped after %d grids (cap)",
+                                 MAX_GRIDS)
+                    capped_grids = True
+                break
+            grids_seen += 1
+            grid_cases = enumerate_grid(page, table, controls, section,
+                                        grid_checks)
+            if len(grid_cases) > MAX_CASES_PER_GRID:
+                _logger.info(
+                    "tc_rules: %s produced %d grid cases, kept %d (cap %d)",
+                    section, len(grid_cases), MAX_CASES_PER_GRID,
+                    MAX_CASES_PER_GRID)
+                grid_cases = grid_cases[:MAX_CASES_PER_GRID]
+            out.extend(grid_cases)
+
         for index, form in enumerate(page.get("forms") or [], start=1):
             if forms_seen >= MAX_FORMS:
-                _logger.info("tc_rules: stopped after %d forms (cap)",
-                             MAX_FORMS)
-                return out
+                if not capped_forms:
+                    _logger.info("tc_rules: stopped after %d forms (cap)",
+                                 MAX_FORMS)
+                    capped_forms = True
+                break
             fields = group_radios([f for f in (form.get("fields") or [])
                                    if isinstance(f, dict)])
             fields = [f for f in fields if control_type(f)]
@@ -496,8 +803,9 @@ def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
 
 
 __all__ = [
-    "enumerate_from_artifacts", "enumerate_from_pages",
+    "enumerate_from_artifacts", "enumerate_from_pages", "enumerate_grid",
     "control_type", "control_types", "field_label", "group_radios",
-    "surface_name", "load_rules",
+    "surface_name", "grid_section_name", "grid_section_names", "load_rules",
     "MAX_CASES_PER_FORM", "MAX_FORMS",
+    "MAX_CASES_PER_GRID", "MAX_GRIDS", "MAX_FAN_OUT",
 ]
