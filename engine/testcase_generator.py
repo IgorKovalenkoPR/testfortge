@@ -58,6 +58,14 @@ class TestCase:
     # | "Regression" | "E2E". Empty string keeps every pre-PR-D TC
     # visible under "All suites".
     suite: str = ""
+    # PR-3: which form this case is stored in — "manual" (the TestFort
+    # columns a tester reads) or "gherkin" (Given/When/Then a runner can
+    # bind). The manual columns stay the source of truth in BOTH cases:
+    # `gherkin` is derived from them by engine.gherkin, because a .feature
+    # that drifts from the signed-off case is worse than none. An operator
+    # edit to `gherkin` wins over a re-derive — see gherkin.ensure_gherkin.
+    tc_format: str = "manual"
+    gherkin: str = ""
 
 
 @dataclass

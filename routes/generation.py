@@ -34,6 +34,7 @@ from engine.imports import parse_checklist as import_parse_checklist
 from engine.job_queue import get_queue, DONE, FAILED
 
 from engine import db as _db
+from engine import gherkin as _gherkin
 from engine.log import get_logger
 
 from ._shared import (
@@ -393,7 +394,8 @@ def _build_artifacts(url: str, custom_prompt: str,
 
 def _run_site_aware(url: str, pid: str | None,
                     custom_prompt: str,
-                    raw_lines: list[str] | None = None) -> dict | None:
+                    raw_lines: list[str] | None = None,
+                    tc_format: str = "manual") -> dict | None:
     """crawl_site → recon_site → build_strategy → generate_from_strategy.
 
     Returns ``None`` when the crawl itself failed (SSRF block, network
@@ -428,6 +430,7 @@ def _run_site_aware(url: str, pid: str | None,
 
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
     cl_dicts = [cl_to_dict(cl) for cl in cls]
+    tc_dicts = _gherkin.apply_format(tc_dicts, tc_format)
 
     # Low-level checklist (PR-2). Built by walking the crawled surfaces into
     # the shape of the team's reviewed deliverable — Header / Page Content /
@@ -513,6 +516,22 @@ def _run_authored_without_url(custom_prompt: str,
         _log.warning("authoring without URL failed: %s", exc)
         return []
     return [tc_to_dict(tc) for tc in tcs]
+
+
+def _requested_tc_format() -> str:
+    """The format the operator asked for on this request.
+
+    Two states, not three: the manual columns are populated either way, so
+    a "manual + BDD" option would store exactly the same row as "BDD". The
+    flag records only whether the automation module should pick the case
+    up. See engine.gherkin.apply_format.
+    """
+    from engine import gherkin as _gk
+    try:
+        raw = request.form.get("tc_format", "")
+    except Exception:  # pragma: no cover — outside a request context
+        raw = ""
+    return _gk.coerce_format(raw)
 
 
 def _persist_test_cases(tc_dicts: list[dict]) -> None:
@@ -718,10 +737,14 @@ def register(app: Flask) -> None:
             sync_pid = ensure_active_project()
             sync_raw_lines = raw_lines
             sync_custom_prompt = custom_prompt
+            # Read the knob inside the request, not inside the worker —
+            # the worker runs on a JobQueue thread with no request context.
+            sync_tc_format = _requested_tc_format()
 
             def _sync_worker(raw_lines=sync_raw_lines,
                              custom_prompt=sync_custom_prompt,
-                             pid=sync_pid):
+                             pid=sync_pid,
+                             tc_format=sync_tc_format):
                 # Legacy path always runs — it owns baseline coverage
                 # (50+ ISTQB-knowledge test cases per typical site)
                 # and the user-stories / traceability surfaces. Stage-2
@@ -753,7 +776,8 @@ def register(app: Flask) -> None:
                 url = _detect_first_url(raw_lines)
                 if url:
                     site_out = _run_site_aware(url, pid, custom_prompt,
-                                               raw_lines=raw_lines)
+                                               raw_lines=raw_lines,
+                                               tc_format=tc_format)
                     if site_out:
                         tcd.extend(site_out.get("tc_dicts") or [])
                         # crawl_errors from the recon crawler land in
@@ -776,6 +800,12 @@ def register(app: Flask) -> None:
                     # agent and falls back to canned templates.
                     tcd.extend(_run_authored_without_url(custom_prompt,
                                                          raw_lines))
+
+                # Stamp the combined list — the legacy template stream
+                # and the site-aware stream both belong to the format the
+                # operator asked for. _run_site_aware already stamped its
+                # own half; re-stamping is idempotent.
+                tcd = _gherkin.apply_format(tcd, tc_format)
 
                 if pid and tcd:
                     try: _db.save_test_cases(pid, tcd)
@@ -1829,8 +1859,12 @@ def register(app: Flask) -> None:
         # pid we resolve here. Falsy result is fine: persistence becomes a
         # no-op and the in-session result still lights up the page.
         pid = ensure_active_project()
+        # Same reason as the sync path: the worker thread has no request
+        # context, so the knob is read here and closed over.
+        wanted_format = _requested_tc_format()
 
-        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid):
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid,
+                    tc_format=wanted_format):
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
             raw_reqs_for_persona = (
@@ -1853,7 +1887,8 @@ def register(app: Flask) -> None:
             url = _detect_first_url(raw_lines)
             if url:
                 site_out = _run_site_aware(url, pid, custom_prompt,
-                                           raw_lines=raw_lines)
+                                           raw_lines=raw_lines,
+                                           tc_format=tc_format)
                 if site_out:
                     tc_dicts.extend(site_out.get("tc_dicts") or [])
             else:
@@ -1866,6 +1901,7 @@ def register(app: Flask) -> None:
             # poll (browser caps at 6 concurrent requests per origin —
             # one slow /status hangs the modal forever once the cap is
             # hit). Best-effort: a DB outage must not hide the result.
+            tc_dicts = _gherkin.apply_format(tc_dicts, tc_format)
             if pid and tc_dicts:
                 try:
                     _db.save_test_cases(pid, tc_dicts)
@@ -2108,7 +2144,62 @@ def register(app: Flask) -> None:
                 content,
                 mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 headers={"Content-Disposition": "attachment; filename=checklist.xlsx"})
+        if fmt == "feature":
+            # One .feature file per section, zipped. Only automation-
+            # targeted cases go in: a manual-only pack has nothing for a
+            # runner to bind, and shipping an empty archive reads as a
+            # failure rather than as "you did not ask for BDD".
+            targeted = [tc for tc in tc_list
+                        if _gherkin.is_automation_targeted(tc)]
+            if not targeted:
+                return ("No automation-targeted test cases in this pack. "
+                        "Regenerate with the BDD format selected, or switch "
+                        "individual cases to BDD in the editor.", 409)
+            content = _feature_archive(targeted, name)
+            return Response(
+                content, mimetype="application/zip",
+                headers={"Content-Disposition":
+                         f"attachment; filename={name}_features.zip"})
         return "Unknown format", 400
+
+
+def _feature_archive(cases: list, project_name: str) -> bytes:
+    """Zip of one ``.feature`` per section, plus a README naming the gaps.
+
+    The Gherkin is derived here rather than read from the column, so the
+    archive always matches the manual columns the client signed off — see
+    :func:`engine.gherkin.ensure_gherkin` for why the column holds only
+    hand-edited text.
+    """
+    import io as _io
+    import zipfile
+
+    buf = _io.BytesIO()
+    findings: list[str] = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for feature in _gherkin.features_from_test_cases(cases):
+            text = feature.render()
+            issues = _gherkin.lint(text)
+            if issues:
+                findings.append(f"{feature.name}: " + "; ".join(issues))
+            zf.writestr(f"features/{_gherkin.feature_filename(feature.name)}",
+                        text)
+        readme = [
+            f"# {project_name} — BDD feature files",
+            "",
+            f"{len(cases)} automation-targeted test cases, "
+            f"grouped into one .feature per section.",
+            "",
+            "Generated from the manual test cases, which stay the source of "
+            "truth. Re-export after editing a case rather than editing a "
+            ".feature by hand — a .feature that drifts from the signed-off "
+            "case is worse than none.",
+        ]
+        if findings:
+            readme += ["", "## Findings", ""]
+            readme += [f"- {f}" for f in findings]
+        zf.writestr("README.md", "\n".join(readme) + "\n")
+    return buf.getvalue()
 
 
 __all__ = ["register"]

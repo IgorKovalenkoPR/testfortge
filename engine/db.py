@@ -252,6 +252,20 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
             "ALTER TABLE test_case ADD COLUMN suite "
             "VARCHAR(20) NOT NULL DEFAULT ''",
         ))
+    # PR-3 dual-format columns. Same idempotent probe; existing rows
+    # back-fill to "manual", which is the format they were written in.
+    if "tc_format" not in existing:
+        additions.append((
+            "tc_format",
+            "ALTER TABLE test_case ADD COLUMN tc_format "
+            "VARCHAR(20) NOT NULL DEFAULT 'manual'",
+        ))
+    if "gherkin" not in existing:
+        additions.append((
+            "gherkin",
+            "ALTER TABLE test_case ADD COLUMN gherkin "
+            "TEXT NOT NULL DEFAULT ''",
+        ))
 
     # PR-F (deep-capture telemetry) column on ``session_draft``. Same
     # idempotent probe: a project that booted before PR-F has the table
@@ -466,6 +480,16 @@ class TestCase(Base):
     # filter UI explicitly handles the empty bucket.
     suite: Mapped[str] = mapped_column(String(20), nullable=False,
                                         default="", server_default="")
+    # PR-3: dual-format test cases. ``tc_format`` is "manual" | "gherkin";
+    # ``gherkin`` holds the .feature Scenario block. Named tc_format rather
+    # than format because FORMAT is reserved in several SQL dialects.
+    # Same NOT NULL DEFAULT idiom as url_pattern / suite, so every
+    # pre-PR-3 row back-fills to the manual format it already was.
+    tc_format: Mapped[str] = mapped_column(String(20), nullable=False,
+                                            default="manual",
+                                            server_default="manual")
+    gherkin: Mapped[str] = mapped_column(Text, nullable=False,
+                                          default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -1097,6 +1121,11 @@ def save_test_cases(project_id: str, test_cases: list) -> int:
                 # for every other authoring path keeps the column happy
                 # under NOT NULL DEFAULT ''.
                 suite=d.get("suite", "") or "",
+                # PR-3: coerced rather than trusted — a stray value in the
+                # column would make every downstream format check
+                # ambiguous, and the coercion is one function call.
+                tc_format=_coerce_tc_format(d.get("tc_format")),
+                gherkin=d.get("gherkin") or "",
             ))
             written += 1
     return written
@@ -1157,7 +1186,20 @@ _TC_DATACLASS_FIELDS = (
     "automation_steps_json",
     # PR-D: suite classification. Same append-only pattern — kept last.
     "suite",
+    # PR-3: dual-format. Append-only, same reason.
+    "tc_format", "gherkin",
 )
+
+
+def _coerce_tc_format(value) -> str:
+    """Normalise a submitted / stored format onto ("manual", "gherkin").
+
+    Kept here rather than imported from engine.gherkin so the DB layer has
+    no dependency on the generator package — db.py is imported by the MCP
+    server and the detached runner worker, which do not need it.
+    """
+    return "gherkin" if str(value or "").strip().lower() in (
+        "gherkin", "bdd", "feature", "automation") else "manual"
 
 
 def update_tc_automation_steps(project_id: str,

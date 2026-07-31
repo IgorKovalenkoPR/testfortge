@@ -16,7 +16,7 @@
 <form method="POST" enctype="multipart/form-data" id="tc-gen-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% set input_title = t.input_title_default %}
-    {% include '_input_block.html' %}
+    {% with show_tc_format = true %}{% include '_input_block.html' %}{% endwith %}
 
     <div class="form-actions">
         <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
@@ -713,6 +713,19 @@
             <tr><th>{{ t.tc_comment }}</th><td>{{ tc.comment or '—' }}</td></tr>
         </table>
 
+        {# BDD view. Shown only for automation-targeted cases, and derived
+           from the columns above rather than stored beside them — so it
+           cannot drift from the case a client signed off. Read-only here:
+           editing belongs on the manual columns, which is where the
+           derivation reads from. #}
+        {% if tc.tc_format == 'gherkin' %}
+        <details class="tc-gherkin">
+            <summary>{{ t.get('tc_gherkin_summary', 'BDD view (Given / When / Then)') }}</summary>
+            <p class="hint">{{ t.get('tc_gherkin_hint', 'Derived from the columns above. Edit the case, not this — the .feature export re-derives on every download.') }}</p>
+            <pre class="gherkin-block">{{ tc | gherkin_view }}</pre>
+        </details>
+        {% endif %}
+
         <div class="tc-status-row">
             <label>{{ t.status }}:</label>
             <select class="status-select" onchange="this.className='status-select status-'+this.value.toLowerCase().replace(' ','-')">
@@ -928,6 +941,12 @@
         <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>
         <a href="{{ url_for('export', fmt='csv-testcases') }}" class="btn btn-export"><i data-lucide="file-spreadsheet" class="icon-sm"></i> {{ t.export_csv }} (TC)</a>
         <a href="{{ url_for('export', fmt='xlsx-testcases') }}" class="btn btn-export btn-success"><i data-lucide="sheet" class="icon-sm"></i> {{ t.export_xlsx_tc }}</a>
+        {# One .feature per section, zipped. Only appears once the pack
+           actually has automation-targeted cases — otherwise the download
+           would 409 and the button would read as broken. #}
+        {% if test_cases | selectattr('tc_format', 'equalto', 'gherkin') | first %}
+        <a href="{{ url_for('export', fmt='feature') }}" class="btn btn-export"><i data-lucide="file-code" class="icon-sm"></i> {{ t.get('export_feature', 'Export .feature (BDD)') }}</a>
+        {% endif %}
     </div>
 </div>
 {% elif not has_data %}

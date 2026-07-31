@@ -319,6 +319,24 @@ def nl2br_filter(s):
     return markupsafe.Markup(str(markupsafe.escape(s)).replace('\n', '<br>\n'))
 
 
+@app.template_filter('gherkin_view')
+def gherkin_view_filter(tc):
+    """The Given/When/Then view of a test case, derived on render.
+
+    A filter rather than a stored field on purpose: the manual columns are
+    the source of truth, so the BDD view is computed from whatever they say
+    right now. Storing it would let the two drift, with the stale copy
+    being what the runner executes. See :mod:`engine.gherkin`.
+    """
+    try:
+        from engine import gherkin
+        return gherkin.ensure_gherkin(tc)
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("gherkin_view failed for %r: %s",
+                  getattr(tc, "id", "?"), exc)
+        return ""
+
+
 @app.template_filter('safe_display')
 def safe_display_filter(s):
     """Strip prompt-injection-style lines from text rendered to other
