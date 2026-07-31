@@ -184,11 +184,21 @@ def _site(pages: int, grids_per_page: int, *, unique_titles: bool = True):
     return analysis
 
 
+BEYOND_ROW = "Grids beyond the generated pack"
+
+
 def _quoted(analysis) -> int:
-    """Grid cases the estimate charges for, read off its own rows."""
+    """Grid cases the estimate charges for that the pack will contain."""
     return sum(int(f.comment.split("(+")[1].split(" ")[0])
                for f in est.features_from_site_analysis(analysis)
-               if "list-surface cases" in f.comment)
+               if "list-surface cases" in f.comment and f.name != BEYOND_ROW)
+
+
+def _quoted_beyond(analysis) -> int:
+    """Grid cases charged for that the pack will NOT contain."""
+    return sum(f.test_cases
+               for f in est.features_from_site_analysis(analysis)
+               if f.name == BEYOND_ROW)
 
 
 def _generated(analysis) -> int:
@@ -200,15 +210,20 @@ def _generated(analysis) -> int:
 
 
 class TestQuoteMatchesPack:
-    """The estimate and the pack must cover the same grids.
+    """The estimate quotes the whole job; the pack is a subset of it.
 
-    They used to disagree in three independent ways at once, in both
-    directions: the generator stopped at a whole-crawl cap the estimator
-    did not know about; the estimator capped grids per page and the
-    generator did not; and the estimator dropped duplicate-titled pages
-    the generator still walked. All three now flow through
-    `tc_rules.plan_grid_coverage`, so the agreement is structural rather
-    than two caps that happened to be set close together.
+    Two numbers answering two questions — what the work costs, and what
+    the tool wrote — with the difference stated rather than hidden. The
+    invariant is not that they are equal but that they are *reconciled*:
+    every grid case charged for is either in the pack or accounted for
+    on the one row that says it is not.
+
+    The rows the pack does cover used to disagree with it in three
+    independent ways at once, in both directions: the generator stopped
+    at a whole-crawl cap the estimator did not know about; the estimator
+    capped grids per page and the generator did not; and the estimator
+    dropped duplicate-titled pages the generator still walked. All three
+    now flow through `tc_rules.plan_grid_coverage`.
     """
 
     @pytest.mark.parametrize("pages,grids_per_page", [
@@ -219,9 +234,26 @@ class TestQuoteMatchesPack:
         (30, 4),     # both budgets biting at once
         (3, 0),      # nothing to reconcile
     ])
-    def test_quote_equals_pack(self, pages, grids_per_page):
+    def test_the_covered_rows_equal_the_pack(self, pages, grids_per_page):
         analysis = _site(pages, grids_per_page)
         assert _quoted(analysis) == _generated(analysis)
+
+    @pytest.mark.parametrize("pages,grids_per_page", [
+        (1, 1), (5, 1), (1, 5), (40, 1), (30, 4), (3, 0),
+    ])
+    def test_every_grid_is_accounted_for(self, pages, grids_per_page):
+        """Nothing falls between the two numbers.
+
+        Total charged = what the pack contains + what the row says it
+        does not. A grid that appears in neither would be work quoted to
+        nobody, or work nobody quoted.
+        """
+        analysis = _site(pages, grids_per_page)
+        all_grids = [t for p in analysis.pages for t in p.tables]
+        controls = analysis.pages[0].grid_controls if analysis.pages else {}
+        full_effort = sum(tc_rules.count_grid_cases(t, controls)
+                          for t in all_grids)
+        assert _quoted(analysis) + _quoted_beyond(analysis) == full_effort
 
     def test_it_holds_when_pages_share_a_title(self):
         """De-duplication is a presentation limit, not a coverage one.
@@ -236,21 +268,44 @@ class TestQuoteMatchesPack:
                 if f.name.startswith("Grids on ")]
         assert rest and rest[0].test_cases > 0
 
-    def test_the_shortfall_is_stated_not_buried_in_a_log(self):
-        # 40 grid pages against a 24-grid budget: 16 go uncovered, and
-        # the estimate has to say so where a human will see it.
+    def test_work_beyond_the_pack_is_charged_for_in_full(self):
+        """The estimate is the cost of the job, not of the automation.
+
+        A tester opens every list surface the site has, not the first two
+        dozen. Quoting only the generated half would under-bill the job
+        to hide a tidier-looking number.
+        """
+        analysis = _site(40, 1)
+        beyond = _quoted_beyond(analysis)
+        # 16 grids past the budget, each worth what any of them is worth.
+        per_grid = tc_rules.count_grid_cases(
+            analysis.pages[0].tables[0], analysis.pages[0].grid_controls)
+        assert beyond == (40 - tc_rules.MAX_GRIDS) * per_grid
+        assert _total(analysis) > _generated(analysis)
+
+    def test_the_gap_is_stated_where_it_will_be_read(self):
         row = [f for f in est.features_from_site_analysis(_site(40, 1))
-               if f.name == "Grids outside this estimate"]
+               if f.name == BEYOND_ROW]
         assert row, "a silently dropped grid reads as covered"
         assert f"{40 - tc_rules.MAX_GRIDS} of 40 grids" in row[0].comment
-        # Zero cases: this row is a warning, not a budget line. Charging
-        # for it would quote work the pack does not contain.
-        assert row[0].test_cases == 0
+        assert "NOT in the generated pack" in row[0].comment
+        assert str(tc_rules.MAX_GRIDS) in row[0].comment
 
-    def test_no_shortfall_row_when_everything_is_covered(self):
+    def test_the_gap_row_counts_towards_the_total(self):
+        """`is_section` rows are excluded from `total_tc`.
+
+        Marking this one a section would drop the very effort it exists
+        to charge for — the estimate would silently shrink back.
+        """
+        row = [f for f in est.features_from_site_analysis(_site(40, 1))
+               if f.name == BEYOND_ROW][0]
+        assert row.is_section is False
+        assert row.test_cases > 0
+
+    def test_no_gap_row_when_the_pack_covers_everything(self):
         names = [f.name for f in
                  est.features_from_site_analysis(_analysis(ADMIN_GRID))]
-        assert "Grids outside this estimate" not in names
+        assert BEYOND_ROW not in names
 
 
 # ── Degrading safely ─────────────────────────────────────────────────
