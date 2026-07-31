@@ -65,6 +65,14 @@ class ChecklistItem:
     id: str               # HDR_001, FTR_001 format
     section: str           # Section name
     objective: str         # Summary of the checklist item
+    # Hierarchical position in the sheet: "1.1", "2.7.1". The reference
+    # low-level checklist numbers every row this way and cites those
+    # numbers in bug reports and status updates, so it is data, not
+    # presentation. Empty on rows from generators that predate it.
+    item_num: str = ""
+    # 2 = a check, 3 = a sub-check of the level-2 row above it. Drives the
+    # indent in the UI and the exported sheet.
+    depth: int = 2
     comments: str = ""     # Comments / Issues
     user_story_id: str = ""
     category: str = ""     # Positive / Negative / Edge Case

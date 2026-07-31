@@ -429,6 +429,26 @@ def _run_site_aware(url: str, pid: str | None,
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
     cl_dicts = [cl_to_dict(cl) for cl in cls]
 
+    # Low-level checklist (PR-2). Built by walking the crawled surfaces into
+    # the shape of the team's reviewed deliverable — Header / Page Content /
+    # Footer, hierarchically numbered, one observable check per row. It
+    # REPLACES the area-template checklist on a site-aware run rather than
+    # appending to it: the templates answer "what does a login form owe",
+    # this answers "what does THIS page owe", and shipping both gives the
+    # tester two overlapping sheets to walk.
+    ll_gaps: list[str] = []
+    try:
+        from engine import checklist_rules as _clr
+        pages = [_page_to_dict(pg)
+                 for pg in (getattr(site_analysis, "pages", None) or [])]
+        low_level = _clr.build_checklist(pages, url=url)
+        if low_level.total:
+            cl_dicts = [cl_to_dict(ci)
+                        for ci in _clr.to_checklist_items(low_level)]
+            ll_gaps = list(low_level.gaps)
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("low-level checklist build failed: %s", exc)
+
     if pid:
         try:
             _db.save_site_profile(pid, url, profile.to_dict(),
@@ -442,7 +462,24 @@ def _run_site_aware(url: str, pid: str | None,
         "profile": profile.to_dict(),
         "strategy": strategy.to_dict(),
         "crawl_errors": list(getattr(site_analysis, "crawl_errors", []) or []),
+        # Surfaces the checklist could not evidence — an unstructured Footer,
+        # sections beyond the cap. Flashed to the operator so a thin sheet
+        # reads as a known limitation rather than as the whole product.
+        "checklist_gaps": ll_gaps,
     }
+
+
+def _page_to_dict(page) -> dict:
+    """PageInfo → plain dict, for the generators that take dicts."""
+    if isinstance(page, dict):
+        return page
+    try:
+        from dataclasses import asdict, is_dataclass
+        if is_dataclass(page):
+            return asdict(page)
+    except Exception:  # pragma: no cover — defensive
+        pass
+    return {k: v for k, v in vars(page).items() if not k.startswith("_")}
 
 
 def _run_authored_without_url(custom_prompt: str,

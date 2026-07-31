@@ -36,7 +36,16 @@ _logger = get_logger(__name__)
 # parallel so the richer crawl actually surfaces as features.
 MAX_PAGES = 50          # max pages to fetch
 FETCH_TIMEOUT = 8       # seconds per request
-MAX_BODY_KB = 512       # truncate response body
+MAX_BODY_KB = 512       # truncate the DECODED document
+# Wire-bytes cap, applied before decompression. Deliberately smaller than
+# MAX_BODY_KB is large: gzipped markup runs 5-10x, so 256 KB of wire data
+# already exceeds the decoded cap on any real page, and a decompression
+# bomb cannot spend more than this much of our bandwidth.
+MAX_RAW_KB = 256
+# Ceiling on the decompressed size, so a small compressed payload cannot
+# expand without bound. 8 MB is ~16x the decoded cap — generous enough
+# that no legitimate page trips it.
+MAX_DECOMPRESSED_KB = 8 * 1024
 
 # Grid recognition. A page shell built out of <table> (old markup still
 # does this) must not become a "grid" — sort / pagination / bulk-action
@@ -115,8 +124,32 @@ class PageInfo:
     has_video: bool = False
     meta_description: str = ""
     headings: list[str] = field(default_factory=list)     # h2/h3 texts
+    #: The same headings WITH their level: ``[{"level": 2, "text": …}]``.
+    #: A low-level checklist nests an h3 under the h2 above it (reference
+    #: rows 2.3 → 2.3.1), which a flattened list cannot express. ``headings``
+    #: stays as-is for every existing consumer.
+    heading_levels: list[dict] = field(default_factory=list)
     links_internal: list[str] = field(default_factory=list)
     links_external: list[str] = field(default_factory=list)
+    # ── Page regions (PR-2) ─────────────────────────────────────────
+    # A low-level checklist opens with a Header section and closes with a
+    # Footer one — 7 and 12 checks respectively in the reference
+    # deliverable — so the generator needs to know which region a link
+    # sits in. Everything below is evidence-gated: an empty list means the
+    # markup did not say, and the checklist simply omits those rows rather
+    # than inventing them.
+    header_links: list[dict] = field(default_factory=list)   # {text, href}
+    footer_links: list[dict] = field(default_factory=list)   # {text, href}
+    email_links: list[str] = field(default_factory=list)     # mailto: targets
+    phone_links: list[str] = field(default_factory=list)     # tel: targets
+    social_links: list[dict] = field(default_factory=list)   # {network, href}
+    legal_links: list[dict] = field(default_factory=list)    # {text, href}
+    has_header_logo: bool = False
+    has_footer_logo: bool = False
+    #: Menu structure in the chrome: {region, label, children[]}. The
+    #: reference deliverable spends one Header row per menu, so a flat
+    #: link list is not enough — see _PageParser.nav_groups.
+    nav_groups: list[dict] = field(default_factory=list)
     error: str = ""
 
 
@@ -157,6 +190,112 @@ class SiteAnalysis:
 # not name its filter a filter simply yields no filter cases, which is
 # the correct outcome. Guessing would produce cases that fail for the
 # wrong reason.
+
+# ── Page-region evidence ─────────────────────────────────────────
+#
+# Which region a link sits in decides whether it becomes a Header check, a
+# Footer check, or a Page Content check. Same discipline as the grid
+# patterns: the markup has to say so.
+
+#: Containers a site actually uses for its chrome. ``<header>`` /
+#: ``<footer>`` and their ARIA landmark equivalents are unambiguous; a
+#: div/section needs the word in its class or id.
+_REGION_CONTAINERS = frozenset({"header", "footer", "div", "section",
+                                "aside", "nav"})
+_HEADER_HINT_RE = re.compile(
+    r"(?:^|[^a-z-])(?:site-?|page-?|main-?|top-?|global-?)?header"
+    r"(?:[^a-z-]|$)|\bmasthead\b|\bnavbar\b|\btop-?bar\b", re.IGNORECASE)
+_FOOTER_HINT_RE = re.compile(
+    r"(?:^|[^a-z-])(?:site-?|page-?|main-?|global-?)?footer"
+    r"(?:[^a-z-]|$)|\bcolophon\b", re.IGNORECASE)
+#: A column header, a table header row or an HTTP header is not the page
+#: Header. Same false-positive family the terminology linter had to fence
+#: off; see engine/glossary.py PAGE_REGIONS.
+_REGION_FALSE_FRIEND_RE = re.compile(
+    r"\b(?:column|table|row|cell|grid|card|modal|accordion|section|panel|"
+    r"sticky-?wrap|sub)-?(?:header|footer)\b|\b(?:header|footer)-?"
+    r"(?:row|cell|col|column|title|text|label)\b", re.IGNORECASE)
+_LOGO_HINT_RE = re.compile(r"\blogo\b|\bbrand\b|\bhome-?link\b", re.IGNORECASE)
+_LEGAL_RE = re.compile(
+    r"privacy|cookie|terms|gdpr|\blegal\b|impressum|disclaimer|"
+    r"accessibility-statement", re.IGNORECASE)
+#: Social platforms, mapped to the name a checklist row should print. The
+#: reference Footer sweep names the networks it found ("Instagram,
+#: LinkedIn, YouTube") rather than writing a generic row.
+_SOCIAL_DOMAINS: dict[str, str] = {
+    "facebook.com": "Facebook", "fb.com": "Facebook",
+    "instagram.com": "Instagram",
+    "linkedin.com": "LinkedIn",
+    "youtube.com": "YouTube", "youtu.be": "YouTube",
+    "twitter.com": "X (Twitter)", "x.com": "X (Twitter)",
+    "t.me": "Telegram", "telegram.me": "Telegram",
+    "tiktok.com": "TikTok",
+    "github.com": "GitHub",
+    "gitlab.com": "GitLab",
+    "dribbble.com": "Dribbble",
+    "behance.net": "Behance",
+    "medium.com": "Medium",
+    "pinterest.com": "Pinterest",
+    "wa.me": "WhatsApp", "whatsapp.com": "WhatsApp",
+    "viber.com": "Viber",
+    "clutch.co": "Clutch",
+    "upwork.com": "Upwork",
+    "goodfirms.co": "GoodFirms",
+    "vimeo.com": "Vimeo",
+    "reddit.com": "Reddit",
+    "threads.net": "Threads",
+    "bsky.app": "Bluesky",
+    "mastodon.social": "Mastodon",
+    "discord.gg": "Discord", "discord.com": "Discord",
+    "slack.com": "Slack",
+    "spotify.com": "Spotify",
+    "apple.com/app-store": "App Store",
+    "play.google.com": "Google Play",
+}
+
+
+def _region_of(tag: str, attr_dict: dict, blob: str) -> str:
+    """``"header"`` / ``"footer"`` / ``""`` for a container start tag."""
+    if tag not in _REGION_CONTAINERS:
+        return ""
+    role = str(attr_dict.get("role") or "").strip().lower()
+    if tag == "header" or role == "banner":
+        return "header"
+    if tag == "footer" or role == "contentinfo":
+        return "footer"
+    if _REGION_FALSE_FRIEND_RE.search(blob):
+        return ""
+    if _FOOTER_HINT_RE.search(blob):
+        return "footer"
+    if _HEADER_HINT_RE.search(blob):
+        return "header"
+    return ""
+
+
+def _social_network(href_lower: str) -> str:
+    """Platform name for a social URL, or ``""``.
+
+    Matched on the host (plus a path prefix for the two app stores) so a
+    blog post that merely mentions facebook.com in a query string does not
+    register as a social profile link.
+    """
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(href_lower).netloc or "").lstrip("www.")
+        path = urlparse(href_lower).path or ""
+    except Exception:  # pragma: no cover — defensive
+        return ""
+    if not host:
+        return ""
+    for domain, name in _SOCIAL_DOMAINS.items():
+        if "/" in domain:
+            d_host, _, d_path = domain.partition("/")
+            if host.endswith(d_host) and path.lstrip("/").startswith(d_path):
+                return name
+        elif host == domain or host.endswith("." + domain):
+            return name
+    return ""
+
 
 _PAGER_HINT_RE = re.compile(r"pagin|\bpager\b|\bpaging\b", re.IGNORECASE)
 _PAGER_ARIA_RE = re.compile(
@@ -240,6 +379,8 @@ class _PageParser(HTMLParser):
         self.title = ""
         self.h1 = ""
         self.headings: list[str] = []
+        self.heading_levels: list[dict] = []
+        self._heading_level = 0
         self.forms: list[dict] = []
         self.nav_links: list[str] = []
         self.buttons: list[str] = []
@@ -291,6 +432,45 @@ class _PageParser(HTMLParser):
         #: inventory, the bulk-action list, or both.
         self._option_sinks: list[list] = []
         self._bulk_options: list | None = None
+        #: Header / Footer region scope — see handle_starttag.
+        self._region = ""
+        self._region_tag = ""
+        self._region_nest = 0
+        self._a_href = ""
+        self._a_is_logo = False
+        #: Region link inventories. ``{"text": …, "href": …}`` pairs, in
+        #: document order, deduplicated on (text, href).
+        self.header_links: list[dict] = []
+        self.footer_links: list[dict] = []
+        #: Contact affordances a checklist owes a row each: the reference
+        #: Footer sweep checks "clicking the email opens the default mail
+        #: client" and "clicking the phone number opens the call
+        #: application" separately.
+        self.email_links: list[str] = []
+        self.phone_links: list[str] = []
+        #: ``{"network": "LinkedIn", "href": …}`` — the reference names the
+        #: networks it found rather than writing a generic "social icons"
+        #: row, so the network has to be resolved here.
+        self.social_links: list[dict] = []
+        #: Privacy / Cookie / Terms. The rows a client checks first and the
+        #: ones most often left pointing at a 404.
+        self.legal_links: list[dict] = []
+        #: True when an anchor marked as the logo was seen in the Header.
+        self.has_header_logo = False
+        self.has_footer_logo = False
+        #: Menu structure inside the Header / Footer chrome:
+        #: ``{"region": "header", "label": "Why Us", "children": [...]}``.
+        #:
+        #: This is what a flat link list cannot give. The reference
+        #: deliverable spends ONE Header row per menu — 'Verify that all
+        #: sub-items are visible and clickable from the "Why Us" drop-down
+        #: menu' — so a 60-link flat inventory would generate 60 unusable
+        #: rows where the team writes 5. Derived from <ul>/<li> nesting: a
+        #: top-level <li> whose subtree opens another list is a drop-down,
+        #: and its first anchor is the label.
+        self.nav_groups: list[dict] = []
+        self._list_depth = 0
+        self._li_stack: list[dict] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple]):
         attr_dict = dict(attrs)
@@ -307,15 +487,43 @@ class _PageParser(HTMLParser):
             self._pager_nest = 1
             self.grid_controls["pagination"] = True
 
+        # Header / Footer scope. A low-level checklist opens with a Header
+        # section and closes with a Footer one (7 and 12 checks in the
+        # reference deliverable), so which region a link sits in is the
+        # difference between generating those sections and guessing them.
+        # Same tag+nest idiom as the pager scope above: it survives the
+        # unclosed tags real pages ship, where a tag stack would not.
+        if self._region_nest:
+            if tag_lower == self._region_tag:
+                self._region_nest += 1
+        else:
+            region = _region_of(tag_lower, attr_dict, blob)
+            if region:
+                self._region = region
+                self._region_tag = tag_lower
+                self._region_nest = 1
+                self._list_depth = 0
+                self._li_stack = []
+
+        # Menu structure inside the chrome. Only tracked while in a region
+        # — a <ul> in the page body is content, not navigation.
+        if self._region:
+            if tag_lower in ("ul", "ol"):
+                self._list_depth += 1
+            elif tag_lower == "li":
+                self._li_stack.append({"depth": self._list_depth,
+                                       "label": "", "children": []})
+
         if tag_lower == "title":
             self._in_title = True
             self._current_text = ""
         elif tag_lower == "h1" and not self.h1:
             self._in_h1 = True
             self._current_text = ""
-        elif tag_lower in ("h2", "h3"):
+        elif tag_lower in ("h2", "h3", "h4"):
             self._in_heading = True
             self._heading_text = ""
+            self._heading_level = int(tag_lower[1])
         elif tag_lower == "nav":
             self._in_nav = True
         elif tag_lower == "a":
@@ -324,6 +532,10 @@ class _PageParser(HTMLParser):
                 self.links.append(href)
             self._in_a = True
             self._current_text = ""
+            # Remember the href so handle_endtag can pair it with the link
+            # text once the text has been collected.
+            self._a_href = href
+            self._a_is_logo = bool(_LOGO_HINT_RE.search(blob))
             rel = str(attr_dict.get("rel") or "").lower()
             if ("next" in rel or "prev" in rel
                     or _PAGER_ARIA_RE.search(
@@ -554,10 +766,113 @@ class _PageParser(HTMLParser):
                 out[attr] = val
         return out
 
+    def _classify_link(self, text: str, href: str, is_logo: bool) -> None:
+        """File one anchor into the region / contact / social inventories.
+
+        Called once per ``</a>`` so the link text is already collected.
+        Every bucket is capped — a sitemap-in-the-footer page would
+        otherwise hand the checklist author 400 rows to walk.
+        """
+        href = (href or "").strip()
+        if not href:
+            return
+        low = href.lower()
+
+        if low.startswith("mailto:"):
+            addr = href[7:].split("?")[0].strip()
+            if addr and addr not in self.email_links \
+                    and len(self.email_links) < 6:
+                self.email_links.append(addr)
+            return
+        if low.startswith("tel:"):
+            num = href[4:].strip()
+            if num and num not in self.phone_links \
+                    and len(self.phone_links) < 6:
+                self.phone_links.append(num)
+            return
+        if low.startswith(("#", "javascript:", "data:")):
+            return
+
+        network = _social_network(low)
+        if network:
+            if not any(s["network"] == network for s in self.social_links) \
+                    and len(self.social_links) < 14:
+                self.social_links.append({"network": network, "href": href})
+            return
+
+        if _LEGAL_RE.search(low) or (text and _LEGAL_RE.search(text)):
+            if not any(l["href"] == href for l in self.legal_links) \
+                    and len(self.legal_links) < 8:
+                self.legal_links.append({"text": text, "href": href})
+            # A legal link also belongs to whichever region holds it — the
+            # reference sweep lists it under Footer.
+
+        if is_logo:
+            if self._region == "header":
+                self.has_header_logo = True
+            elif self._region == "footer":
+                self.has_footer_logo = True
+
+        if not self._region or not text:
+            return
+
+        # Attribute the anchor to the menu it belongs to. The label is the
+        # first anchor of a top-level <li>; anything deeper is a child.
+        in_menu = False
+        if self._li_stack:
+            top = self._li_stack[0]
+            if top["depth"] <= 1:
+                if len(self._li_stack) == 1 and not top["label"]:
+                    top["label"] = text
+                elif len(self._li_stack) > 1 or top["label"]:
+                    in_menu = True
+                    if text != top["label"] and text not in top["children"] \
+                            and len(top["children"]) < 20:
+                        top["children"].append(text)
+
+        sink = (self.header_links if self._region == "header"
+                else self.footer_links)
+        if len(sink) >= 60:
+            return
+        if not any(l["text"] == text and l["href"] == href for l in sink):
+            # ``in_menu`` says this link is reachable only by opening a
+            # drop-down. The checklist covers those with one row per menu,
+            # so it must be able to tell them from the top-level links it
+            # gives a row each. Deriving it downstream from the children
+            # lists does not work: those are capped at 20 per menu, and a
+            # mega-menu overflows the cap.
+            sink.append({"text": text, "href": href, "in_menu": in_menu})
+
     def handle_endtag(self, tag: str):
         tag_lower = tag.lower()
         if self._pager_nest and tag_lower == self._pager_tag:
             self._pager_nest -= 1
+        if self._region:
+            if tag_lower in ("ul", "ol"):
+                self._list_depth = max(0, self._list_depth - 1)
+            elif tag_lower == "li" and self._li_stack:
+                frame = self._li_stack.pop()
+                # A top-level item that opened its own sub-list is a
+                # drop-down. One with no children is a plain link and is
+                # already recorded in header_links / footer_links.
+                if frame["depth"] <= 1 and frame["label"] \
+                        and frame["children"] \
+                        and len(self.nav_groups) < 14 \
+                        and not any(g["label"] == frame["label"]
+                                    for g in self.nav_groups):
+                    self.nav_groups.append({
+                        "region": self._region,
+                        "label": frame["label"],
+                        "children": frame["children"][:20],
+                    })
+        if self._region_nest and tag_lower == self._region_tag:
+            self._region_nest -= 1
+            if self._region_nest <= 0:
+                self._region_nest = 0
+                self._region = ""
+                self._region_tag = ""
+                self._list_depth = 0
+                self._li_stack = []
         if tag_lower == "title":
             self._in_title = False
             self.title = self._current_text.strip()
@@ -565,9 +880,16 @@ class _PageParser(HTMLParser):
             if self._in_h1:
                 self.h1 = self._current_text.strip()
             self._in_h1 = False
-        elif tag_lower in ("h2", "h3"):
+        elif tag_lower in ("h2", "h3", "h4"):
             if self._in_heading and self._heading_text.strip():
-                self.headings.append(self._heading_text.strip())
+                text = self._heading_text.strip()
+                # h4 feeds heading_levels only. Adding it to `headings`
+                # would change what every existing consumer sees.
+                if self._heading_level <= 3:
+                    self.headings.append(text)
+                if len(self.heading_levels) < 60:
+                    self.heading_levels.append(
+                        {"level": self._heading_level, "text": text})
             self._in_heading = False
         elif tag_lower == "nav":
             self._in_nav = False
@@ -578,6 +900,9 @@ class _PageParser(HTMLParser):
             if self._pager_nest and txt:
                 self._append_control("pagination_labels", txt, cap=10)
             self._note_create_control(txt)
+            self._classify_link(txt, self._a_href, self._a_is_logo)
+            self._a_href = ""
+            self._a_is_logo = False
             self._in_a = False
         elif tag_lower == "button":
             txt = self._current_text.strip()
@@ -722,12 +1047,23 @@ def _fetch_page(url: str) -> tuple[str, str]:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestfortForge/1.0",
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "en-US,en;q=0.9",
+            # Ask for compression and decode it. Omitting this header does
+            # NOT guarantee an identity response — python.org served gzip
+            # regardless, which decoded to binary noise and produced a page
+            # record with zero headings, zero links and zero forms while
+            # reporting no error at all. Every downstream module then
+            # silently under-covered that site. See _decompress.
+            "Accept-Encoding": "gzip, deflate",
         })
         with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT, context=ctx) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" not in content_type and "application/xhtml" not in content_type:
                 return "", f"Not HTML: {content_type}"
-            raw = resp.read(MAX_BODY_KB * 1024)
+            raw = resp.read(MAX_RAW_KB * 1024)
+            raw, decomp_err = _decompress(
+                raw, resp.headers.get("Content-Encoding", ""))
+            if decomp_err:
+                return "", decomp_err
             # Try to decode
             charset = "utf-8"
             ct = content_type.lower()
@@ -737,7 +1073,10 @@ def _fetch_page(url: str) -> tuple[str, str]:
                 html = raw.decode(charset, errors="replace")
             except (LookupError, UnicodeDecodeError):
                 html = raw.decode("utf-8", errors="replace")
-            return html, ""
+            # Truncate the DECODED document, not the wire bytes: with
+            # compression on, a 512 KB cap on the wire is several megabytes
+            # of markup.
+            return html[:MAX_BODY_KB * 1024], ""
     except urllib.error.HTTPError as e:
         _logger.info("fetch failed: HTTP %s for %s", e.code, url)
         return "", f"HTTP {e.code}"
@@ -747,6 +1086,49 @@ def _fetch_page(url: str) -> tuple[str, str]:
     except Exception as e:
         _logger.warning("fetch failed: %s for %s", e, url)
         return "", str(e)[:100]
+
+
+def _decompress(raw: bytes, encoding: str) -> tuple[bytes, str]:
+    """Decode a ``Content-Encoding`` body. Returns ``(bytes, error)``.
+
+    A truncated stream is normal here — the wire read is capped at
+    MAX_RAW_KB mid-document — so a partial inflate is kept rather than
+    discarded: half a page still names most of its controls, whereas an
+    empty page names none. Only a stream that yields nothing at all is an
+    error.
+    """
+    enc = (encoding or "").strip().lower()
+    if not enc or enc == "identity":
+        return raw, ""
+    limit = MAX_DECOMPRESSED_KB * 1024
+    try:
+        if enc in ("gzip", "x-gzip"):
+            import zlib
+            d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            out = d.decompress(raw, limit)
+        elif enc == "deflate":
+            import zlib
+            try:
+                out = zlib.decompressobj().decompress(raw, limit)
+            except zlib.error:
+                # Raw deflate without the zlib wrapper — servers do ship
+                # this despite the RFC.
+                out = zlib.decompressobj(-zlib.MAX_WBITS).decompress(
+                    raw, limit)
+        elif enc == "br":
+            try:
+                import brotli  # type: ignore
+            except ImportError:
+                return b"", "unsupported Content-Encoding: br"
+            out = brotli.decompress(raw)[:limit]
+        else:
+            return b"", f"unsupported Content-Encoding: {enc}"
+    except Exception as exc:
+        _logger.warning("decompress failed (%s): %s", enc, exc)
+        return b"", f"decompress failed: {type(exc).__name__}"
+    if not out:
+        return b"", f"empty body after {enc} decode"
+    return out, ""
 
 
 def _parse_page(html: str, page_url: str, base_domain: str) -> PageInfo:
@@ -761,6 +1143,7 @@ def _parse_page(html: str, page_url: str, base_domain: str) -> PageInfo:
     page.title = parser.title
     page.h1 = parser.h1
     page.headings = parser.headings[:30]
+    page.heading_levels = parser.heading_levels[:60]
     page.forms = parser.forms
     page.tables = parser.tables
     # Only meaningful next to a grid — a pager on a page with no table
@@ -771,6 +1154,15 @@ def _parse_page(html: str, page_url: str, base_domain: str) -> PageInfo:
     page.images_count = parser.images_count
     page.has_video = parser.has_video
     page.meta_description = parser.meta_description
+    page.header_links = parser.header_links
+    page.footer_links = parser.footer_links
+    page.email_links = parser.email_links
+    page.phone_links = parser.phone_links
+    page.social_links = parser.social_links
+    page.legal_links = parser.legal_links
+    page.has_header_logo = parser.has_header_logo
+    page.has_footer_logo = parser.has_footer_logo
+    page.nav_groups = parser.nav_groups
 
     # Categorize links
     for href in parser.links:

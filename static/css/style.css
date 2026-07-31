@@ -764,6 +764,19 @@ details p { padding: .3rem 0 .5rem 1rem; font-size: .88rem; color: #475569; }
     padding: .5rem .7rem !important;
 }
 
+/* Low-level checklist hierarchy. The reference sheet numbers every row
+   (1, 1.1, 2.7.1) and indents sub-checks, and testers cite those numbers
+   in bug reports — so the number is data, shown in its own column, and
+   the indent goes on the objective. */
+.cl-num {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted, #64748b);
+    font-size: .82rem;
+    white-space: nowrap;
+}
+.cl-row-sub .cl-num { padding-left: 1.1rem; }
+.cl-row-sub td:nth-child(4) { padding-left: 2rem; }
+
 /* Inline inputs (checklist comments) */
 .inline-input {
     border: 1px solid transparent;

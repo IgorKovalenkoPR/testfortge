@@ -82,10 +82,16 @@ def export_markdown(project_name: str, stories: list[UserStory],
     # Checklist
     if checklist:
         a("---\n## 3. Checklist\n")
-        a("| ID | Section | Objective | Category | Priority | Status | Comments |")
-        a("|----|---------|-----------|----------|----------|--------|----------|")
+        a("| № | ID | Section | Objective | Category | Priority | Status | Comments |")
+        a("|----|----|---------|-----------|----------|----------|--------|----------|")
         for cl in checklist:
-            a(f"| {cl.id} | {cl.section} | {cl.objective} | {cl.category} | {cl.priority} | {cl.status} | {cl.comments} |")
+            # A sub-check is indented so the hierarchy survives in plain
+            # text, exactly as it reads in the reference sheet.
+            obj = ("&nbsp;&nbsp;&nbsp;&nbsp;" + cl.objective
+                   if getattr(cl, "depth", 2) > 2 else cl.objective)
+            a(f"| {getattr(cl, 'item_num', '')} | {cl.id} | {cl.section} "
+              f"| {obj} | {cl.category} | {cl.priority} | {cl.status} "
+              f"| {cl.comments} |")
         a("")
 
     # Traceability
@@ -195,10 +201,15 @@ ul{margin:.5rem 0;padding-left:1.5rem}
     # Checklist
     if checklist:
         a("<h2>3. Checklist</h2><table>")
-        a("<tr><th>ID</th><th>Section</th><th>Objective</th><th>Category</th><th>Priority</th><th>Status</th><th>Comments</th></tr>")
+        a("<tr><th>&#8470;</th><th>ID</th><th>Section</th><th>Objective</th><th>Category</th><th>Priority</th><th>Status</th><th>Comments</th></tr>")
         for cl in checklist:
-            a(f"<tr><td>{h(cl.id)}</td><td>{h(cl.section)}</td><td>{h(cl.objective)}</td>"
-              f"<td>{h(cl.category)}</td><td>{h(cl.priority)}</td><td>{h(cl.status)}</td><td>{h(cl.comments)}</td></tr>")
+            pad = ("padding-left:2em" if getattr(cl, "depth", 2) > 2
+                   else "")
+            a(f"<tr><td>{h(getattr(cl, 'item_num', ''))}</td>"
+              f"<td>{h(cl.id)}</td><td>{h(cl.section)}</td>"
+              f"<td style=\"{pad}\">{h(cl.objective)}</td>"
+              f"<td>{h(cl.category)}</td><td>{h(cl.priority)}</td>"
+              f"<td>{h(cl.status)}</td><td>{h(cl.comments)}</td></tr>")
         a("</table>")
 
     # Traceability
@@ -233,10 +244,12 @@ def export_csv_testcases(test_cases: list[TestCase]) -> str:
 def export_csv_checklist(checklist: list[ChecklistItem]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["ID", "Section", "Objective", "Category", "Priority", "Status", "Comments"])
+    w.writerow(["No", "ID", "Section", "Objective", "Category", "Priority",
+                "Status", "Comments"])
     for cl in checklist:
         w.writerow([_sanitize_cell(v) for v in (
-            cl.id, cl.section, cl.objective, cl.category, cl.priority, cl.status, cl.comments,
+            getattr(cl, "item_num", ""), cl.id, cl.section, cl.objective,
+            cl.category, cl.priority, cl.status, cl.comments,
         )])
     return buf.getvalue()
 
@@ -393,18 +406,20 @@ def export_xlsx_checklist(checklist: list[ChecklistItem]) -> bytes:
     ws = wb.active
     ws.title = "Checklist"
 
-    headers = ["ID", "Section", "Objective", "Category", "Priority", "Status", "Comments"]
+    headers = ["№", "ID", "Section", "Objective", "Category", "Priority",
+               "Status", "Comments"]
 
-    col_category = 4
-    col_priority = 5
-    col_status = 6
+    # Shifted by one now that "№" is column 1.
+    col_category = 5
+    col_priority = 6
+    col_status = 7
 
     _apply_header_row(ws, headers)
 
     for row_idx, cl in enumerate(checklist, start=2):
         values = [
-            cl.id, cl.section, cl.objective, cl.category,
-            cl.priority, cl.status, cl.comments,
+            getattr(cl, "item_num", ""), cl.id, cl.section, cl.objective,
+            cl.category, cl.priority, cl.status, cl.comments,
         ]
         is_alt = (row_idx % 2 == 0)
 
