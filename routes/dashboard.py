@@ -15,7 +15,10 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, render_template, request, session
 
 from engine import db as _db
+from engine.log import get_logger
 from engine.test_metrics_generator import compute_session_metrics
+
+log = get_logger(__name__)
 
 from ._shared import get_session_id, kpi_value, kpi_defect_density
 
@@ -36,6 +39,22 @@ def _compute_dashboard_metrics() -> dict:
         test_runs=session.get("test_runs", []),
         bugs_data=session.get("bug_reports_data", []),
     )
+
+
+def _latest_automation(project_id: str) -> dict | None:
+    """The most recent ingested Allure run, for the Dashboard card.
+
+    Kept out of ``compute_session_metrics`` deliberately: that function is
+    pure over session data so the detached runner_worker can reuse it, and
+    an automation run lives only in the DB.
+    """
+    if not project_id:
+        return None
+    try:
+        return _db.latest_automation_run(project_id)
+    except Exception as exc:  # pragma: no cover — never break the dashboard
+        log.debug("dashboard: automation lookup failed: %s", exc)
+        return None
 
 
 # Module-local cache so we don't pound DB every dashboard load.
@@ -78,7 +97,9 @@ def register(app: Flask) -> None:
         return render_template("index.html",
                                projects=projects,
                                active_project_id=session.get("project_id"),
-                               metrics=metrics)
+                               metrics=metrics,
+                               automation=_latest_automation(
+                                   session.get("project_id") or ""))
 
     @app.route("/metrics/history", methods=["GET"])
     def metrics_history_route():

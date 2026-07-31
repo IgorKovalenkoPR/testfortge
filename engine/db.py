@@ -620,6 +620,51 @@ class ExecutionCaseResult(Base):
     run = relationship("ExecutionRun", back_populates="case_results")
 
 
+class AutomationRun(Base):
+    """One ingested ``allure-results`` upload.
+
+    Separate from :class:`ExecutionRun` on purpose. An ExecutionRun is
+    something this service performed and can attribute per item; an
+    AutomationRun happened somewhere else — a laptop, a CI job — and
+    arrives as a finished artefact. Merging them would mean every
+    ExecutionRun query grew a "but was it really ours" branch, and the
+    per-case results here are keyed by the ``@TC-…`` tag rather than by a
+    row id we issued.
+    """
+    __tablename__ = "automation_run"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                    autoincrement=True)
+    project_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=True, index=True)
+    #: Where it ran, as reported by the uploader: "local", "ci", "unknown".
+    origin: Mapped[str] = mapped_column(String(20), nullable=False,
+                                         default="unknown")
+    #: Free-text label from the uploader — a branch name, a build number.
+    label: Mapped[str] = mapped_column(String(200), nullable=False,
+                                        default="")
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    broken: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Kept as its own column, never folded into passed or failed: a
+    #: skipped scenario is one nobody checked, and both alternatives would
+    #: misreport it. See engine.allure_ingest.
+    skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=0)
+    pass_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: The full RunSummary.to_dict(), for the drill-down view.
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: Relative path under STORAGE_ROOT of an uploaded prebuilt
+    #: allure-report bundle, when one was supplied.
+    report_path: Mapped[str] = mapped_column(String(500), nullable=False,
+                                              default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+
+
 class DashboardMetricSnapshot(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
@@ -1927,6 +1972,59 @@ def save_case_result(run_id: int, *, case_external_id: str | None = None,
         sess.add(row)
         sess.flush()
         return row.id
+
+
+def save_automation_run(project_id: str | None, summary: dict, *,
+                        origin: str = "unknown", label: str = "",
+                        report_path: str = "") -> int:
+    """Persist one ingested ``allure-results`` upload. Returns the row id."""
+    with session_scope() as sess:
+        if project_id:
+            proj = sess.get(Project, project_id)
+            if proj is not None:
+                proj.updated_at = _utcnow()
+        row = AutomationRun(
+            project_id=project_id or None,
+            origin=(origin or "unknown")[:20],
+            label=(label or "")[:200],
+            total=int(summary.get("total") or 0),
+            passed=int(summary.get("passed") or 0),
+            failed=int(summary.get("failed") or 0),
+            broken=int(summary.get("broken") or 0),
+            skipped=int(summary.get("skipped") or 0),
+            duration_ms=int(summary.get("duration_ms") or 0),
+            pass_rate=summary.get("pass_rate"),
+            summary=summary,
+            report_path=(report_path or "")[:500],
+        )
+        sess.add(row)
+        sess.flush()
+        return int(row.id)
+
+
+def list_automation_runs(project_id: str | None = None,
+                         limit: int = 30) -> list[dict]:
+    """Most recent automation runs, newest first."""
+    with session_scope() as sess:
+        stmt = select(AutomationRun)
+        if project_id:
+            stmt = stmt.where(AutomationRun.project_id == project_id)
+        rows = sess.execute(
+            stmt.order_by(AutomationRun.created_at.desc(),
+                          AutomationRun.id.desc()).limit(limit)
+        ).scalars().all()
+        return [_row_to_dict(r) for r in rows]
+
+
+def get_automation_run(run_id: int) -> dict | None:
+    with session_scope() as sess:
+        row = sess.get(AutomationRun, run_id)
+        return _row_to_dict(row) if row is not None else None
+
+
+def latest_automation_run(project_id: str | None = None) -> dict | None:
+    runs = list_automation_runs(project_id, limit=1)
+    return runs[0] if runs else None
 
 
 def list_execution_runs(project_id: str, limit: int = 50) -> list[dict]:

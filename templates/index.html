@@ -386,6 +386,48 @@
         {% endif %}
     </div>
 
+    {# ── 3b. Automation (Allure) ──
+       The last run ingested from a local or CI Playwright suite. Skipped
+       is shown as its own figure and the pass rate is computed over
+       executed scenarios only: an assertion the generated library could
+       not bind reports skipped, and folding that into either passed or
+       failed would misreport it. See engine/allure_ingest.py. #}
+    <div id="metric_automation" class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-big-number">
+                {% if automation %}{{ '%.0f'|format(automation.pass_rate or 0) }}%{% else %}—{% endif %}
+            </div>
+            <div class="metric-big-label">Automation Pass Rate</div>
+        </div>
+        {% if automation %}
+        <div class="metric-legend">
+            <div class="legend-item">
+                <span class="legend-dot" style="background:#22c55e"></span>
+                <span class="legend-label">Passed</span>
+                <span class="legend-value">{{ automation.passed }}</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-dot" style="background:#ef4444"></span>
+                <span class="legend-label">Failed</span>
+                <span class="legend-value">{{ (automation.failed or 0) + (automation.broken or 0) }}</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-dot" style="background:#94a3b8"></span>
+                <span class="legend-label">Skipped</span>
+                <span class="legend-value">{{ automation.skipped }}</span>
+            </div>
+        </div>
+        <p class="metric-empty" style="margin-top:.5rem">
+            {{ automation.origin }}{% if automation.label %} · {{ automation.label }}{% endif %}
+            · {{ ((automation.duration_ms or 0) / 1000)|round(1) }}s ·
+            <a href="{{ url_for('automation_run_detail', run_id=automation.id) }}">Details</a>
+        </p>
+        {% else %}
+        <p class="metric-empty">No automation runs ingested.
+            <a href="{{ url_for('automation_page') }}">Generate the suite</a></p>
+        {% endif %}
+    </div>
+
     {# ── 4. Bug Severity ── #}
     <div id="metric_bug_severity" class="metric-panel">
         <div class="metric-header">

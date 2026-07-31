@@ -118,6 +118,12 @@ services:
       # and `tfg record` (app.py, routes/generation.py).
       - key: RECORDER_ENABLED
         value: "1"
+      # Automation result ingestion. `sync: false` keeps it a dashboard
+      # secret; leaving it unset keeps POST /automation/allure-results
+      # disabled, which is the safe default — the endpoint writes run
+      # history, so an unauthenticated one is an open write.
+      - key: AUTOMATION_INGEST_TOKEN
+        sync: false
       # Basic Auth gate — fill these in the Render dashboard before deploy.
       # `sync: false` means Render will NOT pull them from a generated
       # value or the file; they stay in the dashboard as secrets.
