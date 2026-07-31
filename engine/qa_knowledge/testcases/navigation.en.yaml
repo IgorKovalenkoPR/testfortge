@@ -8,8 +8,8 @@ cases:
     steps:
       - "Identify all items in the navigation menu"
       - "Click each menu item one by one"
-      - "Verify the destination URL matches the item label and the heading on the page matches"
-      - "Verify the browser URL changes to match the navigated route"
+      - "Pay attention to the destination URL and to the page heading"
+      - "Pay attention to the browser URL"
     test_data: "All navigation menu items"
     expected_result: "Every navigation item opens the URL that matches its label. The browser URL matches the route declared for that menu item."
     category: Positive
@@ -30,9 +30,9 @@ cases:
     steps:
       - "Navigate through 3-4 different pages"
       - "Click the browser Back button"
-      - "Verify the URL returns to the previous route and the page renders the same layout it had before"
+      - "Pay attention to the browser URL and to the page layout"
       - "Click the browser Forward button"
-      - "Verify the URL returns to the most recent route and the page renders the same layout it had before"
+      - "Pay attention to the browser URL and to the page layout"
     test_data: ""
     expected_result: "Browser Back and Forward restore the previous and next routes respectively. Each restored page renders without console errors or missing assets."
     category: Positive

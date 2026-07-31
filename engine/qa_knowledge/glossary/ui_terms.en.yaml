@@ -1,0 +1,813 @@
+version: 1
+name: TestFort / QArea UI terminology glossary
+locale: en
+
+# ─────────────────────────────────────────────────────────────────────
+# Provenance
+# ─────────────────────────────────────────────────────────────────────
+# Transcribed from the QA team's own reference workbook, Glossary.xlsx:
+#   sheet "Website Terminology Glossary"        — 80 terms
+#   sheet "Mobile & App Terminology Glossary"   — 11 terms
+#
+# This is the vocabulary the team's reviewers hold authors to. It is the
+# reason a test case says 'the "Industries" drop-down' and not "the
+# industries thing" — the canonical term IS half the locator.
+#
+# Consumed two ways:
+#   1. as prompt material — engine/tc_author.py and
+#      engine/checklist_author.py paste the compact term index into a
+#      cached system block;
+#   2. as a linter — engine/glossary.py matches authored text against
+#      `aliases` and rewrites / flags non-canonical element names, so the
+#      rule also holds on the deterministic no-API-key path.
+#
+# Fields
+#   term          canonical name, spelled and cased as a tester should write it
+#   kind          element | property | concept | gesture | artifact
+#                 Only `element` terms are rewritten by the linter —
+#                 concepts and properties are prose, not locators.
+#   control_type  the noun that follows a quoted label for `element`
+#                 terms: 'the "Save" button'. Omitted where the element
+#                 has no label (scroll bar, favicon).
+#   aliases       ACCEPTABLE spellings that mean this term. Used for
+#                 lookup. A variant that differs from `term` only in
+#                 spacing / hyphenation / case ("dropdown" vs "drop-down")
+#                 is rewritten mechanically; the rest are simply
+#                 recognised and left alone, because a corpus that says
+#                 'the "Case Studies" link' is not wrong.
+#   avoid         spellings the linter actively FLAGS, with `term` as the
+#                 suggestion. Only genuinely wrong names go here — never a
+#                 synonym a reviewer would accept.
+#   definition    one sentence, from the workbook's Description column.
+#   source        the workbook's Source column, when it had one.
+#   note          why an entry exists when the workbook did not carry it.
+#
+# Case discipline: a term with an internal capital (WYSIWYG, IFrame, Open
+# Graph) is a proper noun and keeps its case when rewritten. Everything
+# else is a common noun — the rewriter mirrors whatever case the author
+# used, so "drop-down" stays lower case mid-sentence.
+# ─────────────────────────────────────────────────────────────────────
+
+terms:
+
+  # ── Navigation ────────────────────────────────────────────────────
+  - term: Breadcrumbs
+    kind: element
+    control_type: trail
+    aliases: [breadcrumb, bread crumbs, breadcrumb trail, navigation trail]
+    definition: >-
+      A secondary navigation aid showing the user's current location in the
+      site hierarchy, usually a horizontal trail of text links.
+    source: https://semantic-ui.com/collections/breadcrumb.html
+
+  - term: Menu
+    kind: element
+    control_type: menu
+    aliases: [nav menu, navigation menu, menu bar]
+    definition: >-
+      A graphical control element displaying a list of grouped navigation
+      actions or commands available to the user.
+    source: https://semantic-ui.com/collections/menu.html
+
+  - term: Hamburger button
+    kind: element
+    control_type: button
+    aliases: [hamburger, hamburger icon, hamburger menu]
+    avoid: [burger menu, three-line menu, mobile menu icon]
+    definition: >-
+      An icon of three horizontal lines that toggles a hidden navigation
+      menu, commonly placed in the top corner of the UI.
+    source: https://en.wikipedia.org/wiki/Hamburger_button
+
+  - term: Context menu
+    kind: element
+    control_type: menu
+    aliases: [shortcut menu, pop-up menu, popup menu, right-click menu]
+    definition: >-
+      A menu that appears on a specific interaction such as a right-click,
+      offering actions relevant to the selected item.
+
+  - term: Pagination
+    kind: element
+    control_type: control
+    aliases: [pager, page navigation, paging]
+    definition: >-
+      Division of content into discrete numbered pages to improve
+      navigation and loading performance.
+
+  - term: Infinite scrolling
+    kind: concept
+    aliases: [infinite scroll, endless scroll, lazy scroll]
+    definition: >-
+      A technique that loads content continuously as the user scrolls,
+      removing the need for pagination.
+    source: https://kurapov.ee/rus/technology/ui/js/infinite_scrolling/
+
+  - term: Scroll to top button
+    kind: element
+    control_type: button
+    aliases: [back to top button, back-to-top, go to top button]
+    avoid: [top button, up button]
+    definition: >-
+      A navigation element that scrolls the page back to the very top when
+      clicked.
+
+  - term: Footer
+    kind: element
+    control_type: section
+    aliases: [page footer, bottom section]
+    definition: >-
+      The bottom section of a page, typically carrying copyright info,
+      sitemap links, contact details and legal links.
+
+  - term: Landing page
+    kind: concept
+    aliases: [lander]
+    definition: >-
+      A standalone page built for a marketing or advertising campaign,
+      where a visitor arrives after clicking a link or ad.
+    source: https://en.wikipedia.org/wiki/Landing_page
+
+  # ── Forms and input ───────────────────────────────────────────────
+  - term: Form
+    kind: element
+    control_type: form
+    aliases: [web form, input form]
+    definition: >-
+      An interactive element for data entry, containing input fields and
+      normally submitting its data to a server on button click.
+    source: https://semantic-ui.com/collections/form.html
+
+  - term: Entry field
+    kind: element
+    control_type: field
+    aliases: [input field, text field, entry box]
+    avoid: [text box, textbox, textfield, input box]
+    definition: >-
+      A space where the user types text, keywords or numeric data.
+    source: https://www.usability.gov/what-and-why/glossary/tag/user-interface-design/index.html
+
+  - term: Placeholder text
+    kind: element
+    control_type: text
+    aliases: [placeholder, hint text, input hint]
+    definition: >-
+      A short hint shown inside an input field before the user enters a
+      value, describing the expected format or a sample value.
+    source: https://www.w3schools.com/tags/att_input_placeholder.asp
+
+  - term: Label
+    kind: element
+    control_type: label
+    aliases: [field label, caption]
+    definition: >-
+      An element that classifies content or titles a specific input field
+      or component.
+    source: https://semantic-ui.com/elements/label.html
+
+  - term: Checkbox
+    kind: element
+    control_type: checkbox
+    aliases: [check box, checkbox field]
+    avoid: [tickbox, tick box, check mark box]
+    definition: >-
+      A control used to select one or more independent options; typically
+      a binary checked / unchecked choice.
+    source: https://en.wikipedia.org/wiki/Checkbox
+
+  - term: Radio button
+    kind: element
+    control_type: radio button
+    aliases: [radio, radiobutton, option button]
+    definition: >-
+      A control that allows selecting only one option from a set of
+      mutually exclusive choices.
+    source: https://www.usability.gov/how-to-and-tools/methods/user-interface-elements.html
+
+  - term: Toggle button
+    kind: element
+    control_type: toggle
+    aliases: [toggle, switcher, switch, on/off switch]
+    avoid: [slider switch, flip switch]
+    definition: >-
+      A switcher with two mutually exclusive states (for example On / Off)
+      that changes a setting instantly. The two states must be visually
+      distinct.
+    source: https://www.usability.gov/how-to-and-tools/methods/user-interface-elements.html
+
+  - term: Drop-down
+    kind: element
+    control_type: drop-down
+    note: >-
+      Not a row in Glossary.xlsx, which carries only "Filter drop-down".
+      Added because the Odoo client corpus quotes 'the "Department"
+      drop-down' throughout and authors need the plain control to exist.
+    aliases: [dropdown, drop down, dropdown menu, drop-down list, drop-down menu]
+    avoid: [select list, combobox, combo box, picklist, selector list]
+    definition: >-
+      A control that reveals a list of options on click and collapses once
+      a value is chosen.
+
+  - term: Filter drop-down
+    kind: element
+    control_type: drop-down
+    aliases: [filter dropdown, filter select, filter control]
+    definition: >-
+      A control that lets the user narrow displayed information by
+      specific criteria.
+    source: https://www.w3schools.com/w3css/w3css_filters.asp
+
+  - term: List box
+    kind: element
+    control_type: list box
+    aliases: [listbox, list control]
+    definition: >-
+      An element that allows selecting one or more items from a static
+      list contained in a box.
+    source: https://en.wikipedia.org/wiki/List_box
+
+  - term: Date picker
+    kind: element
+    control_type: date picker
+    aliases: [datepicker, calendar picker, date selector, calendar control]
+    definition: >-
+      A control for selecting a date and/or time that guarantees a
+      consistently formatted value before submission.
+
+  - term: Color picker
+    kind: element
+    control_type: color picker
+    aliases: [colour picker, colorpicker, color selector]
+    definition: >-
+      A tool for selecting colours for visual elements such as text,
+      shapes or backgrounds.
+    source: https://www.techsmith.com/blog/color-picker/
+
+  - term: Slider
+    kind: element
+    control_type: slider
+    aliases: [range slider, range control, track bar]
+    definition: >-
+      A control for selecting a value or range by moving a selector along
+      a horizontal or vertical bar.
+
+  - term: Zoom bar
+    kind: element
+    control_type: control
+    aliases: [zoom slider, zoom control, magnification slider]
+    definition: >-
+      A control, often a slider, that increases or decreases the
+      magnification of displayed content.
+
+  - term: Asterisk sign
+    kind: element
+    control_type: marker
+    aliases: [asterisk, required marker, star marker, required asterisk]
+    definition: >-
+      A symbol denoting a required field that must be filled before
+      submission.
+    source: https://en.wikipedia.org/wiki/Asterisk
+
+  - term: Character Limit
+    kind: property
+    aliases: [char limit, maxlength, max length, character restriction,
+              symbol limit]
+    definition: >-
+      A restriction defining the maximum number of characters the user can
+      type into an input field.
+
+  - term: Password Masking
+    kind: concept
+    aliases: [password mask, masked password, hidden password]
+    definition: >-
+      Replacing password characters with symbols such as asterisks or dots
+      as the user types, for privacy.
+    source: https://www.schneier.com/blog/archives/2017/07/password_maskin.html
+
+  - term: WYSIWYG
+    kind: element
+    control_type: editor
+    aliases: [wysiwyg editor, rich text editor, rich-text editor,
+              visual editor]
+    definition: >-
+      "What You See Is What You Get" — an editor whose content looks
+      exactly like the final output.
+    source: https://en.wikipedia.org/wiki/WYSIWYG
+
+  # ── Feedback, overlays, state ────────────────────────────────────
+  - term: Tooltip
+    kind: element
+    control_type: tooltip
+    aliases: [tool tip, infotip, hint]
+    avoid: [hover box, hover hint, title hint]
+    definition: >-
+      A small hover box giving information about an item when the user
+      hovers a pointer over it without clicking. Normally unavailable on
+      mobile OS unless a mouse is attached.
+    source: https://en.wikipedia.org/wiki/Tooltip
+
+  - term: Balloon
+    kind: element
+    control_type: pop-up
+    aliases: [balloon tip, callout, speech bubble]
+    definition: >-
+      A small temporary window that points at a specific element to
+      provide non-critical information or tips.
+    source: https://msdn.microsoft.com/en-us/library/windows/desktop/dn742400(v=vs.85).aspx
+
+  - term: Modal
+    kind: element
+    control_type: window
+    aliases: [modal window, modal dialog, modal popup]
+    avoid: [lightbox, overlay window, popup window]
+    definition: >-
+      A child window in front of the main window that disables the main
+      window until the user interacts with it or closes it.
+    source: https://en.wikipedia.org/wiki/Modal_window
+
+  - term: Dialog box
+    kind: element
+    control_type: dialog
+    aliases: [dialog, dialogue box, prompt window]
+    definition: >-
+      A small window that communicates information and prompts the user
+      for a response; may be modal or modeless.
+    source: https://en.wikipedia.org/wiki/Dialog_box
+
+  - term: Alert
+    kind: element
+    control_type: notification
+    aliases: [alert box, warning popup, alert message]
+    definition: >-
+      A notification or modal window warning the user about important
+      information or requiring immediate action.
+
+  - term: Message
+    kind: element
+    control_type: message
+    aliases: [notification, banner message, inline message, toast, snackbar]
+    definition: >-
+      A component displaying contextual information, alerts or feedback
+      about nearby content or system status.
+    source: https://semantic-ui.com/collections/message.html
+
+  - term: Preloader
+    kind: element
+    control_type: indicator
+    aliases: [preloader gif, pre-loader, spinner, loading indicator]
+    avoid: [loading animation, busy image]
+    definition: >-
+      An often-animated element telling the user that content is loading
+      and the system is processing the request.
+
+  - term: Loader
+    kind: element
+    control_type: indicator
+    aliases: [loading spinner, load indicator]
+    definition: >-
+      A visual animation or technical process indicating that content is
+      being pre-processed or loaded.
+    source: https://www.w3schools.com/howto/howto_css_loader.asp
+
+  - term: Progress Bar
+    kind: element
+    control_type: bar
+    aliases: [progressbar, progress indicator, step indicator]
+    definition: >-
+      A visual indicator of the user's advancement through a multi-step
+      process. Usually display-only and not clickable.
+
+  - term: Status Bar
+    kind: element
+    control_type: bar
+    aliases: [statusbar, status line]
+    definition: >-
+      An area, usually at the bottom, displaying the current state of the
+      window, background tasks or keyboard state.
+    source: https://msdn.microsoft.com/en-us/library/windows/desktop/dn742440(v=vs.85).aspx
+
+  - term: Empty state
+    kind: concept
+    aliases: [empty screen, no results state, blank state, zero state]
+    definition: >-
+      A screen or area shown when there is no content to display, such as
+      an empty inbox or empty search results; often carries a call to
+      action.
+    source: https://djangostars.com/blog/ui-ux-terms-everyone-should-know/
+
+  - term: Pointer States
+    kind: concept
+    aliases: [cursor state, pointer state, cursor shape, mouse cursor state]
+    definition: >-
+      The different visual shapes of the on-screen cursor that indicate
+      the system's current behaviour or interactive possibilities.
+    source: https://en.wikipedia.org/wiki/Pointer_(user_interface)
+
+  # ── Layout and content containers ────────────────────────────────
+  - term: Accordion
+    kind: element
+    control_type: accordion
+    aliases: [accordion list, accordion item, collapsible, collapsible menu,
+              expandable section]
+    avoid: [spoiler, expander, foldout]
+    definition: >-
+      A vertically stacked list of items with show/hide behaviour —
+      clicking a label expands the section; one or several sections may be
+      open at a time depending on configuration.
+    source: https://www.w3schools.com/w3css/w3css_accordions.asp
+
+  - term: Carousel
+    kind: element
+    control_type: carousel
+    aliases: [slider carousel, slideshow, image slider, banner rotator]
+    definition: >-
+      A slideshow component cycling through content such as images or
+      text, often with Previous / Next controls and position indicators.
+    source: https://getbootstrap.com/docs/4.0/components/carousel/
+
+  - term: Table
+    kind: element
+    control_type: table
+    aliases: [data table, grid table]
+    definition: >-
+      A structured display of data organised into rows and columns for
+      scanning and comparison.
+    source: https://semantic-ui.com/collections/table.html
+
+  - term: Grid
+    kind: element
+    control_type: grid
+    aliases: [layout grid, card grid]
+    definition: >-
+      A layout structure aligning elements and negative space to keep
+      visual consistency across screen sizes.
+    source: https://semantic-ui.com/collections/grid.html
+
+  - term: Tree view
+    kind: element
+    control_type: tree
+    aliases: [treeview, tree control, hierarchy view]
+    definition: >-
+      A hierarchical representation of information whose nodes can be
+      expanded or collapsed to show sub-items.
+    source: https://en.wikipedia.org/wiki/Tree_view
+
+  - term: IFrame
+    kind: element
+    control_type: frame
+    aliases: [iframe, inline frame, embedded frame]
+    definition: >-
+      An HTML element embedding one web page inside another, often used
+      for external presentations, videos or scripts.
+    source: https://www.w3schools.com/html/html_iframe.asp
+
+  - term: Scroll bar
+    kind: element
+    aliases: [scrollbar, scroll strip]
+    definition: >-
+      A thin interactive strip at the edge of a display that moves the
+      visible area of a document or window.
+
+  - term: Scroll Arrow
+    kind: element
+    control_type: arrow
+    aliases: [scroll arrow button, scrollbar arrow]
+    definition: >-
+      A small arrow at either end of a scroll bar; clicking it shifts the
+      view area incrementally.
+    source: http://www.usabilityfirst.com/glossary/scroll-arrow/index.html
+
+  - term: flip-container
+    kind: element
+    control_type: container
+    aliases: [flip container, flip card, flip block]
+    definition: >-
+      A CSS flip effect where a container carries content on both its
+      front and its back face.
+
+  - term: Results per page picker
+    kind: element
+    control_type: selector
+    aliases: [results per page selector, per page selector, page size selector]
+    definition: >-
+      A component letting the user change how many results are displayed
+      per page.
+    source: https://community.algolia.com/vue-instantsearch/components/results-per-page-selector.html
+
+  - term: Sorting
+    kind: concept
+    aliases: [sort, sort order, ordering]
+    definition: >-
+      A feature that orders a list of items, for example ascending (A-Z)
+      or descending (Z-A).
+    source: https://www.w3schools.com/howto/howto_js_sort_list.asp
+
+  # ── Visual primitives and CSS properties ─────────────────────────
+  - term: Icon
+    kind: element
+    control_type: icon
+    aliases: [pictogram, glyph]
+    definition: >-
+      A simplified pictogram helping users navigate and identify functions
+      or tools quickly.
+    source: https://en.wikipedia.org/wiki/Icon_(computing)
+
+  - term: Avatar
+    kind: element
+    control_type: image
+    aliases: [profile picture, profile photo, user picture, userpic]
+    definition: >-
+      A graphical representation or icon identifying a user in a community,
+      game or profile section.
+    source: https://en.wikipedia.org/wiki/Avatar_(computing)
+
+  - term: Favicon
+    kind: element
+    control_type: icon
+    aliases: [fav icon, site icon, tab icon]
+    definition: >-
+      A small icon associated with a site or page, shown in browser tabs,
+      bookmarks and shortcut lists.
+    source: https://en.wikipedia.org/wiki/Favicon
+
+  - term: Caret button
+    kind: element
+    control_type: button
+    aliases: [caret, chevron, chevron button, arrow toggle, caret icon]
+    definition: >-
+      An inverted V-shaped element indicating an expandable section or a
+      drop-down menu.
+    source: https://en.wikipedia.org/wiki/Caret
+
+  - term: Magnifying button
+    kind: element
+    control_type: button
+    aliases: [magnifying glass icon, magnifier icon, search icon,
+              magnifying glass button]
+    definition: >-
+      The standard search symbol, also used to indicate a zoom-in action.
+    source: https://www.nngroup.com/articles/magnifying-glass-icon/
+
+  - term: Upward arrow icon
+    kind: element
+    control_type: icon
+    aliases: [up arrow icon, upward arrow, arrow up icon]
+    definition: >-
+      An icon indicating an upload, a return to the top of a page, or the
+      expansion of a bottom sheet.
+
+  - term: Hyperlink
+    kind: element
+    control_type: link
+    aliases: [link, anchor, url link, clickable link]
+    definition: >-
+      A clickable reference that navigates the user to another page, file
+      or section.
+    source: https://www.w3schools.com/html/html_links.asp
+
+  - term: Margin
+    kind: property
+    aliases: [outer spacing, outside spacing]
+    definition: >-
+      A CSS property creating space around an element, outside any defined
+      borders.
+
+  - term: Padding
+    kind: property
+    aliases: [inner spacing, inside spacing]
+    definition: >-
+      A CSS property creating space around an element's content, inside
+      any defined borders.
+
+  - term: Counters
+    kind: property
+    aliases: [css counters, auto numbering]
+    definition: >-
+      CSS-maintained variables whose values rules can increment, allowing
+      automatic numbering based on document placement.
+    source: https://www.w3schools.com/css/css_counters.asp
+
+  - term: LSEP symbol
+    kind: artifact
+    aliases: [lsep, line separator character, u+2028]
+    definition: >-
+      The Unicode Line Separator character (U+2028), which behaves as a
+      newline much like the HTML <br> tag. Renders as visible junk in some
+      browsers.
+    source: https://stackoverflow.com/questions/39603446/why-is-this-symbol-showing-up-on-chrome-and-not-firefox-or-edge
+
+  # ── Cross-cutting concepts ───────────────────────────────────────
+  - term: Responsive Design
+    kind: concept
+    aliases: [responsive layout, adaptive design, adaptive layout]
+    definition: >-
+      An approach that lets a site adapt its layout and elements to give
+      an optimal experience across screen sizes.
+    source: https://www.w3schools.com/html/html_responsive.asp
+
+  - term: Accessibility
+    kind: concept
+    aliases: [a11y, accessible design]
+    definition: >-
+      The practice of making sites and apps usable by everyone, including
+      people with disabilities — for example sufficient contrast for
+      colour-blind users.
+    source: https://www.w3.org/standards/webdesign/accessibility
+
+  - term: Usability
+    kind: concept
+    aliases: [ease of use]
+    definition: >-
+      The degree to which specific users can achieve their goals with a
+      product effectively, efficiently and with satisfaction.
+    source: https://en.wikipedia.org/wiki/Usability
+
+  - term: Affordance
+    kind: concept
+    aliases: [perceived affordance]
+    definition: >-
+      A design property where an element's appearance suggests its
+      function — a button that looks clickable.
+    source: https://www.interaction-design.org/literature/article/affordances-and-design
+
+  - term: Wireframe
+    kind: artifact
+    aliases: [wire frame, mockup skeleton, lo-fi mockup]
+    definition: >-
+      A low-fidelity visual guide representing page structure, layout and
+      basic interactions without full styling.
+    source: https://djangostars.com/blog/ui-ux-terms-everyone-should-know/
+
+  - term: Cookie
+    kind: artifact
+    aliases: [browser cookie, http cookie]
+    definition: >-
+      A small text file a site stores on the user's computer to remember
+      preferences, login data or browsing history.
+
+  - term: Metadata
+    kind: artifact
+    aliases: [meta data, meta tags, meta information]
+    definition: >-
+      "Data about data" — information embedded in a page describing its
+      content, author or keywords for search engines.
+    source: https://techterms.com/definition/metadata
+
+  - term: Open Graph
+    kind: artifact
+    aliases: [og tags, open graph tags, og protocol]
+    definition: >-
+      A protocol letting pages become rich objects in a social graph, used
+      by platforms to render a custom title, description and image when a
+      link is shared.
+
+  - term: Robots.txt
+    kind: artifact
+    aliases: [robots file, robots txt]
+    definition: >-
+      A text file instructing web crawlers which pages should or should
+      not be indexed.
+    source: http://www.robotstxt.org/robotstxt.html
+
+  - term: Search Query
+    kind: concept
+    aliases: [search term, search string, query string]
+    definition: >-
+      The sequence of characters or words the user enters into a search bar
+      to find information.
+    source: https://en.wikipedia.org/wiki/Web_query
+
+  - term: Tag
+    kind: element
+    control_type: tag
+    aliases: [chip, keyword tag, category tag]
+    definition: >-
+      A keyword or term assigned to a piece of information so users can
+      find and categorise related content.
+    source: https://www.usability.gov/how-to-and-tools/methods/user-interface-elements.html
+
+  - term: Trigger
+    kind: concept
+    aliases: [event trigger]
+    definition: >-
+      A command or function signalling the system that a specific event
+      occurred, initiating an automated response.
+
+  - term: Cheat List
+    kind: artifact
+    aliases: [cheat sheet, cheatlist, check list of repetitive checks]
+    definition: >-
+      A list of repetitive checks reused for standard functionality such
+      as registration or authorisation forms, to keep quality consistent.
+
+  - term: Console
+    kind: artifact
+    aliases: [browser console, devtools console, js console]
+    definition: >-
+      A text-based interface where developers and testers read system
+      output, errors and log messages.
+    source: https://techterms.com/definition/console
+
+  - term: Terminal
+    kind: artifact
+    aliases: [command line, shell]
+    definition: >-
+      An interface for sending commands to a computer system and receiving
+      its output.
+    source: https://techterms.com/definition/terminal
+
+  - term: Display resolution
+    kind: property
+    aliases: [screen resolution, resolution]
+    definition: >-
+      The number of distinct pixels in each dimension a device can
+      display; higher resolution gives a sharper image.
+    source: https://en.wikipedia.org/wiki/Display_resolution
+
+  - term: Tray icon
+    kind: element
+    control_type: icon
+    aliases: [system tray icon, notification area icon]
+    definition: >-
+      An icon in the operating system's system tray giving quick access to
+      background applications and status indicators.
+    source: https://searchenterprisedesktop.techtarget.com/definition/system-tray
+
+  # ── Gestures and interaction ─────────────────────────────────────
+  - term: Drag-and-Drop
+    kind: gesture
+    aliases: [drag and drop, dragndrop, drag & drop]
+    definition: >-
+      Selecting a virtual object, grabbing it and dragging it to another
+      location or onto another object to perform an action.
+    source: https://en.wikipedia.org/wiki/Drag_and_drop
+
+  - term: Mobile Gestures
+    kind: gesture
+    aliases: [touch gestures, gestures, mobile gesture]
+    definition: >-
+      Physical interactions such as tap, swipe and pinch that trigger a
+      device action, following platform standards like the iOS Design
+      Guide.
+    platform: mobile
+
+  # ── Mobile-specific ──────────────────────────────────────────────
+  - term: Tab bar
+    kind: element
+    control_type: bar
+    aliases: [tabbar, bottom navigation, bottom nav, bottom tab bar]
+    definition: >-
+      A navigation element at the bottom of the screen for switching
+      between the app's primary sections.
+    platform: mobile
+    source: https://developer.apple.com/ios/human-interface-guidelines/bars/tab-bars/
+
+  - term: Widget
+    kind: element
+    control_type: widget
+    aliases: [home screen widget, app widget]
+    definition: >-
+      An extension displaying timely information or app functionality
+      directly on the home or lock screen.
+    platform: mobile
+    source: https://developer.apple.com/ios/human-interface-guidelines/extensions/widgets/
+
+  - term: Portrait mode
+    kind: property
+    aliases: [portrait, portrait orientation, vertical orientation]
+    definition: >-
+      The standard vertical screen orientation, taller than it is wide.
+    platform: mobile
+
+  - term: Landscape mode
+    kind: property
+    aliases: [landscape, landscape orientation, horizontal orientation]
+    definition: >-
+      A screen orientation wider than it is tall.
+    platform: mobile
+
+  - term: Push Notification
+    kind: element
+    control_type: notification
+    aliases: [push, push message, web push]
+    definition: >-
+      An alert an app or site sends to the user's device even when the user
+      is not actively using the application.
+
+  - term: Crash log
+    kind: artifact
+    aliases: [crashlog, crash report]
+    avoid: [crash dump, error dump]
+    definition: >-
+      Technical information recorded when an app shuts down unexpectedly;
+      essential for finding the root cause of sporadic or severe defects.
+    platform: mobile
+    source: https://academy.test.io/tools-co/crash-logs/
+
+  - term: Chatbot
+    kind: element
+    control_type: widget
+    aliases: [chat bot, bot, chat widget, live chat widget]
+    definition: >-
+      A program simulating human conversation through text or voice, acting
+      as an interactive agent inside an app or site.

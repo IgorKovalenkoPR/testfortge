@@ -9,7 +9,7 @@ cases:
       - "Navigate to a product page"
       - "Click 'Add to Cart' button"
       - "Navigate to the cart page"
-      - "Verify the item shows the same name, price, and image that are stored on the product page"
+      - "Pay attention to the name, price and image of the item in the cart"
     test_data: "Any available product"
     expected_result: "Product is added to the cart. Cart count is updated. Product details in the cart match the product page fields exactly."
     category: Positive
@@ -22,7 +22,7 @@ cases:
       - "Fill shipping/billing information"
       - "Enter valid payment details"
       - "Complete the purchase"
-      - "Verify order confirmation"
+      - "Pay attention to the order confirmation Message"
     test_data: "Valid card: 4242 4242 4242 4242, Exp: 12/28, CVC: 123"
     expected_result: "Order is placed successfully. Confirmation page/email is received. Cart is cleared."
     category: Positive
@@ -43,8 +43,8 @@ cases:
     preconditions: "Checkout page is reached. Payment form is filled."
     steps:
       - "Click the 'Pay' / 'Place Order' button rapidly multiple times"
-      - "Verify payment was processed only once"
-      - "Check for duplicate charges"
+      - "Pay attention to the number of charges in the payment provider dashboard"
+      - "Try to find a duplicate charge for the same order"
     test_data: ""
     expected_result: "Only one charge is processed. No duplicate orders are created."
     category: "Edge Case"

@@ -68,6 +68,17 @@ jobs:
       - name: Validate qa_knowledge YAML
         run: python -c "from engine.qa_knowledge_loader import LOADER; assert LOADER.areas(), 'no areas loaded'"
 
+      # The glossary and wording rules are not schema-validated by LOADER
+      # (they are prompt material, read as raw text). A malformed file
+      # would degrade to an empty index and silently disable the
+      # terminology linter, so assert the parsed shape here instead.
+      - name: Validate terminology assets
+        run: >-
+          python -c "from engine import glossary as g;
+          assert len(g.terms()) >= 85, f'glossary shrank to {len(g.terms())} terms';
+          assert g.canonical_term('dropdown') == 'Drop-down', 'alias index broken';
+          assert 'correctly' in g.banned_phrases('grading'), 'wording rules did not parse'"
+
       # No playwright browser install — tests don't launch a real browser.
       # The async endpoint tests submit jobs to the in-process queue and
       # mock / bypass the runner. If that changes, add:

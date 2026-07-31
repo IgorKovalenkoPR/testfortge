@@ -45,6 +45,7 @@ from dataclasses import dataclass, field, asdict
 from functools import lru_cache
 from typing import Any
 
+from engine import glossary
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.log import get_logger
 
@@ -93,10 +94,17 @@ CATEGORIES = ("Positive", "Negative")
 PRIORITIES = ("High", "Medium", "Low")
 
 # Weak modals the house style bans from the expected-result column: they
-# make the assertion unfalsifiable. Measured absence in the corpus — the
-# 4,808 reference rows never use one as the assertion verb.
+# read as a requirement rather than an observation.
+#
+# "should" is NOT in this set, deliberately. The two reference corpora
+# disagree: the Odoo client deliverable (4,808 rows) never uses it, while
+# the team's own reviewed training deliverable uses it throughout ("The
+# entered data should be accepted") and the reviewing team lead did not
+# object to a single instance. The operator settled it in favour of the
+# training deliverable — "should" is accepted and is never rewritten.
+# "must" and "shall" appear in neither corpus and stay banned.
 _WEAK_MODAL_RE = re.compile(
-    r"\b(should(?:\s+be)?|must(?:\s+be)?|shall(?:\s+be)?|ought\s+to(?:\s+be)?|"
+    r"\b(must(?:\s+be)?|shall(?:\s+be)?|ought\s+to(?:\s+be)?|"
     r"is\s+expected\s+to(?:\s+be)?|are\s+expected\s+to(?:\s+be)?)\b",
     re.IGNORECASE,
 )
@@ -392,9 +400,15 @@ _SCHEMA_HINT = """{
 def _system_blocks(grounding: str) -> list[dict]:
     """System message with prompt caching on every static part.
 
-    The two style assets are ~10k tokens combined and identical on every
-    call, so caching them is the difference between this agent being
-    affordable and not.
+    The style assets are ~15k tokens combined and identical on every call,
+    so caching them is the difference between this agent being affordable
+    and not.
+
+    Budget note: the API allows at most four ``cache_control`` breakpoints.
+    Head, house style, coverage model and the terminology pair take all
+    four. The ISTQB grounding block is deliberately left uncached — it is
+    retrieved per request and varies, so a breakpoint on it would spend a
+    slot on a prefix that never hits.
     """
     blocks: list[dict] = [{
         "type": "text",
@@ -415,14 +429,44 @@ def _system_blocks(grounding: str) -> list[dict]:
             "text": "=== COVERAGE MODEL (coverage_rules.yaml) ===\n" + coverage,
             "cache_control": {"type": "ephemeral"},
         })
+    terminology = _terminology_block()
+    if terminology:
+        blocks.append({
+            "type": "text",
+            "text": terminology,
+            "cache_control": {"type": "ephemeral"},
+        })
     if grounding:
         blocks.append({
             "type": "text",
             "text": "=== ISTQB grounding (verbatim from syllabus) ===\n"
                     + grounding,
-            "cache_control": {"type": "ephemeral"},
         })
     return blocks
+
+
+def _terminology_block() -> str:
+    """Glossary + reviewer wording rules, as one cache breakpoint.
+
+    Both files answer "what do I call this and how do I phrase it", and
+    the pair fits in one block — which matters because breakpoints are the
+    scarce resource here, not tokens.
+    """
+    parts: list[str] = []
+    wording = glossary.wording_rules_text()
+    if wording:
+        parts.append(
+            "=== WORDING AND TERMINOLOGY DISCIPLINE (wording_rules.yaml) "
+            "===\nEvery rule here quotes the reviewing team lead's own "
+            "comment on a real deliverable. Treat the `reviewer:` lines as "
+            "non-negotiable.\n" + wording)
+    gloss = glossary.glossary_text()
+    if gloss:
+        parts.append(
+            "=== UI TERMINOLOGY GLOSSARY (ui_terms.en.yaml) ===\nName every "
+            "element with its `term`. The `avoid` list is what a reviewer "
+            "sends back.\n" + gloss)
+    return "\n\n".join(parts)
 
 
 def _build_grounding(profile, artifacts: Artifacts) -> str:
@@ -697,11 +741,12 @@ def _ensure_verify_that(summary: str) -> str:
 
 # Weak-modal → declarative rewrites, longest pattern first so
 # "should not be" is handled before "should be".
+# "should" is absent here for the reason spelled out at _WEAK_MODAL_RE:
+# the operator ruled it acceptable, so rewriting it would be editing text
+# a reviewer already signed off on.
 _MODAL_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bshould\s+not\s+be\b", re.I),   "is not"),
     (re.compile(r"\bmust\s+not\s+be\b", re.I),     "is not"),
     (re.compile(r"\bshall\s+not\s+be\b", re.I),    "is not"),
-    (re.compile(r"\bshould\s+be\b", re.I),         "is"),
     (re.compile(r"\bmust\s+be\b", re.I),           "is"),
     (re.compile(r"\bshall\s+be\b", re.I),          "is"),
     (re.compile(r"\bought\s+to\s+be\b", re.I),     "is"),
@@ -716,7 +761,7 @@ _IRREGULAR_3SG: dict[str, str] = {
 }
 
 _BARE_MODAL_RE = re.compile(
-    r"\b(?:should|must|shall)\s+(?:not\s+)?([a-z][a-z-]+)\b", re.I)
+    r"\b(?:must|shall)\s+(?:not\s+)?([a-z][a-z-]+)\b", re.I)
 
 
 def _third_person_singular(verb: str) -> str:
@@ -840,7 +885,7 @@ def lint_case(case: AuthoredCase) -> list[str]:
     if len(summary) > 220:
         out.append("summary exceeds 220 characters")
     if has_weak_modal(summary):
-        out.append("summary uses a weak modal (should/must/shall)")
+        out.append("summary uses a weak modal (must/shall)")
 
     if not case.steps:
         out.append("no steps")
@@ -853,7 +898,7 @@ def lint_case(case: AuthoredCase) -> list[str]:
     if not (case.expected_result or "").strip():
         out.append("expected result is empty")
     elif has_weak_modal(case.expected_result):
-        out.append("expected result uses a weak modal (should/must/shall)")
+        out.append("expected result uses a weak modal (must/shall)")
 
     if case.category == "Negative" and case.expected_result \
             and not asserts_feedback(case.expected_result):
@@ -864,6 +909,33 @@ def lint_case(case: AuthoredCase) -> list[str]:
     if case.priority not in PRIORITIES:
         out.append(f"unknown priority {case.priority!r}")
 
+    out.extend(_terminology_findings(case))
+    return out
+
+
+def _terminology_findings(case: AuthoredCase) -> list[str]:
+    """Wording / glossary findings, from the reviewer rules in code.
+
+    Kept separate from the structural checks above so the deterministic
+    generator can call it on cases it built itself without paying for the
+    structural pass twice.
+    """
+    out: list[str] = []
+    # The corpus's error-message sweep uses "<Surface>: <attempted action>"
+    # instead of the Verify grammar — a sanctioned alternate form, so the
+    # opener check is switched off for it exactly as it is above.
+    for issue in glossary.lint_text(
+            case.summary or "", kind="title",
+            check_opener=not _is_error_message_title(case.summary or "")):
+        out.append(f"summary: {issue}")
+    out.extend(glossary.lint_steps(case.steps or []))
+    for issue in glossary.lint_text(case.expected_result or "",
+                                    kind="expected"):
+        out.append(f"expected result: {issue}")
+    if case.steps and not glossary.starts_from_entry_point(case.steps):
+        out.append(
+            "step 1 deep-links instead of navigating from the entry URL — "
+            "a tester cannot reach the surface when the route changes")
     return out
 
 
@@ -900,6 +972,25 @@ def normalise_case(case: AuthoredCase) -> tuple[AuthoredCase, list[str]]:
         case.expected_result = append_feedback_assertion(
             case.expected_result)
         fixed.append("negative feedback assertion")
+
+    # Terminology pass. Only information-preserving fixes — region
+    # capitalisation, spelling variants of glossary terms, spacing, and
+    # the trailing period the reviewer asked about three times. A semantic
+    # rename ("burger menu" → "Hamburger button") is reported by
+    # lint_case, never applied, because guessing wrong there breaks the
+    # locator the label stands in for.
+    before = (case.summary, tuple(case.steps),
+              case.expected_result, case.preconditions, case.test_data)
+    case.summary = glossary.normalise_text(case.summary or "", kind="title")
+    case.steps = [glossary.normalise_text(s or "", kind="step")
+                  for s in case.steps]
+    case.expected_result = glossary.normalise_text(
+        case.expected_result or "", kind="expected")
+    case.preconditions = glossary.normalise_text(case.preconditions or "")
+    case.test_data = glossary.normalise_text(case.test_data or "")
+    if before != (case.summary, tuple(case.steps), case.expected_result,
+                  case.preconditions, case.test_data):
+        fixed.append("terminology")
 
     case.category = _coerce_category(case.category)
     case.priority = _coerce_priority(case.priority)
