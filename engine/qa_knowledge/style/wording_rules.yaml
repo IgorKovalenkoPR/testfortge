@@ -1,0 +1,243 @@
+version: 1
+name: TestFort / QArea wording and terminology discipline
+locale: en
+
+# ─────────────────────────────────────────────────────────────────────
+# Provenance
+# ─────────────────────────────────────────────────────────────────────
+# Two sources, both from the team's own artefacts — not a textbook:
+#
+#   1. Glossary.xlsx — the team's UI terminology reference (91 terms),
+#      transcribed to engine/qa_knowledge/glossary/ui_terms.en.yaml.
+#
+#   2. "Training Plan_Horban Yaroslavna.xlsx" — a trainee's Low-level
+#      checklist / Test Cases / Test Design Techniques / Bugs sheets
+#      WITH the reviewing team lead's threaded comments still attached.
+#      Those comments are the only place the team's wording rules are
+#      written down explicitly, so every rule below quotes the comment
+#      that produced it under `reviewer:`. A rule with no `reviewer:` or
+#      `evidence:` line is an invention and should be deleted.
+#
+# Read as raw text by engine/tc_author.py and engine/checklist_author.py
+# into a cached system block, and enforced in code by engine/glossary.py
+# so the same rules hold on the deterministic no-API-key path.
+# ─────────────────────────────────────────────────────────────────────
+
+element_naming:
+  rule: >-
+    Name every UI element with its canonical glossary term, and capitalise
+    the names of page regions. The term is half the locator — a tester who
+    did not write the case has nothing else to find the control with.
+  reviewer:
+    - '"Footer should be started from a capital letter"'
+    - '"Header should be started from a capital letter"'
+    - '"Main/Homepage should be started from a capital letter"'
+  rules:
+    - >-
+      Page regions are proper nouns: Header, Footer, Homepage, Sidebar,
+      Navigation. Write "in the Header", not "in the header".
+    - >-
+      Quote the on-screen label exactly, then name the control type from
+      the glossary: the "Contact us" button, the "Industries" drop-down,
+      the "I agree to the Cookie Policy and Privacy Policy" checkbox.
+    - >-
+      Use the glossary's canonical term, not a synonym. Write "drop-down"
+      (not dropdown / select / combobox), "entry field" or the field's own
+      label (not textbox), "Accordion" (not spoiler / expander),
+      "Hamburger button" (not burger menu), "Modal" (not lightbox).
+    - >-
+      Buttons whose label the design renders in brackets keep the
+      brackets: the [Show more] button, the [Find your role] button. The
+      corpus uses both `the "X" button` and `the [X] button`; be
+      consistent inside one document.
+    - >-
+      Never refer to an element only by its position ("the second card",
+      "the icon on the right"). Name it, then qualify by position if two
+      identical elements exist.
+
+action_verbs:
+  rule: >-
+    One action per step, with an explicit verb from the approved list and
+    an explicit object. A step that does not say WHAT it acts on is not
+    executable.
+  reviewer: '"1. What do you scroll?"'
+  approved:
+    - Go to            # navigation to a URL or breadcrumb path
+    - Click on         # buttons, links, cards, icons
+    - Tap              # mobile equivalent of Click on
+    - Expand           # drop-downs, accordions, tree nodes
+    - Collapse
+    - Select           # a value inside an already-open list
+    - Fill in          # entry fields, with the value named
+    - Enter            # keyboard input where "Fill in" reads wrong
+    - Clear            # emptying a field
+    - Leave … empty    # the deliberate omission in a negative case
+    - Mark             # checkboxes, radio buttons, consent boxes
+    - Unmark
+    - Press            # keyboard keys: Press the "Enter" key
+    - Hover over
+    - Scroll           # always with the object: "Scroll the page down"
+    - Swipe            # mobile
+    - Upload
+    - Drag and drop
+    - Change
+    - Confirm
+    - Pay attention to # observation-only step, display checks
+    - Try to find      # observation-only step, absence checks
+  rules:
+    - >-
+      "Scroll" always names its object and direction: "Scroll the page
+      down to the Footer", never a bare "Scroll down".
+    - >-
+      Observation steps use "Pay attention to <element>" or "Try to find
+      <element>". Never put "Verify", "Check" or "Ensure" in a step — the
+      assertion belongs in the expected result.
+    - >-
+      "Fill in the <field> field with <what>" — name the field AND say
+      whether the data is valid or invalid, then repeat the literal value
+      in the test-data column.
+    - >-
+      Banned as steps: "Navigate to the relevant page", "Perform the
+      action", "Observe the result", "Do the same for other fields".
+
+navigation_from_entry_point:
+  rule: >-
+    Steps start at the product's entry URL and navigate. A deep link into
+    an inner page is not a reproduction path — it rots the moment the
+    route changes and it hides which navigation the case actually
+    depends on.
+  reviewer: >-
+    "Let`s imagine if this URL will be changed - how other tester or
+    developer could navigate to it? Please, specify all steps and
+    preconditions steps, starting from main URL."
+  rules:
+    - >-
+      Step 1 is navigation to the entry point: "Go to the site:
+      https://example.com/".
+    - >-
+      Every subsequent hop is its own step, naming the control clicked:
+      'Click on the "Industries" menu in the Header', 'Click on the
+      "AI Assistant Quality Audit" case study card'.
+    - >-
+      A precondition may state that a surface is already open ('The
+      "Didn`t find a suitable position?" form is opened on the
+      https://example.com/careers page') only when every case in the
+      section shares it — and the path to it must still be derivable
+      from the section's own steps.
+    - >-
+      Never jump to an in-page state. A step-1 URL carrying a fragment
+      ("…/careers#form") or a query string ("…/projects?industry=finance")
+      records a state, not a navigation, and dies the moment the anchor or
+      the parameter is renamed. Open the page, then act on the control that
+      produces the state.
+  enforcement: >-
+    Only the fragment / query-string half is checked in code
+    (engine.glossary.starts_from_entry_point). Whether a deep page should
+    be opened directly or reached by clicking through a menu is a
+    judgement about the product under test — the reference corpus does
+    both — so it is left to the authoring agent, which can see the
+    control inventory.
+
+result_wording:
+  rule: >-
+    State an observable outcome. Never grade it as "correct" or
+    "incorrect" — name the action that happened or the state that holds,
+    so the reader can tell a pass from a fail without asking the author
+    what "correct" meant.
+  reviewer: >-
+    "Try do not use ""correct/incorrect"", specify the action or the
+    result"
+  rules:
+    - >-
+      Banned in expected results and in checklist objectives: "correctly",
+      "incorrectly", "correct", "incorrect", "properly", "as expected",
+      "works fine", "works as designed", "appropriately", "successfully
+      works".
+    - >-
+      Replace the grade with the observable fact. Not "the filter works
+      correctly" but "only projects related to the selected industry are
+      displayed". Not "the form is validated correctly" but 'the "Name"
+      field is highlighted in red and an error message is displayed below
+      the field'.
+    - >-
+      "should" IS accepted in expected results — the team's reviewed
+      training deliverable uses it throughout ("The entered data should be
+      accepted", "Button should be hidden when there is no additional
+      data") and the reviewing team lead did not object. Present-tense
+      declarative ("The entered data is accepted") is equally accepted and
+      is what the Odoo client corpus uses. Do not rewrite one into the
+      other.
+    - >-
+      "must" and "shall" stay banned — neither reference corpus uses them
+      and they read as a requirement, not an observation.
+    - >-
+      A negative case asserts BOTH halves: the action is blocked AND the
+      user-visible feedback. "The form is not submitted. The required
+      fields are highlighted in red and error messages are displayed."
+    - >-
+      When there are two or more independent outcomes, number them
+      ("1. … 2. … 3. …") exactly as the reference sheets do.
+
+punctuation:
+  rule: No trailing period on a checklist objective or a test-case title.
+  reviewer:
+    - '"Remove dot at the end"'
+    - '"2. Extra dot"'
+    - '"extra space"'
+  rules:
+    - >-
+      Titles and checklist objectives end without ".". Multi-sentence
+      expected results keep internal periods.
+    - No double spaces, and no space before a comma or a period.
+    - >-
+      Use straight quotes (") around labels consistently. Do not mix
+      curly and straight quotes inside one document.
+
+opener:
+  rule: Every checklist objective and test-case title opens with "Verify".
+  reviewer: '"typo: Verify"'
+  rules:
+    - >-
+      Test-case titles: 'Verify that <actor> can <action> …' /
+      'Verify that <element> is <state> …'.
+    - >-
+      Checklist objectives: 'Verify that the <element> …' — same opener,
+      shorter body, one observable check.
+    - >-
+      "Validate", "Check", "Ensure", "Test that", "Make sure" are not
+      used as the opener anywhere in either reference corpus.
+
+banned_phrases:
+  # Enforced in code by engine.glossary.lint_terminology so the rule also
+  # holds when no LLM is in the loop.
+  grading:      [correctly, incorrectly, correct, incorrect, properly,
+                 "as expected", "works fine", "works as designed",
+                 appropriately]
+  modal:        [must, shall, "ought to", "is expected to"]
+  generic_step: ["navigate to the relevant page", "perform the action",
+                 "observe the result", "do the same for other fields",
+                 "check everything", "verify all functionality"]
+  vague_object: ["scroll down", "scroll up", "click the button",
+                 "fill the field", "select the option"]
+
+anti_patterns:
+  - text: '"Verify that the filter works correctly"'
+    why: >-
+      Grades instead of describing. The tester cannot tell what a correct
+      filter looks like. Write what is displayed after filtering.
+  - text: '"1. Scroll down"'
+    why: >-
+      No object. The reviewer asked "What do you scroll?" — the page, a
+      modal, a drop-down list and a table all scroll differently.
+  - text: 'Step 1 is "Go to https://example.com/careers#form"'
+    why: >-
+      A deep link is not a navigation path. When the route changes the
+      case is dead and nobody can tell what it used to exercise.
+  - text: '"the industries dropdown"'
+    why: >-
+      Neither the label nor the glossary term. Write 'the "Industries"
+      drop-down'.
+  - text: '"Verify that the footer is displayed."'
+    why: >-
+      Lowercase region name plus a trailing period — two of the
+      reviewer's three most-repeated comments in one line.

@@ -164,8 +164,10 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
     The QA Team Lead checks, in the order the rules run:
       0. No PDF underscore-fill artifacts in any text field
       1. Summary starts with "Verify that"
-      2. Expected Result asserts in declarative present tense — no
-         "should" / "must" / "shall"
+      2. Expected Result asserts an observation, not a requirement —
+         no "must" / "shall". ("should" is accepted: see
+         ``tc_author._WEAK_MODAL_RE`` for why the two reference corpora
+         disagree and how the operator settled it.)
       3. No page-number artifacts in the summary
       4. No page-number artifacts in the steps
       5. No duplicate test case IDs
@@ -224,8 +226,8 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
         if expected and _has_weak_modal(expected):
             report.findings.append(ReviewFinding(
                 severity="Major", category="Expected Result Voice",
-                message="Expected result hedges with 'should/must/shall' "
-                        "instead of asserting in declarative present tense",
+                message="Expected result reads as a requirement "
+                        "('must'/'shall') instead of an observation",
                 item_id=tc_id,
             ))
             # Auto-fix
@@ -353,8 +355,10 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
         if summary and _has_weak_modal(summary):
             report.findings.append(ReviewFinding(
                 severity="Minor", category="Summary Voice",
-                message="Summary hedges with 'should/must/shall'; the house "
-                        "grammar is 'Verify that <Actor> can/cannot ...'",
+                message="Summary reads as a requirement ('must'/'shall'); "
+                        "the house grammar is 'Verify that <Actor> "
+                        "can/cannot ...'",
+
                 item_id=tc_id,
             ))
             if hasattr(tc, "summary"):
@@ -513,13 +517,15 @@ def _ensure_verify_that(text: str) -> str:
 
 
 def _has_weak_modal(text: str) -> bool:
-    """True when the expected result hedges instead of asserting.
+    """True when the expected result states a requirement, not an outcome.
 
-    "should" / "must" / "shall" make the assertion unfalsifiable — the
-    tester cannot decide pass from fail. The 4,808-row reference corpus
-    (Odoo Test Plan) never uses one as the assertion verb; it writes
-    declarative present tense throughout ("The required fields are
-    highlighted", "Odoo Warning is displayed").
+    "must" / "shall" appear in neither reference corpus and read as a
+    specification rather than something a tester can observe.
+
+    "should" is NOT flagged. The 4,808-row Odoo client corpus never uses
+    it, but the team's own reviewed training deliverable uses it
+    throughout and the reviewing team lead let every instance stand; the
+    operator ruled in favour of the training deliverable.
 
     Delegates to :mod:`engine.tc_author` so the linter and the author
     agent share one definition of the rule.
@@ -532,17 +538,14 @@ def _fix_expected_result_voice(text: str) -> str:
     """Rewrite a hedged expected result into the house declarative voice.
 
     Transforms patterns like:
-      'User should be authenticated'    → 'User is authenticated'
-      'Results should be displayed'     → 'Results are displayed'
-      'Form should not be submitted'    → 'Form is not submitted'
-      'The server should reject it'     → 'The server rejects it'
-      'No errors should occur'          → 'No errors occur'
+      'User must be authenticated'      → 'User is authenticated'
+      'Results must be displayed'       → 'Results are displayed'
+      'Form must not be submitted'      → 'Form is not submitted'
+      'No errors shall occur'           → 'No errors occur'
 
-    This is the exact inverse of what this helper used to do: it
-    previously converted declarative text *into* "should" voice, which
-    put every generated case in conflict with the client-accepted house
-    style. See ``qa_knowledge/style/house_style.yaml`` →
-    ``expected_result``.
+    "should" passes through untouched — see :func:`_has_weak_modal`. See
+    ``qa_knowledge/style/house_style.yaml`` → ``expected_result`` and
+    ``qa_knowledge/style/wording_rules.yaml`` → ``result_wording``.
     """
     from .tc_author import normalise_expected_result
     return normalise_expected_result(text)

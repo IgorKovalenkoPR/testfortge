@@ -18,11 +18,15 @@ engine/qa_knowledge/
   style/
     house_style.yaml        writing standard for the LLM author agent
     coverage_rules.yaml     coverage model for the LLM author agent
+    wording_rules.yaml      the reviewing team lead's own wording rules
+  glossary/
+    ui_terms.en.yaml        the team's UI terminology reference
 ```
 
-`style/` is **not** loaded by `LOADER` and is not schema-validated — it
-is prompt material, read as raw text by `engine.tc_author` and pasted
-into a cached system block. See "Style assets" below.
+`style/` and `glossary/` are **not** loaded by `LOADER` and are not
+schema-validated — they are prompt material, read as raw text by
+`engine.tc_author` and pasted into cached system blocks. See "Style
+assets" below.
 
 The loader validates every file on construction. Bad YAML or a
 violation of the schema raises `RuntimeError` at boot — broken
@@ -73,40 +77,60 @@ cases:
                              # to bypass the heuristic in testcase_generator
 ```
 
-## Style assets (`style/`)
+## Style assets (`style/`, `glossary/`)
 
-Two files teach the **Test Case Author agent** (`engine/tc_author.py`)
-how to write, and what to cover. Both were reverse-engineered from a
-real accepted client deliverable — the Odoo Test Plan spreadsheet, 41
-test sheets / 4,808 test-case rows / 8 modules — and every rule carries
-the measured pattern that backs it as an inline `evidence:` note.
+Four files teach the **Test Case Author agent** (`engine/tc_author.py`)
+how to write, what to cover, and what to call things.
 
-| File | Answers |
-|---|---|
-| `house_style.yaml` | **How** to write a case: title grammar, precondition idiom, step verbs, expected-result voice, section naming, category rules, anti-patterns. |
-| `coverage_rules.yaml` | **Which** cases must exist: per-surface control enumeration, per-control-type scenario sets, mandatory positive/negative pairings, cross-cutting sweeps. |
+| File | Answers | Provenance |
+|---|---|---|
+| `style/house_style.yaml` | **How** to write a case: title grammar, precondition idiom, step verbs, expected-result voice, section naming, category rules, anti-patterns. | Odoo Test Plan — 41 sheets / 4,808 rows / 8 modules |
+| `style/coverage_rules.yaml` | **Which** cases must exist: per-surface control enumeration, per-control-type scenario sets, mandatory positive/negative pairings, cross-cutting sweeps. | same |
+| `style/wording_rules.yaml` | **How to phrase it**: element naming, approved action verbs, entry-point navigation, graded-outcome ban, punctuation, opener. | `Training Plan_Horban Yaroslavna.xlsx` — the reviewing team lead's threaded comments |
+| `glossary/ui_terms.en.yaml` | **What to call it**: 87 canonical UI terms with `kind`, `control_type`, acceptable `aliases`, and flagged `avoid` spellings. | `Glossary.xlsx` — 80 website + 11 mobile terms |
 
-Editing either changes generated output with no Python change. They are
-loaded as **raw text**, not parsed YAML, because the `evidence:` comments
-are the part that stops the model treating a house convention as
-negotiable.
+Editing any of them changes generated output with no Python change. They
+are loaded as **raw text**, not parsed YAML, because the `evidence:` and
+`reviewer:` comments are the part that stops the model treating a house
+convention as negotiable.
 
-Two rules from `house_style.yaml` are also enforced in code, so they hold
-on every path including the no-API-key fallback:
+`wording_rules.yaml` is the only place the team's wording rules are
+written down explicitly — they existed nowhere but as review comments on
+a spreadsheet. Every rule in it quotes the comment that produced it under
+`reviewer:`. **A rule with no `reviewer:` or `evidence:` line is an
+invention and should be deleted.**
 
-- **Declarative expected results.** `should` / `must` / `shall` are
-  banned — they leave the tester unable to decide pass from fail. The
-  reference corpus never uses one as the assertion verb.
-  `engine.tc_author.normalise_expected_result` rewrites them, and
-  `engine.qa_team_lead` review rule 2 applies it.
+### Rules also enforced in code
+
+So they hold on every path, including the no-API-key fallback:
+
+- **Requirement voice.** `must` / `shall` / `ought to` are banned in the
+  expected result — they state a requirement on the product rather than
+  something a tester can observe. `engine.tc_author.normalise_expected_result`
+  rewrites them; `engine.qa_team_lead` review rule 2 applies it.
+- **`should` is accepted.** The two corpora disagree: the Odoo client
+  deliverable never writes it, the team's own reviewed training
+  deliverable writes it throughout and the reviewing team lead let every
+  instance stand. The operator settled it in favour of the training
+  deliverable, so `should` is neither rewritten nor flagged. The full
+  provenance is in `engine/tc_author.py` at `_WEAK_MODAL_RE`.
 - **Negative cases assert the feedback too.** A refusal case must state
   both that the action was blocked *and* what the user sees. On the
   corpus's dedicated error-message sheet, 8 of 25 rows failed precisely
   on missing or misdirected feedback. Review rule 8 repairs cases that
   only assert the refusal.
+- **Terminology and wording** (`engine/glossary.py`): graded outcomes
+  ("works correctly"), generic steps, objectless verbs ("Scroll down"),
+  assertions inside steps, missing `Verify` opener, trailing periods,
+  lower-case page regions, and non-canonical element names. Everything
+  information-preserving is auto-fixed by `normalise_text`; a semantic
+  rename is only ever *suggested*, because guessing wrong there breaks
+  the locator the label stands in for.
 
-`tests/test_tc_author.py` guards both, and asserts that no shipped
-template under `testcases/` hedges.
+`tests/test_glossary.py` guards each rule against the reviewer comment
+that produced it, and asserts that **every shipped `testcases/` template
+passes the linter** — those templates are the free-tier output, so a
+finding there is a finding a client would see.
 
 ## Conventions
 

@@ -51,11 +51,31 @@ class TestStyleAssets:
         # pure waste.
         assert tc_author.house_style_text() is tc_author.house_style_text()
 
-    def test_system_blocks_mark_every_static_part_cacheable(self):
+    def test_system_blocks_respect_the_cache_breakpoint_budget(self):
+        # The API allows at most four cache_control breakpoints. Head,
+        # house style, coverage model and the terminology pair take all
+        # four; the ISTQB grounding block is retrieved per request and
+        # varies, so a breakpoint on it would spend a slot on a prefix
+        # that can never hit.
         blocks = tc_author._system_blocks("ISTQB chunk")
-        assert len(blocks) >= 3
-        assert all(b.get("cache_control") == {"type": "ephemeral"}
-                   for b in blocks)
+        assert len(blocks) == 5
+        cached = [b for b in blocks
+                  if b.get("cache_control") == {"type": "ephemeral"}]
+        assert len(cached) == 4
+        assert blocks[-1]["text"].startswith("=== ISTQB grounding")
+        assert "cache_control" not in blocks[-1]
+
+    def test_terminology_block_carries_the_glossary_and_reviewer_rules(self):
+        blocks = tc_author._system_blocks("")
+        blob = "\n".join(b["text"] for b in blocks)
+        assert "wording_rules.yaml" in blob
+        assert "ui_terms.en.yaml" in blob
+        # The reviewer quotes are the part that stops the model treating a
+        # house convention as negotiable.
+        assert "Remove dot at the end" in blob
+        assert "What do you scroll?" in blob
+        # And the glossary has to reach the model, not just be named.
+        assert "Hamburger button" in blob
 
 
 # ── Control inventory ────────────────────────────────────────────────
@@ -100,21 +120,39 @@ class TestControlInventory:
 
 class TestDeclarativeVoice:
     @pytest.mark.parametrize("src,want", [
-        ("User should be authenticated", "User is authenticated"),
-        ("Results should be displayed", "Results are displayed"),
-        ("Form should not be submitted", "Form is not submitted"),
         ("The record must be created", "The record is created"),
         ("The banner shall be visible", "The banner is visible"),
-        ("The server should reject the payload",
+        ("The record must not be created", "The record is not created"),
+        ("Errors shall not be displayed", "Errors are not displayed"),
+        ("The server must reject the payload",
          "The server rejects the payload"),
-        ("No errors should occur", "No errors occur"),
-        ("Images should have alt text", "Images have alt text"),
-        ("The message should identify the field",
+        ("No errors shall occur", "No errors occur"),
+        ("Images must have alt text", "Images have alt text"),
+        ("The message must identify the field",
          "The message identifies the field"),
-        ("The row should not persist", "The row does not persist"),
+        ("The row must not persist", "The row does not persist"),
+        ("X is expected to be Y", "X is Y"),
+        ("X ought to be Y", "X is Y"),
     ])
     def test_rewrites(self, src, want):
         assert tc_author.normalise_expected_result(src) == want
+
+    @pytest.mark.parametrize("src", [
+        "The entered data should be accepted",
+        "The form should not be submitted",
+        "Button should be hidden when there is no additional data",
+        "Error message should be displayed below the field",
+    ])
+    def test_should_is_accepted_and_never_rewritten(self, src):
+        # The two reference corpora disagree. The Odoo client deliverable
+        # (4,808 rows) never writes "should"; the team's own reviewed
+        # training deliverable writes it throughout and the reviewing team
+        # lead objected to none of it. The operator settled it in favour of
+        # the training deliverable, so "should" passes through untouched
+        # and is not a lint finding.
+        assert tc_author.normalise_expected_result(src) == src
+        assert not tc_author.has_weak_modal(src)
+        assert tc_author.lint_case(_case(expected_result=src)) == []
 
     def test_declarative_text_is_left_alone(self):
         src = ("User cannot create Job Position without required field "
@@ -122,14 +160,14 @@ class TestDeclarativeVoice:
         assert tc_author.normalise_expected_result(src) == src
 
     def test_multi_sentence_agreement_is_per_clause(self):
-        src = ("The record should be saved. Validation errors should not "
+        src = ("The record must be saved. Validation errors shall not "
                "be displayed.")
         out = tc_author.normalise_expected_result(src)
         assert out == ("The record is saved. Validation errors are not "
                        "displayed.")
 
     def test_no_weak_modal_survives_the_rewrite(self):
-        for src in ("X should be Y", "X must occur", "X shall not be Z",
+        for src in ("X must be Y", "X must occur", "X shall not be Z",
                     "X is expected to be Y", "X ought to be Y"):
             assert not tc_author.has_weak_modal(
                 tc_author.normalise_expected_result(src)), src
@@ -192,7 +230,7 @@ class TestLint:
 
     def test_flags_weak_modal_in_expected_result(self):
         findings = tc_author.lint_case(
-            _case(expected_result="The record should be saved"))
+            _case(expected_result="The record must be saved"))
         assert any("weak modal" in f for f in findings)
 
     def test_flags_negative_case_without_feedback_assertion(self):
@@ -213,9 +251,9 @@ class TestLint:
 class TestNormalise:
     def test_fixes_opener_modal_and_step_numbering(self):
         case = _case(
-            summary="check that the record should be saved",
+            summary="check that the record must be saved",
             steps=["1. Go to the grid", "2) Click Save"],
-            expected_result="The record should be saved",
+            expected_result="The record must be saved",
         )
         fixed, residual = tc_author.normalise_case(case)
         assert fixed.summary.startswith("Verify that ")
@@ -704,14 +742,25 @@ class _TC:
 
 
 class TestTeamLeadHouseStyle:
-    def test_hedged_expected_result_is_rewritten_not_enforced(self):
+    def test_requirement_voiced_expected_result_is_rewritten(self):
         from engine.qa_team_lead import review_test_cases
-        tc = _TC(expected_result="The record should be saved")
+        tc = _TC(expected_result="The record must be saved")
         fixed, report = review_test_cases([tc])
         assert fixed[0].expected_result == "The record is saved"
         finding = next(f for f in report.findings
                        if f.category == "Expected Result Voice")
         assert finding.auto_fixed
+
+    def test_should_voiced_expected_result_survives_the_reviewer(self):
+        # Operator ruling: the team's own reviewed deliverable writes
+        # "should" throughout, so the reviewer neither rewrites nor flags
+        # it. See tc_author._WEAK_MODAL_RE for the full provenance.
+        from engine.qa_team_lead import review_test_cases
+        tc = _TC(expected_result="The record should be saved")
+        fixed, report = review_test_cases([tc])
+        assert fixed[0].expected_result == "The record should be saved"
+        assert not [f for f in report.findings
+                    if f.category == "Expected Result Voice"]
 
     def test_declarative_expected_result_is_left_alone(self):
         from engine.qa_team_lead import review_test_cases
@@ -757,9 +806,9 @@ class TestTeamLeadHouseStyle:
         _, report = review_test_cases([_TC(test_steps="1. Open the page")])
         assert any(f.category == "Insufficient Steps" for f in report.findings)
 
-    def test_hedged_summary_is_rewritten(self):
+    def test_requirement_voiced_summary_is_rewritten(self):
         from engine.qa_team_lead import review_test_cases
-        tc = _TC(summary="Verify that the record should be saved")
+        tc = _TC(summary="Verify that the record must be saved")
         fixed, report = review_test_cases([tc])
         assert not tc_author.has_weak_modal(fixed[0].summary)
         assert any(f.category == "Summary Voice" for f in report.findings)
@@ -810,5 +859,9 @@ class TestTestCasesRoute:
                 or "Verify that User can filter Job Positions" in body)
         assert ("Verify that User cannot create Job Position without the "
                 "required fields filling" in body)
-        # The hedged expected result was normalised before render.
-        assert "should not be created" not in body
+        # "should" reaches the page unchanged — the operator's ruling
+        # applies on the render path too, not only in the unit helpers.
+        assert "should not be created" in body
+        # …but the negative case still gained its feedback half, which is
+        # the assertion most likely to catch a real defect.
+        assert "an error message names the reason" in body

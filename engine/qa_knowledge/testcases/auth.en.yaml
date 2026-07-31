@@ -11,7 +11,7 @@ cases:
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: testuser@example.com, Password: ValidPass123!"
-    expected_result: "User is authenticated successfully. User is redirected to the dashboard/homepage. Session cookie is set."
+    expected_result: "User is authenticated successfully. User is redirected to the dashboard/Homepage. Session cookie is set."
     category: Positive
     priority: High
     section: Authentication

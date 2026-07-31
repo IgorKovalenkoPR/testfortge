@@ -6,13 +6,13 @@ cases:
   - summary: "Verify that the form is submitted successfully with all valid data"
     preconditions: "Application is accessible. Form page is opened."
     steps:
-      - "Scroll down to the form section"
+      - "Scroll the page down to the Form section"
       - "Fill the 'name' field with 'Olena Marchenko'"
       - "Fill the 'email' field with 'tester@example.com'"
       - "Fill the 'message' field with 'Smoke test from TestForTge'"
       - "Click the 'Submit' button"
-      - "Verify 'Thank you' is displayed"
-      - "Scroll up to the top"
+      - "Pay attention to the confirmation Message"
+      - "Scroll the page up to the top"
     test_data: "Name: Olena Marchenko, Email: tester@example.com, Message: Smoke test from TestForTge"
     expected_result: "Form is submitted successfully. Success confirmation is displayed. Data is saved."
     category: Positive
@@ -21,10 +21,10 @@ cases:
   - summary: "Verify that validation errors are displayed when required fields are left empty"
     preconditions: "Application is accessible. Form page is opened."
     steps:
-      - "Scroll down to the form"
+      - "Scroll the page down to the Form"
       - "Fill the 'email' field with ''"
       - "Click the 'Submit' button"
-      - "Verify 'required' is displayed"
+      - "Pay attention to the validation Message under each required field"
     test_data: "All fields empty"
     expected_result: "Form is not submitted. Validation error messages are displayed for each required field."
     category: Negative

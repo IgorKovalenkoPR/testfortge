@@ -137,19 +137,34 @@ steps:
 
 expected_result:
   style: >-
-    Declarative present tense, third person, stating the observable
-    system state. No modal verbs.
+    Third person, stating the observable system state. Declarative present
+    tense is the default; "should" is also accepted.
   evidence: >-
-    Corpus expected results read "User can filter Job Positions using
+    Odoo corpus expected results read "User can filter Job Positions using
     filters", "The required fields are highlighted", "Odoo Warning is
-    displayed", "Time is not added to Timesheet if …". The words
-    "should", "must" and "shall" do not appear as the assertion verb
-    anywhere in the 4,808 rows.
+    displayed", "Time is not added to Timesheet if …" — "should", "must"
+    and "shall" do not appear as the assertion verb anywhere in the 4,808
+    rows. The team's own training deliverable
+    ("Training Plan_Horban Yaroslavna.xlsx") writes the opposite ("The
+    entered data should be accepted", "Button should be hidden when there
+    is no additional data") and the reviewing team lead objected to none
+    of it. Operator ruling: both voices are accepted, neither is rewritten
+    into the other.
   rules:
     - >-
-      Banned: "should", "should be", "must", "shall", "is expected to",
-      "ought to". These make the assertion unfalsifiable — the tester
-      cannot tell a pass from a fail.
+      "should" and "should be" are accepted. Declarative present tense
+      ("The entered data is accepted") is equally accepted. Pick one voice
+      and hold it for the whole document — do not mix them case by case.
+    - >-
+      Banned: "must", "shall", "is expected to", "ought to". These read as
+      a requirement on the product rather than something the tester can
+      observe, and neither reference corpus uses them.
+    - >-
+      Banned regardless of voice: "correctly", "incorrectly", "properly",
+      "as expected", "works fine". Naming the grade instead of the
+      observation is the finding the reviewing team lead raised verbatim
+      ("Try do not use ""correct/incorrect"", specify the action or the
+      result"). See ``wording_rules.yaml`` → ``result_wording``.
     - >-
       For a simple capability check, mirroring the title is acceptable and
       is the corpus norm (1,818 of 4,808 rows do exactly this). Do not
@@ -271,8 +286,24 @@ execution_result_vocabulary:
 anti_patterns:
   - text: Generic step text ("Navigate to the relevant page", "Perform the action", "Observe the result")
     why: Not executable by anyone but the author; hides the fact that no analysis happened.
-  - text: '"should" / "must" in the expected result'
-    why: Unfalsifiable. The tester cannot decide pass or fail.
+  - text: '"must" / "shall" in the expected result'
+    why: >-
+      Reads as a requirement on the product, not an observation a tester
+      can record. Neither reference corpus uses either word. ("should" is
+      accepted — see expected_result above.)
+  - text: '"the filter works correctly" / "the form is validated properly"'
+    why: >-
+      Grades the outcome instead of naming it. The reader cannot tell what
+      correct looks like, so the row cannot be failed with evidence.
+  - text: Element named by position ("the second card", "the icon on the right")
+    why: >-
+      Position is not a locator — it changes with content. Name the
+      element with its glossary term and its quoted label.
+  - text: Step 1 deep-links into an inner page or a fragment
+    why: >-
+      Reviewer's own comment: "Let`s imagine if this URL will be changed -
+      how other tester or developer could navigate to it?" A path that
+      starts mid-product dies with the next route change.
   - text: Expected result identical to the title on a NEGATIVE case
     why: Loses the feedback assertion — the half most likely to be broken.
   - text: Multiple independent assertions in one title joined by "and"

@@ -8,8 +8,8 @@ cases:
     steps:
       - "Open the application URL in the browser"
       - "Wait for the document ready event and measure load time in DevTools Network tab"
-      - "Verify the browser tab title matches the value declared in the design spec"
-      - "Verify there is exactly one H1 element and its text matches the page topic"
+      - "Pay attention to the browser tab title"
+      - "Pay attention to the H1 heading in the page source"
     test_data: "Application URL"
     expected_result: "Homepage loads in under 3 seconds on a wired connection. Browser tab title and H1 match the spec. Network tab shows no 4xx/5xx and Console tab shows no JavaScript errors."
     category: Positive
@@ -20,8 +20,8 @@ cases:
     steps:
       - "Open the page in the browser"
       - "Inspect all images on the page"
-      - "Verify each image is loaded (no broken image icons)"
-      - "Verify images have appropriate alt attributes"
+      - "Pay attention to every image on the page"
+      - "Pay attention to the alt attribute of every image in the page source"
     test_data: ""
     expected_result: "All images are loaded successfully. No broken image placeholders are visible. Images have alt text."
     category: Positive
@@ -32,9 +32,9 @@ cases:
     steps:
       - "Open the page in browser DevTools responsive mode"
       - "Set viewport width to 375px (mobile)"
-      - "Verify the layout uses a single column and the Header collapses into a hamburger menu"
-      - "Verify no horizontal scrollbar appears"
-      - "Verify that body text is ≥ 14px and readable at 100% zoom"
+      - "Pay attention to the column count and to the Header"
+      - "Try to find a horizontal scroll bar"
+      - "Pay attention to the computed font size of the body text at 100% zoom"
     test_data: "Viewport: 375x812 (iPhone)"
     expected_result: "Layout uses a single column at 375px. No horizontal scrollbar. Body font ≥ 14px. Every tap target measures ≥ 44×44 CSS pixels including padding."
     category: Positive
@@ -45,8 +45,8 @@ cases:
     steps:
       - "Open the page in browser DevTools responsive mode"
       - "Set viewport width to 768px (tablet)"
-      - "Verify the layout matches the tablet breakpoint of the design spec (e.g. two-column cards)"
-      - "Verify no two visible elements overlap and every container stays inside the 768px width"
+      - "Pay attention to the layout against the tablet breakpoint in the design spec"
+      - "Pay attention to element overlap and to container width"
     test_data: "Viewport: 768x1024 (iPad)"
     expected_result: "Layout matches the tablet breakpoint defined in the design spec. No overlapping elements. No horizontal scrollbar."
     category: Positive
@@ -57,8 +57,8 @@ cases:
     steps:
       - "Open browser DevTools (Console and Network tabs)"
       - "Load the page"
-      - "Check the page load time in the Network tab"
-      - "Check for JavaScript errors in the Console tab"
+      - "Pay attention to the page load time in the Network tab"
+      - "Pay attention to the Console tab"
     test_data: ""
     expected_result: "Page loads within 3 seconds. No JavaScript errors appear in the console."
     category: Positive
@@ -68,9 +68,9 @@ cases:
     preconditions: "Application URL is accessible."
     steps:
       - "Open the application URL"
-      - "Check the browser address bar for HTTPS padlock"
-      - "Click the padlock to verify certificate validity"
-      - "Verify no mixed content warnings"
+      - "Pay attention to the padlock in the browser address bar"
+      - "Click on the padlock and pay attention to the certificate details"
+      - "Try to find a mixed-content warning in the Console tab"
     test_data: ""
     expected_result: "Page is served over HTTPS. Certificate is valid. No mixed content (HTTP resources on HTTPS page)."
     category: Security
@@ -80,9 +80,9 @@ cases:
     preconditions: "Application is accessible."
     steps:
       - "Navigate the page using only keyboard (Tab, Enter, Escape)"
-      - "Verify all interactive elements are reachable via Tab"
-      - "Verify focus indicators are visible on focused elements"
-      - "Verify all images have descriptive alt text"
+      - "Pay attention to which interactive elements receive focus"
+      - "Pay attention to the focus indicator on each focused element"
+      - "Pay attention to the alt text of every image in the page source"
     test_data: ""
     expected_result: "Page is fully navigable via keyboard. Focus indicators are visible. All images have alt text."
     category: Positive
