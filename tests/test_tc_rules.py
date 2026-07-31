@@ -178,12 +178,27 @@ class TestNaming:
         # House style: sections are named after the UI surface.
         assert {c.section for c in cases} == {"Customer order"}
 
-    def test_section_falls_back_h1_then_title_then_ordinal(self):
-        page = {"url": "u", "h1": "", "title": "The title"}
-        assert tc_rules.surface_name(page, {"heading": ""}, 1) == "The title"
-        assert tc_rules.surface_name({"url": "u"}, {}, 3) == "Form #3"
+    def test_section_fallback_chain(self):
+        """heading → h1 → title → humanised URL path → ordinal.
+
+        The URL step was added after the real httpbin page (no <h1>, no
+        <title>) produced the useless section name "Form #1".
+        """
+        assert tc_rules.surface_name({"h1": "H1 wins", "title": "t"},
+                                     {"heading": "Heading wins"}, 1) \
+            == "Heading wins"
         assert tc_rules.surface_name({"h1": "H1 wins", "title": "t"},
                                      {"heading": ""}, 1) == "H1 wins"
+        assert tc_rules.surface_name({"url": "u", "h1": "", "title": "The title"},
+                                     {"heading": ""}, 1) == "The title"
+        assert tc_rules.surface_name({"url": "https://x.test/checkout/step-2"},
+                                     {}, 1) == "Checkout step 2 form"
+
+    def test_ordinal_only_when_nothing_names_the_surface(self):
+        # Bare origin: no path to humanise, nothing on the page either.
+        assert tc_rules.surface_name({"url": "https://x.test/"}, {}, 3) \
+            == "Form #3"
+        assert tc_rules.surface_name({}, {}, 2) == "Form #2"
 
     def test_first_step_is_a_breadcrumb_to_the_surface(self, cases):
         for c in cases:
@@ -342,3 +357,126 @@ class TestGeneratorUsesTheRuleEngine:
         assert {t.section for t in tcs} == {"Customer order"}
         # The checklist still comes from the Medium/Low strategy checks.
         assert cls
+
+
+# ── Real-world markup ────────────────────────────────────────────────
+
+#: The actual httpbin.org/forms/post page — no <h1>, no <title>, labels
+#: that wrap their control, colons in the visible text, and a radio
+#: group. Ran against prod on 2026-07-31 and exposed three defects a
+#: synthetic form had not: "Form #1" as a section name, labels quoted as
+#: "Customer name:", and three identical cases for the one radio group.
+HTTPBIN_FORM = """
+<html><body><form method="post" action="/post">
+ <p><label>Customer name: <input name="custname"></label></p>
+ <p><label>Telephone: <input type="tel" name="custtel"></label></p>
+ <p><label>E-mail address: <input type="email" name="custemail"></label></p>
+ <fieldset><legend>Pizza Size</legend>
+  <p><label><input type="radio" name="size" value="small"> Small</label></p>
+  <p><label><input type="radio" name="size" value="medium"> Medium</label></p>
+  <p><label><input type="radio" name="size" value="large"> Large</label></p>
+ </fieldset>
+ <p><label>Delivery time: <input type="time" min="11:00" max="21:00" name="delivery"></label></p>
+ <p><label>Delivery instructions: <textarea name="comments"></textarea></label></p>
+ <p><button>Submit order</button></p>
+</form></body></html>
+"""
+
+
+@pytest.fixture(scope="module")
+def httpbin_cases() -> list:
+    return tc_rules.enumerate_from_pages(
+        _pages(HTTPBIN_FORM, url="https://httpbin.org/forms/post"))
+
+
+class TestRealWorldMarkup:
+    def test_labels_lose_their_trailing_punctuation(self, httpbin_cases):
+        blob = " ".join(c.summary for c in httpbin_cases)
+        assert '"Customer name"' in blob
+        assert '"Customer name:"' not in blob, (
+            "a quoted colon reads as part of the control name")
+
+    def test_radio_group_becomes_one_choice_control(self, httpbin_cases):
+        size = [c for c in httpbin_cases if '"size"' in c.summary]
+        assert size, "the radio group produced no cases"
+        assert len(size) == len({c.summary for c in size}), (
+            "three radio members must not yield three identical cases")
+        assert all("drop-down" in c.summary for c in size), (
+            "a radio group is a choice control, not N checkboxes")
+
+    def test_radio_options_come_from_the_member_labels(self, httpbin_cases):
+        pick = next(c for c in httpbin_cases
+                    if "select an existing value" in c.summary.lower())
+        for opt in ("Small", "Medium", "Large"):
+            assert opt in pick.test_data, pick.test_data
+
+    def test_label_text_after_the_control_is_captured(self):
+        """<label><input> Small</label> puts the name after the control."""
+        p = _PageParser()
+        p.feed('<form><label><input type="radio" name="s" value="v"> '
+               "Visible</label></form>")
+        assert p.forms[0]["fields"][0]["label"] == "Visible"
+
+    def test_option_text_still_does_not_bleed_into_the_label(self):
+        # The reason label collection was restricted in the first place.
+        p = _PageParser()
+        p.feed('<form><label>Size <select name="s">'
+               "<option>Small</option><option>Large</option>"
+               "</select></label></form>")
+        assert p.forms[0]["fields"][0]["label"] == "Size"
+
+    def test_section_falls_back_to_the_url_not_an_ordinal(self,
+                                                         httpbin_cases):
+        sections = {c.section for c in httpbin_cases}
+        assert sections == {"Forms post"}, sections
+        assert "Form #" not in " ".join(sections)
+
+    def test_no_redundant_form_suffix(self):
+        page = {"url": "https://x.test/forms/post"}
+        assert tc_rules.surface_name(page, {}, 1) == "Forms post"
+        page = {"url": "https://x.test/checkout"}
+        assert tc_rules.surface_name(page, {}, 1) == "Checkout form"
+
+    def test_time_input_with_min_max_gets_the_range_negative(self,
+                                                            httpbin_cases):
+        delivery = [c for c in httpbin_cases if '"Delivery time"' in c.summary]
+        assert any("outside the allowed range" in c.summary
+                   for c in delivery), (
+            'min="11:00" max="21:00" justifies the out-of-range case')
+
+    def test_still_house_style_clean_on_real_markup(self, httpbin_cases):
+        offenders = [(c.summary[:60], lint_case(c)) for c in httpbin_cases
+                     if lint_case(c)]
+        assert not offenders, offenders
+
+
+class TestRadioGrouping:
+    def test_non_radio_fields_pass_through_untouched(self):
+        fields = [{"type": "text", "name": "a"}, {"type": "email", "name": "b"}]
+        assert tc_rules.group_radios(fields) == fields
+
+    def test_groups_are_keyed_by_name(self):
+        fields = [
+            {"type": "radio", "name": "x", "label": "One"},
+            {"type": "radio", "name": "x", "label": "Two"},
+            {"type": "radio", "name": "y", "label": "Other"},
+        ]
+        out = tc_rules.group_radios(fields)
+        assert len(out) == 2
+        assert out[0]["options"] == ["One", "Two"]
+        assert out[1]["options"] == ["Other"]
+
+    def test_required_on_any_member_marks_the_group(self):
+        fields = [
+            {"type": "radio", "name": "x", "value": "a"},
+            {"type": "radio", "name": "x", "value": "b", "required": True},
+        ]
+        assert tc_rules.group_radios(fields)[0]["required"] is True
+
+    def test_group_is_named_after_the_field_not_a_member(self):
+        fields = [{"type": "radio", "name": "size", "label": "Large"}]
+        assert tc_rules.group_radios(fields)[0]["label"] == "size"
+
+    def test_value_is_used_when_a_member_has_no_label(self):
+        fields = [{"type": "radio", "name": "x", "value": "only"}]
+        assert tc_rules.group_radios(fields)[0]["options"] == ["only"]
