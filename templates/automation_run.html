@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}TestForTge — {{ t.get('automation_run_title', 'Automation run') }} #{{ run.id }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ t.get('automation_run_title', 'Automation run') }} #{{ run.id }}</h1>
+  <p class="subtitle">
+    {{ run.created_at }} · {{ run.origin }}{% if run.label %} · {{ run.label }}{% endif %}
+  </p>
+</div>
+
+<div class="card">
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="stat-value">{{ '%.1f'|format(run.pass_rate or 0) }}%</div>
+            <div class="stat-label">{{ t.get('automation_pass_rate', 'Pass rate') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ run.passed }}</div>
+            <div class="stat-label">{{ t.get('passed', 'Passed') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ run.failed }}</div>
+            <div class="stat-label">{{ t.get('failed', 'Failed') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ run.broken }}</div>
+            <div class="stat-label">{{ t.get('automation_broken', 'Broken') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ run.skipped }}</div>
+            <div class="stat-label">{{ t.get('automation_skipped', 'Skipped') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ ((run.duration_ms or 0) / 1000)|round(1) }}s</div>
+            <div class="stat-label">{{ t.get('automation_duration', 'Duration') }}</div>
+        </div>
+    </div>
+    {# The three non-passing statuses mean different things and the fix
+       differs, so they are never collapsed:
+         failed  — an assertion did not hold. The product is wrong.
+         broken  — the test threw before asserting. The test or the
+                   environment is wrong.
+         skipped — nobody checked. #}
+    <p class="hint">{{ t.get('automation_status_legend',
+        'Failed = an assertion did not hold, so the product is wrong. Broken = the test threw before it could assert, so the test or the environment is wrong. Skipped = nobody checked. The pass rate counts executed scenarios only.') }}</p>
+</div>
+
+{% if summary.warnings %}
+<div class="card">
+    <h2>{{ t.get('automation_warnings', 'Warnings about the results') }}</h2>
+    <ul>{% for w in summary.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if summary.by_suite %}
+<div class="card">
+    <h2>{{ t.get('automation_by_suite', 'By suite') }}</h2>
+    <table class="data-table">
+        <thead><tr>
+            <th>{{ t.get('section', 'Suite') }}</th>
+            <th>{{ t.get('passed', 'Passed') }}</th>
+            <th>{{ t.get('failed', 'Failed') }}</th>
+            <th>{{ t.get('automation_broken', 'Broken') }}</th>
+            <th>{{ t.get('automation_skipped', 'Skipped') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for name, counts in summary.by_suite.items() %}
+        <tr>
+            <td>{{ name }}</td>
+            <td>{{ counts.passed or 0 }}</td>
+            <td>{{ counts.failed or 0 }}</td>
+            <td>{{ counts.broken or 0 }}</td>
+            <td>{{ counts.skipped or 0 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if summary.failures %}
+<div class="card">
+    <h2>{{ t.get('automation_failures', 'Failures') }} ({{ summary.failures|length }})</h2>
+    <table class="data-table">
+        <thead><tr>
+            <th width="110">{{ t.get('automation_case', 'Test case') }}</th>
+            <th>{{ t.get('automation_scenario', 'Scenario') }}</th>
+            <th width="90">{{ t.get('status', 'Status') }}</th>
+            <th>{{ t.get('automation_where', 'Failed at') }}</th>
+            <th>{{ t.get('automation_message', 'Message') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for f in summary.failures %}
+        <tr>
+            <td><strong>{{ f.case_id or '—' }}</strong></td>
+            <td>{{ f.name }}</td>
+            <td>{{ f.status }}</td>
+            <td>{{ f.failed_step or '—' }}</td>
+            <td><code class="wrap">{{ f.message }}</code></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if summary.skipped_detail %}
+<div class="card">
+    <h2>{{ t.get('automation_skipped_h', 'Skipped — nobody checked these') }}
+        ({{ summary.skipped_detail|length }})</h2>
+    <p class="hint">{{ t.get('automation_skipped_hint',
+        'Each carries the reason the runner gave. An assertion or precondition the generated library could not bind lands here rather than reporting green.') }}</p>
+    <table class="data-table">
+        <thead><tr>
+            <th width="110">{{ t.get('automation_case', 'Test case') }}</th>
+            <th>{{ t.get('automation_scenario', 'Scenario') }}</th>
+            <th>{{ t.get('automation_reason', 'Reason') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for s in summary.skipped_detail %}
+        <tr>
+            <td><strong>{{ s.case_id or '—' }}</strong></td>
+            <td>{{ s.name }}</td>
+            <td>{{ s.message or '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if summary.flaky %}
+<div class="card">
+    <h2>{{ t.get('automation_flaky', 'Flaky') }} ({{ summary.flaky|length }})</h2>
+    <ul>{% for name in summary.flaky %}<li>{{ name }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<p><a href="{{ url_for('automation_page') }}" class="btn btn-sm">
+    ← {{ t.get('automation_back', 'Back to Automation') }}</a></p>
+{% endblock %}

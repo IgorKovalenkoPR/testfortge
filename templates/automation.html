@@ -1,316 +1,202 @@
 {% extends "base.html" %}
-{% block title %}TestForTge — {{ t.auto_title }}{% endblock %}
+{% block title %}TestForTge — {{ t.get('nav_automation', 'Automation') }}{% endblock %}
 
 {% block content %}
 <div class="page-header">
-  <h1>{{ t.auto_title }}</h1>
-  <p class="subtitle">{{ t.auto_subtitle }}</p>
+  <h1>{{ t.get('automation_title', 'Automation') }}</h1>
+  <p class="subtitle">{{ t.get('automation_sub',
+    'Generate a TypeScript + Playwright suite from the BDD test cases, run it where the browsers live, and send the Allure results back here.') }}</p>
 </div>
 
-<div id="run-progress" class="alert alert-info" style="display:none; margin-bottom:1rem">
-  <div style="display:flex; align-items:center; gap:.75rem">
-    <i data-lucide="loader-circle" class="icon-sm spin"></i>
-    <div style="flex:1">
-      <strong id="run-progress-label">{{ t.get('auto_running', 'Automation run in progress…') }}</strong>
-      <div class="progress-bar" style="margin-top:.25rem; height:6px; background:#eee; border-radius:3px; overflow:hidden">
-        <div id="run-progress-fill" style="height:100%; width:0%; background:var(--tf-primary, #FF865C); transition:width .4s ease"></div>
-      </div>
-      <small id="run-progress-message" style="color:#666"></small>
-    </div>
-  </div>
+{# Why the suite is generated rather than run here. Saying it up front
+   answers the obvious "where is the Run button" before it is asked. #}
+<div class="card">
+    <h2>{{ t.get('automation_how_title', 'How this works') }}</h2>
+    <ol class="steps-list">
+        <li><strong>{{ t.get('automation_step1', 'Generate') }}</strong> —
+            {{ t.get('automation_step1_body',
+               'download a self-contained Node project built from this project&#39;s BDD test cases, carrying the locators the recorder already learned.') }}</li>
+        <li><strong>{{ t.get('automation_step2', 'Run') }}</strong> —
+            <code>npm ci &amp;&amp; npm test</code>
+            {{ t.get('automation_step2_body',
+               'on your machine or via the bundled GitHub Actions workflow. That is where the browsers are.') }}</li>
+        <li><strong>{{ t.get('automation_step3', 'Report back') }}</strong> —
+            <code>npm run upload</code>
+            {{ t.get('automation_step3_body',
+               'posts allure-results here. TestForTge parses it in Python, so the numbers below need no JVM.') }}</li>
+    </ol>
 </div>
 
-<form id="automation-form" method="POST" action="{{ url_for('automation_run') }}"
-      data-async-url="{{ url_for('automation_run_async') }}"
-      data-status-url-base="{{ url_for('automation_status', job_id='__ID__') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <div class="card">
-    <h2>{{ t.auto_config }}</h2>
-    <div class="form-row">
-      <div class="form-group">
-        <label>{{ t.auto_base_url }}</label>
-        <input type="url" name="base_url" required
-               value="{{ last_base_url or '' }}" placeholder="https://example.com">
-      </div>
-      <div class="form-group">
-        <label>{{ t.auto_scope }}</label>
-        <select name="scope">
-          <option value="all">{{ t.auto_scope_all }}</option>
-          <option value="section">{{ t.auto_scope_section }}</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>{{ t.auto_headless }}</label>
-        <select name="headless">
-          <option value="1">{{ t.auto_headless_yes }}</option>
-          <option value="0">{{ t.auto_headless_no }}</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>{{ t.auto_record_video }}</label>
-        <select name="record_video">
-          <option value="1">{{ t.yes if t.get('yes') else 'Yes' }}</option>
-          <option value="0">{{ t.no if t.get('no') else 'No' }}</option>
-        </select>
-      </div>
-    </div>
-    <p><strong>{{ t.auto_tc_count }}:</strong> {{ tc_count }}</p>
-  </div>
-
-  <div class="card">
-    <h2>{{ t.get('creds_title', 'Test Account') }}</h2>
-    <p class="subtitle">{{ t.get('creds_help',
-       'Optional. Provide a login/password if test cases need to run behind authentication, or let TestForTge generate a throw-away test account.') }}</p>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="none"
-                 {% if cred.mode in ('', 'none') %}checked{% endif %}>
-          {{ t.get('creds_mode_none', 'No authentication needed') }}
-        </label>
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="provided"
-                 {% if cred.mode == 'provided' %}checked{% endif %}>
-          {{ t.get('creds_mode_provided', 'Use existing account') }}
-        </label>
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="radio" name="cred_mode" value="generated"
-                 {% if cred.mode == 'generated' %}checked{% endif %}>
-          {{ t.get('creds_mode_generated', 'Generate test account') }}
-        </label>
-      </div>
+{# ── Coverage, measured before anything runs ─────────────────────── #}
+<div class="card">
+    <h2>{{ t.get('automation_pack', 'Test pack') }}</h2>
+    {% if not targeted_cases %}
+    <p class="metric-empty">
+        {{ t.get('automation_no_bdd', 'No automation-targeted test cases yet.') }}
+        {% if total_cases %}
+          ({{ total_cases }} {{ t.get('automation_all_manual', 'case(s) in this project, all in manual format.') }})
+        {% endif %}
+        <a href="{{ url_for('test_cases_page') }}">{{ t.get('automation_go_generate',
+           'Generate with the BDD format selected') }}</a>.
+    </p>
+    {% else %}
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="stat-value">{{ targeted_cases }}</div>
+            <div class="stat-label">{{ t.get('automation_bdd_cases', 'BDD cases') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ coverage.bound_pct }}%</div>
+            <div class="stat-label">{{ t.get('automation_bound', 'steps bound') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ coverage.runnable_scenarios }}</div>
+            <div class="stat-label">{{ t.get('automation_runnable', 'run end to end') }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="stat-value">{{ coverage.partly_manual_scenarios }}</div>
+            <div class="stat-label">{{ t.get('automation_skipping', 'report skipped') }}</div>
+        </div>
+        {% if coverage.unbound_actions %}
+        <div class="metric-card">
+            <div class="stat-value">{{ coverage.unbound_actions|length }}</div>
+            <div class="stat-label">{{ t.get('automation_unbound', 'unbound actions') }}</div>
+        </div>
+        {% endif %}
     </div>
 
-    <div class="form-row">
-      <div class="form-group">
-        <label>{{ t.get('creds_login_url', 'Login page URL') }}</label>
-        <input type="url" name="cred_login_url"
-               value="{{ cred.login_url or '' }}"
-               placeholder="https://example.com/login">
-      </div>
-      <div class="form-group">
-        <label>{{ t.get('creds_username', 'Username / email') }}</label>
-        <input type="text" name="cred_username" autocomplete="off"
-               value="{{ cred.username or '' }}"
-               placeholder="qa.tester@example.com">
-      </div>
-      <div class="form-group">
-        <label>{{ t.get('creds_password', 'Password') }}</label>
-        <input type="password" name="cred_password" autocomplete="new-password"
-               placeholder="{% if cred.password %}{{ t.get('creds_kept', '(kept from previous run)') }}{% endif %}">
-      </div>
-    </div>
+    {# The honesty rule, stated plainly. An operator who does not know that
+       a skipped scenario is not a passing one will read the pass rate
+       wrong, and that misreading is the whole risk this module carries. #}
+    <p class="hint">{{ t.get('automation_honesty',
+        'A step the generator cannot bind never reports green. Those scenarios report skipped — neither passed nor failed — and every pass rate here is computed over executed scenarios only. MANUAL-ASSERTIONS.md in the bundle lists each one by test-case id.') }}</p>
 
-    <details style="margin-top:.75rem">
-      <summary>{{ t.get('creds_advanced', 'Advanced: registration & custom selectors') }}</summary>
-      <div class="form-row" style="margin-top:.5rem">
-        <div class="form-group">
-          <label>{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
-          <input type="url" name="cred_register_url"
-                 value="{{ cred.register_url or '' }}"
-                 placeholder="https://example.com/signup">
-        </div>
-        <div class="form-group">
-          <label>{{ t.get('creds_display_name', 'Display name') }}</label>
-          <input type="text" name="cred_display_name"
-                 value="{{ cred.display_name or '' }}">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>{{ t.get('creds_user_selector', 'Username field selector') }}</label>
-          <input type="text" name="cred_username_selector"
-                 value="{{ cred.username_selector or '' }}"
-                 placeholder="input[name='email']">
-        </div>
-        <div class="form-group">
-          <label>{{ t.get('creds_pass_selector', 'Password field selector') }}</label>
-          <input type="text" name="cred_password_selector"
-                 value="{{ cred.password_selector or '' }}"
-                 placeholder="input[name='password']">
-        </div>
-        <div class="form-group">
-          <label>{{ t.get('creds_submit_selector', 'Submit button selector') }}</label>
-          <input type="text" name="cred_submit_selector"
-                 value="{{ cred.submit_selector or '' }}"
-                 placeholder="role=button[name=/sign in/i]">
-        </div>
-      </div>
+    {% if coverage.manual_assertions %}
+    <details class="tc-gherkin">
+        <summary>{{ t.get('automation_manual_list', 'Assertions to verify manually') }}
+            ({{ coverage.manual_assertions|length }})</summary>
+        <table class="data-table">
+            <thead><tr>
+                <th width="120">{{ t.get('automation_case', 'Test case') }}</th>
+                <th>{{ t.get('automation_assertion', 'Assertion') }}</th>
+            </tr></thead>
+            <tbody>
+            {% for m in coverage.manual_assertions %}
+                <tr><td><strong>{{ m.case_id }}</strong></td><td>{{ m.text }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
     </details>
-
-    {% if cred.mode == 'generated' and cred.username %}
-    <div class="alert alert-info" style="margin-top:.75rem">
-      <strong>{{ t.get('creds_generated_label', 'Generated test account:') }}</strong>
-      <code>{{ cred.username }}</code> / <code>{{ cred.password }}</code>
-      {% if cred.notes %}<br><small>{{ cred.notes }}</small>{% endif %}
-    </div>
     {% endif %}
 
-    <p style="margin-top:.5rem">
-      <button type="submit" form="gen-acc-form" class="btn btn-secondary">
-        <i data-lucide="key-round" class="icon-sm"></i> {{ t.get('creds_generate_now', 'Generate test account now') }}
-      </button>
-    </p>
-  </div>
+    {% if coverage.manual_preconditions %}
+    <details class="tc-gherkin">
+        <summary>{{ t.get('automation_precond_list', 'Preconditions to set up by hand') }}
+            ({{ coverage.manual_preconditions|length }})</summary>
+        <p class="hint">{{ t.get('automation_precond_hint',
+            'These scenarios skip before acting. An unmet precondition means the scenario would exercise a different situation than the case describes. A precondition naming a URL is already automated; what is left needs data or state, which belongs in a fixture.') }}</p>
+        <table class="data-table">
+            <thead><tr>
+                <th width="120">{{ t.get('automation_case', 'Test case') }}</th>
+                <th>{{ t.get('automation_precondition', 'Precondition') }}</th>
+            </tr></thead>
+            <tbody>
+            {% for m in coverage.manual_preconditions %}
+                <tr><td><strong>{{ m.case_id }}</strong></td><td>{{ m.text }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
 
-  <div class="form-actions">
-    <button type="submit" class="btn btn-primary btn-lg" {% if tc_count == 0 %}disabled{% endif %}>
-      {{ t.auto_run_btn }} &rarr;
-    </button>
-  </div>
-</form>
+    {% if coverage.unbound_actions %}
+    <details class="tc-gherkin">
+        <summary>{{ t.get('automation_unbound_list',
+            'Unbound action steps — these scenarios FAIL rather than skip') }}
+            ({{ coverage.unbound_actions|length }})</summary>
+        <p class="hint">{{ t.get('automation_unbound_hint',
+            'A missing action is a defect in the test case, not a gap in the library — the step drifted from the house verb vocabulary in wording_rules.yaml. Fix the case, or add the pattern to steps/actions.ts.') }}</p>
+        <ul>
+        {% for a in coverage.unbound_actions %}<li><code>{{ a }}</code></li>{% endfor %}
+        </ul>
+    </details>
+    {% endif %}
 
-<form id="gen-acc-form" method="POST" action="{{ url_for('automation_generate_account') }}" style="display:none">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <input type="hidden" name="base_url" value="{{ last_base_url or '' }}">
-  <input type="hidden" name="cred_login_url" value="{{ cred.login_url or '' }}">
-  <input type="hidden" name="cred_register_url" value="{{ cred.register_url or '' }}">
-</form>
-
-{% if report %}
-<div class="card card-highlight">
-  <h2>{{ t.auto_summary }}</h2>
-  <div class="stats-grid stats-grid-3">
-    <div class="stat-card"><div class="stat-number">{{ report.total }}</div><div class="stat-label">{{ t.auto_total }}</div></div>
-    <div class="stat-card"><div class="stat-number status-passed">{{ report.passed }}</div><div class="stat-label">{{ t.passed }}</div></div>
-    <div class="stat-card"><div class="stat-number status-failed">{{ report.failed }}</div><div class="stat-label">{{ t.failed }}</div></div>
-    <div class="stat-card"><div class="stat-number status-blocked">{{ report.blocked }}</div><div class="stat-label">{{ t.blocked }}</div></div>
-    <div class="stat-card"><div class="stat-number">{{ report.pass_rate }}%</div><div class="stat-label">{{ t.auto_pass_rate }}</div></div>
-    <div class="stat-card"><div class="stat-number">{{ (report.duration_ms // 1000) }}s</div><div class="stat-label">{{ t.auto_duration }}</div></div>
-  </div>
-  {% if metrics %}
-  <div class="stats-grid stats-grid-3" style="margin-top:1rem">
-    <div class="stat-card"><div class="stat-number">{{ metrics.automation_coverage }}%</div><div class="stat-label">{{ t.auto_coverage }}</div></div>
-    <div class="stat-card"><div class="stat-number">{{ metrics.total_automated }}/{{ metrics.total_manual }}</div><div class="stat-label">{{ t.auto_automated_vs_manual }}</div></div>
-  </div>
-  {% endif %}
-</div>
-
-{% for script in report.scripts %}
-<div class="card step-card">
-  <h3>
-    <span class="status-badge status-{{ script.status }}">{{ script.status|upper }}</span>
-    {{ script.tc_id }} — {{ script.summary }}
-    <small>({{ (script.duration_ms // 1000) }}s)</small>
-  </h3>
-  {% if script.comment %}<p class="alert alert-warning">{{ script.comment }}</p>{% endif %}
-
-  <details>
-    <summary>{{ t.auto_show_steps }} ({{ script.steps|length }})</summary>
-    <div class="screenshot-gallery">
-      {% for step in script.steps %}
-      <div class="step-row status-{{ step.status }}">
-        <div class="step-head">
-          <strong>#{{ step.index }}. {{ step.action }}</strong>
-          <span class="status-badge status-{{ step.status }}">{{ step.status }}</span>
-          <small>{{ step.duration_ms }} ms</small>
-        </div>
-        <div class="step-raw">{{ step.raw }}</div>
-        {% if step.comment %}<div class="step-comment">{{ step.comment }}</div>{% endif %}
-        <div class="step-shots">
-          {% if step.screenshot_before %}
-          <figure>
-            <img src="{{ url_for('automation_asset', path=step.screenshot_before) }}" alt="before">
-            <figcaption>{{ t.auto_before }}</figcaption>
-          </figure>
-          {% endif %}
-          {% if step.screenshot_after %}
-          <figure>
-            <img src="{{ url_for('automation_asset', path=step.screenshot_after) }}" alt="after">
-            <figcaption>{{ t.auto_after }}</figcaption>
-          </figure>
-          {% endif %}
-        </div>
-      </div>
-      {% endfor %}
+    <div class="export-row" style="margin-top:1rem">
+        <a href="{{ url_for('automation_bundle') }}" class="btn btn-primary">
+            <i data-lucide="download" class="icon-sm"></i>
+            {{ t.get('automation_download', 'Download the suite') }}
+            (v{{ bundle_version }})
+        </a>
+        {% if base_url %}
+        <span class="hint" style="margin-left:.75rem">
+            {{ t.get('automation_base_url', 'BASE_URL') }}: <code>{{ base_url }}</code>
+        </span>
+        {% endif %}
     </div>
-  </details>
-
-  {% if script.video_path %}
-  <p><a href="{{ url_for('automation_asset', path=script.video_path) }}" target="_blank">▶ {{ t.auto_video }}</a></p>
-  {% endif %}
+    {% endif %}
 </div>
-{% endfor %}
-{% elif tc_count == 0 %}
-<div class="card card-info">
-  <p>{{ t.auto_no_tc }}</p>
+
+{# ── Ingest configuration ────────────────────────────────────────── #}
+<div class="card">
+    <h2>{{ t.get('automation_ingest', 'Result ingestion') }}</h2>
+    {% if ingest_enabled %}
+    <p class="hint">
+        <i data-lucide="check-circle" class="icon-sm"></i>
+        {{ t.get('automation_ingest_on', 'Enabled. Post a zipped allure-results directory to') }}
+        <code>POST /automation/allure-results</code>
+        {{ t.get('automation_ingest_on2', 'with the token in an X-TFG-Token header.') }}
+    </p>
+    {% else %}
+    <p class="hint">
+        <i data-lucide="alert-triangle" class="icon-sm"></i>
+        {{ t.get('automation_ingest_off',
+            'Disabled. Set AUTOMATION_INGEST_TOKEN on the service to accept results. Until then every upload is refused — an unauthenticated ingest endpoint is one anybody can write run history into.') }}
+    </p>
+    {% endif %}
 </div>
-{% endif %}
 
-<script nonce="{{ csp_nonce }}">
-// Async automation submit — intercepts the form, POSTs to /automation/run-async,
-// polls /automation/status/<id> every 2s, reloads the page on completion.
-// If JS is disabled or fetch fails, the native form POST to /automation/run
-// is used as a fallback.
-(function () {
-  const form = document.getElementById('automation-form');
-  if (!form || !window.fetch) return;
-
-  const banner = document.getElementById('run-progress');
-  const fill = document.getElementById('run-progress-fill');
-  const msg = document.getElementById('run-progress-message');
-  const label = document.getElementById('run-progress-label');
-  const asyncUrl = form.dataset.asyncUrl;
-  const statusBase = form.dataset.statusUrlBase;
-
-  function setProgress(pct, message) {
-    fill.style.width = Math.round(pct * 100) + '%';
-    if (message) msg.textContent = message;
-  }
-
-  function poll(jobId) {
-    const url = statusBase.replace('__ID__', jobId);
-    fetch(url, {credentials: 'same-origin'})
-      .then(r => r.json())
-      .then(payload => {
-        if (payload.error) {
-          label.textContent = 'Error: ' + payload.error;
-          banner.classList.remove('alert-info');
-          banner.classList.add('alert-danger');
-          return;
-        }
-        setProgress(payload.progress || 0.1, payload.message || '');
-        if (payload.status === 'done') {
-          setProgress(1, 'Complete — reloading…');
-          setTimeout(() => window.location.reload(), 400);
-        } else if (payload.status === 'failed') {
-          label.textContent = 'Automation failed';
-          msg.textContent = payload.error || '';
-          banner.classList.remove('alert-info');
-          banner.classList.add('alert-danger');
-        } else {
-          setTimeout(() => poll(jobId), 2000);
-        }
-      })
-      .catch(err => {
-        // Network hiccup — keep polling; Playwright runs are long.
-        setTimeout(() => poll(jobId), 3000);
-      });
-  }
-
-  form.addEventListener('submit', function (evt) {
-    evt.preventDefault();
-    banner.style.display = 'block';
-    setProgress(0.05, 'Submitting…');
-    const fd = new FormData(form);
-    fetch(asyncUrl, {method: 'POST', body: fd, credentials: 'same-origin'})
-      .then(r => r.json())
-      .then(data => {
-        if (data.job_id) {
-          poll(data.job_id);
-        } else {
-          // Fallback: submit the form natively
-          form.removeEventListener('submit', arguments.callee);
-          form.submit();
-        }
-      })
-      .catch(() => form.submit());
-  });
-})();
-</script>
+{# ── Run history ─────────────────────────────────────────────────── #}
+<div class="card">
+    <h2>{{ t.get('automation_runs', 'Ingested runs') }}</h2>
+    {% if not runs %}
+    <p class="metric-empty">{{ t.get('automation_no_runs',
+        'No runs ingested yet. Run the suite, then npm run upload.') }}</p>
+    {% else %}
+    <table class="data-table">
+        <thead><tr>
+            <th>{{ t.get('automation_when', 'When') }}</th>
+            <th>{{ t.get('automation_origin', 'Origin') }}</th>
+            <th>{{ t.get('automation_label', 'Label') }}</th>
+            <th>{{ t.get('automation_pass_rate', 'Pass rate') }}</th>
+            <th>{{ t.get('passed', 'Passed') }}</th>
+            <th>{{ t.get('failed', 'Failed') }}</th>
+            <th>{{ t.get('automation_skipped', 'Skipped') }}</th>
+            <th>{{ t.get('automation_duration', 'Duration') }}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>
+        {% for r in runs %}
+        <tr>
+            <td>{{ r.created_at }}</td>
+            <td>{{ r.origin }}</td>
+            <td>{{ r.label or '—' }}</td>
+            <td><strong>{{ '%.1f'|format(r.pass_rate or 0) }}%</strong></td>
+            <td>{{ r.passed }}</td>
+            {# failed + broken: an assertion that did not hold and a test
+               that threw before asserting are both "not passing", and the
+               drill-down splits them again. #}
+            <td>{{ (r.failed or 0) + (r.broken or 0) }}</td>
+            {# Skipped keeps its own column and never folds into either of
+               the two above — see engine/allure_ingest.py. #}
+            <td>{{ r.skipped }}</td>
+            <td>{{ ((r.duration_ms or 0) / 1000)|round(1) }}s</td>
+            <td><a href="{{ url_for('automation_run_detail', run_id=r.id) }}"
+                   class="btn btn-sm">{{ t.get('view', 'View') }}</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
 {% endblock %}

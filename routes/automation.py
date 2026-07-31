@@ -17,10 +17,12 @@ so the request thread returns immediately. The synchronous
 
 from __future__ import annotations
 
+import hmac
 import os
 
-from flask import (Flask, abort, flash, jsonify, redirect, render_template,
-                   request, send_from_directory, session, url_for)
+from flask import (Flask, Response, abort, flash, jsonify, redirect,
+                   render_template, request, send_from_directory, session,
+                   url_for)
 
 from engine.log import get_logger
 from engine.i18n import get_lang
@@ -34,7 +36,13 @@ from engine.test_credentials import (
 from engine.job_queue import get_queue, DONE, FAILED
 from engine.automation_paths import STORAGE_ROOT  # re-exported below
 
-from ._shared import SAFE_ASSET_RE, get_session_id
+from engine import allure_ingest
+from engine import automation_codegen as codegen
+from engine import db as _db
+from engine import gherkin
+
+from ._shared import (SAFE_ASSET_RE, get_session_id,
+                      reconstruct_test_cases, resolve_active_project)
 
 log = get_logger(__name__)
 
@@ -45,15 +53,183 @@ MAX_CONCURRENT_JOBS_PER_SESSION = int(
 )
 
 
+def _ingest_token() -> str:
+    """The shared secret CI presents to post results back.
+
+    Read per call rather than at import: the value comes from the
+    environment and an operator setting it on Render should not need a
+    redeploy of this module to take effect.
+
+    No token means the ingest endpoint is OFF. That is the safe default —
+    an unauthenticated endpoint that writes run history is an endpoint
+    anyone can use to write run history.
+    """
+    return (os.environ.get("AUTOMATION_INGEST_TOKEN") or "").strip()
+
+
+def _project_base_url(project_id: str | None) -> str:
+    """The project's own base URL, for the generated playwright.config."""
+    if not project_id:
+        return ""
+    try:
+        project = _db.get_project(project_id) or {}
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.debug("automation: base_url lookup failed: %s", exc)
+        return ""
+    return str(project.get("base_url") or "")
+
+
 def register(app: Flask) -> None:
     @app.route("/automation", methods=["GET"])
     def automation_page():
-        # Automation QA was merged into Test Execution. The /automation
-        # asset endpoints (status, asset/<path>, run-async) are still
-        # registered below for back-compat with bookmarks and existing
-        # automation runs, but the GET landing now points users to the
-        # unified module.
-        return redirect(url_for("test_execution_page"))
+        """The Automation module — codegen out, Allure results in.
+
+        Was a redirect to Test Execution while automation meant "the
+        built-in Python runner". It is a module again because the TS
+        pipeline is a different thing with a different lifecycle: the suite
+        is generated here, runs somewhere with browsers, and reports back.
+        Test Execution stays the place you launch and watch a run.
+        """
+        pid = resolve_active_project(session)
+        cases = reconstruct_test_cases(session.get("test_cases_data", []))
+        if not cases and pid:
+            try:
+                cases = reconstruct_test_cases(_db.load_test_cases(pid))
+            except Exception as exc:  # pragma: no cover — best-effort
+                log.warning("automation: DB reload failed: %s", exc)
+
+        targeted = [tc for tc in cases if gherkin.is_automation_targeted(tc)]
+        coverage = codegen.coverage_report(targeted).to_dict() if targeted \
+            else None
+
+        runs: list[dict] = []
+        try:
+            runs = _db.list_automation_runs(pid, limit=20)
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("automation: run history failed: %s", exc)
+
+        return render_template(
+            "automation.html",
+            total_cases=len(cases),
+            targeted_cases=len(targeted),
+            coverage=coverage,
+            runs=runs,
+            latest=runs[0] if runs else None,
+            ingest_enabled=bool(_ingest_token()),
+            bundle_version=codegen.BUNDLE_VERSION,
+            base_url=session.get("automation_base_url", "")
+                     or _project_base_url(pid),
+        )
+
+    @app.route("/automation/bundle.zip", methods=["GET"])
+    def automation_bundle():
+        """The generated TypeScript + Playwright + Allure project."""
+        pid = resolve_active_project(session)
+        cases = reconstruct_test_cases(session.get("test_cases_data", []))
+        if not cases and pid:
+            try:
+                cases = reconstruct_test_cases(_db.load_test_cases(pid))
+            except Exception as exc:  # pragma: no cover
+                log.warning("automation bundle: DB reload failed: %s", exc)
+        targeted = [tc for tc in cases if gherkin.is_automation_targeted(tc)]
+        if not targeted:
+            # Explaining beats an empty archive — an empty zip reads as a
+            # broken download rather than as "you did not ask for BDD".
+            return ("No automation-targeted test cases. Regenerate the pack "
+                    "with the BDD format selected, or switch individual "
+                    "cases to BDD in the Test Cases editor.", 409)
+
+        name = ((session.get("project_setup") or {}).get("project_name")
+                or "testfortge").replace(" ", "_")
+        payload = codegen.bundle_zip(
+            targeted,
+            base_url=session.get("automation_base_url", "")
+                     or _project_base_url(pid),
+            project_name=name,
+            locators=codegen.locators_for_project(pid or ""),
+        )
+        return Response(
+            payload, mimetype="application/zip",
+            headers={"Content-Disposition":
+                     f"attachment; filename={name}_automation.zip"})
+
+    @app.route("/automation/allure-results", methods=["POST"])
+    def automation_allure_results():
+        """Ingest an ``allure-results`` archive from a local or CI run.
+
+        Token-authenticated rather than session-authenticated: the caller
+        is a CI job with no browser and no cookie. Disabled outright when
+        no token is configured — an open ingest endpoint would let anyone
+        write run history into someone's project.
+        """
+        expected = _ingest_token()
+        if not expected:
+            return jsonify({
+                "error": "ingest_disabled",
+                "message": ("Set AUTOMATION_INGEST_TOKEN on the service to "
+                            "enable result ingestion."),
+            }), 403
+        supplied = (request.headers.get("X-TFG-Token")
+                    or request.form.get("token") or "")
+        if not hmac.compare_digest(supplied.encode(), expected.encode()):
+            return jsonify({"error": "bad_token"}), 401
+
+        upload = request.files.get("results")
+        raw = upload.read() if upload is not None else request.get_data()
+        if not raw:
+            return jsonify({
+                "error": "empty",
+                "message": ("Attach the zipped allure-results directory as "
+                            "the 'results' file field."),
+            }), 400
+
+        summary = allure_ingest.parse_archive(raw)
+        if summary.total == 0:
+            # 422, not 400: the request was well-formed, its contents were
+            # not what the endpoint needs. The warning says which.
+            return jsonify({"error": "no_results",
+                            "warnings": summary.warnings}), 422
+
+        pid = (request.form.get("project_id") or "").strip() \
+            or resolve_active_project(session) or None
+        if pid:
+            try:
+                if _db.get_project(pid) is None:
+                    pid = None
+            except Exception:  # pragma: no cover — best-effort
+                pid = None
+
+        origin = (request.form.get("origin") or "").strip().lower()
+        if origin not in ("local", "ci"):
+            origin = "ci" if request.headers.get("X-TFG-Token") else "unknown"
+
+        try:
+            run_id = _db.save_automation_run(
+                pid, summary.to_dict(), origin=origin,
+                label=(request.form.get("label") or "").strip())
+        except Exception as exc:
+            log.exception("automation ingest: save failed")
+            return jsonify({"error": "save_failed", "message": str(exc)}), 500
+
+        return jsonify({
+            "run_id": run_id,
+            "project_id": pid,
+            **allure_ingest.to_metrics(summary),
+            "warnings": summary.warnings,
+        }), 201
+
+    @app.route("/automation/runs/<int:run_id>", methods=["GET"])
+    def automation_run_detail(run_id):
+        """Drill-down for one ingested run."""
+        run = None
+        try:
+            run = _db.get_automation_run(run_id)
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("automation run detail failed: %s", exc)
+        if run is None:
+            abort(404)
+        return render_template("automation_run.html", run=run,
+                              summary=run.get("summary") or {})
 
     @app.route("/automation/generate-account", methods=["POST"])
     def automation_generate_account():
@@ -217,6 +393,17 @@ def register(app: Flask) -> None:
         if not target.startswith(asset_root + os.sep):
             abort(400)
         return send_from_directory(STORAGE_ROOT, path)
+
+    # The ingest endpoint carries its own token auth and is called by a CI
+    # job from another origin — there is no TestForTge session cookie and
+    # no csrf_token in that context, so the global CSRFProtect gate cannot
+    # apply. Same pattern the recorder endpoints use in routes/generation.py.
+    _ext = app.extensions.get("csrf") if hasattr(app, "extensions") else None
+    if _ext is not None:
+        try:
+            _ext.exempt(automation_allure_results)
+        except Exception as exc:  # pragma: no cover — defensive
+            log.debug("automation allure-results csrf.exempt skipped: %s", exc)
 
 
 __all__ = ["register", "STORAGE_ROOT"]

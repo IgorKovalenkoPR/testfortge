@@ -58,9 +58,18 @@
                     {{ t.get('nav_test_execution', 'Test Execution') }}
                 </a>
             </li>
-            {# Automation QA was merged into Test Execution — the
-               unified module now drives both manual and Playwright-
-               based runs from a single page. #}
+            {# Automation is its own module again. The built-in Python
+               runner still lives inside Test Execution — that is where a
+               run is launched and watched. This module owns the OTHER
+               lifecycle: generate a TypeScript + Playwright suite, run it
+               where the browsers are, ingest the Allure results. Different
+               artefacts, different cadence, different page. #}
+            <li class="{% if request.endpoint and request.endpoint.startswith('automation') %}active{% endif %}">
+                <a href="{{ url_for('automation_page') }}">
+                    <span class="step-icon"><i data-lucide="bot" class="icon-sm"></i></span>
+                    {{ t.get('nav_automation', 'Automation') }}
+                </a>
+            </li>
             <li class="{% if request.endpoint == 'bug_reports_page' %}active{% endif %}">
                 <a href="{{ url_for('bug_reports_page') }}">
                     <span class="step-icon"><i data-lucide="bug" class="icon-sm"></i></span>
