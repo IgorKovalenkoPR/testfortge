@@ -76,6 +76,12 @@ def load_rules() -> dict:
         return {}
 
 
+def grid_checks() -> list[dict]:
+    """The ``list_surface`` checks, or [] if the asset is unusable."""
+    surface = load_rules().get("list_surface") or {}
+    return [c for c in (surface.get("checks") or []) if isinstance(c, dict)]
+
+
 # ── Crawler type → coverage-model control type ───────────────────────
 
 #: HTML input types map onto the eight control types the coverage model
@@ -606,6 +612,60 @@ def _fan_out_values(rule: dict, table: dict,
     return [(placeholder, v) for v in values]
 
 
+def _writable(rule: dict) -> bool:
+    """Whether the asset can phrase this check at all.
+
+    A check with evidence but no title / step / expected template cannot
+    be written honestly, so it is neither emitted nor counted — and the
+    warning is loud, because a half-written coverage model reads as
+    coverage until someone opens the pack.
+    """
+    missing = [key for key in ("title", "step", "expected")
+               if not str(rule.get(key) or "").strip()]
+    if missing:
+        _logger.warning("tc_rules: check %r has evidence but no %s template "
+                        "— skipped", rule.get("id"), "/".join(missing))
+    return not missing
+
+
+def _firing_checks(table: dict, controls: dict,
+                   checks: list[dict]) -> list[tuple[dict, tuple | None]]:
+    """(check, fan-out pair) for every case this grid justifies.
+
+    The single place that answers "what does this grid earn?", so
+    :func:`enumerate_grid` (which writes the cases) and
+    :func:`count_grid_cases` (which the estimator prices) can never
+    disagree about the number.
+    """
+    out: list[tuple[dict, tuple | None]] = []
+    for rule in checks or []:
+        if not isinstance(rule, dict):
+            continue
+        if not _has_grid_evidence(rule.get("requires"), table, controls):
+            continue
+        if not _writable(rule):
+            continue
+        for pair in _fan_out_values(rule, table, controls):
+            out.append((rule, pair))
+    return out
+
+
+def count_grid_cases(table: dict, controls: dict | None = None,
+                     checks: list[dict] | None = None) -> int:
+    """How many cases a parsed grid justifies, without writing them.
+
+    Exists so :mod:`engine.qa_estimator` can price a list surface off the
+    same coverage model the generator writes from. Reproducing the model
+    as a density formula there would let the estimate and the pack drift
+    apart the first time a check is added to the YAML.
+    """
+    if not isinstance(table, dict):
+        return 0
+    fired = _firing_checks(table, controls or {},
+                           grid_checks() if checks is None else checks)
+    return min(len(fired), MAX_CASES_PER_GRID)
+
+
 def _grid_test_data(rule: dict, controls: dict, values: dict) -> str:
     """Fill the Test Data column where the case turns on a named value."""
     bits: list[str] = []
@@ -650,19 +710,13 @@ def enumerate_grid(page: dict, table: dict, controls: dict, section: str,
                     if row_count else f"{section} is opened.")
 
     out: list[AuthoredCase] = []
-    for rule in checks:
-        if not isinstance(rule, dict):
-            continue
-        if not _has_grid_evidence(rule.get("requires"), table, controls):
-            continue
-        for pair in _fan_out_values(rule, table, controls):
-            values = dict(base)
-            if pair is not None:
-                values[pair[0]] = pair[1]
-            case = _grid_case(rule, values, controls, nav, precondition,
-                              section)
-            if case is not None:
-                out.append(case)
+    for rule, pair in _firing_checks(table, controls, checks):
+        values = dict(base)
+        if pair is not None:
+            values[pair[0]] = pair[1]
+        case = _grid_case(rule, values, controls, nav, precondition, section)
+        if case is not None:
+            out.append(case)
     return out
 
 
@@ -673,13 +727,11 @@ def _grid_case(rule: dict, values: dict, controls: dict, nav: str,
     action = _fmt(rule.get("step"), values)
     expected = _fmt(rule.get("expected"), values)
     if not (summary and action and expected):
-        # The evidence was there but the phrasing was not. Emitting a
-        # half-written case would be worse than emitting none, so say so
-        # loudly instead of dropping it silently.
-        _logger.warning("tc_rules: check %r has evidence but no %s template",
-                        rule.get("id"),
-                        "title" if not summary
-                        else ("step" if not action else "expected"))
+        # _firing_checks already screens for missing templates, so this
+        # only fires when formatting failed — an unfillable placeholder.
+        # Emitting a half-written case would be worse than emitting none.
+        _logger.warning("tc_rules: check %r could not be phrased for this "
+                        "grid — skipped", rule.get("id"))
         return None
 
     case = AuthoredCase(
@@ -719,9 +771,8 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
     rules = load_rules()
     per_type = (((rules.get("create_form") or {})
                  .get("per_control_type")) or {})
-    grid_checks = [c for c in (((rules.get("list_surface") or {})
-                                .get("checks")) or []) if isinstance(c, dict)]
-    if not per_type and not grid_checks:
+    checks = grid_checks()
+    if not per_type and not checks:
         _logger.warning("tc_rules: coverage model has neither "
                         "create_form.per_control_type nor list_surface.checks")
         return []
@@ -746,7 +797,7 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                 break
             grids_seen += 1
             grid_cases = enumerate_grid(page, table, controls, section,
-                                        grid_checks)
+                                        checks)
             if len(grid_cases) > MAX_CASES_PER_GRID:
                 _logger.info(
                     "tc_rules: %s produced %d grid cases, kept %d (cap %d)",
@@ -804,6 +855,7 @@ def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
 
 __all__ = [
     "enumerate_from_artifacts", "enumerate_from_pages", "enumerate_grid",
+    "count_grid_cases", "grid_checks",
     "control_type", "control_types", "field_label", "group_radios",
     "surface_name", "grid_section_name", "grid_section_names", "load_rules",
     "MAX_CASES_PER_FORM", "MAX_FORMS",

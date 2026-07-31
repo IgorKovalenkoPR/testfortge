@@ -374,7 +374,13 @@ class TestCapsAreLoudNotSilent:
                 {"url": "https://x.test/g"},
                 {"columns": ["A", "B"], "row_count": 1}, {}, "G", [rule])
         assert out == []
-        assert "no step template" in caplog.text
+        # The warning names every template that is missing, so the fix is
+        # obvious from the log line alone.
+        assert "no step/expected template" in caplog.text
+        # And the estimator must not price a case the generator refuses
+        # to write — one source of truth for "what does this grid earn".
+        assert tc_rules.count_grid_cases(
+            {"columns": ["A", "B"], "row_count": 1}, {}, [rule]) == 0
 
     def test_an_unknown_fan_out_list_warns_and_emits_nothing(self, caplog):
         rule = {"id": "bad_fan", "fan_out": "made_up_list",

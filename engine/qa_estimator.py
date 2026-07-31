@@ -45,6 +45,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable
 
+from engine.log import get_logger
+
+_logger = get_logger(__name__)
+
 
 # ── Data structures ──────────────────────────────────────────────
 
@@ -728,6 +732,57 @@ def features_from_text(text: str) -> list[Feature]:
     return pruned
 
 
+#: How many grids on one page are priced individually. A page rendering
+#: eight tables is a report, not eight list surfaces, and charging full
+#: list-surface coverage for each would swamp the estimate.
+MAX_PRICED_GRIDS_PER_PAGE = 3
+
+#: Ceiling on one page's grid budget. Generous — a rich admin grid
+#: prices at ~20 — but it bounds a reference/documentation site whose
+#: every page ships several tables. Logged when it bites.
+MAX_GRID_TC_PER_PAGE = 60
+
+
+def _grid_tc(page) -> tuple[int, str]:
+    """Test-case budget for the grids on one page, and a note naming it.
+
+    Priced by :func:`engine.tc_rules.count_grid_cases`, which walks the
+    same ``coverage_rules.yaml`` checks the generator writes from. A
+    density formula here would be a second copy of the coverage model,
+    and the estimate would drift from the pack the first time a check
+    was added to the YAML.
+
+    Returns ``(0, "")`` when the page has no grid, when the crawl
+    predates grid support, or when the rules asset is unusable — an
+    estimate that silently loses its grid budget is worse than one that
+    never had it, so the failure is logged.
+    """
+    tables = list(getattr(page, "tables", None) or [])
+    if not tables:
+        return 0, ""
+    controls = getattr(page, "grid_controls", None) or {}
+
+    try:
+        from engine.tc_rules import count_grid_cases
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("qa_estimator: cannot price grids: %s", exc)
+        return 0, ""
+
+    priced = tables[:MAX_PRICED_GRIDS_PER_PAGE]
+    if len(tables) > len(priced):
+        _logger.info("qa_estimator: page has %d grids, priced %d (cap %d)",
+                     len(tables), len(priced), MAX_PRICED_GRIDS_PER_PAGE)
+    total = sum(count_grid_cases(t, controls) for t in priced)
+    if total > MAX_GRID_TC_PER_PAGE:
+        _logger.info("qa_estimator: page grid budget %d, kept %d (cap %d)",
+                     total, MAX_GRID_TC_PER_PAGE, MAX_GRID_TC_PER_PAGE)
+        total = MAX_GRID_TC_PER_PAGE
+    if not total:
+        return 0, ""
+    noun = "grid" if len(priced) == 1 else "grids"
+    return total, f"{len(priced)} {noun} (+{total} list-surface cases)"
+
+
 def features_from_site_analysis(analysis) -> list[Feature]:
     """Build features from a `SiteAnalysis` produced by engine.site_crawler.
 
@@ -760,14 +815,14 @@ def features_from_site_analysis(analysis) -> list[Feature]:
     # For shared-template sites these get the bulk of the TC budget so we
     # don't double-count header/footer/nav on every content page.
     global_budget = {
-        "wordpress": {"web_general": 8, "auth": 10, "search": 6, "forms": 6, "payment": 12},
-        "static":    {"web_general": 6, "auth": 8,  "search": 5, "forms": 5, "payment": 10},
-        "landing":   {"web_general": 6, "auth": 8,  "search": 5, "forms": 6, "payment": 10},
-        "spa":       {"web_general": 10, "auth": 14, "search": 8, "forms": 8, "payment": 14},
-        "ecommerce": {"web_general": 12, "auth": 16, "search": 10, "forms": 10, "payment": 22},
-        "dashboard": {"web_general": 10, "auth": 16, "search": 8, "forms": 10, "payment": 14},
-        "app":       {"web_general": 10, "auth": 14, "search": 8, "forms": 10, "payment": 14},
-        "generic":   {"web_general": 8, "auth": 10, "search": 6, "forms": 6, "payment": 12},
+        "wordpress": {"web_general": 8, "auth": 10, "search": 6, "forms": 6, "grids": 5, "payment": 12},
+        "static":    {"web_general": 6, "auth": 8,  "search": 5, "forms": 5, "grids": 4, "payment": 10},
+        "landing":   {"web_general": 6, "auth": 8,  "search": 5, "forms": 6, "grids": 4, "payment": 10},
+        "spa":       {"web_general": 10, "auth": 14, "search": 8, "forms": 8, "grids": 8, "payment": 14},
+        "ecommerce": {"web_general": 12, "auth": 16, "search": 10, "forms": 10, "grids": 8, "payment": 22},
+        "dashboard": {"web_general": 10, "auth": 16, "search": 8, "forms": 10, "grids": 10, "payment": 14},
+        "app":       {"web_general": 10, "auth": 14, "search": 8, "forms": 10, "grids": 8, "payment": 14},
+        "generic":   {"web_general": 8, "auth": 10, "search": 6, "forms": 6, "grids": 6, "payment": 12},
     }.get(site_type, None) or {"web_general": 8}
 
     if getattr(analysis, "features_detected", None):
@@ -790,6 +845,7 @@ def features_from_site_analysis(analysis) -> list[Feature]:
         forms = len(page.forms or [])
         buttons = len(page.buttons or [])
         nav = len(page.nav_links or [])
+        grid_tc, grid_note = _grid_tc(page)
         if site_type in ("wordpress", "static", "landing"):
             # Content pages: SEO + copy + responsive + links. Forms add a bit.
             tc = 3 + min(forms, 2) * 2
@@ -813,6 +869,14 @@ def features_from_site_analysis(analysis) -> list[Feature]:
             comment = f"page (forms={forms}, buttons={buttons})"
         tc = int(round(min(tc, cap)))
         tc = max(tc, 2)
+        # The grid budget sits OUTSIDE the density cap on purpose. The
+        # cap exists to stop form/button counts running away; a list
+        # surface is a separate surface worth 12-20 cases in the
+        # reference corpus, and folding it under the same ceiling is
+        # exactly how a grid-heavy admin app came out under-estimated.
+        if grid_tc:
+            tc += grid_tc
+            comment = f"{comment}; {grid_note}"
         return tc, comment
 
     interactive_types = {"spa", "ecommerce", "dashboard", "app"}
