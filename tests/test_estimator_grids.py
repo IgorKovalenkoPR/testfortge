@@ -109,7 +109,7 @@ class TestGridBudget:
         `coverage_rules.yaml` and both move together, or this fails.
         """
         page = _analysis(ADMIN_GRID).pages[0]
-        priced, _ = est._grid_tc(page)
+        priced, _ = est._grid_tc(page, len(page.tables))
 
         generated = tc_rules.enumerate_from_artifacts(Artifacts(pages=[{
             "url": page.url, "h1": page.h1, "title": page.title,
@@ -161,6 +161,98 @@ class TestGridBudget:
         assert row.test_cases > 7
 
 
+# ── The reconciliation ───────────────────────────────────────────────
+
+def _site(pages: int, grids_per_page: int, *, unique_titles: bool = True):
+    """A crawl of `pages` pages each rendering `grids_per_page` grids."""
+    tables = "".join(
+        ADMIN_GRID.split("<table>")[1].split("</table>")[0].join(
+            ("<table>", "</table>"))
+        for _ in range(grids_per_page))
+    analysis = SiteAnalysis(base_url="https://shop.test", domain="shop.test")
+    analysis.pages = []
+    for i in range(pages):
+        html = ADMIN_GRID.replace(
+            ADMIN_GRID[ADMIN_GRID.index("<table>"):
+                       ADMIN_GRID.index("</table>") + 8], tables)
+        page = _parse_page(html, f"https://shop.test/p{i}", "shop.test")
+        if unique_titles:
+            page.h1 = f"Orders {i}"
+        analysis.pages.append(page)
+    analysis.page_count = pages
+    _detect_features(analysis, ADMIN_GRID)
+    return analysis
+
+
+def _quoted(analysis) -> int:
+    """Grid cases the estimate charges for, read off its own rows."""
+    return sum(int(f.comment.split("(+")[1].split(" ")[0])
+               for f in est.features_from_site_analysis(analysis)
+               if "list-surface cases" in f.comment)
+
+
+def _generated(analysis) -> int:
+    """Grid cases the generator will actually write."""
+    return len(tc_rules.enumerate_from_artifacts(Artifacts(pages=[{
+        "url": p.url, "h1": p.h1, "title": p.title, "forms": [],
+        "tables": p.tables, "grid_controls": p.grid_controls,
+    } for p in analysis.pages])))
+
+
+class TestQuoteMatchesPack:
+    """The estimate and the pack must cover the same grids.
+
+    They used to disagree in three independent ways at once, in both
+    directions: the generator stopped at a whole-crawl cap the estimator
+    did not know about; the estimator capped grids per page and the
+    generator did not; and the estimator dropped duplicate-titled pages
+    the generator still walked. All three now flow through
+    `tc_rules.plan_grid_coverage`, so the agreement is structural rather
+    than two caps that happened to be set close together.
+    """
+
+    @pytest.mark.parametrize("pages,grids_per_page", [
+        (1, 1),      # the ordinary case
+        (5, 1),      # a handful of list surfaces
+        (1, 5),      # one page over the per-page allowance
+        (40, 1),     # more pages than the crawl-wide budget
+        (30, 4),     # both budgets biting at once
+        (3, 0),      # nothing to reconcile
+    ])
+    def test_quote_equals_pack(self, pages, grids_per_page):
+        analysis = _site(pages, grids_per_page)
+        assert _quoted(analysis) == _generated(analysis)
+
+    def test_it_holds_when_pages_share_a_title(self):
+        """De-duplication is a presentation limit, not a coverage one.
+
+        The estimator shows one row per unique title; the generator walks
+        every crawled page. Charging only for the surfaced rows quoted
+        less than the pack shipped.
+        """
+        analysis = _site(12, 1, unique_titles=False)
+        assert _quoted(analysis) == _generated(analysis)
+        rest = [f for f in est.features_from_site_analysis(analysis)
+                if f.name.startswith("Grids on ")]
+        assert rest and rest[0].test_cases > 0
+
+    def test_the_shortfall_is_stated_not_buried_in_a_log(self):
+        # 40 grid pages against a 24-grid budget: 16 go uncovered, and
+        # the estimate has to say so where a human will see it.
+        row = [f for f in est.features_from_site_analysis(_site(40, 1))
+               if f.name == "Grids outside this estimate"]
+        assert row, "a silently dropped grid reads as covered"
+        assert f"{40 - tc_rules.MAX_GRIDS} of 40 grids" in row[0].comment
+        # Zero cases: this row is a warning, not a budget line. Charging
+        # for it would quote work the pack does not contain.
+        assert row[0].test_cases == 0
+
+    def test_no_shortfall_row_when_everything_is_covered(self):
+        names = [f.name for f in
+                 est.features_from_site_analysis(_analysis(ADMIN_GRID))]
+        assert "Grids outside this estimate" not in names
+
+
 # ── Degrading safely ─────────────────────────────────────────────────
 
 class TestRobustness:
@@ -174,38 +266,66 @@ class TestRobustness:
             buttons: list = []
             nav_links: list = []
 
-        assert est._grid_tc(LegacyPage()) == (0, "")
+        assert est._grid_tc(LegacyPage(), 3) == (0, "")
 
     def test_an_empty_grid_list_costs_nothing(self):
         class Page:
             tables: list = []
             grid_controls: dict = {}
 
-        assert est._grid_tc(Page()) == (0, "")
+        assert est._grid_tc(Page(), 3) == (0, "")
 
-    def test_only_the_first_few_grids_on_a_page_are_priced(self, caplog):
+    def test_a_page_prices_exactly_its_allowance(self):
+        """The allowance is handed in, never chosen here.
+
+        When the estimator picked its own per-page number, the generator
+        walked grids the quote had already capped.
+        """
         class Page:
             grid_controls: dict = {}
             tables = [{"columns": ["A", "B"], "row_count": 2}] * 9
 
-        with caplog.at_level("INFO", logger="engine.qa_estimator"):
-            total, note = est._grid_tc(Page())
-        assert f"{est.MAX_PRICED_GRIDS_PER_PAGE} grids" in note
-        assert "priced 3" in caplog.text
-        assert total > 0
+        assert est._grid_tc(Page(), 0) == (0, "")
+        total_two, note = est._grid_tc(Page(), 2)
+        assert "2 grids" in note
+        assert total_two == 2 * tc_rules.count_grid_cases(
+            {"columns": ["A", "B"], "row_count": 2}, {})
 
-    def test_the_per_page_ceiling_is_enforced_and_logged(self, monkeypatch,
-                                                          caplog):
-        monkeypatch.setattr(est, "MAX_GRID_TC_PER_PAGE", 4)
 
-        class Page:
-            grid_controls: dict = {}
-            tables = [{"columns": ["A", "B"], "row_count": 2}] * 3
+class TestSharedCoveragePolicy:
+    def test_the_per_page_allowance_is_capped(self):
+        covered, skipped = tc_rules.plan_grid_coverage([9])
+        assert covered == [tc_rules.MAX_GRIDS_PER_PAGE]
+        assert skipped == 9 - tc_rules.MAX_GRIDS_PER_PAGE
 
-        with caplog.at_level("INFO", logger="engine.qa_estimator"):
-            total, _ = est._grid_tc(Page())
-        assert total == 4
-        assert "kept 4 (cap 4)" in caplog.text
+    def test_the_crawl_wide_budget_is_capped(self):
+        covered, skipped = tc_rules.plan_grid_coverage([1] * 40)
+        assert sum(covered) == tc_rules.MAX_GRIDS
+        assert skipped == 40 - tc_rules.MAX_GRIDS
+
+    def test_the_budget_is_spent_in_crawl_order(self):
+        covered, _ = tc_rules.plan_grid_coverage([2, 2, 2])
+        assert covered == [2, 2, 2]
+        covered, _ = tc_rules.plan_grid_coverage([1] * 26)
+        # The pages past the budget get nothing, the earlier ones all of it.
+        assert covered[:tc_rules.MAX_GRIDS] == [1] * tc_rules.MAX_GRIDS
+        assert covered[tc_rules.MAX_GRIDS:] == [0, 0]
+
+    def test_nothing_is_skipped_on_an_ordinary_site(self):
+        covered, skipped = tc_rules.plan_grid_coverage([1, 0, 2, 1])
+        assert covered == [1, 0, 2, 1]
+        assert skipped == 0
+
+    def test_junk_counts_do_not_crash_the_plan(self):
+        covered, skipped = tc_rules.plan_grid_coverage([None, -3, "2"])
+        assert covered == [0, 0, 2]
+        assert skipped >= 0
+
+    def test_the_grid_budget_matches_the_form_budget(self):
+        # Neither surface should be able to swamp the other; the grid
+        # cap was raised from 6 for exactly this reason.
+        assert tc_rules.MAX_GRIDS * tc_rules.MAX_CASES_PER_GRID == \
+            tc_rules.MAX_FORMS * tc_rules.MAX_CASES_PER_FORM
 
 
 # ── The counter itself ───────────────────────────────────────────────

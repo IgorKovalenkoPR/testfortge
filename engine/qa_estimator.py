@@ -732,32 +732,34 @@ def features_from_text(text: str) -> list[Feature]:
     return pruned
 
 
-#: How many grids on one page are priced individually. A page rendering
-#: eight tables is a report, not eight list surfaces, and charging full
-#: list-surface coverage for each would swamp the estimate.
-MAX_PRICED_GRIDS_PER_PAGE = 3
-
-#: Ceiling on one page's grid budget. Generous — a rich admin grid
-#: prices at ~20 — but it bounds a reference/documentation site whose
-#: every page ships several tables. Logged when it bites.
-MAX_GRID_TC_PER_PAGE = 60
+def _page_grids(page) -> list[dict]:
+    """The grids on a page, [] if the crawl predates grid support."""
+    return [t for t in (getattr(page, "tables", None) or [])
+            if isinstance(t, dict)]
 
 
-def _grid_tc(page) -> tuple[int, str]:
+def _grid_tc(page, allowance: int) -> tuple[int, str]:
     """Test-case budget for the grids on one page, and a note naming it.
 
-    Priced by :func:`engine.tc_rules.count_grid_cases`, which walks the
-    same ``coverage_rules.yaml`` checks the generator writes from. A
-    density formula here would be a second copy of the coverage model,
-    and the estimate would drift from the pack the first time a check
-    was added to the YAML.
+    ``allowance`` is how many of this page's grids the generator will
+    actually enumerate, decided by
+    :func:`engine.tc_rules.plan_grid_coverage`. The estimator does not
+    get to pick its own number: when it did, a page with more grids than
+    the estimator priced still had every grid walked by the generator,
+    and the quote came out under the pack it shipped with.
 
-    Returns ``(0, "")`` when the page has no grid, when the crawl
-    predates grid support, or when the rules asset is unusable — an
-    estimate that silently loses its grid budget is worse than one that
-    never had it, so the failure is logged.
+    The count itself comes from :func:`engine.tc_rules.count_grid_cases`,
+    which walks the same ``coverage_rules.yaml`` checks the generator
+    writes from. A density formula here would be a second copy of the
+    coverage model, drifting from the pack the first time a check was
+    added to the YAML.
+
+    Returns ``(0, "")`` when the page has no grid, when its allowance is
+    zero, or when the rules asset is unusable — an estimate that
+    silently loses its grid budget is worse than one that never had it,
+    so the failure is logged.
     """
-    tables = list(getattr(page, "tables", None) or [])
+    tables = _page_grids(page)[:max(int(allowance or 0), 0)]
     if not tables:
         return 0, ""
     controls = getattr(page, "grid_controls", None) or {}
@@ -768,19 +770,11 @@ def _grid_tc(page) -> tuple[int, str]:
         _logger.warning("qa_estimator: cannot price grids: %s", exc)
         return 0, ""
 
-    priced = tables[:MAX_PRICED_GRIDS_PER_PAGE]
-    if len(tables) > len(priced):
-        _logger.info("qa_estimator: page has %d grids, priced %d (cap %d)",
-                     len(tables), len(priced), MAX_PRICED_GRIDS_PER_PAGE)
-    total = sum(count_grid_cases(t, controls) for t in priced)
-    if total > MAX_GRID_TC_PER_PAGE:
-        _logger.info("qa_estimator: page grid budget %d, kept %d (cap %d)",
-                     total, MAX_GRID_TC_PER_PAGE, MAX_GRID_TC_PER_PAGE)
-        total = MAX_GRID_TC_PER_PAGE
+    total = sum(count_grid_cases(t, controls) for t in tables)
     if not total:
         return 0, ""
-    noun = "grid" if len(priced) == 1 else "grids"
-    return total, f"{len(priced)} {noun} (+{total} list-surface cases)"
+    noun = "grid" if len(tables) == 1 else "grids"
+    return total, f"{len(tables)} {noun} (+{total} list-surface cases)"
 
 
 def features_from_site_analysis(analysis) -> list[Feature]:
@@ -839,13 +833,28 @@ def features_from_site_analysis(analysis) -> list[Feature]:
             ))
 
     # --- 2) Per-page features with architecture-aware density ----------
+    # Grid coverage is planned once, over the crawl in its own order, by
+    # the same policy the generator enumerates with — so the quote and
+    # the pack cover the same grids by construction rather than by two
+    # caps that happened to be set close to each other.
+    crawl_pages = list(getattr(analysis, "pages", None) or [])
+    try:
+        from engine.tc_rules import plan_grid_coverage
+        grid_plan, grids_beyond_budget = plan_grid_coverage(
+            [len(_page_grids(p)) for p in crawl_pages])
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("qa_estimator: cannot plan grid coverage: %s", exc)
+        grid_plan, grids_beyond_budget = [0] * len(crawl_pages), 0
+    grid_allowance = {id(p): a for p, a in zip(crawl_pages, grid_plan)}
+    grids_total = sum(len(_page_grids(p)) for p in crawl_pages)
+
     # Density formula differs per type; content-heavy sites get a small
     # flat budget, interactive sites scale with form/button density.
     def _per_page_tc(page, interactive: bool) -> tuple[int, str]:
         forms = len(page.forms or [])
         buttons = len(page.buttons or [])
         nav = len(page.nav_links or [])
-        grid_tc, grid_note = _grid_tc(page)
+        grid_tc, grid_note = _grid_tc(page, grid_allowance.get(id(page), 0))
         if site_type in ("wordpress", "static", "landing"):
             # Content pages: SEO + copy + responsive + links. Forms add a bit.
             tc = 3 + min(forms, 2) * 2
@@ -912,7 +921,47 @@ def features_from_site_analysis(analysis) -> list[Feature]:
         tc, note = _per_page_tc(page, interactive)
         features.append(Feature(name=title, test_cases=tc, comment=note))
 
-    # --- 3) Architecture summary note ---------------------------------
+    # --- 3) Grids on pages this table does not itemise -----------------
+    # The de-duplication and per-architecture cap above decide how many
+    # page ROWS to show; they are a presentation limit. The generator
+    # walks every crawled page regardless, so charging only for the
+    # surfaced ones would quote less than the pack ships. Those grids
+    # are priced together in one row instead of being lost.
+    surfaced = {id(page) for _, page in unique_pages}
+    rest = [p for p in crawl_pages if id(p) not in surfaced]
+    rest_tc = 0
+    rest_grids = 0
+    for page in rest:
+        allowance = grid_allowance.get(id(page), 0)
+        tc, _note = _grid_tc(page, allowance)
+        rest_tc += tc
+        rest_grids += min(allowance, len(_page_grids(page)))
+    if rest_tc:
+        features.append(Feature(
+            name=f"Grids on {len(rest)} further pages",
+            test_cases=rest_tc,
+            comment=(f"{rest_grids} grids on pages this table does not "
+                     f"itemise (+{rest_tc} list-surface cases)"),
+        ))
+
+    # --- 4) Grids nobody covers ----------------------------------------
+    # What is left is the shared coverage budget biting: the generator
+    # will not write these either. The tester still has to test them, so
+    # the shortfall gets a row somebody has to read rather than a log
+    # line nobody does.
+    if grids_beyond_budget:
+        _logger.info("qa_estimator: %d of %d grids are outside the coverage "
+                     "budget", grids_beyond_budget, grids_total)
+        features.append(Feature(
+            name="Grids outside this estimate",
+            test_cases=0,
+            is_section=True,
+            comment=(f"{grids_beyond_budget} of {grids_total} grids fall "
+                     f"outside the coverage budget — neither priced here "
+                     f"nor generated into the pack. Estimate them by hand."),
+        ))
+
+    # --- 5) Architecture summary note ---------------------------------
     notes = getattr(analysis, "architecture_notes", None) or []
     notes_text = "; ".join(notes)
     if notes_text:
