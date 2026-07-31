@@ -197,6 +197,10 @@ def analyze_input(requirements: list[dict],
                     "nav_links": [n[:60] for n in (p.nav_links or [])[:8]],
                     "buttons": [b[:60] for b in (p.buttons or [])[:6]],
                     "forms": p.forms or [],
+                    # Grid inventory — the list_surface half of the
+                    # deterministic coverage model reads these.
+                    "tables": getattr(p, "tables", None) or [],
+                    "grid_controls": getattr(p, "grid_controls", None) or {},
                     "has_video": bool(p.has_video),
                     "images_count": int(p.images_count or 0),
                     "links_internal_count": len(p.links_internal or []),

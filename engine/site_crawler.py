@@ -38,6 +38,14 @@ MAX_PAGES = 50          # max pages to fetch
 FETCH_TIMEOUT = 8       # seconds per request
 MAX_BODY_KB = 512       # truncate response body
 
+# Grid recognition. A page shell built out of <table> (old markup still
+# does this) must not become a "grid" — sort / pagination / bulk-action
+# cases generated against a layout table are exactly the invention
+# house_style.yaml calls out. Hence the qualification rules in
+# ``_is_grid`` and the caps below.
+MAX_TABLES_PER_PAGE = 10
+MAX_GRID_COLUMNS = 24
+
 # Only these schemes are ever fetched — ``file://`` / ``gopher://`` and
 # friends would bypass our SSRF guard, so they're rejected up-front.
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -96,6 +104,11 @@ class PageInfo:
     title: str = ""
     h1: str = ""
     forms: list[dict] = field(default_factory=list)      # {action, method, fields:[]}
+    # Data grids only — layout tables are dropped by _PageParser.
+    tables: list[dict] = field(default_factory=list)
+    # Page-level controls that surround a grid: pager, search, filters,
+    # bulk actions, create control. See _PageParser.grid_controls.
+    grid_controls: dict = field(default_factory=dict)
     nav_links: list[str] = field(default_factory=list)    # text of nav links
     buttons: list[str] = field(default_factory=list)      # button texts
     images_count: int = 0
@@ -131,6 +144,86 @@ class SiteAnalysis:
     architecture_notes: list[str] = field(default_factory=list)
 
 
+# ── Grid evidence patterns ───────────────────────────────────────
+#
+# Every pattern here answers one question: "does the markup itself say
+# this control exists?". They are deliberately narrow — a site that does
+# not name its filter a filter simply yields no filter cases, which is
+# the correct outcome. Guessing would produce cases that fail for the
+# wrong reason.
+
+_PAGER_HINT_RE = re.compile(r"pagin|\bpager\b|\bpaging\b", re.IGNORECASE)
+_PAGER_ARIA_RE = re.compile(
+    r"\b(?:next|previous|prev)\s+page\b|\bpage\s+\d+\b|pagin", re.IGNORECASE)
+#: "sortable", "sort-header", "js-sort", "orderby". The lookbehind keeps
+#: Wikipedia's ``class="unsortable"`` — an opt-*out* — from reading as an
+#: opt-in, and _UNSORTABLE_RE catches the rest of the opt-out spellings.
+_SORT_HINT_RE = re.compile(
+    r"(?<!un)sortable|\bsort\b|sort[-_]|[-_]sort|order[-_]?by",
+    re.IGNORECASE)
+_UNSORTABLE_RE = re.compile(r"unsortable|no[-_]?sort", re.IGNORECASE)
+_SEARCH_HINT_RE = re.compile(r"search|filter|query|\bq\b", re.IGNORECASE)
+_FILTER_HINT_RE = re.compile(r"filter|refine|facet", re.IGNORECASE)
+_BULK_HINT_RE = re.compile(
+    r"bulk|mass[-_ ]?action|action[-_ ]?selector", re.IGNORECASE)
+#: "Create", "New", "Add product", "+ Add" — but not "Add to cart",
+#: which is a purchase control, not a record-creation one.
+_CREATE_LABEL_RE = re.compile(
+    r"^(?:[+＋]\s*)?(?:create|new|add)\b[\w &/'-]{0,24}$", re.IGNORECASE)
+
+#: Only container elements open a pagination scope. A void element
+#: (<input>, <img>) never gets an end tag, so tracking one would leave
+#: the scope open for the rest of the document.
+_PAGER_CONTAINERS = {"nav", "ul", "ol", "div", "section", "span", "p",
+                     "table", "tfoot", "td", "footer", "aside"}
+
+
+def _attr_blob(attr_dict: dict) -> str:
+    """The identifying attributes, joined, for pattern matching."""
+    return " ".join(str(attr_dict.get(k) or "") for k in
+                    ("name", "id", "class", "aria-label", "role", "rel"))
+
+
+def _control_label(attr_dict: dict) -> str:
+    """Best human-readable name for a control from its attributes."""
+    for key in ("aria-label", "title", "name", "id"):
+        val = str(attr_dict.get(key) or "").strip()
+        if val:
+            return re.sub(r"[_\-]+", " ", val).strip()[:60]
+    return ""
+
+
+def _declares_sorting(blob: str, has_aria_sort: bool = False) -> bool:
+    """Whether these attributes say "this sorts".
+
+    An explicit opt-out wins: ``class="wikitable sortable"`` on the table
+    with ``class="unsortable"`` on one header means every column but that
+    one sorts, and generating a sort case for the excluded column would
+    fail for the wrong reason.
+    """
+    if _UNSORTABLE_RE.search(blob):
+        return False
+    return has_aria_sort or bool(_SORT_HINT_RE.search(blob))
+
+
+def _is_grid(tbl: dict) -> bool:
+    """Whether a parsed <table> is a data grid rather than page layout.
+
+    Two or more ``<th>`` column headers is the honest signature of a
+    tabular record list. A layout table has neither headers nor a
+    caption, and ``role="presentation"`` is the author telling us
+    outright that the table carries no tabular semantics.
+    """
+    if tbl.get("_role") in ("presentation", "none"):
+        return False
+    columns = tbl.get("columns") or []
+    if len(columns) >= 2:
+        return True
+    # An explicit role is the author asserting tabular semantics, so a
+    # single-column grid is believable there and nowhere else.
+    return bool(columns) and tbl.get("_role") in ("grid", "table")
+
+
 # ── HTML Parser ──────────────────────────────────────────────────
 
 class _PageParser(HTMLParser):
@@ -148,6 +241,22 @@ class _PageParser(HTMLParser):
         self.images_count = 0
         self.has_video = False
         self.meta_description = ""
+        #: Data grids, layout tables excluded (see :func:`_is_grid`).
+        self.tables: list[dict] = []
+        #: Controls that surround a grid. Collected page-wide rather than
+        #: "above the table": HTMLParser walks a token stream, not a tree,
+        #: so proximity is not knowable. On a page with two grids both
+        #: inherit the same controls — the pragmatic trade for keeping the
+        #: parser a single linear pass.
+        self.grid_controls: dict = {
+            "pagination": False,
+            "pagination_labels": [],
+            "search": False,
+            "search_labels": [],
+            "filters": [],
+            "bulk_actions": [],
+            "create_controls": [],
+        }
 
         self._in_title = False
         self._in_h1 = False
@@ -165,10 +274,32 @@ class _PageParser(HTMLParser):
         self._label_for: str | None = None
         self._label_text: str | None = None
         self._labels_by_for: dict[str, str] = {}
+        # Grid capture. Tables nest (a data grid inside a layout table is
+        # ordinary), so cells attribute to the innermost open table.
+        self._table_stack: list[dict] = []
+        self._th_text: str | None = None
+        self._caption_text: str | None = None
+        self._pager_tag = ""
+        self._pager_nest = 0
+        #: Where <option> text goes. A <select> can feed the form's field
+        #: inventory, the bulk-action list, or both.
+        self._option_sinks: list[list] = []
+        self._bulk_options: list | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple]):
         attr_dict = dict(attrs)
         tag_lower = tag.lower()
+        blob = _attr_blob(attr_dict)
+
+        # Pagination scope — a container the markup names a pager. Its
+        # links are the page-number / next / previous controls.
+        if self._pager_nest:
+            if tag_lower == self._pager_tag:
+                self._pager_nest += 1
+        elif tag_lower in _PAGER_CONTAINERS and _PAGER_HINT_RE.search(blob):
+            self._pager_tag = tag_lower
+            self._pager_nest = 1
+            self.grid_controls["pagination"] = True
 
         if tag_lower == "title":
             self._in_title = True
@@ -187,17 +318,35 @@ class _PageParser(HTMLParser):
                 self.links.append(href)
             self._in_a = True
             self._current_text = ""
+            rel = str(attr_dict.get("rel") or "").lower()
+            if ("next" in rel or "prev" in rel
+                    or _PAGER_ARIA_RE.search(
+                        str(attr_dict.get("aria-label") or ""))):
+                self.grid_controls["pagination"] = True
+            self._note_cell_link()
         elif tag_lower == "button":
             self._in_button = True
             self._current_text = ""
+            self._note_cell_link()
         elif tag_lower == "input":
             btn_type = attr_dict.get("type", "").lower()
             if btn_type in ("submit", "button"):
                 val = attr_dict.get("value", "")
                 if val:
                     self.buttons.append(val)
+                    self._note_create_control(val)
                     if self._current_form is not None and not self._current_form.get("submit_text"):
                         self._current_form["submit_text"] = val
+            if btn_type == "checkbox":
+                self._note_row_checkbox()
+            if btn_type == "search" or (
+                    btn_type in ("", "text")
+                    and _SEARCH_HINT_RE.search(
+                        blob + " " + str(attr_dict.get("placeholder") or ""))):
+                self.grid_controls["search"] = True
+                label = (str(attr_dict.get("placeholder") or "").strip()
+                         or _control_label(attr_dict) or "Search")
+                self._append_control("search_labels", label)
             if self._current_form is not None:
                 self._current_form["fields"].append(
                     self._field(attr_dict, attr_dict.get("type", "text")))
@@ -206,18 +355,74 @@ class _PageParser(HTMLParser):
                 self._current_form["fields"].append(
                     self._field(attr_dict, "textarea"))
         elif tag_lower == "select":
+            sinks: list[list] = []
             if self._current_form is not None:
                 fld = self._field(attr_dict, "select")
                 fld["options"] = []
                 self._current_form["fields"].append(fld)
                 self._current_select = fld
+                sinks.append(fld["options"])
+            if _BULK_HINT_RE.search(blob):
+                # The options of a bulk-action picker ARE the actions —
+                # "Delete selected", "Export", "Mark as read".
+                self._bulk_options = []
+                sinks.append(self._bulk_options)
+            elif _FILTER_HINT_RE.search(blob):
+                self._append_control("filters", _control_label(attr_dict))
+            self._option_sinks = sinks
         elif tag_lower == "option":
             # Real option values let a generated step name the choice
             # instead of saying "select a value" — the difference between
             # a runnable case and a placeholder.
-            if self._current_select is not None:
+            if self._option_sinks:
                 self._pending_option = attr_dict.get("value", "")
                 self._option_text = ""
+        elif tag_lower == "table":
+            self._table_stack.append({
+                "caption": "",
+                "columns": [],
+                "sortable_columns": [],
+                "row_count": 0,
+                "has_checkboxes": False,
+                "select_all": False,
+                "row_links": False,
+                "_role": str(attr_dict.get("role") or "").lower(),
+                "_in_thead": False,
+                "_row_has_td": False,
+                # Grid libraries mark the table sortable, not each
+                # header — class="wikitable sortable", DataTables, and
+                # bootstrap-table all do it this way.
+                "_all_sortable": _declares_sorting(blob),
+                "_th_sortable": False,
+                "_th_unsortable": False,
+                "_th_has_link": False,
+                "_th_is_row_header": False,
+                # Header cells of the row being read. Only committed once
+                # the row is known to hold no <td> — see _flush_header_row.
+                "_row_ths": [],
+            })
+        elif tag_lower == "caption" and self._table_stack:
+            self._caption_text = ""
+        elif tag_lower == "thead" and self._table_stack:
+            self._table_stack[-1]["_in_thead"] = True
+        elif tag_lower == "tr" and self._table_stack:
+            tbl = self._table_stack[-1]
+            # Markup that omits </tr> would otherwise lose the header row
+            # it just finished, so flush here as well as on the end tag.
+            self._flush_header_row(tbl)
+            tbl["_row_has_td"] = False
+        elif tag_lower == "th" and self._table_stack:
+            tbl = self._table_stack[-1]
+            self._th_text = ""
+            tbl["_th_sortable"] = _declares_sorting(
+                blob, "aria-sort" in attr_dict)
+            tbl["_th_unsortable"] = bool(_UNSORTABLE_RE.search(blob))
+            tbl["_th_has_link"] = False
+            tbl["_th_is_row_header"] = (
+                str(attr_dict.get("scope") or "").lower()
+                in ("row", "rowgroup"))
+        elif tag_lower == "td" and self._table_stack:
+            self._table_stack[-1]["_row_has_td"] = True
         elif tag_lower == "label":
             # <label for="x"> is how a human names the control, so steps
             # can quote the visible label instead of the machine-readable
@@ -225,6 +430,8 @@ class _PageParser(HTMLParser):
             self._label_for = attr_dict.get("for", "")
             self._label_text = ""
         elif tag_lower == "form":
+            if str(attr_dict.get("role") or "").lower() == "search":
+                self.grid_controls["search"] = True
             # Capture human context the form sits inside so qa_persona
             # can build readable TC names instead of falling back to
             # the URL action (which on WordPress / Contact Form 7 is
@@ -244,6 +451,76 @@ class _PageParser(HTMLParser):
             name = attr_dict.get("name", "").lower()
             if name == "description":
                 self.meta_description = attr_dict.get("content", "")
+
+    # ── Grid evidence helpers ────────────────────────────────────
+
+    def _append_control(self, key: str, label: str, cap: int = 8) -> None:
+        """Record a de-duplicated, capped grid control label."""
+        label = " ".join((label or "").split())[:60]
+        bucket = self.grid_controls[key]
+        if label and label not in bucket and len(bucket) < cap:
+            bucket.append(label)
+
+    @staticmethod
+    def _flush_header_row(tbl: dict) -> None:
+        """Commit the buffered ``<th>`` cells — if they form a header row.
+
+        A row that also holds ``<td>`` is a data row whose leading
+        ``<th>`` is a *row* header, not a column. PyPI's hash table is
+        the real case: ``<th scope="row">SHA256</th><td>…</td>`` made
+        "SHA256" / "MD5" / "BLAKE2b-256" look like three extra columns,
+        which would have produced sort cases for columns that do not
+        exist. Buffering catches it even when ``scope`` is omitted.
+        """
+        buffered = tbl.get("_row_ths") or []
+        if buffered and not tbl["_row_has_td"]:
+            for text, sortable in buffered:
+                if len(tbl["columns"]) >= MAX_GRID_COLUMNS:
+                    break
+                # A <tfoot> that repeats the header row is standard in
+                # DataTables markup; without this the columns — and the
+                # sort cases fanned out over them — come out doubled.
+                if text in tbl["columns"]:
+                    continue
+                tbl["columns"].append(text)
+                if sortable:
+                    tbl["sortable_columns"].append(text)
+        tbl["_row_ths"] = []
+
+    def _note_cell_link(self) -> None:
+        """A link/button inside a data cell opens the record it sits on.
+
+        Inside a ``<th>`` the same markup means something else — a
+        clickable header is how a grid exposes sorting — so it is
+        recorded there instead.
+        """
+        if not self._table_stack:
+            return
+        tbl = self._table_stack[-1]
+        if self._th_text is not None:
+            tbl["_th_has_link"] = True
+        elif tbl["_row_has_td"] and not tbl["_in_thead"]:
+            tbl["row_links"] = True
+
+    def _note_row_checkbox(self) -> None:
+        """A checkbox in the header selects all rows; in a row, one row."""
+        if not self._table_stack:
+            return
+        tbl = self._table_stack[-1]
+        if not tbl["_row_has_td"] and (self._th_text is not None
+                                       or tbl["_in_thead"]):
+            tbl["select_all"] = True
+        elif tbl["_row_has_td"]:
+            tbl["has_checkboxes"] = True
+
+    def _note_create_control(self, text: str) -> None:
+        """Record a "Create" / "New" / "Add …" control by its own label."""
+        label = " ".join((text or "").split())
+        if not label or " to " in label.lower():
+            # "Add to cart" is a purchase control, not record creation.
+            return
+        if _CREATE_LABEL_RE.match(label):
+            self._append_control("create_controls", label, cap=6)
 
     @staticmethod
     def _field(attr_dict: dict, ftype: str) -> dict:
@@ -273,6 +550,8 @@ class _PageParser(HTMLParser):
 
     def handle_endtag(self, tag: str):
         tag_lower = tag.lower()
+        if self._pager_nest and tag_lower == self._pager_tag:
+            self._pager_nest -= 1
         if tag_lower == "title":
             self._in_title = False
             self.title = self._current_text.strip()
@@ -287,11 +566,18 @@ class _PageParser(HTMLParser):
         elif tag_lower == "nav":
             self._in_nav = False
         elif tag_lower == "a":
-            if self._in_nav and self._current_text.strip():
-                self.nav_links.append(self._current_text.strip())
+            txt = self._current_text.strip()
+            if self._in_nav and txt:
+                self.nav_links.append(txt)
+            if self._pager_nest and txt:
+                self._append_control("pagination_labels", txt, cap=10)
+            self._note_create_control(txt)
             self._in_a = False
         elif tag_lower == "button":
             txt = self._current_text.strip()
+            if self._pager_nest and txt:
+                self._append_control("pagination_labels", txt, cap=10)
+            self._note_create_control(txt)
             if txt:
                 self.buttons.append(txt)
                 # Attach as submit_text for the form we're currently
@@ -301,14 +587,24 @@ class _PageParser(HTMLParser):
                     self._current_form["submit_text"] = txt
             self._in_button = False
         elif tag_lower == "option":
-            if self._current_select is not None:
-                shown = (self._option_text or "").strip() \
-                    or (self._pending_option or "").strip()
-                if shown and len(self._current_select["options"]) < 12:
-                    self._current_select["options"].append(shown)
+            shown = (self._option_text or "").strip() \
+                or (self._pending_option or "").strip()
+            if shown:
+                for sink in self._option_sinks:
+                    if len(sink) < 12:
+                        sink.append(shown)
             self._pending_option = None
             self._option_text = ""
         elif tag_lower == "select":
+            if self._bulk_options is not None:
+                for opt in self._bulk_options:
+                    # Drop the picker's own "-- Bulk actions --" prompt:
+                    # it names the control, not an action.
+                    if _BULK_HINT_RE.search(opt) or opt.strip("- ").strip() == "":
+                        continue
+                    self._append_control("bulk_actions", opt.strip("- ").strip())
+                self._bulk_options = None
+            self._option_sinks = []
             self._current_select = None
         elif tag_lower == "label":
             text = " ".join((self._label_text or "").split())
@@ -323,6 +619,44 @@ class _PageParser(HTMLParser):
                     last.setdefault("label", text[:80])
             self._label_for = None
             self._label_text = None
+        elif tag_lower == "caption" and self._table_stack:
+            text = " ".join((self._caption_text or "").split())
+            if text:
+                self._table_stack[-1]["caption"] = text[:80]
+            self._caption_text = None
+        elif tag_lower == "th" and self._table_stack:
+            tbl = self._table_stack[-1]
+            text = " ".join((self._th_text or "").split())
+            if text and not tbl["_th_is_row_header"]:
+                # A header that carries aria-sort, a sort class, a
+                # link/button, or that sits in a table the markup calls
+                # sortable, is the markup saying the column sorts.
+                sortable = not tbl["_th_unsortable"] and bool(
+                    tbl["_th_sortable"] or tbl["_th_has_link"]
+                    or tbl["_all_sortable"])
+                tbl["_row_ths"].append((text[:60], sortable))
+            self._th_text = None
+            tbl["_th_sortable"] = False
+            tbl["_th_unsortable"] = False
+            tbl["_th_has_link"] = False
+            tbl["_th_is_row_header"] = False
+        elif tag_lower == "thead" and self._table_stack:
+            self._flush_header_row(self._table_stack[-1])
+            self._table_stack[-1]["_in_thead"] = False
+        elif tag_lower == "tr" and self._table_stack:
+            tbl = self._table_stack[-1]
+            if tbl["_row_has_td"] and not tbl["_in_thead"]:
+                tbl["row_count"] += 1
+            self._flush_header_row(tbl)
+            tbl["_row_has_td"] = False
+        elif tag_lower == "table" and self._table_stack:
+            self._flush_header_row(self._table_stack[-1])
+            tbl = self._table_stack.pop()
+            self._th_text = None
+            self._caption_text = None
+            if _is_grid(tbl) and len(self.tables) < MAX_TABLES_PER_PAGE:
+                self.tables.append(
+                    {k: v for k, v in tbl.items() if not k.startswith("_")})
         elif tag_lower == "form":
             if self._current_form is not None:
                 # A <label for=...> may appear before its control, so run
@@ -344,6 +678,10 @@ class _PageParser(HTMLParser):
             self._heading_text += data
         if self._pending_option is not None:
             self._option_text += data
+        if self._th_text is not None:
+            self._th_text += data
+        if self._caption_text is not None:
+            self._caption_text += data
         if self._label_text is not None and self._pending_option is None:
             # Both sides of a wrapped control matter: "Customer name:
             # <input>" puts the name before it, "<input> Small" after.
@@ -418,6 +756,10 @@ def _parse_page(html: str, page_url: str, base_domain: str) -> PageInfo:
     page.h1 = parser.h1
     page.headings = parser.headings[:30]
     page.forms = parser.forms
+    page.tables = parser.tables
+    # Only meaningful next to a grid — a pager on a page with no table
+    # evidences nothing the list_surface model can use.
+    page.grid_controls = dict(parser.grid_controls) if parser.tables else {}
     page.nav_links = parser.nav_links
     page.buttons = parser.buttons
     page.images_count = parser.images_count

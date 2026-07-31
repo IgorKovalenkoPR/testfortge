@@ -156,6 +156,9 @@ def _build_evidence(site_analysis) -> dict:
             "nav_links": list(getattr(p, "nav_links", []) or [])[:8],
             "buttons": list(getattr(p, "buttons", []) or [])[:6],
             "form_count": len(getattr(p, "forms", []) or []),
+            # Layout tables are already excluded by the crawler, so a
+            # non-zero count really does mean "this page lists records".
+            "grid_count": len(getattr(p, "tables", []) or []),
         })
     return {
         "base_url": getattr(site_analysis, "base_url", "") or "",

@@ -262,6 +262,45 @@ def build_control_inventory(pages: list[dict], *, max_pages: int = 12) -> str:
             lines.append("  buttons / actions: "
                          + " | ".join(f'"{b}"' for b in buttons[:16]))
 
+        # Grids get their own lines: the coverage model walks a list
+        # surface separately from the forms on the same page, and it can
+        # only do that if the columns and row controls are named.
+        for t_ix, table in enumerate(page.get("tables") or [], start=1):
+            if not isinstance(table, dict):
+                continue
+            name = (table.get("caption") or "").strip()
+            lines.append(f"  grid #{t_ix}"
+                         + (f' "{name}"' if name else "") + ":")
+            cols = [str(c) for c in (table.get("columns") or [])][:16]
+            if cols:
+                lines.append("    columns: "
+                             + " | ".join(f'"{c}"' for c in cols))
+            sortable = [str(c) for c in
+                        (table.get("sortable_columns") or [])][:16]
+            if sortable:
+                lines.append("    sortable columns: "
+                             + " | ".join(f'"{c}"' for c in sortable))
+            lines.append(f"    rows rendered: {table.get('row_count', 0)}"
+                         f"; row links: {bool(table.get('row_links'))}"
+                         f"; row checkboxes: "
+                         f"{bool(table.get('has_checkboxes'))}"
+                         f"; select-all: {bool(table.get('select_all'))}")
+        grid_ctl = page.get("grid_controls") or {}
+        if isinstance(grid_ctl, dict) and grid_ctl.get("pagination"):
+            labels = [str(x) for x in
+                      (grid_ctl.get("pagination_labels") or [])][:8]
+            lines.append("  pager: present"
+                         + (" (" + " | ".join(labels) + ")" if labels else ""))
+        for key, caption in (("filters", "filter controls"),
+                             ("bulk_actions", "bulk actions"),
+                             ("create_controls", "create controls"),
+                             ("search_labels", "search controls")):
+            vals = [str(v) for v in
+                    ((grid_ctl or {}).get(key) or [])][:8]
+            if vals:
+                lines.append(f"  {caption}: "
+                             + " | ".join(f'"{v}"' for v in vals))
+
         for f_ix, form in enumerate(page.get("forms") or [], start=1):
             method = (form.get("method") or "GET").upper()
             action = (form.get("action") or "").strip()
