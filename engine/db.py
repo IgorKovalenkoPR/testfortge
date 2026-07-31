@@ -272,7 +272,31 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
             "TEXT NOT NULL DEFAULT ''",
         ))
 
-    if not additions and not sd_additions:
+    # PR-2 low-level checklist numbering on ``checklist_item``. Same
+    # idempotent probe and the same NOT NULL DEFAULT idiom: a project that
+    # booted before PR-2 has the table without these, and reading
+    # ChecklistItem through the ORM would raise "no such column".
+    cl_additions: list[tuple[str, str]] = []
+    try:
+        cl_existing = {c["name"] for c in insp.get_columns("checklist_item")}
+    except SQLAlchemyError as exc:
+        log.debug("checklist_item column probe skipped: %s", exc)
+        cl_existing = None
+    if cl_existing is not None:
+        if "item_num" not in cl_existing:
+            cl_additions.append((
+                "item_num",
+                "ALTER TABLE checklist_item ADD COLUMN item_num "
+                "VARCHAR(24) NOT NULL DEFAULT ''",
+            ))
+        if "depth" not in cl_existing:
+            cl_additions.append((
+                "depth",
+                "ALTER TABLE checklist_item ADD COLUMN depth "
+                "INTEGER NOT NULL DEFAULT 2",
+            ))
+
+    if not additions and not sd_additions and not cl_additions:
         return
 
     try:
@@ -283,6 +307,10 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
                 conn.execute(text(sql))
             for col_name, sql in sd_additions:
                 log.info("walkthrough migration: adding session_draft.%s",
+                         col_name)
+                conn.execute(text(sql))
+            for col_name, sql in cl_additions:
+                log.info("checklist migration: adding checklist_item.%s",
                          col_name)
                 conn.execute(text(sql))
     except SQLAlchemyError as exc:  # pragma: no cover — best-effort
@@ -452,6 +480,17 @@ class ChecklistItem(Base):
         nullable=False, index=True)
     external_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     section: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # PR-2: hierarchical row number ("1.1", "2.7.1") and its depth. The
+    # reference low-level checklist numbers every row and those numbers get
+    # cited in bug reports, so they are persisted rather than recomputed —
+    # recomputing would renumber siblings when a row is inserted, which
+    # checklist_style.yaml explicitly forbids. Empty string / 2 on every
+    # pre-PR-2 row, matching the NOT NULL DEFAULT idiom used by
+    # TestCase.url_pattern and TestCase.suite.
+    item_num: Mapped[str] = mapped_column(String(24), nullable=False,
+                                           default="", server_default="")
+    depth: Mapped[int] = mapped_column(Integer, nullable=False,
+                                        default=2, server_default="2")
     objective: Mapped[str | None] = mapped_column(Text, nullable=True)
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_story_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -1392,6 +1431,8 @@ def save_checklist(project_id: str, items: list) -> int:
                 priority=d.get("priority"),
                 status=d.get("status"),
                 testing_type=d.get("testing_type", "Functional"),
+                item_num=d.get("item_num") or "",
+                depth=int(d.get("depth") or 2),
             ))
             written += 1
     return written
@@ -1400,6 +1441,7 @@ def save_checklist(project_id: str, items: list) -> int:
 _CL_DATACLASS_FIELDS = (
     "id", "section", "objective", "comments", "user_story_id",
     "category", "priority", "status", "testing_type",
+    "item_num", "depth",
 )
 
 

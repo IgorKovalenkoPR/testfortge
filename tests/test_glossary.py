@@ -322,9 +322,7 @@ class TestShippedTemplatesComply:
     """The no-API-key path must produce text a reviewer would accept.
 
     These templates ARE the free-tier output, so a finding here is a
-    finding a client would see. Checklist templates are exempted until the
-    checklist author lands — tracked separately, and the exemption is an
-    explicit count so it cannot quietly grow.
+    finding a client would see.
     """
 
     def test_every_shipped_test_case_template_is_clean(self):
@@ -343,15 +341,17 @@ class TestShippedTemplatesComply:
                     offenders.append(f"{area}: {summary[:60]} → {issues}")
         assert not offenders, offenders
 
-    def test_checklist_template_debt_does_not_grow(self):
+    def test_every_shipped_checklist_template_is_clean(self):
         from engine.qa_knowledge_loader import LOADER
-        offending = 0
+        offenders: list[str] = []
         for area in LOADER.areas():
             for _sec, checks in (LOADER.get_checklist(area) or {}).items():
                 for ci in checks:
-                    if g.lint_text(ci.objective, kind="objective"):
-                        offending += 1
-        # Baseline measured when the linter landed. The checklist author
-        # PR drives this to zero; until then it must not increase.
-        assert offending <= 34, (
-            f"{offending} non-compliant checklist objectives, baseline 34")
+                    issues = g.lint_text(ci.objective, kind="objective")
+                    if issues:
+                        offenders.append(f"{area}: {ci.objective[:60]} "
+                                         f"→ {issues}")
+        # 34 objectives were phrased as test cases ("do X and verify Y")
+        # when the linter landed; all were rewritten into the house
+        # observation grammar. This must stay at zero.
+        assert not offenders, offenders

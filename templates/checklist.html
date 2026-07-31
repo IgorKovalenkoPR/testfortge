@@ -389,6 +389,7 @@
         <thead>
             <tr>
                 <th width="50">{{ t.status }}</th>
+                <th width="70">&#8470;</th>
                 <th width="100">ID</th>
                 <th>{{ t.cl_objective }}</th>
                 <th width="120">{{ t.category }}</th>
@@ -397,15 +398,21 @@
             </tr>
         </thead>
         <tbody>
+            {# The section row carries the section's own number when the
+               low-level generator produced one ("1", "2", "3") — the
+               reference sheet numbers sections, not just checks. #}
             {% set ns = namespace(current_section='') %}
             {% for cl in checklist %}
             {% if cl.section != ns.current_section %}
             {% set ns.current_section = cl.section %}
             <tr class="section-row">
-                <td colspan="6"><strong>{{ cl.section }}</strong></td>
+                <td></td>
+                <td><strong>{{ (cl.item_num or '').split('.')[0] }}</strong></td>
+                <td colspan="5"><strong>{{ cl.section }}</strong></td>
             </tr>
             {% endif %}
-            <tr class="cl-row" data-category="{{ cl.category }}">
+            <tr class="cl-row{% if (cl.depth or 2) > 2 %} cl-row-sub{% endif %}"
+                data-category="{{ cl.category }}">
                 <td>
                     <select class="status-select-sm">
                         <option value="Unchecked">—</option>
@@ -415,6 +422,7 @@
                         <option value="Blocked">BLK</option>
                     </select>
                 </td>
+                <td class="cl-num">{{ cl.item_num or '' }}</td>
                 <td><strong>{{ cl.id }}</strong></td>
                 <td>{{ cl.objective }}</td>
                 <td><span class="badge badge-cat-{{ cl.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cl.category }}</span></td>

@@ -8,25 +8,25 @@ sections:
       - objective: "Verify that the company logo is displayed in the Header"
         category: Positive
         priority: High
-      - objective: "Click the company logo and verify the browser navigates to the Homepage URL"
+      - objective: "Verify that the Homepage is opened after clicking the company logo"
         category: Positive
         priority: Medium
       - objective: "Verify that the main navigation menu in the Header lists every expected item"
         category: Positive
         priority: High
-      - objective: "Click each navigation link and verify the browser opens the URL that matches the link label"
+      - objective: "Verify that each navigation link opens the URL that matches its label"
         category: Positive
         priority: High
       - objective: "Verify that the navigation item for the current page has the active visual state (highlight / underline / different background)"
         category: Positive
         priority: Medium
-      - objective: "Hover a navigation item with a submenu and verify that the submenu becomes visible with all expected items"
+      - objective: "Verify that the submenu becomes visible with all its items on hover over a navigation item"
         category: Positive
         priority: Medium
-      - objective: "Resize the viewport to 375px and verify that the Header navigation collapses into a hamburger menu button"
+      - objective: "Verify that the Header navigation collapses into a Hamburger button at a 375px viewport"
         category: Positive
         priority: High
-      - objective: "Tap the hamburger menu and verify the menu opens; tap outside and verify the menu closes"
+      - objective: "Verify that the menu opens on tapping the Hamburger button and closes on tapping outside it"
         category: Positive
         priority: Medium
       - objective: "Verify that the browser tab title matches the page name shown in the Header"
@@ -44,7 +44,7 @@ sections:
       - objective: "Verify that body text uses the site's declared font family and is legible (no clipped characters, no overflow)"
         category: Positive
         priority: High
-      - objective: "Load the page and verify that every <img> element returns HTTP 200 (no broken icons)"
+      - objective: "Verify that every image on the page returns HTTP 200 with no broken-image placeholder"
         category: Positive
         priority: High
       - objective: 'Verify that every decorative image has alt="" and every content image has a descriptive alt attribute'
@@ -53,7 +53,7 @@ sections:
       - objective: "Verify that every CTA button (e.g. 'Buy', 'Sign Up', 'Submit') is visible above the fold and reacts to click"
         category: Positive
         priority: High
-      - objective: "Verify that content sections appear in the order defined by the design spec (hero → features → pricing → footer, etc.)"
+      - objective: "Verify that content sections appear in the order defined by the design spec (hero, features, pricing, Footer)"
         category: Positive
         priority: Medium
       - objective: "Verify that the live page contains no 'Lorem Ipsum' or 'TBD' placeholder strings"
@@ -68,25 +68,25 @@ sections:
   - name: "Links & Media"
     prefix: LNK
     items:
-      - objective: "Click every internal link on the page and verify the destination URL is on the same origin and returns HTTP 200"
+      - objective: "Verify that every internal link stays on the same origin and returns HTTP 200"
         category: Positive
         priority: High
       - objective: 'Verify that every external link carries target="_blank" and rel="noopener"'
         category: Positive
         priority: Medium
-      - objective: "Crawl every link on the page and verify none returns HTTP 404 or 5xx"
+      - objective: "Verify that no link on the page returns HTTP 404 or 5xx"
         category: Negative
         priority: High
-      - objective: "Click play on each video/audio element and verify playback starts within 2 seconds with no decoder errors"
+      - objective: "Verify that playback starts within 2 seconds with no decoder error after clicking play on each video or audio element"
         category: Positive
         priority: Medium
-      - objective: "Click each social-media link and verify the destination URL matches the brand's official account for that network"
+      - objective: "Verify that each social media link opens the brand's official account for that network"
         category: Positive
         priority: Medium
-      - objective: "Click a mailto: link and verify the default email client opens with the prefilled recipient address"
+      - objective: "Verify that the default mail client opens with the prefilled recipient address after clicking a mailto: link"
         category: Positive
         priority: Low
-      - objective: "Tap a tel: link on a mobile device and verify the dialer opens with the prefilled phone number"
+      - objective: "Verify that the call application opens with the prefilled phone number after tapping a tel: link on a mobile device"
         category: Positive
         priority: Low
   - name: "Footer"
@@ -95,13 +95,13 @@ sections:
       - objective: "Verify that the Footer is rendered at the bottom of the page and stays below the content on every viewport"
         category: Positive
         priority: Medium
-      - objective: "Click every link inside the Footer and verify each destination returns HTTP 200 and matches the link label"
+      - objective: "Verify that every link inside the Footer returns HTTP 200 and opens the page its label names"
         category: Positive
         priority: Medium
       - objective: "Verify that the copyright line in the Footer shows the current year and the legal entity name from the design spec"
         category: Positive
         priority: Low
-      - objective: "Visit at least three pages of the site and verify the Footer has the same structure and links on each page"
+      - objective: "Verify that the Footer keeps the same structure and links across at least three pages of the site"
         category: Positive
         priority: Low
   - name: "Forms & Input"
@@ -113,64 +113,64 @@ sections:
       - objective: 'Verify that every required field is marked with an asterisk and carries aria-required="true"'
         category: Positive
         priority: Medium
-      - objective: "Fill every field with valid sample data and submit: verify the backend accepts the payload and the UI shows a success state"
+      - objective: "Verify that the payload is accepted and a success state is displayed after submitting every field with valid data"
         category: Positive
         priority: High
-      - objective: "Submit the form with required fields empty and verify an inline error appears next to each missing field"
+      - objective: "Verify that an inline error is displayed next to each missing field after submitting with required fields empty"
         category: Negative
         priority: High
-      - objective: "Enter invalid email values ('test@', '@domain', 'no-at-sign') and verify each is rejected with a 'valid email required' message"
+      - objective: "Verify that an invalid email value ('test@', '@domain', 'no-at-sign') is rejected with a valid-email-required message"
         category: Negative
         priority: High
-      - objective: "Enter letters into the phone field and verify the form blocks submission with a numeric-only message"
+      - objective: "Verify that submission is blocked with a numeric-only message after entering letters into the phone field"
         category: Negative
         priority: Medium
-      - objective: "Submit a valid form and verify that a success banner or toast appears within 2 seconds and the URL/state updates as designed"
+      - objective: "Verify that a success Message is displayed within 2 seconds and the URL state updates after submitting a valid form"
         category: Positive
         priority: High
-      - objective: "Enter valid data, trigger a validation error on one field, and verify the other fields keep their values"
+      - objective: "Verify that the other fields keep their values when a validation error is triggered on one field"
         category: Negative
         priority: Medium
-      - objective: "Enter the field's maximum allowed length (per spec) and verify the form submits without truncation or error"
+      - objective: "Verify that the Form is submitted without truncation or error at the field's maximum allowed length"
         category: "Edge Case"
         priority: Medium
-      - objective: "Enter the field's minimum allowed length and verify it passes validation"
+      - objective: "Verify that the field's minimum allowed length passes validation"
         category: "Edge Case"
         priority: Medium
-      - objective: "Enter Unicode and emoji characters (e.g. 'Привіт 🚀') and verify they survive submission and round-trip in the saved record"
+      - objective: "Verify that Unicode and emoji characters (e.g. 'Привіт 🚀') survive submission and round-trip in the saved record"
         category: "Edge Case"
         priority: Medium
-      - objective: "Submit '<script>alert(1)</script>' in every text field and verify it is stored/displayed as inert text, not executed"
+      - objective: "Verify that '<script>alert(1)</script>' submitted in any text field is stored and displayed as inert text, not executed"
         category: Security
         priority: High
-      - objective: "Submit \"' OR 1=1 --\" in every text field and verify the response is a normal validation error, not a SQL error or changed result set"
+      - objective: "Verify that \"' OR 1=1 --\" submitted in any text field returns a normal validation error, not a SQL error or a changed result set"
         category: Security
         priority: High
   - name: "Responsive Design"
     prefix: RSP
     items:
-      - objective: "Resize the viewport to 375px width and verify the layout uses a single column with no horizontal scrollbar"
+      - objective: "Verify that the layout uses a single column with no horizontal scroll bar at a 375px viewport"
         category: Positive
         priority: High
-      - objective: "Resize the viewport to 768px width and verify the layout matches the tablet breakpoint of the design spec"
+      - objective: "Verify that the layout matches the tablet breakpoint of the design spec at a 768px viewport"
         category: Positive
         priority: High
-      - objective: "Resize the viewport to 1280px+ and verify the layout matches the desktop breakpoint of the design spec"
+      - objective: "Verify that the layout matches the desktop breakpoint of the design spec at a 1280px or wider viewport"
         category: Positive
         priority: High
-      - objective: "Resize the viewport between 375px and 1920px and verify images scale proportionally with no distortion or cropping of faces/text"
+      - objective: "Verify that images scale proportionally with no distortion or cropping of faces and text between a 375px and a 1920px viewport"
         category: Positive
         priority: Medium
       - objective: "Verify that no page state (normal, modal open, form focused) introduces a horizontal scrollbar at any viewport ≥ 320px"
         category: Negative
         priority: High
-      - objective: "Open the page on a 375px viewport and verify every body text paragraph is legible at 100% zoom (font-size ≥ 14px)"
+      - objective: "Verify that every body-text paragraph is legible at 100% zoom (font-size at least 14px) on a 375px viewport"
         category: Positive
         priority: Medium
-      - objective: "Tap each interactive control on a mobile viewport (375px) and verify its hit area measures ≥ 44×44 CSS pixels including padding"
+      - objective: "Verify that each interactive control has a hit area of at least 44x44 CSS pixels including padding on a 375px viewport"
         category: Positive
         priority: Medium
-      - objective: "Rotate a mobile device from portrait to landscape and verify the layout re-flows without truncation or fixed-position overlap"
+      - objective: "Verify that the layout re-flows without truncation or fixed-position overlap after rotating a mobile device from portrait to landscape"
         category: "Edge Case"
         priority: Low
   - name: "Performance"
