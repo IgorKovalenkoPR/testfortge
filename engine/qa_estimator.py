@@ -738,6 +738,28 @@ def _page_grids(page) -> list[dict]:
             if isinstance(t, dict)]
 
 
+def _count_cases(tables: list, controls: dict) -> int:
+    """Cases these grids justify, per the shared coverage model.
+
+    Delegates to :func:`engine.tc_rules.count_grid_cases`, which walks
+    the same ``coverage_rules.yaml`` checks the generator writes from. A
+    density formula here would be a second copy of the coverage model,
+    drifting from the pack the first time a check was added to the YAML.
+
+    Returns 0 when the rules asset is unusable — an estimate that
+    silently loses its grid budget is worse than one that never had it,
+    so the failure is logged.
+    """
+    if not tables:
+        return 0
+    try:
+        from engine.tc_rules import count_grid_cases
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("qa_estimator: cannot price grids: %s", exc)
+        return 0
+    return sum(count_grid_cases(t, controls or {}) for t in tables)
+
+
 def _grid_tc(page, allowance: int) -> tuple[int, str]:
     """Test-case budget for the grids on one page, and a note naming it.
 
@@ -760,17 +782,7 @@ def _grid_tc(page, allowance: int) -> tuple[int, str]:
     so the failure is logged.
     """
     tables = _page_grids(page)[:max(int(allowance or 0), 0)]
-    if not tables:
-        return 0, ""
-    controls = getattr(page, "grid_controls", None) or {}
-
-    try:
-        from engine.tc_rules import count_grid_cases
-    except Exception as exc:  # pragma: no cover — defensive
-        _logger.warning("qa_estimator: cannot price grids: %s", exc)
-        return 0, ""
-
-    total = sum(count_grid_cases(t, controls) for t in tables)
+    total = _count_cases(tables, getattr(page, "grid_controls", None))
     if not total:
         return 0, ""
     noun = "grid" if len(tables) == 1 else "grids"
@@ -944,21 +956,38 @@ def features_from_site_analysis(analysis) -> list[Feature]:
                      f"itemise (+{rest_tc} list-surface cases)"),
         ))
 
-    # --- 4) Grids nobody covers ----------------------------------------
-    # What is left is the shared coverage budget biting: the generator
-    # will not write these either. The tester still has to test them, so
-    # the shortfall gets a row somebody has to read rather than a log
-    # line nobody does.
+    # --- 4) Grids the generator will not write --------------------------
+    # What is left is the shared coverage budget biting. These grids are
+    # still real work — a tester opens every list surface the site has,
+    # not the first two dozen — so the estimate charges for them in full.
+    #
+    # That deliberately makes the estimate LARGER than the generated
+    # pack. The two numbers answer different questions: what the job
+    # costs, and what the tool wrote. Rather than hide the gap by
+    # quoting only the automated half, this row states it, so nobody
+    # reads a shortfall in the pack as coverage.
     if grids_beyond_budget:
-        _logger.info("qa_estimator: %d of %d grids are outside the coverage "
-                     "budget", grids_beyond_budget, grids_total)
+        beyond_tc = 0
+        for page in crawl_pages:
+            allowance = grid_allowance.get(id(page), 0)
+            beyond_tc += _count_cases(
+                _page_grids(page)[allowance:],
+                getattr(page, "grid_controls", None))
+        _logger.info("qa_estimator: %d of %d grids are beyond the generated "
+                     "pack, priced at %d cases",
+                     grids_beyond_budget, grids_total, beyond_tc)
+        try:
+            from engine.tc_rules import MAX_GRIDS, MAX_GRIDS_PER_PAGE
+            budget = f"{MAX_GRIDS} per crawl / {MAX_GRIDS_PER_PAGE} per page"
+        except Exception:  # pragma: no cover — defensive
+            budget = "the coverage budget"
         features.append(Feature(
-            name="Grids outside this estimate",
-            test_cases=0,
-            is_section=True,
+            name="Grids beyond the generated pack",
+            test_cases=beyond_tc,
             comment=(f"{grids_beyond_budget} of {grids_total} grids fall "
-                     f"outside the coverage budget — neither priced here "
-                     f"nor generated into the pack. Estimate them by hand."),
+                     f"outside the generator's budget ({budget}). The effort "
+                     f"is estimated here in full; those cases are NOT in the "
+                     f"generated pack and have to be authored by hand."),
         ))
 
     # --- 5) Architecture summary note ---------------------------------
