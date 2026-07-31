@@ -113,6 +113,45 @@ def control_types(field: dict) -> list[str]:
                         if t != primary]
 
 
+def group_radios(fields: list[dict]) -> list[dict]:
+    """Collapse same-name radio inputs into a single choice control.
+
+    A radio group is one decision for the user, so N members must not
+    become N cases — on the real httpbin form that produced three
+    identical "mark and unmark the \"size\" checkbox" rows. Modelled as a
+    drop-down because that is the coverage set for "choose one of these",
+    with the members' labels as the options.
+    """
+    out: list[dict] = []
+    seen: dict[str, dict] = {}
+    for field in fields:
+        if str(field.get("type") or "").lower() != "radio":
+            out.append(field)
+            continue
+        key = str(field.get("name") or field.get("id") or "")
+        option = (str(field.get("label") or "").strip().rstrip(_LABEL_TRIM)
+                  or str(field.get("value") or "").strip())
+        if key and key in seen:
+            group = seen[key]
+            if option and option not in group["options"]:
+                group["options"].append(option)
+            group["required"] = group["required"] or bool(field.get("required"))
+            continue
+        group = {
+            "name": key,
+            # The group's own name, not a member's label — a member label
+            # ("Large") would misname the control.
+            "label": key or "choice",
+            "type": "select",
+            "required": bool(field.get("required")),
+            "options": [option] if option else [],
+            "_radio_group": True,
+        }
+        seen[key] = group
+        out.append(group)
+    return out
+
+
 # ── Evidence tokens ──────────────────────────────────────────────────
 
 def _has_evidence(token: str | None, field: dict, form: dict) -> bool:
@@ -147,10 +186,16 @@ def _has_evidence(token: str | None, field: dict, form: dict) -> bool:
 
 # ── Naming ───────────────────────────────────────────────────────────
 
+#: Trailing decoration real markup puts on labels: "Customer name:",
+#: "E-mail *". Quoting it back into a step reads as if the colon were
+#: part of the control name.
+_LABEL_TRIM = " \t:*\u2022-\u2013\u2014"
+
+
 def field_label(field: dict) -> str:
     """Human name for a control, preferring what a tester can see."""
     for key in ("label", "placeholder", "name", "id"):
-        val = str(field.get(key) or "").strip()
+        val = str(field.get(key) or "").strip().rstrip(_LABEL_TRIM).strip()
         if val:
             return val[:60]
     return "unnamed field"
@@ -179,6 +224,20 @@ def surface_name(page: dict, form: dict, index: int) -> str:
         text = " ".join(str(candidate or "").split())
         if text:
             return text[:80]
+    # Nothing on the page names itself — httpbin's form page has no <h1>
+    # and no <title>, and "Form #1" tells a reader nothing. The URL path
+    # is the last honest signal before falling back to an ordinal.
+    path = re.sub(r"^https?://[^/]+", "",
+                  str(page.get("url") or "")).strip("/")
+    if path:
+        words = [w for w in re.split(r"[/\-_.]+", path) if w]
+        if words:
+            label = " ".join(words).strip()
+            titled = (label[:1].upper() + label[1:])[:80]
+            # "forms/post" already says form; "Forms post form" does not.
+            if "form" in label.lower():
+                return titled
+            return titled + " form"
     return f"Form #{index}"
 
 
@@ -396,8 +455,9 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                 _logger.info("tc_rules: stopped after %d forms (cap)",
                              MAX_FORMS)
                 return out
-            fields = [f for f in (form.get("fields") or [])
-                      if isinstance(f, dict) and control_type(f)]
+            fields = group_radios([f for f in (form.get("fields") or [])
+                                   if isinstance(f, dict)])
+            fields = [f for f in fields if control_type(f)]
             if not fields:
                 continue
             forms_seen += 1
@@ -437,7 +497,7 @@ def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
 
 __all__ = [
     "enumerate_from_artifacts", "enumerate_from_pages",
-    "control_type", "control_types", "field_label",
+    "control_type", "control_types", "field_label", "group_radios",
     "surface_name", "load_rules",
     "MAX_CASES_PER_FORM", "MAX_FORMS",
 ]

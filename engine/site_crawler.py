@@ -164,10 +164,6 @@ class _PageParser(HTMLParser):
         self._option_text = ""
         self._label_for: str | None = None
         self._label_text: str | None = None
-        # A <label> that wraps its control ("<label>Size <select>…") must
-        # stop collecting text once the control opens, or the option
-        # labels end up glued onto the field name.
-        self._label_closed = False
         self._labels_by_for: dict[str, str] = {}
 
     def handle_starttag(self, tag: str, attrs: list[tuple]):
@@ -205,15 +201,12 @@ class _PageParser(HTMLParser):
             if self._current_form is not None:
                 self._current_form["fields"].append(
                     self._field(attr_dict, attr_dict.get("type", "text")))
-                self._close_label_text()
         elif tag_lower == "textarea":
             if self._current_form is not None:
                 self._current_form["fields"].append(
                     self._field(attr_dict, "textarea"))
-                self._close_label_text()
         elif tag_lower == "select":
             if self._current_form is not None:
-                self._close_label_text()
                 fld = self._field(attr_dict, "select")
                 fld["options"] = []
                 self._current_form["fields"].append(fld)
@@ -231,7 +224,6 @@ class _PageParser(HTMLParser):
             # ``name`` attribute.
             self._label_for = attr_dict.get("for", "")
             self._label_text = ""
-            self._label_closed = False
         elif tag_lower == "form":
             # Capture human context the form sits inside so qa_persona
             # can build readable TC names instead of falling back to
@@ -252,11 +244,6 @@ class _PageParser(HTMLParser):
             name = attr_dict.get("name", "").lower()
             if name == "description":
                 self.meta_description = attr_dict.get("content", "")
-
-    def _close_label_text(self) -> None:
-        """Stop accumulating label text (a nested control just opened)."""
-        if self._label_text is not None:
-            self._label_closed = True
 
     @staticmethod
     def _field(attr_dict: dict, ftype: str) -> dict:
@@ -336,7 +323,6 @@ class _PageParser(HTMLParser):
                     last.setdefault("label", text[:80])
             self._label_for = None
             self._label_text = None
-            self._label_closed = False
         elif tag_lower == "form":
             if self._current_form is not None:
                 # A <label for=...> may appear before its control, so run
@@ -358,7 +344,11 @@ class _PageParser(HTMLParser):
             self._heading_text += data
         if self._pending_option is not None:
             self._option_text += data
-        if self._label_text is not None and not self._label_closed:
+        if self._label_text is not None and self._pending_option is None:
+            # Both sides of a wrapped control matter: "Customer name:
+            # <input>" puts the name before it, "<input> Small" after.
+            # Only <option> text is excluded — that was the real source
+            # of the original label/option bleed, not position.
             self._label_text += data
 
 
