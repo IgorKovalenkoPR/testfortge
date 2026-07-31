@@ -134,6 +134,12 @@ class SiteAnalysis:
     has_search: bool = False
     has_forms: bool = False
     has_payment: bool = False
+    #: At least one page renders a data grid (layout tables excluded).
+    #: The estimator scales its budget off this — a list surface is worth
+    #: 12-20 cases in the reference corpus, which no per-page density
+    #: formula built from forms and buttons can see.
+    has_grid: bool = False
+    grid_count: int = 0
     has_footer: bool = True
     page_count: int = 0
     crawl_errors: list[str] = field(default_factory=list)
@@ -895,6 +901,11 @@ def _detect_features(analysis: SiteAnalysis, all_html: str):
             analysis.has_payment = True
             break
 
+    # Grids. _PageParser has already refused layout tables, so a
+    # non-zero count really does mean "this site lists records".
+    analysis.grid_count = sum(len(page.tables or []) for page in analysis.pages)
+    analysis.has_grid = analysis.grid_count > 0
+
     # Build features list
     analysis.features_detected = ["web_general"]
     if analysis.has_auth:
@@ -903,6 +914,8 @@ def _detect_features(analysis: SiteAnalysis, all_html: str):
         analysis.features_detected.append("search")
     if analysis.has_forms:
         analysis.features_detected.append("forms")
+    if analysis.has_grid:
+        analysis.features_detected.append("grids")
     if analysis.has_payment:
         analysis.features_detected.append("payment")
 
@@ -965,6 +978,14 @@ def _detect_architecture(analysis: SiteAnalysis, html_text: str) -> None:
     dash_match = bool(_DASHBOARD_KEYWORDS.search(nav_text + " " + title_text))
     if dash_match:
         notes.append("Dashboard/admin signals found (analytics / reports / admin panel)")
+
+    # Grids are reported, not ranked. A pricing comparison table on a
+    # marketing page is a real grid, and letting it vote for "dashboard"
+    # would inflate that site's whole budget — the per-page grid budget
+    # already charges for the grid itself, on the page that has one.
+    if getattr(analysis, "grid_count", 0):
+        notes.append(f"{analysis.grid_count} data grid(s) parsed — "
+                     f"list-surface coverage applies")
 
     # Landing vs multi-page
     landing = len(analysis.pages) <= 2 and not (ecom_match or dash_match)
