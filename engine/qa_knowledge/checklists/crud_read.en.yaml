@@ -11,7 +11,7 @@ sections:
       - objective: "Verify that all data columns/fields are visible and formatted per the design spec (date format, currency symbol, thousands separator)"
         category: Positive
         priority: High
-      - objective: "Verify that pagination splits the rows into pages of the declared size when the record count exceeds the page limit"
+      - objective: "Verify that the rows are split into pages of the declared size when the record count exceeds the page limit"
         category: Positive
         priority: Medium
       - objective: "Verify that sorting reorders rows in ascending/descending order of the selected column"

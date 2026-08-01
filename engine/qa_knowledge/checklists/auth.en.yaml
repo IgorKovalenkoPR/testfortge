@@ -11,10 +11,10 @@ sections:
       - objective: "Verify that the password field is masked (characters are hidden)"
         category: Positive
         priority: High
-      - objective: "Verify that the 'Show password' toggle reveals and hides the password characters"
+      - objective: "Verify that the password characters are revealed after clicking the 'Show password' toggle"
         category: Positive
         priority: Medium
-      - objective: "Verify that the 'Forgot password' link is displayed and opens the recovery page"
+      - objective: "Verify that the recovery page is opened after clicking the 'Forgot password' link"
         category: Positive
         priority: High
       - objective: "Verify that 'Remember me' checkbox is present and functional"
@@ -38,7 +38,7 @@ sections:
       - objective: "Verify that the username/avatar is displayed in the Header after login"
         category: Positive
         priority: Medium
-      - objective: "Verify that 'Remember me' extends the session beyond browser close"
+      - objective: "Verify that the session is extended beyond browser close when 'Remember me' is selected"
         category: Positive
         priority: Medium
   - name: "Login — Negative"
@@ -59,7 +59,7 @@ sections:
       - objective: "Verify that the error message does not reveal which specific field failed validation (uniform 'invalid credentials' message)"
         category: Negative
         priority: High
-      - objective: "Verify that multiple failed attempts trigger account lockout or CAPTCHA"
+      - objective: "Verify that account lockout or CAPTCHA is triggered after multiple failed attempts"
         category: Negative
         priority: High
   - name: "Login — Edge Cases & Security"
@@ -143,16 +143,16 @@ sections:
       - objective: "Verify that password reset email is sent for a valid registered email"
         category: Positive
         priority: High
-      - objective: "Verify that the reset link in the email opens the password change form"
+      - objective: "Verify that the password change form is opened after clicking the reset link in the email"
         category: Positive
         priority: High
       - objective: "Verify that the new password is saved successfully after reset"
         category: Positive
         priority: High
-      - objective: "Verify that the reset link expires after a single use"
+      - objective: "Verify that the reset link is invalidated after a single use"
         category: Security
         priority: High
-      - objective: "Verify that the reset link expires after a timeout period (e.g. 24h)"
+      - objective: "Verify that the reset link is invalidated after a timeout period (e.g. 24h)"
         category: Security
         priority: Medium
       - objective: "Verify that no information is revealed for non-existent email"

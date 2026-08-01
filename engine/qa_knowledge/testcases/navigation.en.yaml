@@ -25,7 +25,7 @@ cases:
     category: Negative
     priority: High
     section: Navigation
-  - summary: "Verify that the browser Back button returns to the previous route and Forward restores the next one"
+  - summary: "Verify that the previous route is reopened by the browser Back button and the next one by Forward"
     preconditions: "Application is accessible. User has navigated through several pages."
     steps:
       - "Navigate through 3-4 different pages"

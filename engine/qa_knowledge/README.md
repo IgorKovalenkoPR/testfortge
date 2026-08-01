@@ -128,11 +128,37 @@ So they hold on every path, including the no-API-key fallback:
   expected result — they state a requirement on the product rather than
   something a tester can observe. `engine.tc_author.normalise_expected_result`
   rewrites them; `engine.qa_team_lead` review rule 2 applies it.
-- **One modal, one place.** A summary — a test-case summary, a checklist
-  objective or a bug title — carries **no modal verb at all** and is
-  written in active or passive voice. `should` / `should be` is the sole
-  exception and belongs only in the **expected result** of a test case or
-  a bug report. Operator ruling, 2026-08-01.
+- **Passive voice, thing-under-test first.** A summary puts what is being
+  checked in the subject position and the control that triggers it in a
+  trailing clause. Operator ruling, 2026-08-01, with their examples:
+
+  | | |
+  |---|---|
+  | test case / checklist | `Verify that the "Contact" form is submitted after clicking the "Submit" button` |
+  | bug report | `The "Contact" form is not submitted after clicking the "Submit" button` |
+
+  Active voice is acceptable only where the passive would be contorted —
+  in practice that means stative verbs (`the counter matches the visible
+  row count`). **The tester is never the subject**: `Verify that User
+  saves the record` names the same check as `Verify that the record is
+  saved after clicking the "Save" control` and buries the thing it is
+  about. `glossary.lint_text` flags the `User <verb>s` shape; it does not
+  try to detect active voice in general, because no regex does that
+  reliably.
+
+  Where the sentence is written matters as much as how. Phrasing for
+  generated cases lives in `style/coverage_rules.yaml` as a `title:`
+  template next to its rule, not in Python — the objectives are
+  heterogeneous prose and a transform that reorders an arbitrary clause
+  into the passive is the same machine that produced *"concurrent create
+  requests are returns the expected outcome"*. `tc_rules` fills the
+  placeholders; a human writes the sentence. The code fallback handles
+  exactly one shape (a bare imperative and its object) and refuses
+  everything else.
+
+- **One modal, one place.** A summary carries **no modal verb at all**.
+  `should` / `should be` is the sole exception and belongs only in the
+  **expected result** of a test case or a bug report. Same ruling.
 
   | | summary / objective / bug title | expected result |
   |---|---|---|

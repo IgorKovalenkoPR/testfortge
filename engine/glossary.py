@@ -444,6 +444,80 @@ def third_person(verb: str) -> str | None:
     return v + "s"
 
 
+#: Past participles the "+ed" rule gets wrong. Every irregular verb the
+#: coverage model actually uses, plus the handful a rule author is most
+#: likely to reach for next. An unlisted irregular returns None rather
+#: than "leaved" — a missing rewrite is visible, a wrong one is not.
+_IRREGULAR_PARTICIPLE = {
+    "leave": "left", "run": "run", "go": "gone", "set": "set",
+    "reset": "reset", "put": "put", "read": "read", "send": "sent",
+    "keep": "kept", "find": "found", "hide": "hidden", "show": "shown",
+    "write": "written", "choose": "chosen", "give": "given",
+    "take": "taken", "make": "made", "see": "seen", "hold": "held",
+    "cut": "cut", "split": "split", "be": "been", "do": "done",
+    "have": "had", "get": "got", "upload": "uploaded", "undo": "undone",
+}
+
+#: Regular verbs whose final consonant doubles: "submit" → "submitted".
+#: Restricted to a listed set for the same reason — the general rule
+#: (stress on the last syllable) is not something a regex can decide.
+_DOUBLING_PARTICIPLE = {
+    "submit", "commit", "omit", "permit", "admit", "cancel", "label",
+    "scroll", "stop", "drop", "tap", "plan", "refer", "prefer", "defer",
+}
+
+
+def past_participle(verb: str) -> str | None:
+    """Bare infinitive → past participle, or None when unsure.
+
+    Used to turn an imperative objective into the passive. Returning
+    None is the safe answer: the caller then keeps the objective as
+    written rather than emitting a word that is not English.
+    """
+    v = (verb or "").strip().lower()
+    if not re.fullmatch(r"[a-z]+", v):
+        return None
+    if v in _IRREGULAR_PARTICIPLE:
+        return _IRREGULAR_PARTICIPLE[v]
+    if v in _DOUBLING_PARTICIPLE:
+        return v + v[-1] + "ed"
+    if v.endswith("e"):
+        return v + "d"
+    if re.search(r"[^aeiou]y$", v):
+        return v[:-1] + "ied"
+    return v + "ed"
+
+
+#: Determiners that force the singular no matter what follows.
+_SINGULAR_DETERMINER = re.compile(r"^(a|an|each|every|one)\b", re.I)
+#: …and the ones that force the plural.
+_PLURAL_DETERMINER = re.compile(r"^(all|both|several|multiple|two|three)\b",
+                                re.I)
+
+
+def reads_plural(phrase: str) -> bool:
+    """Whether a noun phrase takes "are" rather than "is".
+
+    Deliberately shallow: the corpus's object phrases are short and
+    determiner-led. When nothing settles it, singular is the answer —
+    it is the overwhelming majority here, so a wrong guess is rare and
+    the sentence still parses.
+    """
+    text = (phrase or "").strip()
+    if not text:
+        return False
+    if _PLURAL_DETERMINER.match(text):
+        return True
+    if _SINGULAR_DETERMINER.match(text):
+        return False
+    head = re.sub(r"^(the)\s+", "", text, flags=re.I).split()
+    if not head:
+        return False
+    word = re.sub(r"[^a-z]", "", head[0].lower())
+    # "characters" plural; "address"/"status" singular despite the s.
+    return bool(word) and word.endswith("s") and not word.endswith("ss")
+
+
 # "User can save the record" -> "User saves the record"
 # "User cannot save the record" -> "User does not save the record"
 #
@@ -613,6 +687,25 @@ def lint_text(text: str, *, kind: str = "prose",
                     f'modal "{word}" in {where} — "should" is the only '
                     f"modal the house style permits, and only in an "
                     f"expected result. State what happens")
+
+    if kind in ("title", "objective"):
+        # Active voice with the tester as the subject. The check is about
+        # the product, not about who clicked — the operator's ruling
+        # (2026-08-01, wording_rules.yaml → voice) asks for the passive
+        # with the thing under test in the subject position.
+        #
+        # Only "User <verb>" is flagged, not active voice in general: a
+        # stative "the counter matches the visible row count" is fine and
+        # no regex separates the two reliably. This is the shape the
+        # generators produced and the one a reviewer keeps striking out.
+        actor = re.search(
+            r"\b(?:the\s+)?[Uu]ser\s+(?!is\b|are\b|was\b|were\b|can\b)"
+            r"([a-z]+(?:ies|es|s))\b", raw)
+        if actor:
+            issues.append(
+                f'"User {actor.group(1)}" — a summary is written in the '
+                f"passive voice with the thing under test as the subject, "
+                f"not with the tester as the actor")
 
     # Non-canonical element naming. Suggestion only — normalise_text
     # deliberately does not guess a semantic rename.

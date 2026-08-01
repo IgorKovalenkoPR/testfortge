@@ -207,6 +207,40 @@ opener:
       "Validate", "Check", "Ensure", "Test that", "Make sure" are not
       used as the opener anywhere in either reference corpus.
 
+voice:
+  # Operator ruling, 2026-08-01, with the examples they gave:
+  #
+  #   "В саммері (тайтлі) тест-кейсів, чек-лістів та баг-репортів має
+  #    використовуватися Passive Voice, інколи Active Voice (якщо це
+  #    доречно)."
+  #
+  #   * Verify that the "Contact" form is submitted after clicking the
+  #     "Submit" button      (test case / checklist)
+  #   * The "Contact" form is not submitted after clicking the "Submit"
+  #     button               (bug report)
+  rule: >-
+    A summary is written in the passive voice. The thing under test is
+    the subject; the control that triggers it goes into a trailing
+    clause — "after clicking the …", "via the …", "when … is selected".
+    Active voice is acceptable where the passive would be contorted,
+    which in this corpus means stative verbs ("the counter matches the
+    row count") and nothing else.
+  never: >-
+    Do not make the tester the subject. "Verify that User saves the
+    record" is active voice with an actor who is not what the check is
+    about; "Verify that the record is saved after clicking the 'Save'
+    control" names the same check and the same control.
+  examples:
+    - bad: 'Verify that User uploads an accepted file to the "CV" field'
+      good: 'Verify that an accepted file is uploaded to the "CV" field'
+    - bad: 'Verify that the "Email" field rejects a malformed address'
+      good: 'Verify that a malformed address is rejected in the "Email" field'
+    - bad: "Verify that multiple failed attempts trigger account lockout"
+      good: "Verify that account lockout is triggered after multiple failed attempts"
+  bug_reports: >-
+    Same shape, negated, and without the "Verify that" opener — a bug
+    report states what happened, it does not ask for a check.
+
 banned_phrases:
   # Enforced in code by engine.glossary.lint_terminology so the rule also
   # holds when no LLM is in the loop.

@@ -32,6 +32,6 @@ sections:
       - objective: "Verify that the empty state is displayed after the last record is deleted"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that bulk deletion removes every selected record and leaves unselected records untouched (if supported)"
+      - objective: "Verify that every selected record is removed by bulk deletion and the unselected records are kept (if supported)"
         category: "Edge Case"
         priority: Low

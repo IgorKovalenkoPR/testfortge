@@ -187,12 +187,12 @@ class TestDeclarativeVoice:
 
 def _case(**kw) -> tc_author.AuthoredCase:
     base = dict(
-        summary='Verify that User saves the record via the "Save" button',
+        summary='Verify that the record is saved after clicking the "Save" button',
         preconditions="Record is created",
         steps=["Go to HR module -> Employees grid",
                'Click on the "Save" button'],
         test_data="",
-        expected_result='User saves the record via the "Save" button.',
+        expected_result='The record is saved after clicking the "Save" button.',
         category="Positive",
         priority="High",
         section="Employees grid",
@@ -378,7 +378,7 @@ def _strategy() -> _strat.TestStrategy:
         site_url="https://x.test",
         matrix={
             "Functional": [
-                _strat.CheckSpec(objective="Verify that User logs in",
+                _strat.CheckSpec(objective="Verify that the user is logged in",
                                  priority="High"),
                 _strat.CheckSpec(objective="Verify that the grid filters",
                                  priority="Medium"),
@@ -445,13 +445,13 @@ _LLM_PAYLOAD = {
     "cases": [
         {
             "section": "Job Positions grid",
-            "summary": 'Verify that User can filter Job Positions using '
+            "summary": 'Verify that Job Positions are filtered using '
                        'the "Internal" filter',
             "preconditions": "Job Positions are created",
             "steps": ["1. Go to HR module -> Job Positions grid",
                       '2. Click on the "Internal" filter button'],
             "test_data": "",
-            "expected_result": 'User can filter Job Positions using the '
+            "expected_result": 'Job Positions are filtered using the '
                                '"Internal" filter. Only internal positions '
                                'remain in the grid.',
             "category": "Positive",
@@ -460,8 +460,8 @@ _LLM_PAYLOAD = {
         },
         {
             "section": "Job Position creation",
-            "summary": "Verify that User cannot create Job Position "
-                       "without the required fields filling",
+            "summary": "Verify that Job Position is not created "
+                       "without the required fields filled",
             "preconditions": "",
             "steps": ["Go to HR module -> Job Positions grid",
                       'Click on the "Create" button',
@@ -562,7 +562,7 @@ class TestAuthorLLMPath:
         assert "Only smoke" in prompt
         # The strategy checks come through as objectives to expand, not
         # as finished cases.
-        assert "Verify that User logs in" in prompt
+        assert "Verify that the user is logged in" in prompt
         assert "objectives to expand" in prompt.lower() \
             or "OBJECTIVE, not" in prompt
 
@@ -732,7 +732,7 @@ class _TC:
 
     def __init__(self, **kw):
         self.id = kw.get("id", "SC1_001")
-        self.summary = kw.get("summary", "Verify that User saves the record")
+        self.summary = kw.get("summary", "Verify that the record is saved")
         self.preconditions = kw.get("preconditions", "")
         self.test_steps = kw.get("test_steps", "1. Go to the grid\n"
                                                "2. Click Save")
@@ -857,12 +857,13 @@ class TestTestCasesRoute:
         # The model wrote "User can filter …" / "User cannot create …";
         # a summary carries no modal, so normalise_case rewrote both on
         # the way through. The render path must show the rewritten form.
-        assert ('Verify that User filters Job Positions using the '
+        assert ('Verify that Job Positions are filtered using the '
                 '&#34;Internal&#34; filter' in body
-                or "Verify that User filters Job Positions" in body)
+                or "Verify that Job Positions are filtered" in body)
         assert "can filter Job Positions" not in body
-        assert ("Verify that User does not create Job Position without the "
-                "required fields filling" in body)
+        assert "User filters" not in body
+        assert ("Verify that Job Position is not created without the "
+                "required fields filled" in body)
         # "should" reaches the page unchanged — the operator's ruling
         # applies on the render path too, not only in the unit helpers.
         assert "should not be created" in body

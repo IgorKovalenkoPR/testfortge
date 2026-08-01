@@ -91,7 +91,7 @@ list_surface:
       category: Positive
       priority: High
       requires: row_links
-      title: 'Verify that User opens a record from the "{grid}" grid by clicking its row link'
+      title: 'Verify that the record is opened from the "{grid}" grid after clicking its row link'
       step: 'Click on the link in the first data row of the "{grid}" grid'
       expected: 'The detail surface of the clicked row is opened, and the record it renders is the one that row named.'
     - id: open_new_tab
@@ -99,7 +99,7 @@ list_surface:
       category: Positive
       priority: Low
       requires: row_links
-      title: 'Verify that User opens a row of the "{grid}" grid in a new browser tab'
+      title: 'Verify that a row of the "{grid}" grid is opened in a new browser tab'
       step: 'Middle-click the link in the first data row of the "{grid}" grid'
       expected: 'The record is opened in a new browser tab, and the "{grid}" grid is left as it was in the original tab.'
     - id: start_create
@@ -108,7 +108,7 @@ list_surface:
       priority: High
       requires: create_control
       fan_out: create_controls
-      title: 'Verify that User starts record creation from the "{grid}" grid via the "{control}" control'
+      title: 'Verify that record creation is started from the "{grid}" grid after clicking the "{control}" control'
       step: 'Click on the "{control}" control'
       expected: 'The creation surface is opened with its inputs empty, and the "{grid}" grid is left unchanged behind it.'
     - id: search_simple
@@ -116,7 +116,7 @@ list_surface:
       category: Positive
       priority: High
       requires: search
-      title: 'Verify that User finds a row of the "{grid}" grid by searching a value from its first column'
+      title: 'Verify that a row of the "{grid}" grid is found by searching a value from its first column'
       step: 'Enter a value taken from the first column of an existing row into the "{search}" control'
       expected: 'The "{grid}" grid renders the matching row, and the rows that do not match it are no longer rendered.'
     - id: empty_state
@@ -124,7 +124,7 @@ list_surface:
       category: Negative
       priority: Medium
       requires: search
-      title: 'Verify that the "{grid}" grid renders its empty state when the search matches no rows'
+      title: 'Verify that the empty state of the "{grid}" grid is displayed when the search matches no rows'
       step: 'Enter a value no record carries into the "{search}" control'
       expected: 'No data row is rendered. An explicit empty-state message replaces the rows of the "{grid}" grid, and the browser console raises no error.'
     - id: filters
@@ -133,7 +133,7 @@ list_surface:
       priority: Medium
       requires: filters
       fan_out: filters
-      title: 'Verify that the "{filter}" filter narrows the "{grid}" grid to the matching rows'
+      title: 'Verify that the "{grid}" grid is narrowed to the matching rows by the "{filter}" filter'
       step: 'Apply the "{filter}" filter'
       expected: 'Only the rows matching the "{filter}" selection are rendered in the "{grid}" grid, and the applied filter is marked as active.'
     - id: filters_cleared
@@ -142,7 +142,7 @@ list_surface:
       priority: Medium
       requires: filters
       fan_out: filters
-      title: 'Verify that clearing the "{filter}" filter restores the full row set of the "{grid}" grid'
+      title: 'Verify that the full row set of the "{grid}" grid is restored after clearing the "{filter}" filter'
       step: 'Apply the "{filter}" filter, then clear it'
       expected: 'The "{grid}" grid renders the same rows it held before the filter was applied, and no filter is marked as active.'
     - id: sort_ascending
@@ -151,7 +151,7 @@ list_surface:
       priority: Medium
       requires: sortable
       fan_out: sortable_columns
-      title: 'Verify that User sorts the "{grid}" grid by the "{column}" column in ascending order'
+      title: 'Verify that the "{grid}" grid is sorted by the "{column}" column in ascending order'
       step: 'Click on the "{column}" column header once'
       expected: 'The rows are reordered by "{column}" from the lowest value to the highest, and the header marks the ascending direction.'
     - id: sort_descending
@@ -160,7 +160,7 @@ list_surface:
       priority: Medium
       requires: sortable
       fan_out: sortable_columns
-      title: 'Verify that User sorts the "{grid}" grid by the "{column}" column in descending order'
+      title: 'Verify that the "{grid}" grid is sorted by the "{column}" column in descending order'
       step: 'Click on the "{column}" column header twice'
       expected: 'The rows are reordered by "{column}" from the highest value to the lowest, and the header marks the descending direction.'
     - id: pagination_next
@@ -168,7 +168,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: pagination
-      title: 'Verify that User moves to the next page of the "{grid}" grid via the pager'
+      title: 'Verify that the next page of the "{grid}" grid is opened via the pager'
       step: 'Click on the next-page control of the pager'
       expected: 'The next page of records is rendered in the "{grid}" grid, and the pager marks the new page as the current one.'
     - id: pagination_previous
@@ -176,7 +176,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: pagination
-      title: 'Verify that User returns to the previous page of the "{grid}" grid via the pager'
+      title: 'Verify that the previous page of the "{grid}" grid is opened via the pager'
       step: 'Move to the second page, then click on the previous-page control of the pager'
       expected: 'The first page of records is rendered again in the "{grid}" grid, and the pager marks it as the current page.'
     - id: multi_select
@@ -184,7 +184,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: checkboxes
-      title: 'Verify that User marks and unmark rows of the "{grid}" grid via the row checkboxes'
+      title: 'Verify that rows of the "{grid}" grid are marked and unmarked via the row checkboxes'
       step: 'Mark the checkboxes of two rows, then unmark one of them'
       expected: 'Both rows are marked after the first two clicks, and after the third only the row that stayed marked is selected.'
     - id: select_all
@@ -192,7 +192,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: select_all
-      title: 'Verify that the header checkbox of the "{grid}" grid marks every row on the current page'
+      title: 'Verify that every row on the current page is marked by the header checkbox of the "{grid}" grid'
       step: 'Mark the checkbox in the header row of the "{grid}" grid'
       expected: 'Every row rendered on the current page of the "{grid}" grid is marked, and the header checkbox is shown in its selected state.'
     - id: bulk_actions
@@ -202,7 +202,7 @@ list_surface:
       requires: bulk_actions
       fan_out: bulk_actions
       note: One case per action the bulk control offers — delete, mass edit, export, related-task creation.
-      title: 'Verify that User runs the "{action}" bulk action on a multi-row selection in the "{grid}" grid'
+      title: 'Verify that the "{action}" bulk action is run on a multi-row selection in the "{grid}" grid'
       step: 'Mark two rows, then choose "{action}" from the bulk-action control'
       expected: 'The "{action}" action is applied to both marked rows and to no other row, and the outcome that action defines is rendered.'
     - id: bulk_actions_no_selection
@@ -210,7 +210,7 @@ list_surface:
       category: Negative
       priority: Medium
       requires: bulk_actions
-      title: 'Verify that the "{grid}" grid refuses a bulk action while no row is marked'
+      title: 'Verify that a bulk action is refused while no row is marked in the "{grid}" grid'
       step: 'Leave every row checkbox unmarked, then trigger the bulk-action control'
       expected: 'No record is changed. The bulk-action control is disabled, or a message states that no row is selected.'
     - id: group_by
@@ -218,25 +218,25 @@ list_surface:
       category: Positive
       priority: Medium
       requires: group_by_control
-      title: 'Verify that User groups the "{grid}" grid by each Group By option'
+      title: 'Verify that the "{grid}" grid is grouped by each Group By option'
     - id: search_advanced
       objective: Search via Advanced Search with parameter drop-downs
       category: Positive
       priority: Medium
       requires: advanced_search_control
-      title: 'Verify that User narrows the "{grid}" grid via Advanced Search'
+      title: 'Verify that the "{grid}" grid is narrowed via Advanced Search'
     - id: save_filter
       objective: Save the current filter set as a favourite
       category: Positive
       priority: Low
       requires: save_filter_control
-      title: 'Verify that User saves the current filter set of the "{grid}" grid as a favourite'
+      title: 'Verify that the current filter set of the "{grid}" grid is saved as a favourite'
     - id: column_picker
       objective: Add and remove columns via the field selector
       category: Positive
       priority: Low
       requires: column_picker_control
-      title: 'Verify that User adds and remove columns of the "{grid}" grid via the field selector'
+      title: 'Verify that columns of the "{grid}" grid are added and removed via the field selector'
     - id: counter
       objective: Confirm the record counter matches the visible row count
       category: Positive
@@ -275,11 +275,11 @@ create_form:
   applies_when: The artifacts evidence a create / add / new-record form.
   checks:
     - id: happy_path
-      objective: Create the record with only the required fields filled
+      objective: Confirm the record is created with only the required fields filled
       category: Positive
       priority: High
     - id: required_empty
-      objective: Attempt to save with the required fields left empty
+      objective: Confirm the record is not saved while a required field is left empty
       category: Negative
       priority: High
     - id: required_highlight
@@ -287,31 +287,32 @@ create_form:
       category: Positive
       priority: Medium
     - id: per_field_fill
-      objective: Fill in each field and confirm the value is accepted
+      objective: Confirm the value is accepted in each field
       category: Positive
       priority: Medium
       fan_out: one case per field in the artifacts' field inventory
     - id: save
-      objective: Persist via the "Save" control and confirm the record appears in the grid
+      objective: Confirm the record is displayed in the grid after the "Save" control is clicked
       category: Positive
       priority: High
     - id: discard
-      objective: Abandon via the "Discard" / "Cancel" control and confirm nothing is persisted
+      objective: Confirm nothing is persisted after the "Discard" / "Cancel" control is clicked
       category: Positive
       priority: High
     - id: unsaved_guard
-      objective: Navigate away with unsaved changes
+      objective: Confirm an unsaved-changes warning is displayed when the surface is left
       category: Negative
       priority: Medium
       note: Expected — a confirmation dialog appears; leaving discards, staying preserves the edits.
     - id: breadcrumbs
-      objective: Confirm the breadcrumb trail reflects the create context and returns to the grid
+      objective: Confirm the create context is shown in the breadcrumb trail and the grid is reopened from it
       category: Positive
       priority: Low
   per_control_type:
     text_input:
       cases:
         - objective: 'Enter a valid value'
+          title: 'Verify that a valid value is accepted in the "{label}" {noun}'
           category: Positive
         - objective: 'Leave empty when required'
           category: Negative
@@ -321,77 +322,79 @@ create_form:
         - objective: 'Enter a value at the maximum allowed length'
           category: Positive
           requires: maxlength
-          title: 'Verify that the "{label}" {noun} accepts a value at the maximum allowed length'
+          title: 'Verify that a value at the maximum allowed length is accepted in the "{label}" {noun}'
         - objective: 'Enter a value one character over the maximum'
           category: Negative
           requires: maxlength
-          title: 'Verify that the "{label}" {noun} rejects a value one character over the maximum'
+          title: 'Verify that a value one character over the maximum is rejected in the "{label}" {noun}'
           step: 'Enter one character more than the maximum into the "{label}" {noun}'
         - objective: 'Enter non-Latin characters and reopen the record'
           category: Positive
-          title: 'Verify that the "{label}" {noun} accepts non-Latin characters and keeps them after a reload'
+          title: 'Verify that non-Latin characters are accepted in the "{label}" {noun} and kept after a reload'
         - objective: 'Enter a whitespace-only value'
           category: Negative
           requires: required
-          title: 'Verify that the "{label}" {noun} rejects a whitespace-only value'
+          title: 'Verify that a whitespace-only value is rejected in the "{label}" {noun}'
           step: 'Enter only spaces into the "{label}" {noun}'
     email_input:
       cases:
         - objective: 'Enter a valid address'
+          title: 'Verify that a valid address is accepted in the "{label}" {noun}'
           category: Positive
         - objective: 'Enter a malformed address'
           category: Negative
-          title: 'Verify that the "{label}" {noun} rejects a malformed address'
+          title: 'Verify that a malformed address is rejected in the "{label}" {noun}'
           step: 'Enter a malformed address into the "{label}" {noun}'
     numeric_input:
       cases:
         - objective: 'Enter a value inside the allowed range'
+          title: 'Verify that a value inside the allowed range is accepted in the "{label}" {noun}'
           category: Positive
           requires: range
         - objective: 'Enter the minimum allowed value'
           category: Positive
           requires: range
-          title: 'Verify that the "{label}" {noun} accepts the minimum allowed value'
+          title: 'Verify that the minimum allowed value is accepted in the "{label}" {noun}'
         - objective: 'Enter the maximum allowed value'
           category: Positive
           requires: range
-          title: 'Verify that the "{label}" {noun} accepts the maximum allowed value'
+          title: 'Verify that the maximum allowed value is accepted in the "{label}" {noun}'
         - objective: 'Enter a value below the minimum'
           category: Negative
           requires: range
-          title: 'Verify that the "{label}" {noun} rejects a value below the minimum'
+          title: 'Verify that a value below the minimum is rejected in the "{label}" {noun}'
           step: 'Enter a value below the minimum into the "{label}" {noun}'
         - objective: 'Enter a value above the maximum'
           category: Negative
           requires: range
-          title: 'Verify that the "{label}" {noun} rejects a value above the maximum'
+          title: 'Verify that a value above the maximum is rejected in the "{label}" {noun}'
           step: 'Enter a value above the maximum into the "{label}" {noun}'
         - objective: 'Enter letters into a numeric control'
           category: Negative
-          title: 'Verify that the "{label}" {noun} rejects letters'
+          title: 'Verify that letters are rejected in the "{label}" {noun}'
           step: 'Enter letters into the "{label}" {noun}'
         - objective: 'Enter a decimal where only integers are allowed'
           category: Negative
           requires: step
-          title: 'Verify that the "{label}" {noun} rejects a decimal value'
+          title: 'Verify that a decimal value is rejected in the "{label}" {noun}'
           step: 'Enter a decimal value into the "{label}" {noun}'
     date_input:
       cases:
         - objective: 'Pick a date via the date-picker'
           category: Positive
-          title: 'Verify that User picks a date in the "{label}" {noun} via the date-picker'
+          title: 'Verify that a date is picked in the "{label}" {noun} via the date-picker'
         - objective: 'Type the date directly in the accepted format'
           category: Positive
-          title: 'Verify that User types a date directly into the "{label}" {noun} in the accepted format'
+          title: 'Verify that a date is typed directly into the "{label}" {noun} in the accepted format'
         - objective: 'Enter a date outside the allowed range'
           category: Negative
           requires: range
-          title: 'Verify that the "{label}" {noun} rejects a date outside the allowed range'
+          title: 'Verify that a date outside the allowed range is rejected in the "{label}" {noun}'
           step: 'Enter a date outside the allowed range into the "{label}" {noun}'
         - objective: 'Enter an end date earlier than the start date'
           category: Negative
           requires: sibling_date
-          title: 'Verify that the form rejects an end date earlier than the start date'
+          title: 'Verify that an end date earlier than the start date is rejected by the form'
     dropdown:
       note: >-
         The select / type-ahead / clear set per relational control is the
@@ -402,56 +405,61 @@ create_form:
         - objective: 'Select an existing value'
           category: Positive
           requires: options
-          title: 'Verify that User selects an existing value from the "{label}" {noun}'
+          title: 'Verify that an existing value is selected from the "{label}" {noun}'
         - objective: 'Filter by typing a prefix'
           category: Positive
           requires: options
-          title: 'Verify that User filters the "{label}" {noun} by typing a prefix'
+          title: 'Verify that the "{label}" {noun} is filtered by typing a prefix'
         - objective: 'Clear the selection'
           category: Positive
           requires: not_required
-          title: 'Verify that User clears the selection in the "{label}" {noun}'
+          title: 'Verify that the selection is cleared in the "{label}" {noun}'
         - objective: 'Open the full picker via "Search More" and select from it'
+          title: 'Verify that a value is selected from the full picker of the "{label}" {noun} opened via "Search More"'
           category: Positive
           requires: search_more_control
         - objective: 'Create a related record via "Create and Edit"'
+          title: 'Verify that a related record is created from the "{label}" {noun} via "Create and Edit"'
           category: Positive
           requires: inline_create_control
         - objective: 'Attempt "Create and Edit" without the required permission'
+          title: 'Verify that "Create and Edit" is refused in the "{label}" {noun} without the required permission'
           category: Negative
           requires: inline_create_control
     checkbox:
       cases:
         - objective: 'Mark and unmark the control'
           category: Positive
-          title: 'Verify that User marks and unmark the "{label}" {noun}'
+          title: 'Verify that the "{label}" {noun} is marked and unmarked'
           step: 'Mark the "{label}" {noun}, then unmark it'
         - objective: 'Confirm dependent controls follow the state'
+          title: 'Verify that the dependent controls are updated to match the state of the "{label}" {noun}'
           category: Positive
           requires: dependent_fields
     file_upload:
       cases:
         - objective: 'Upload a file of an accepted type and size'
           category: Positive
-          title: 'Verify that User uploads an accepted file to the "{label}" {noun}'
+          title: 'Verify that an accepted file is uploaded to the "{label}" {noun}'
         - objective: 'Upload a file of a rejected type'
           category: Negative
           requires: accept
-          title: 'Verify that the "{label}" {noun} rejects a file of a disallowed type'
+          title: 'Verify that a file of a disallowed type is rejected in the "{label}" {noun}'
         - objective: 'Upload a file over the size limit'
+          title: 'Verify that a file over the size limit is rejected in the "{label}" {noun}'
           category: Negative
           requires: max_size
         - objective: 'Remove an uploaded file and upload it again'
           category: Positive
-          title: 'Verify that User removes a file from the "{label}" {noun} and upload the same file again'
+          title: 'Verify that a file is removed from the "{label}" {noun} and uploaded again'
     rich_text:
       cases:
         - objective: 'Enter formatted text and reload'
           category: Positive
-          title: 'Verify that formatted text in the "{label}" {noun} survives a reload'
+          title: 'Verify that formatted text in the "{label}" {noun} is preserved after a reload'
         - objective: 'Paste markup or script content'
           category: Negative
-          title: 'Verify that the "{label}" {noun} renders pasted markup inert'
+          title: 'Verify that pasted markup is rendered inert in the "{label}" {noun}'
           step: 'Paste markup and script content into the "{label}" {noun}'
   must_pair:
     - when: A field is required
@@ -468,24 +476,24 @@ create_form:
 # ─────────────────────────────────────────────────────────────────────
 detail_form:
   checks:
-    - {objective: 'Enter edit mode via the "Edit" control', category: Positive, priority: High}
+    - {objective: 'Confirm edit mode is opened after the "Edit" control is clicked', category: Positive, priority: High}
     - {objective: 'Confirm every field is pre-populated with the stored value', category: Positive, priority: High}
-    - {objective: 'Change one field, save, reload, and confirm only that field changed', category: Positive, priority: High}
-    - {objective: 'Change one field, discard, and confirm the stored value is intact', category: Positive, priority: High}
-    - {objective: 'Open each tab and confirm its content renders', category: Positive, priority: Medium, fan_out: one case per tab}
-    - {objective: 'Confirm each smart button is displayed with a correct counter', category: Positive, priority: Medium}
-    - {objective: 'Follow each smart button to its target grid', category: Positive, priority: Medium, fan_out: one case per smart button}
-    - {objective: 'Confirm the counter updates after adding and removing a related record', category: Positive, priority: Medium}
-    - {objective: 'Add and delete an attachment', category: Positive, priority: Medium}
-    - {objective: 'Add, view and remove followers', category: Positive, priority: Medium}
-    - {objective: 'Post a message and log an internal note', category: Positive, priority: Medium}
-    - {objective: 'Confirm tooltips appear on hover over annotated fields', category: Positive, priority: Low}
-    - {objective: 'Switch to the next and previous record via the record switcher', category: Positive, priority: Low}
-    - {objective: 'Print / export the record from the print menu', category: Positive, priority: Medium}
-    - {objective: 'Duplicate the record and confirm the copy is independent of the original', category: Positive, priority: Medium}
-    - {objective: 'Delete the record through the confirmation dialog', category: Positive, priority: High}
-    - {objective: 'Cancel the delete confirmation and confirm the record survives', category: Negative, priority: High}
-    - {objective: 'Open the detail URL of a deleted record directly', category: Negative, priority: Medium}
+    - {objective: 'Confirm only the changed field is updated after the record is saved and reloaded', category: Positive, priority: High}
+    - {objective: 'Confirm the stored value is kept after one field is changed and discarded', category: Positive, priority: High}
+    - {objective: 'Confirm the content of each tab is displayed after the tab is opened', category: Positive, priority: Medium, fan_out: one case per tab}
+    - {objective: 'Confirm each smart button is displayed with the counter matching its target grid', category: Positive, priority: Medium}
+    - {objective: 'Confirm the target grid is opened after each smart button is clicked', category: Positive, priority: Medium, fan_out: one case per smart button}
+    - {objective: 'Confirm the counter is updated after a related record is added and removed', category: Positive, priority: Medium}
+    - {objective: 'Confirm an attachment is added and deleted', category: Positive, priority: Medium}
+    - {objective: 'Confirm followers are added, displayed and removed', category: Positive, priority: Medium}
+    - {objective: 'Confirm a message is posted and an internal note is logged', category: Positive, priority: Medium}
+    - {objective: 'Confirm a tooltip is displayed on hover over each annotated field', category: Positive, priority: Low}
+    - {objective: 'Confirm the next and the previous record are opened via the record switcher', category: Positive, priority: Low}
+    - {objective: 'Confirm the record is printed and exported from the print menu', category: Positive, priority: Medium}
+    - {objective: 'Confirm the duplicated record is independent of the original', category: Positive, priority: Medium}
+    - {objective: 'Confirm the record is deleted through the confirmation dialog', category: Positive, priority: High}
+    - {objective: 'Confirm the record is kept after the delete confirmation is cancelled', category: Negative, priority: High}
+    - {objective: 'Confirm a not-found state is displayed when the detail URL of a deleted record is opened directly', category: Negative, priority: Medium}
 
 # ─────────────────────────────────────────────────────────────────────
 # 5. State machine
@@ -496,12 +504,12 @@ state_machine:
     kanban column set — e.g. the corpus's Appraisal flow
     New → Plan in Progress → Waiting Appreciation → Done, plus Cancelled.
   checks:
-    - {objective: 'Advance the record through each legal transition via its own control', category: Positive, priority: High, fan_out: one case per transition}
+    - {objective: 'Confirm the record is advanced through each legal transition via its own control', category: Positive, priority: High, fan_out: one case per transition}
     - {objective: 'Confirm the transition control is NOT displayed while the record is in a state that forbids it', category: Negative, priority: High, fan_out: one case per guarded control}
-    - {objective: 'Attempt a transition whose entry conditions are unmet', category: Negative, priority: High}
-    - {objective: 'Confirm fields auto-filled by a transition carry the right value and are read-only', category: Positive, priority: Medium}
-    - {objective: 'Reset the record to its initial state where the flow allows it', category: Positive, priority: Medium}
-    - {objective: 'Attempt to leave a terminal state', category: Negative, priority: High}
+    - {objective: 'Confirm a transition whose entry conditions are unmet is refused', category: Negative, priority: High}
+    - {objective: 'Confirm the fields auto-filled by a transition are populated with the declared value and are read-only', category: Positive, priority: Medium}
+    - {objective: 'Confirm the record is reset to its initial state where the flow allows it', category: Positive, priority: Medium}
+    - {objective: 'Confirm a terminal state is not left', category: Negative, priority: High}
     - {objective: 'Confirm actions on a locked / approved record are refused', category: Negative, priority: High}
   must_pair:
     - when: A control drives a transition
@@ -524,11 +532,11 @@ permissions:
     "User with special rights can …" with
     "User without special rights cannot …".
   checks:
-    - {objective: 'Confirm the privileged actor performs the action', category: Positive, priority: High}
+    - {objective: 'Confirm the action is completed for the privileged actor', category: Positive, priority: High}
     - {objective: 'Confirm the action is refused for the unprivileged actor', category: Negative, priority: High}
     - {objective: 'Confirm the restricted tab / field / menu is hidden from the unprivileged actor', category: Negative, priority: High}
     - {objective: 'Confirm the restricted surface is not reachable by its direct URL for the unprivileged actor', category: Negative, priority: High}
-    - {objective: 'Confirm each actor sees only the records their scope allows', category: Positive, priority: High}
+    - {objective: 'Confirm only the records allowed by the scope of each actor are displayed', category: Positive, priority: High}
   must_pair:
     - when: Any action is permission-gated
       derive: 'Exactly one Negative counterpart per gated action, per role that lacks the permission.'
