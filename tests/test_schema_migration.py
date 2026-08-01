@@ -19,14 +19,19 @@ schema, DROP the new columns, run the migration, and check what came back.
 SQLite has supported ``DROP COLUMN`` since 3.35, which is what makes the
 simulation possible.
 
-**Not covered here: PostgreSQL.** Production runs Postgres and no server
-was available in this environment, so the DDL is exercised on SQLite only
-and checked for portable syntax by inspection below. A Postgres run before
-deploy is still worth doing.
+Every test that touches the schema is parameterised over **both** engines.
+SQLite runs always; PostgreSQL runs when ``TFG_TEST_POSTGRES_URL`` points
+at a throwaway database, which CI supplies from a service container. That
+matters because the ALTERs are hand-written SQL and production is
+Postgres: the two engines differ on reserved words, on whether
+``ADD COLUMN … NOT NULL DEFAULT`` rewrites the table, and on type names. A
+migration verified only on SQLite is verified on the wrong engine.
 """
 from __future__ import annotations
 
+import os
 import re
+import sqlite3
 
 import pytest
 from sqlalchemy import inspect, text
@@ -59,9 +64,40 @@ def _columns(table: str) -> set[str]:
         return set()
 
 
-@pytest.fixture()
-def fresh_engine(tmp_path, monkeypatch):
-    """A brand-new SQLite database with the full schema.
+#: Point this at a THROWAWAY PostgreSQL database to run the whole file
+#: against the engine production actually uses. CI sets it from a service
+#: container; locally, any scratch database works:
+#:
+#:     TFG_TEST_POSTGRES_URL=postgresql+psycopg2://u:p@localhost/tfg_test
+#:
+#: Everything below is destructive — it drops columns and tables — so the
+#: URL must never point at anything whose contents matter.
+POSTGRES_URL = os.environ.get("TFG_TEST_POSTGRES_URL", "").strip()
+
+#: SQLite gained ``DROP COLUMN`` in 3.35. Older builds can still run the
+#: fresh-install and portability checks.
+_CAN_DROP_COLUMN = sqlite3.sqlite_version_info >= (3, 35)
+
+
+def _params() -> list:
+    out = [pytest.param("sqlite", id="sqlite")]
+    out.append(pytest.param(
+        "postgres", id="postgres",
+        marks=pytest.mark.skipif(
+            not POSTGRES_URL,
+            reason="set TFG_TEST_POSTGRES_URL to a throwaway database")))
+    return out
+
+
+@pytest.fixture(params=_params())
+def fresh_engine(request, tmp_path, monkeypatch):
+    """A brand-new database with the full schema, on each backend.
+
+    Parameterised over SQLite and PostgreSQL because the ALTERs are
+    hand-written SQL and production runs Postgres. A migration verified
+    only on SQLite is a migration verified on the wrong engine — the two
+    differ on reserved words, on whether ``ADD COLUMN … NOT NULL DEFAULT``
+    rewrites the table, and on type names.
 
     These tests DROP columns and tables. If the swap below ever fails to
     take, they would do that to the shared development database instead —
@@ -74,24 +110,49 @@ def fresh_engine(tmp_path, monkeypatch):
     quietly corrupt everyone else's.
     """
     monkeypatch.setenv("FLASK_DEBUG", "1")
-    db_path = tmp_path / "mig.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    if request.param == "postgres":
+        url = POSTGRES_URL
+        marker = url.rsplit("/", 1)[-1].split("?")[0]
+    else:
+        db_path = tmp_path / "mig.db"
+        url = f"sqlite:///{db_path}"
+        marker = str(db_path)
+
+    monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setattr(_db, "_engine", None, raising=False)
     monkeypatch.setattr(_db, "_Session", None, raising=False)
-    _db.init_db()
 
+    if request.param == "postgres":
+        # Start from nothing: a leftover schema from a previous run would
+        # make "the migration created this" indistinguishable from "it was
+        # already there".
+        from sqlalchemy import create_engine
+        probe = create_engine(url)
+        _db.Base.metadata.drop_all(probe)
+        probe.dispose()
+
+    _db.init_db()
     engine = _db.get_engine()
-    assert str(db_path) in str(engine.url), (
+    assert marker in str(engine.url), (
         f"refusing to run destructive migration tests against "
         f"{engine.url} — the database swap did not take")
 
     yield engine
 
+    if request.param == "postgres":
+        _db.Base.metadata.drop_all(engine)
     # Tear the engine down so the next test rebuilds against the real URL
-    # rather than inheriting this throwaway one.
+    # rather than inheriting this throwaway one. Both globals: resetting
+    # only ``_engine`` leaves the stale sessionmaker bound here, which is
+    # the split brain that caused the cross-file failures above.
     engine.dispose()
     monkeypatch.setattr(_db, "_engine", None, raising=False)
     monkeypatch.setattr(_db, "_Session", None, raising=False)
+
+
+def _drop_column(conn, table: str, column: str) -> None:
+    """``DROP COLUMN``, quoting the identifier for both engines."""
+    conn.execute(text(f'ALTER TABLE {table} DROP COLUMN "{column}"'))
 
 
 class TestFreshInstall:
@@ -110,11 +171,13 @@ class TestFreshInstall:
 class TestUpgradeInPlace:
     """The path a deployment actually takes: an existing DB, new code."""
 
+    @pytest.mark.skipif(not _CAN_DROP_COLUMN,
+                        reason="SQLite < 3.35 has no DROP COLUMN")
     def test_dropped_columns_are_restored(self, fresh_engine):
         # Simulate the pre-PR schema.
         with fresh_engine.begin() as conn:
             for table, column, _default in ADDED_COLUMNS:
-                conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+                _drop_column(conn, table, column)
         for table, column, _default in ADDED_COLUMNS:
             assert column not in _columns(table), \
                 f"{table}.{column} survived the drop — test is not testing"
@@ -125,6 +188,8 @@ class TestUpgradeInPlace:
                    if c not in _columns(t)]
         assert not missing, missing
 
+    @pytest.mark.skipif(not _CAN_DROP_COLUMN,
+                        reason="SQLite < 3.35 has no DROP COLUMN")
     def test_existing_rows_back_fill_to_the_declared_default(self,
                                                              fresh_engine):
         pid = _db.upsert_project("migration-backfill")
@@ -139,7 +204,7 @@ class TestUpgradeInPlace:
 
         with fresh_engine.begin() as conn:
             for table, column, _default in ADDED_COLUMNS:
-                conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+                _drop_column(conn, table, column)
         _db._ensure_walkthrough_columns(fresh_engine)
 
         # A row written before the migration must read back with the
@@ -152,6 +217,8 @@ class TestUpgradeInPlace:
                     text(f"SELECT {column} FROM {table} LIMIT 1")).scalar()
                 assert value == default, f"{table}.{column} = {value!r}"
 
+    @pytest.mark.skipif(not _CAN_DROP_COLUMN,
+                        reason="SQLite < 3.35 has no DROP COLUMN")
     def test_the_orm_can_read_a_migrated_row(self, fresh_engine):
         """The failure mode this whole file exists for.
 
@@ -163,7 +230,7 @@ class TestUpgradeInPlace:
         _db.save_bug(pid, {"title": "Before"})
         with fresh_engine.begin() as conn:
             for table, column, _default in ADDED_COLUMNS:
-                conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+                _drop_column(conn, table, column)
         _db._ensure_walkthrough_columns(fresh_engine)
 
         rows = _db.list_bugs(pid)

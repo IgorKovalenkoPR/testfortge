@@ -16,6 +16,26 @@ jobs:
   pytest:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+
+    # A real PostgreSQL for the schema-migration tests. Production runs
+    # Postgres and the ALTERs are hand-written SQL, so verifying them only
+    # on SQLite verifies them on the wrong engine. Free in Actions, and it
+    # means every push checks the upgrade path a deploy will actually take.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tfg
+          POSTGRES_PASSWORD: tfg
+          POSTGRES_DB: tfg_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     strategy:
       # Don't short-circuit — we want to see failures on ALL versions,
       # not just the first one to break.
@@ -33,6 +53,10 @@ jobs:
       # output capture on minimal-locale runners.
       PYTHONIOENCODING: "utf-8"
       PYTHONUTF8: "1"
+      # Points tests/test_schema_migration.py at the service container
+      # above. Its contents are destroyed by those tests, which is why it
+      # is a dedicated throwaway database and not the app's own.
+      TFG_TEST_POSTGRES_URL: "postgresql+psycopg2://tfg:tfg@localhost:5432/tfg_migration_test"
 
     steps:
       - name: Checkout
@@ -83,5 +107,16 @@ jobs:
       # The async endpoint tests submit jobs to the in-process queue and
       # mock / bypass the runner. If that changes, add:
       #   python -m playwright install --with-deps chromium
+      # Guard against the Postgres leg silently skipping: a skipped test
+      # nobody looks at is the same as no coverage, and this whole service
+      # container exists to stop the migration being verified on the wrong
+      # engine.
+      - name: Verify the Postgres leg actually runs
+        run: >-
+          python -m pytest tests/test_schema_migration.py -q
+          -k postgres --no-header -p no:cacheprovider
+          | tee /tmp/pg.txt;
+          grep -qE "[1-9][0-9]* passed" /tmp/pg.txt
+
       - name: Run test suite
         run: python run_tests.py
