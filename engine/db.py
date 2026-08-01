@@ -310,7 +310,31 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
                 "INTEGER NOT NULL DEFAULT 2",
             ))
 
-    if not additions and not sd_additions and not cl_additions:
+    # PR-6 bug-sheet columns. Same idempotent probe and NOT NULL DEFAULT
+    # idiom; every pre-PR-6 row back-fills to Functional, which is what an
+    # un-triaged bug effectively was.
+    bug_additions: list[tuple[str, str]] = []
+    try:
+        bug_existing = {c["name"] for c in insp.get_columns("bug_report")}
+    except SQLAlchemyError as exc:
+        log.debug("bug_report column probe skipped: %s", exc)
+        bug_existing = None
+    if bug_existing is not None:
+        for col, ddl in (
+            ("preconditions",
+             "ALTER TABLE bug_report ADD COLUMN preconditions TEXT"),
+            ("attachment",
+             "ALTER TABLE bug_report ADD COLUMN attachment VARCHAR(500)"),
+            ("assignee",
+             "ALTER TABLE bug_report ADD COLUMN assignee VARCHAR(120)"),
+            ("bug_area",
+             "ALTER TABLE bug_report ADD COLUMN bug_area VARCHAR(20) "
+             "NOT NULL DEFAULT 'Functional'"),
+        ):
+            if col not in bug_existing:
+                bug_additions.append((col, ddl))
+
+    if not additions and not sd_additions and not cl_additions             and not bug_additions:
         return
 
     try:
@@ -325,6 +349,10 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
                 conn.execute(text(sql))
             for col_name, sql in cl_additions:
                 log.info("checklist migration: adding checklist_item.%s",
+                         col_name)
+                conn.execute(text(sql))
+            for col_name, sql in bug_additions:
+                log.info("bug-sheet migration: adding bug_report.%s",
                          col_name)
                 conn.execute(text(sql))
     except SQLAlchemyError as exc:  # pragma: no cover — best-effort
@@ -549,6 +577,20 @@ class BugReport(Base):
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     reporter: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # PR-6: the remaining columns of the team's own bug sheet
+    # (Training Plan_Horban Yaroslavna.xlsx, "Bugs" tab). Preconditions
+    # carry the state and the test data a reproduction needs; Attachment
+    # is the evidence link the reference puts on every row; Assignee is
+    # who owns the fix.
+    preconditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # WHAT KIND of broken, independent of severity's HOW BADLY. A Critical
+    # accessibility defect and a Critical payment defect go to different
+    # people. See engine/bug_areas.py.
+    bug_area: Mapped[str] = mapped_column(String(20), nullable=False,
+                                           default="Functional",
+                                           server_default="Functional")
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual",
                                          index=True)
     related_case_id: Mapped[int | None] = mapped_column(
@@ -1564,6 +1606,15 @@ VALID_BUG_SOURCES = {
 }
 
 
+def _resolve_bug_area(bug: dict) -> str:
+    """The quality attribute a bug belongs to. See engine.bug_areas."""
+    try:
+        from engine import bug_areas
+        return bug_areas.resolve_area(bug)
+    except Exception:  # pragma: no cover — never block a bug write
+        return "Functional"
+
+
 def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
     """Persist a bug report. Returns the row id (auto-assigned)."""
     if source not in VALID_BUG_SOURCES:
@@ -1574,6 +1625,7 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
         "environment", "browser", "os", "version",
         "steps_to_reproduce", "actual_result", "expected_result",
         "comment", "reporter", "related_case_id", "run_id",
+        "preconditions", "attachment", "assignee", "bug_area",
     )}
     with session_scope() as sess:
         # Bump project recency so a fresh bug surfaces the project at
@@ -1598,6 +1650,13 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
             expected_result=bug.get("expected_result"),
             comment=bug.get("comment"),
             reporter=bug.get("reporter"),
+            preconditions=bug.get("preconditions"),
+            attachment=bug.get("attachment"),
+            assignee=bug.get("assignee"),
+            # Derived when the caller did not decide, never overwritten
+            # when it did — triage is a judgement and re-deriving it on
+            # every write would silently undo it.
+            bug_area=_resolve_bug_area(bug),
             source=source,
             related_case_id=bug.get("related_case_id"),
             run_id=bug.get("run_id"),

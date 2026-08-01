@@ -29,8 +29,13 @@ from engine.bug_report import (
 )
 
 from engine import db as _db
+from engine import bug_areas as _bug_areas
+# CSV injection guard, shared with engine/exporter.py — a cell beginning
+# with = + - @ is executed as a formula by Excel on open.
+from engine.exporter import _sanitize_cell
 
-from ._shared import ensure_active_project, get_session_id
+from ._shared import (ensure_active_project, get_session_id,
+                      resolve_active_project)
 from .projects import _require_project_owner
 
 log = get_logger(__name__)
@@ -59,7 +64,14 @@ def _bug_row_to_session_dict(row: dict) -> dict:
         "priority":           row.get("priority") or "Medium",
         "status":             row.get("status") or "Open",
         "environment":        row.get("environment") or "",
-        "preconditions":      extra.get("preconditions", ""),
+        # First-class columns as of PR-6; ``extra`` is the fallback for
+        # rows written before the migration, whose values still live in
+        # the JSON blob.
+        "preconditions":      row.get("preconditions")
+                              or extra.get("preconditions", ""),
+        "attachment":         row.get("attachment") or "",
+        "bug_area":           row.get("bug_area")
+                              or extra.get("bug_area", "") or "Functional",
         "steps_to_reproduce": row.get("steps_to_reproduce") or "",
         "actual_result":      row.get("actual_result") or "",
         "expected_result":    row.get("expected_result") or "",
@@ -70,7 +82,7 @@ def _bug_row_to_session_dict(row: dict) -> dict:
         "linked_item_id":     extra.get("linked_item_id", ""),
         "linked_item_type":   extra.get("linked_item_type", ""),
         "reporter":           row.get("reporter") or "",
-        "assignee":           extra.get("assignee", ""),
+        "assignee":           row.get("assignee") or extra.get("assignee", ""),
         "created_at":         (row.get("created_at") or "")
                                 if isinstance(row.get("created_at"), str)
                                 else (row.get("created_at").isoformat()
@@ -353,6 +365,17 @@ def register(app: Flask) -> None:
             else:  # manual_tc
                 bugs = [b for b in bugs if not _is_walkthrough(b)]
 
+        # ── Quality-attribute filter (PR-6) ──────────────────────
+        #
+        # Counted BEFORE the filter is applied, so every chip keeps its
+        # true number while one is active — a chip whose count changed to
+        # match the filtered view would tell the operator nothing.
+        area_counts = _bug_areas.counts_by_area(bugs)
+        area_filter = _bug_areas.coerce_area(request.args.get("area"))
+        if area_filter:
+            bugs = [b for b in bugs
+                    if _bug_areas.resolve_area(b) == area_filter]
+
         stats = {
             "total": len(bugs),
             "open": sum(1 for b in bugs if b.status == "Open"),
@@ -374,6 +397,9 @@ def register(app: Flask) -> None:
                                statuses=BUG_STATUSES, frequencies=BUG_FREQUENCIES,
                                source_filter=source_filter,
                                run_options=run_options, run_filter=run_filter,
+                               areas=_bug_areas.AREAS,
+                               area_counts=area_counts,
+                               area_filter=area_filter,
                                project_bug_total=project_bug_total)
 
     @app.route("/bugs/bulk", methods=["POST"])
@@ -507,6 +533,56 @@ def register(app: Flask) -> None:
             "Project reset — {n} bug{s} deleted.").format(n=n, s=suffix),
             "success")
         return redirect(url_for("bug_reports_page"))
+
+    @app.route("/export-bug-reports.csv")
+    def export_bug_reports_csv():
+        """The team's own bug sheet, column for column.
+
+        Shape taken from the "Bugs" tab of
+        ``Training Plan_Horban Yaroslavna.xlsx``, with ``Area`` added —
+        the operator asked for the six quality attributes and the
+        reference sheet has no column for them.
+        """
+        import csv
+        import io as _io
+
+        pid = resolve_active_project(session)
+        bugs = _hydrate_bugs(pid)
+        if not bugs:
+            flash("No bug reports to export.", "error")
+            return redirect(url_for("bug_reports_page"))
+
+        buf = _io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Bug ID", "Summary", "Area", "Status", "Priority", "Severity",
+            "Reporter", "Date", "Environment", "Preconditions",
+            "Steps to reproduce", "Actual result", "Expected result",
+            "Attachment", "Note", "Assignee",
+        ])
+        for bug in bugs:
+            attachment = getattr(bug, "attachment", "") or ""
+            if not attachment:
+                # The reference sheet has one Attachment cell per row; the
+                # runner records a list, so join rather than drop the tail.
+                attachment = ", ".join(
+                    str(a) for a in (getattr(bug, "attachments", None) or []))
+            writer.writerow([_sanitize_cell(v) for v in (
+                bug.id, bug.title,
+                getattr(bug, "bug_area", "Functional"),
+                bug.status, bug.priority, bug.severity,
+                bug.reporter, getattr(bug, "created_at", ""),
+                bug.environment, getattr(bug, "preconditions", ""),
+                bug.steps_to_reproduce, bug.actual_result,
+                bug.expected_result, attachment,
+                bug.comment, getattr(bug, "assignee", ""),
+            )])
+        name = ((session.get("project_setup") or {}).get("project_name")
+                or "project").replace(" ", "_")
+        return Response(
+            buf.getvalue(), mimetype="text/csv",
+            headers={"Content-Disposition":
+                     f"attachment; filename=bug_reports_{name}.csv"})
 
     @app.route("/export-bug-reports")
     def export_bug_reports():

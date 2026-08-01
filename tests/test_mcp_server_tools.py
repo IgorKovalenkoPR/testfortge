@@ -93,10 +93,11 @@ class TestCreateBugReport:
         )
         rows = db.list_bugs(project_id=project_id)
         row = next(r for r in rows if r["id"] == out["db_id"])
-        assert row.get("extra") == {
-            "assignee": "qa-bot",
-            "labels": ["regression", "p1"],
-        }
+        # ``assignee`` was promoted to its own column in PR-6 (the team's
+        # bug sheet has a column for it), so it no longer lands in the
+        # JSON blob. Anything without a column still does.
+        assert row.get("assignee") == "qa-bot"
+        assert row.get("extra") == {"labels": ["regression", "p1"]}
 
     def test_related_case_id_persists_when_pointing_at_real_tc(
         self, project_id

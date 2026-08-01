@@ -577,6 +577,17 @@
         </label>
     </div>
 
+    {# Site-wide sweep. Opt-in: it answers a different question than the
+       pack does — "what else is wrong with this site" rather than "do
+       these items pass" — and 20+ unrequested findings on top of a run's
+       own results is how a bug list stops being read. #}
+    <label class="radio-inline" style="margin:.4rem 0">
+        <input type="checkbox" name="site_sweep" value="1">
+        {{ t.get('te_site_sweep', 'Also sweep the site for Performance, Security, Accessibility and UI defects the pack does not cover') }}
+    </label>
+    <p class="hint">{{ t.get('te_site_sweep_hint',
+        'Runs 53 checks against the live URL and files every failure as a bug in its own quality-attribute category. Independent of the items selected below.') }}</p>
+
     {# The fourth mode is not a radio because it does not run here. The
        TypeScript suite runs where the browsers are and reports back — an
        option that silently did nothing on this page would be worse than

@@ -1117,12 +1117,44 @@ def _make_found_in_build(environment: str, run_iso_ts: str) -> str:
     return f"{plat}-{brw}@{ts}"
 
 
+def _area_from_item(item: dict, testing_types: list | None = None) -> str:
+    """The quality attribute a failing item's bug belongs to.
+
+    The item's own ``testing_type`` is the strongest signal available: a
+    Security test case that fails produces a Security defect, whatever the
+    step text happens to mention. Falls back to the run's testing types,
+    then to Functional.
+    """
+    try:
+        from .bug_areas import coerce_area, DEFAULT_AREA
+    except Exception:  # pragma: no cover — defensive
+        return "Functional"
+    found = coerce_area((item or {}).get("testing_type"))
+    if found:
+        return found
+    for tt in (testing_types or []):
+        found = coerce_area(tt)
+        if found:
+            return found
+    return DEFAULT_AREA
+
+
+def _log_sweep_failure(exc: BaseException) -> None:
+    """The site sweep is additive — a failure must not lose the run."""
+    try:
+        from .log import get_logger
+        get_logger(__name__).warning("site sweep failed: %s", exc)
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+
 def execute_items(items: list, item_type: str, tester_id: str,
                   environment: str, testing_types: list[str],
                   selected_ids: list[str] | None = None,
                   site_url: str = "",
                   manual_statuses: dict[str, str] | None = None,
-                  manual_bug_refs: dict[str, str] | None = None) -> dict:
+                  manual_bug_refs: dict[str, str] | None = None,
+                  site_sweep: bool = False) -> dict:
     """Auto-execute test cases or checklist items.
 
     When *site_url* is provided the tester runs **real automated checks**
@@ -1185,6 +1217,9 @@ def execute_items(items: list, item_type: str, tester_id: str,
 
     results = []
     bugs = []
+    #: Checks an item matched. Everything else that FAILED is a real
+    #: finding the pack simply never asked about — see the sweep below.
+    consumed_checks: set[str] = set()
     passed = failed = blocked = 0
     bug_counter = 0
     # Bookkeeping so callers can flash an honest summary of how each
@@ -1234,6 +1269,7 @@ def execute_items(items: list, item_type: str, tester_id: str,
         if not status and runner and summary:
             check_key = runner.match_item(summary)
             if check_key and check_key in real_checks:
+                consumed_checks.add(check_key)
                 cr = real_checks[check_key]
                 status = cr.status                    # "Passed" or "Failed"
                 comment = cr.actual_result             # real description
@@ -1337,11 +1373,46 @@ def execute_items(items: list, item_type: str, tester_id: str,
                 "component": section,
                 "labels": labels,
                 "comment": comment if status == "Blocked" else "",
+                # WHAT KIND of broken. The item's own testing_type is the
+                # best signal we have — a Security test case that fails
+                # produces a Security defect.
+                "bug_area": _area_from_item(item, testing_types),
             }
             bugs.append(bug)
             result_entry["bug_id"] = f"__pending_{bug_counter}"
 
         results.append(result_entry)
+
+    # ── Site-wide sweep ────────────────────────────────────────────
+    #
+    # run_all_checks() ran 53 checks; the loop above consumed only those
+    # an item's summary matched. Every OTHER failed check was computed and
+    # thrown away — which is why the product could not produce a
+    # Performance or a Security bug no matter how broken the site was.
+    # OFF by default, and that default is the point. The sweep answers a
+    # different question than the pack does — "what else is wrong with
+    # this site" rather than "do these items pass" — and a walkthrough run
+    # that quietly gained 22 extra findings on top of its own 2 is exactly
+    # the flood that makes people stop reading a bug list. The operator
+    # asks for it with a checkbox.
+    sweep_dropped = 0
+    if site_sweep and real_checks:
+        try:
+            from .site_findings import findings_from_results, dropped_count
+            unconsumed = {k: v for k, v in real_checks.items()
+                          if k not in consumed_checks}
+            sweep = findings_from_results(unconsumed, base_url=site_url)
+            sweep_dropped = dropped_count(unconsumed, sweep,
+                                          base_url=site_url)
+            for finding in sweep:
+                finding.setdefault("reporter", tester_name)
+                finding.setdefault("created_at", now)
+                finding.setdefault("frequency", "Always")
+                finding.setdefault("assignee", "")
+                finding.setdefault("attachments", [])
+                bugs.append(finding)
+        except Exception as exc:  # pragma: no cover — never block a run
+            _log_sweep_failure(exc)
 
     total = passed + failed + blocked
     stats = {
@@ -1352,6 +1423,9 @@ def execute_items(items: list, item_type: str, tester_id: str,
         "pass_rate": round(passed / total * 100, 1) if total else 0,
         "sources": sources,
         "site_url": site_url,
+        # Reported, not swallowed: a capped sweep that says nothing reads
+        # as "the site is clean".
+        "sweep_dropped": sweep_dropped,
     }
 
     return {"results": results, "bugs": bugs, "stats": stats}
