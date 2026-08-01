@@ -162,18 +162,217 @@ class TestTheRequirementsSpecificRowsAreClean:
         assert any("can sign in" in o for o in objectives), objectives
 
 
-class TestTheGeneratorStoppedEmittingCan:
-    """`tc_rules` composed "Verify that User can <objective>"."""
+class TestTheVoiceGuard:
+    """The operator's shape: the thing under test is the subject.
 
-    def test_the_imperative_is_inflected_instead(self):
-        from engine.tc_rules import _third_person
-        assert _third_person("Enter a valid value") == "enters a valid value"
-        assert _third_person("Search a value") == "searches a value"
-        assert _third_person("Apply the filter") == "applies the filter"
-        assert _third_person("Go to the page") == "goes to the page"
+        Verify that the "Contact" form is submitted after clicking the
+        "Submit" button
 
-    def test_a_non_verb_opener_is_refused_rather_than_mangled(self):
-        """Prefixing a subject to a statement produced "User 'launch' is …"."""
-        from engine.tc_rules import _third_person
-        assert _third_person("'Launch' is displayed") is None
-        assert _third_person("") is None
+    A first pass at the modal ruling replaced "Verify that User can save"
+    with "Verify that User saves" — modal-free, but active voice with the
+    tester as the actor, which is what the ruling is against.
+    """
+
+    @pytest.mark.parametrize("summary", [
+        'Verify that User uploads an accepted file to the "CV" field',
+        "Verify that User saves the record",
+        "Verify that the user selects an existing value",
+    ])
+    def test_the_tester_as_actor_is_flagged(self, summary):
+        assert [f for f in g.lint_text(summary, kind="objective")
+                if "passive voice" in f], summary
+
+    @pytest.mark.parametrize("summary", [
+        'Verify that an accepted file is uploaded to the "CV" field',
+        "Verify that the record is saved after clicking the \"Save\" control",
+        # Stative active voice is explicitly allowed — "інколи Active
+        # Voice (якщо це доречно)".
+        "Verify that the record counter matches the visible row count",
+        # "User" as part of a noun, not as the actor.
+        "Verify that the User account is deleted",
+        'Verify that the "User" drop-down is displayed',
+    ])
+    def test_the_passive_and_the_allowed_active_pass(self, summary):
+        assert [f for f in g.lint_text(summary, kind="objective")
+                if "passive voice" in f] == [], summary
+
+
+class TestVoiceIsReportedNotRewritten:
+    """Where the two rules meet, and why the seam is where it is.
+
+    The modal rule rewrites: "User cannot create X" becomes "User does
+    not create X", which is mechanical and loses nothing. That result is
+    still active voice with the tester as the subject, so the voice rule
+    then reports it — it does not try to reorder the clause into "X is
+    not created", because reordering arbitrary prose is exactly the
+    machine that broke this corpus in May.
+
+    So a normaliser can hand back text its own linter flags. That is the
+    intended split: rewrite only what is safe, name the rest.
+    """
+
+    def test_the_modal_is_removed_and_the_voice_is_flagged(self):
+        rewritten = g.normalise_text(
+            "Verify that User cannot create the record", kind="title")
+        assert "cannot" not in rewritten
+        assert rewritten == "Verify that User does not create the record"
+        findings = g.lint_text(rewritten, kind="title")
+        assert [f for f in findings if "passive voice" in f], findings
+        assert not [f for f in findings if "modal" in f]
+
+    def test_the_passive_form_needs_neither(self):
+        text = "Verify that the record is not created"
+        assert g.normalise_text(text, kind="title") == text
+        assert g.lint_text(text, kind="title") == []
+
+
+class TestTheCoverageModelTitles:
+    """The phrasing lives in the asset, so the asset is what is checked."""
+
+    def _yaml(self) -> str:
+        return (QA_KNOWLEDGE / "style" / "coverage_rules.yaml").read_text(
+            encoding="utf-8")
+
+    def test_every_per_control_case_carries_a_title(self):
+        """Without one the generic fallback composes the summary, and a
+        fallback is not where a client-visible sentence should be born.
+        """
+        import yaml as _yaml
+        doc = _yaml.safe_load(self._yaml())
+        per_type = ((doc.get("create_form") or {})
+                    .get("per_control_type")) or {}
+        missing = [c["objective"] for v in per_type.values()
+                   for c in (v.get("cases") or []) if not c.get("title")]
+        assert not missing, missing
+
+    def test_every_title_renders_and_lints_clean(self):
+        import re as _re
+        values = {"grid": "Job Positions", "column": "Name",
+                  "control": "Create", "filter": "Internal",
+                  "action": "Archive", "label": "Email", "noun": "field",
+                  "section": "Contact form", "search": "Search"}
+        problems: list[str] = []
+        titles = _re.findall(r"title: '([^']+)'", self._yaml())
+        assert len(titles) > 40, "title templates went missing"
+        for template in titles:
+            try:
+                rendered = template.format(**values)
+            except KeyError as exc:
+                problems.append(f"unknown placeholder {exc} in {template!r}")
+                continue
+            problems += [f"{rendered!r}: {f}"
+                         for f in g.lint_text(rendered, kind="title")]
+        assert not problems, "\n  ".join([""] + problems)
+
+
+class TestGeneratedFromRealMarkup:
+    """The end the client sees: crawled controls in, summaries out."""
+
+    def _cases(self):
+        from engine.tc_rules import enumerate_from_pages
+        return enumerate_from_pages([{
+            "url": "https://x.test/contact", "title": "Contact",
+            "forms": [{"action": "/contact", "submit_text": "Send",
+                       "fields": [
+                           {"name": "name", "label": "Name",
+                            "type": "text", "required": True},
+                           {"name": "email", "label": "Email",
+                            "type": "email", "required": True},
+                           {"name": "topic", "label": "Topic",
+                            "type": "select",
+                            "options": ["Sales", "Support"]},
+                           {"name": "cv", "label": "CV", "type": "file"},
+                       ]}]}])
+
+    def test_cases_are_produced(self):
+        assert len(self._cases()) > 8
+
+    def test_no_generated_summary_puts_the_tester_in_the_subject(self):
+        for case in self._cases():
+            assert [f for f in g.lint_text(case.summary, kind="title")
+                    if "passive voice" in f] == [], case.summary
+
+    def test_generated_summaries_are_house_style_clean(self):
+        for case in self._cases():
+            assert g.lint_text(case.summary, kind="title") == [], case.summary
+
+
+class TestThePassiveFallback:
+    """For a rule added without a title. It refuses more than it accepts."""
+
+    @pytest.mark.parametrize("objective,expected", [
+        ("Enter a valid value", "a valid value is entered"),
+        ("Clear the selection", "the selection is cleared"),
+        ("Submit the form", "the form is submitted"),
+        ("Run the report", "the report is run"),
+        ("Reset the record to its initial state",
+         "the record is reset to its initial state"),
+        # The trailing prepositional phrase stays after the verb.
+        ("Pick a date via the date-picker",
+         "a date is picked via the date-picker"),
+        ("Delete the record through the confirmation dialog",
+         "the record is deleted through the confirmation dialog"),
+    ])
+    def test_the_one_safe_shape_is_rewritten(self, objective, expected):
+        from engine.tc_rules import _passive_clause
+        assert _passive_clause(objective) == expected
+
+    @pytest.mark.parametrize("objective", [
+        # Compound — reordering needs a parser.
+        "Add and delete an attachment",
+        "Change one field, save, reload, and confirm only that field changed",
+        # Already an assertion: "… updates is confirmed" is not English.
+        "Confirm required fields are visually marked before submission",
+        # No noun phrase to promote: "empty when required is left".
+        "Leave empty when required",
+        # Not an imperative at all.
+        "'Launch' is displayed",
+        "Enter",
+        "",
+    ])
+    def test_everything_else_is_refused(self, objective):
+        from engine.tc_rules import _passive_clause
+        assert _passive_clause(objective) is None
+
+
+class TestParticiples:
+    def test_the_irregulars_the_corpus_uses(self):
+        assert g.past_participle("reset") == "reset"
+        assert g.past_participle("run") == "run"
+        assert g.past_participle("leave") == "left"
+        assert g.past_participle("find") == "found"
+
+    def test_the_regular_rules(self):
+        assert g.past_participle("enter") == "entered"
+        assert g.past_participle("apply") == "applied"
+        assert g.past_participle("save") == "saved"
+        assert g.past_participle("submit") == "submitted"   # doubling
+
+    def test_an_unknown_shape_is_refused_not_guessed(self):
+        assert g.past_participle("") is None
+        assert g.past_participle("'Launch'") is None
+
+    def test_number_agreement(self):
+        assert g.reads_plural("the characters") is True
+        assert g.reads_plural("a valid value") is False
+        assert g.reads_plural("all rows") is True
+        # "-ss" is not a plural.
+        assert g.reads_plural("the address") is False
+
+
+class TestTheRequirementExcerpt:
+    """A citation cut mid-word looks faithful and is not."""
+
+    def test_a_long_requirement_is_cut_on_a_word_boundary(self):
+        from engine.qa_persona import _excerpt
+        out = _excerpt("The user can sign in with an email and a password. "
+                       "The user can reset a forgotten password.", 80)
+        assert out.endswith("…")
+        assert not out.rstrip("…").endswith(" ")
+        # the cut never lands inside a word
+        assert out.rstrip("…").split()[-1] in \
+            "The user can sign in with an email and a password The".split()
+
+    def test_a_short_requirement_is_left_alone(self):
+        from engine.qa_persona import _excerpt
+        assert _excerpt("The user signs in.", 80) == "The user signs in"

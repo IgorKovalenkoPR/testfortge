@@ -14,7 +14,7 @@ sections:
       - objective: "Verify that success confirmation is displayed after create"
         category: Positive
         priority: High
-      - objective: "Verify that the new record appears in the list view"
+      - objective: "Verify that the new record is displayed in the list view"
         category: Positive
         priority: High
       - objective: "Verify that every submitted field appears in the database row with the exact value entered"
@@ -47,6 +47,6 @@ sections:
       - objective: "Verify that special characters are accepted in text fields"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that two concurrent create requests produce two distinct records without overwriting each other"
+      - objective: "Verify that two distinct records are created by two concurrent requests and neither is overwritten"
         category: "Edge Case"
         priority: Low

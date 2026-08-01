@@ -14,7 +14,7 @@ sections:
       - objective: "Verify that the current page is highlighted in the navigation"
         category: Positive
         priority: Medium
-      - objective: "Verify that the browser Back button returns to the previous route and Forward restores the next one"
+      - objective: "Verify that the previous route is reopened by the browser Back button and the next one by Forward"
         category: Positive
         priority: Medium
       - objective: "Verify that the browser URL changes to match the destination route on every navigation"
@@ -23,6 +23,6 @@ sections:
       - objective: "Verify that 404 page is displayed for non-existent URLs"
         category: Negative
         priority: High
-      - objective: "Verify that a deep link entered directly in the address bar opens the same page as navigating to it"
+      - objective: "Verify that the same page is opened by a deep link entered directly in the address bar as by navigating to it"
         category: Positive
         priority: Medium

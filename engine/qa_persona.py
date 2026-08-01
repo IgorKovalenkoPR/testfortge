@@ -140,6 +140,22 @@ def browser_pass_enabled() -> bool:
             .strip().lower() not in ("0", "false", "no", "off"))
 
 
+def _excerpt(text: str, limit: int) -> str:
+    """Trim to ``limit`` on a word boundary, with an ellipsis if cut.
+
+    A quotation cut mid-word — ``"… the user can reset a forgotte"`` —
+    reads as a faithful citation and is not one. Cutting on a space and
+    marking the cut says which it is.
+    """
+    clean = " ".join((text or "").split()).rstrip(".").strip('"“”')
+    if len(clean) <= limit:
+        return clean
+    cut = clean.rfind(" ", 0, limit)
+    if cut < limit // 2:          # one very long token — nothing to cut on
+        cut = limit
+    return clean[:cut].rstrip(",;:") + "…"
+
+
 def analyze_input(requirements: list[dict],
                   custom_prompt: str = "") -> AnalysisResult:
     """Analyze structured requirements to determine testing scope."""
@@ -401,7 +417,7 @@ def generate_professional_checklist(analysis: AnalysisResult,
             # summary the house style says carries none. Quoted, it reads
             # as the citation it is, and the sentence around it is ours:
             # modal-free and stating an observable outcome.
-            short = req_text[:80].rstrip(".").strip('"“”')
+            short = _excerpt(req_text, 80)
             items.append(CheckItem(
                 objective=f'Verify that valid input is accepted for the '
                           f'requirement "{short}"',

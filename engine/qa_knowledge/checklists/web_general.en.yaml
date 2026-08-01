@@ -206,7 +206,7 @@ sections:
       - objective: "Verify that focus indicators are visible on interactive elements"
         category: Positive
         priority: Medium
-      - objective: "Verify that a screen reader reads all content in logical order"
+      - objective: "Verify that all content is read by a screen reader in logical order"
         category: Positive
         priority: Medium
       - objective: "Verify that form fields have associated labels for assistive technologies"

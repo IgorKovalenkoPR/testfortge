@@ -53,13 +53,13 @@ sections:
   - name: "Search — Edge Cases & Security"
     prefix: SRCH
     items:
-      - objective: "Verify that special characters in the query are escaped and the search completes without an error"
+      - objective: "Verify that special characters in the query are escaped and no error is raised by the search"
         category: "Edge Case"
         priority: Medium
       - objective: "Verify that a query of 500+ characters is accepted or truncated with a message, and the page stays responsive"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that Unicode and emoji characters in the query return matching results"
+      - objective: "Verify that matching results are returned for Unicode and emoji characters in the query"
         category: "Edge Case"
         priority: Low
       - objective: "Verify that SQL injection is blocked in the search field"

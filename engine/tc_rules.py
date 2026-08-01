@@ -145,31 +145,57 @@ _TYPE_MAP = {
 }
 
 
-def _third_person(objective: str) -> str | None:
-    """Imperative objective -> third-person singular statement.
+def _passive_clause(objective: str) -> str | None:
+    """Bare imperative + object -> passive clause, or None.
 
-    "Enter a valid value" -> "enters a valid value". Every objective in
-    coverage_rules.yaml opens with an imperative verb and all 28 of them
-    are regular — measured, not assumed — so inflecting the first word is
-    enough to keep the composed summary modal-free (operator ruling
-    2026-08-01).
+    "Enter a valid value" -> "a valid value is entered". The house style
+    puts the thing under test in the subject position (operator ruling
+    2026-08-01), so the object of the imperative becomes the subject.
 
-    Returns None when the first word is not a plain verb: an objective
-    like ``'Launch' is displayed`` is already a statement, and prefixing
-    a subject to it produces "User 'launch' is displayed". The caller
-    composes those without the subject instead.
-
-    The inflection itself lives in ``glossary`` so the LLM normaliser
-    and this generator cannot drift apart.
+    Returns None whenever the shape is anything other than one verb
+    followed by one object phrase — a compound ("Add and delete an
+    attachment"), an objective that is already a clause ("Confirm the
+    counter updates …"), or a verb with no reliable past participle.
+    Reordering those needs a parser, and the last time this codebase
+    reordered clauses mechanically it shipped "concurrent create
+    requests are returns the expected outcome" to production.
     """
     text = (objective or "").strip()
-    if not text:
+    if not text or " " not in text:
         return None
-    head, _, tail = text.partition(" ")
-    inflected = _glossary.third_person(head)
-    if not inflected:
+    head, _, rest = text.partition(" ")
+    rest = rest.strip()
+    if not rest:
         return None
-    return f"{inflected} {tail}".strip()
+    # "Confirm the counter updates …" is already an assertion, not an
+    # instruction — passivising it yields "… updates is confirmed".
+    if head.lower() in ("confirm", "verify", "check", "ensure", "observe"):
+        return None
+    # A second verb, a comma or a conjunction means the objective is
+    # doing more than one thing — leave it alone.
+    if re.search(r"\b(and|or|then)\b|,", rest, re.I):
+        return None
+    # Split the object from any trailing prepositional phrase, so the
+    # phrase stays after the verb: "Pick a date via the date-picker"
+    # becomes "a date is picked via the date-picker", not "a date via
+    # the date-picker is picked".
+    m = re.search(r"\s+\b(via|with|without|through|from|into|onto|over|"
+                  r"under|outside|inside|before|after|against|per|by|"
+                  r"to|in|on|at|as|for)\b\s+", rest, re.I)
+    obj, tail = (rest[:m.start()], rest[m.start():].strip()) if m \
+        else (rest, "")
+    obj = obj.strip()
+    # The object has to look like a noun phrase. "Leave empty when
+    # required" has none, and "empty when required is left" is not a
+    # sentence.
+    if not re.match(r"^(a|an|the|each|every|this|that|its|their|all|both|"
+                    r"several|multiple|one|two|three)\b", obj, re.I):
+        return None
+    participle = _glossary.past_participle(head)
+    if not participle:
+        return None
+    verb = "are" if _glossary.reads_plural(obj) else "is"
+    return " ".join(p for p in (obj, verb, participle, tail) if p)
 
 
 def control_type(field: dict) -> str | None:
@@ -522,28 +548,32 @@ def _field_case(page: dict, form: dict, field: dict, kind: str,
 
     fmt = {"label": label, "noun": noun, "section": section}
 
-    # Phrasing lives in the YAML next to the rule. A `title:` template is
-    # used verbatim; without one the generic composition below reads
-    # acceptably ("Enter a valid value" -> "Verify that User can enter a
-    # valid value in the ... field"). Composing every title generically
-    # produced clumsy lines and duplicated nouns ("select an existing
-    # value from the drop-down in the ... drop-down").
+    # Phrasing lives in the YAML next to the rule, and every shipped rule
+    # now carries a `title:` — see tests/test_summary_voice.py, which
+    # fails if one is added without.
+    #
+    # The reason it lives there rather than here: the objectives are
+    # heterogeneous prose ("Enter a valid value", but also "Change one
+    # field, save, reload, and confirm only that field changed"), and a
+    # transform that reorders an arbitrary clause into the passive is the
+    # same machine that produced "concurrent create requests are returns
+    # the expected outcome" in May. A human writes the sentence; the code
+    # only fills the placeholders.
+    #
+    # The fallback below is for a rule added without a title. It handles
+    # the one shape that reorders safely — a bare imperative and its
+    # object, "Enter a valid value" -> "a valid value is entered" — and
+    # otherwise keeps the objective as its own clause. It never prefixes
+    # a subject, because "User <verb>s" is active voice and the house
+    # style asks for the passive (operator ruling 2026-08-01).
     title_tpl = str(rule.get("title") or "").strip()
     if title_tpl:
         summary = title_tpl.format(**fmt)
     else:
-        # No modal: a summary states what is checked, and "can" turns it
-        # into a statement about capability. Operator ruling 2026-08-01 —
-        # see banned_phrases.modal_summary_only in wording_rules.yaml.
-        # The objective is an imperative ("Enter a valid value"), so the
-        # verb is inflected to the third person to keep active voice.
-        inflected = _third_person(objective)
-        if inflected:
-            summary = (f'Verify that User {inflected}'
-                       f' in the "{label}" {noun}')
-        else:
-            summary = (f'Verify that {objective[0].lower()}{objective[1:]}'
-                       f' in the "{label}" {noun}')
+        passive = _passive_clause(objective)
+        clause = passive or (objective[0].lower() + objective[1:]
+                             if objective else "the control behaves")
+        summary = f'Verify that {clause} in the "{label}" {noun}'
 
     step_tpl = str(rule.get("step") or "").strip()
     action = (step_tpl.format(**fmt) if step_tpl
@@ -593,7 +623,7 @@ def _form_level_cases(page: dict, form: dict, section: str,
     req_names = ", ".join(f'"{field_label(f)}"' for f in required[:6])
 
     out.append(AuthoredCase(
-        summary=f"Verify that User submits {section} with the required "
+        summary=f"Verify that {section} is submitted with the required "
                 f"controls filled",
         preconditions=f"{section} is opened.",
         steps=[nav,

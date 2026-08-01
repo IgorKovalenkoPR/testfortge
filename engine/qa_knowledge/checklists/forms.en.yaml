@@ -74,7 +74,7 @@ sections:
       - objective: "Verify that special characters are stored and redisplayed unchanged in text fields"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that pasted text is accepted in every field and passes the same validation as typed text"
+      - objective: "Verify that pasted text is accepted in every field and is validated the same as typed text"
         category: "Edge Case"
         priority: Low
       - objective: "Verify that double submission is prevented (double-click protection)"
