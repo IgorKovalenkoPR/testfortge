@@ -2129,3 +2129,38 @@ input[type="text"]:focus, textarea:focus, select:focus {
     border: 1px solid var(--border, #e2e8f0);
     border-radius: 4px;
 }
+
+/* ── Manual execution walk ─────────────────────────────────────────
+   One verdict per click, so the buttons are the primary control on the
+   page: big enough to hit without aiming, colour-coded so a tester
+   halfway through 60 checks does not have to read them each time. */
+.verdict-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: .5rem;
+}
+.verdict-btn {
+    flex: 1 1 8rem;
+    min-height: 2.75rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+.verdict-passed      { background: #16a34a; color: #fff; }
+.verdict-passed-but  { background: #65a30d; color: #fff; }
+.verdict-failed      { background: #dc2626; color: #fff; }
+.verdict-blocked     { background: #f59e0b; color: #fff; }
+/* Skipped is deliberately grey, not amber: it is not a soft failure, it
+   is "nobody looked", and it is excluded from the pass rate. */
+.verdict-skipped     { background: #94a3b8; color: #fff; }
+.verdict-btn:hover   { filter: brightness(1.08); }
+
+.manual-steps { margin: 0; padding-left: 1.2rem; }
+.manual-steps li { margin: .2rem 0; }
+.manual-verdict-form { margin-top: .75rem; }
+
+.badge-passed      { background: #dcfce7; color: #166534; }
+.badge-passed-but  { background: #ecfccb; color: #3f6212; }
+.badge-failed      { background: #fee2e2; color: #991b1b; }
+.badge-blocked     { background: #fef3c7; color: #92400e; }
+.badge-skipped     { background: #e2e8f0; color: #475569; }

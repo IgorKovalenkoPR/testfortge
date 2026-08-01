@@ -818,8 +818,15 @@ def register(app: Flask) -> None:
               # so the field always posts; missing/invalid values fall
               # back to "tc_driven" for safety.
               run_mode = (request.form.get("run_mode") or "tc_driven").strip().lower()
-              if run_mode not in ("tc_driven", "walkthrough"):
+              if run_mode not in ("tc_driven", "walkthrough", "manual"):
                   run_mode = "tc_driven"
+              # PR-5: the manual walk is a different surface, not a
+              # different runner — hand the whole POST to it and let it
+              # open the run. 307 preserves the method AND the body, so
+              # the selection, the environment and the CSRF token all
+              # arrive intact and the mode still works with JS disabled.
+              if run_mode == "manual":
+                  return redirect(url_for("manual_run_start"), code=307)
               # Walkthrough sub-config — only consulted when run_mode ==
               # "walkthrough". Numeric coercion is permissive so a
               # missing/empty field falls back to the conservative
