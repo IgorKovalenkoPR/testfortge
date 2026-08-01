@@ -123,6 +123,45 @@ class TestTheShippedCorpusObeysIt:
         assert not problems, "\n  ".join([""] + problems)
 
 
+class TestTheRequirementsSpecificRowsAreClean:
+    """Found on prod after the rule shipped, by generating and reading.
+
+    ``qa_persona`` builds three checklist rows per raw requirement and
+    interpolated the requirement text bare: with a requirement of "user
+    can sign in" that produced "Verify user can sign in rejects invalid
+    input with a clear validation message" — ungrammatical whatever the
+    requirement said, and carrying the operator's modal into a summary.
+
+    Nothing linted this path, which is how it survived a commit that
+    cleaned every template and both other generators.
+    """
+
+    def _objectives(self, requirement: str) -> list[str]:
+        from engine.qa_persona import (analyze_input,
+                                       generate_professional_checklist)
+        analysis = analyze_input([{"text": requirement}])
+        items = generate_professional_checklist(analysis)
+        return [i.objective for i in items
+                if "Requirements-specific" in (i.section or "")]
+
+    def test_a_requirement_with_a_modal_still_yields_clean_rows(self):
+        objectives = self._objectives(
+            "The user can sign in with an email and a password")
+        assert objectives, "no Requirements-specific rows were produced"
+        for objective in objectives:
+            findings = [f for f in g.lint_text(objective, kind="objective")
+                        if "modal" in f]
+            assert not findings, f"{objective}: {findings}"
+
+    def test_the_requirement_is_quoted_not_interpolated_bare(self):
+        """Quoting is what makes the row grammatical for any input."""
+        objectives = self._objectives(
+            "The user can sign in with an email and a password")
+        assert all('"' in o for o in objectives), objectives
+        # …and the operator's own words survive inside the quotes.
+        assert any("can sign in" in o for o in objectives), objectives
+
+
 class TestTheGeneratorStoppedEmittingCan:
     """`tc_rules` composed "Verify that User can <objective>"."""
 

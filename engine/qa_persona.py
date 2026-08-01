@@ -394,21 +394,31 @@ def generate_professional_checklist(analysis: AnalysisResult,
                 continue
             if is_instruction(req_text):
                 continue
-            short = req_text[:80].rstrip(".")
+            # The requirement is the operator's own words and goes in
+            # quotes — interpolating it bare produced "Verify user can
+            # sign in rejects invalid input", ungrammatical whatever the
+            # requirement said, and smuggled the operator's modal into a
+            # summary the house style says carries none. Quoted, it reads
+            # as the citation it is, and the sentence around it is ours:
+            # modal-free and stating an observable outcome.
+            short = req_text[:80].rstrip(".").strip('"“”')
             items.append(CheckItem(
-                objective=f"Verify {short} with valid input",
+                objective=f'Verify that valid input is accepted for the '
+                          f'requirement "{short}"',
                 category="Positive", priority="High",
                 section="Requirements-specific",
             ))
             items.append(CheckItem(
-                objective=f"Verify {short} rejects invalid input "
-                           "with a clear validation message",
+                objective=f'Verify that invalid input is rejected with a '
+                          f'clear validation message for the requirement '
+                          f'"{short}"',
                 category="Negative", priority="High",
                 section="Requirements-specific",
             ))
             items.append(CheckItem(
-                objective=f"Verify {short} on boundary values "
-                           "(min, min+1, max-1, max)",
+                objective=f'Verify that boundary values (min, min+1, '
+                          f'max-1, max) are accepted or rejected per the '
+                          f'declared limits for the requirement "{short}"',
                 category="Edge case", priority="Medium",
                 section="Requirements-specific",
             ))
