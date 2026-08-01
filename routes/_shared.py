@@ -106,6 +106,14 @@ def cl_to_dict(cl: ChecklistItem) -> dict:
         "comments": cl.comments, "user_story_id": cl.user_story_id,
         "category": cl.category, "priority": cl.priority, "status": cl.status,
         "testing_type": getattr(cl, "testing_type", "Functional"),
+        # PR-2 hierarchy. Dropping these here meant the site-aware
+        # generation path persisted a checklist with no numbering at all:
+        # the generator produced 1 / 1.1 / 2.7.1, save_checklist knew the
+        # columns, and this dict silently lost them in between. Found by
+        # the end-to-end pipeline test, which is the only place the whole
+        # chain runs. Same class of bug as tc_to_dict dropping `suite`.
+        "item_num": getattr(cl, "item_num", "") or "",
+        "depth": int(getattr(cl, "depth", 2) or 2),
     }
 
 
