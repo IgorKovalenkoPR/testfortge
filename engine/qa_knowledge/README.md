@@ -88,6 +88,26 @@ how to write, what to cover, and what to call things.
 | `style/coverage_rules.yaml` | **Which** cases must exist: per-surface control enumeration, per-control-type scenario sets, mandatory positive/negative pairings, cross-cutting sweeps. | same |
 | `style/wording_rules.yaml` | **How to phrase it**: element naming, approved action verbs, entry-point navigation, graded-outcome ban, punctuation, opener. | `Training Plan_Horban Yaroslavna.xlsx` — the reviewing team lead's threaded comments |
 | `glossary/ui_terms.en.yaml` | **What to call it**: 87 canonical UI terms with `kind`, `control_type`, acceptable `aliases`, and flagged `avoid` spellings. | `Glossary.xlsx` — 80 website + 11 mobile terms |
+| `style/checklist_style.yaml` | **The low-level checklist**: section set, hierarchical numbering, per-surface and per-form derivation, objective grammar, status vocabulary. Read by `engine/checklist_author.py`. | `Training Plan_Horban Yaroslavna.xlsx` — the "Low-level checklist" sheet, 57 checks |
+
+### Two authors, two floors
+
+Each artefact has an LLM author and a deterministic generator, and the
+deterministic one is the floor rather than a degraded mode:
+
+| Artefact | Agent | Enumeration |
+|---|---|---|
+| Test cases | `engine/tc_author.py` | `engine/tc_rules.py` |
+| Checklist | `engine/checklist_author.py` | `engine/checklist_rules.py` |
+
+The agent buys judgement — section naming and order, which interactions
+deserve a row, and reading requirements or an attached spec that no
+crawler can see. It does **not** get to decide what counts as evidence or
+how a row is worded: numbering is applied afterwards by
+`checklist_rules.assign_numbers`, the terminology rules run over its output
+in code, and a row quoting a label no artefact contains is dropped and
+reported. Every failure path — no key, refused call, unparseable JSON,
+empty result — lands on the enumeration.
 
 Editing any of them changes generated output with no Python change. They
 are loaded as **raw text**, not parsed YAML, because the `evidence:` and

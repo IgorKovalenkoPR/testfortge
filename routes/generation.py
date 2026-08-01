@@ -441,14 +441,31 @@ def _run_site_aware(url: str, pid: str | None,
     # tester two overlapping sheets to walk.
     ll_gaps: list[str] = []
     try:
+        from engine import checklist_author as _cla
         from engine import checklist_rules as _clr
         pages = [_page_to_dict(pg)
                  for pg in (getattr(site_analysis, "pages", None) or [])]
-        low_level = _clr.build_checklist(pages, url=url)
-        if low_level.total:
+        # The author agent when a key is configured, the enumeration when
+        # not — author_checklist falls back internally, so this call has
+        # one shape either way and the free tier keeps working untouched.
+        authored = _cla.author_checklist(
+            artifacts=_cla.Artifacts(
+                url=url, pages=pages, custom_prompt=custom_prompt or "",
+                requirements=[ln.strip() for ln in (raw_lines or [])
+                              if (ln or "").strip()][:120]),
+            profile=profile)
+        if authored.total:
             cl_dicts = [cl_to_dict(ci)
-                        for ci in _clr.to_checklist_items(low_level)]
-            ll_gaps = list(low_level.gaps)
+                        for ci in _cla.to_checklist_items(authored)]
+            ll_gaps = list(authored.gaps)
+            if authored.lint_findings:
+                # Wording the agent got wrong that normalisation could not
+                # fix. Logged rather than hidden — it is the signal that
+                # the prompt needs work, not the operator.
+                _log.info("checklist author: %d residual wording findings",
+                          len(authored.lint_findings))
+            _log.info("checklist source=%s rows=%d",
+                      authored.source, authored.total)
     except Exception as exc:  # pragma: no cover — never block generation
         _log.warning("low-level checklist build failed: %s", exc)
 
