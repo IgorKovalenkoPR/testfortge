@@ -596,7 +596,10 @@
         <i data-lucide="bot" class="icon-sm"></i>
         {{ t.get('te_mode_ts_note', 'Running the TypeScript + Playwright suite? That lives in') }}
         <a href="{{ url_for('automation_page') }}">{{ t.get('nav_automation', 'Automation') }}</a>
-        — {{ t.get('te_mode_ts_note2', 'it is generated here, run where the browsers are, and its Allure results come back to the Dashboard.') }}
+        {# "come back to the Dashboard" was wrong: ingested runs are listed
+           on the Automation page itself. The Dashboard has no Allure
+           section, so the old wording sent operators looking for one. #}
+        — {{ t.get('te_mode_ts_note2', 'it is generated there, run where the browsers are, and its Allure results are ingested back into that same page.') }}
     </p>
 
     {# ── Walkthrough options — only relevant when mode=walkthrough.

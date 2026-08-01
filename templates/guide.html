@@ -62,7 +62,16 @@
                    transition:transform .15s ease, box-shadow .15s ease;">
         <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">▶️</div>
         <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Test Execution</strong>
-        <small style="color:#64748b;">Run TCs in real Playwright · record sessions → suites · live view</small>
+        <small style="color:#64748b;">Run TCs in Playwright · walk them by hand · record sessions → suites</small>
+    </button>
+
+    <button type="button" class="guide-card" data-section="automation"
+            style="text-align:left;padding:18px;border:1px solid #e2e8f0;
+                   background:white;border-radius:8px;cursor:pointer;
+                   transition:transform .15s ease, box-shadow .15s ease;">
+        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">🧰</div>
+        <strong style="display:block;font-size:1.05em;margin-bottom:4px;">Automation QA</strong>
+        <small style="color:#64748b;">TypeScript + Playwright suite out · Allure results in</small>
     </button>
 
     <button type="button" class="guide-card" data-section="bug-reports"
@@ -342,6 +351,28 @@
        <strong>deterministic simulator</strong> (no Base URL — fast,
        heuristic) or <strong>real Playwright run</strong> (Base URL
        set — headless browser, screenshots, optional video).</p>
+
+    <h3>Walking a pack by hand</h3>
+    <p>Pick <em>Manual — walk it yourself</em> and the run becomes one
+       item at a time, with its preconditions, numbered steps and
+       expected result on screen and one click per verdict: Passed,
+       Passed&nbsp;but, Failed, Blocked, Skipped.</p>
+    <ul>
+      <li><strong>It is resumable.</strong> Progress lives in the
+          database, not the session, so a 60-check walk survives a
+          laptop sleep, a browser restart and a hand-off to a colleague.
+          The URL is the bookmark.</li>
+      <li><strong>Failed or Passed but can file a bug in one click.</strong>
+          Tick the box and what you typed in <em>"What did you see?"</em>
+          becomes the actual result, word for word — the report never
+          invents an observation you did not make.</li>
+      <li><strong>Skipped is excluded from the pass rate; Blocked
+          counts as executed.</strong> Closing early records the run as
+          partial, so a half-finished walk is never read as full
+          coverage.</li>
+      <li>A later verdict on the same item overwrites the earlier one
+          rather than appending, so corrections are cheap.</li>
+    </ul>
     <h3>Typical workflow</h3>
     <ol>
       <li>Set <strong>Base URL</strong>. Without it the run is
@@ -538,6 +569,62 @@ python -m playwright install chromium</pre>
        baselines, exploratory pre-release sweeps. Not a substitute
        for scripted regression — heuristics catch defect <em>classes</em>,
        not your specific business flows.</p>
+  </template>
+
+  <template data-content="automation">
+    <h3>What it is</h3>
+    <p>A separate module because automation has a different lifecycle
+       from a manual run: the suite is <strong>generated here</strong>,
+       <strong>runs where the browsers are</strong> (your machine or
+       CI), and <strong>reports back here</strong>. Nothing executes on
+       the TestForTge instance — the free tier has 512&nbsp;MB and one
+       worker, and Chromium does not fit beside the app.</p>
+    <h3>The three steps</h3>
+    <ol>
+      <li><strong>Generate.</strong> Download a self-contained Node
+          project: playwright-bdd, allure-playwright, a step library, a
+          GitHub Actions workflow, and the locators the recorder already
+          learned. Only test cases saved in the <em>Manual&nbsp;+&nbsp;BDD</em>
+          format are picked up — the pack counter on the page tells you
+          how many there are.</li>
+      <li><strong>Run.</strong> <code>npm ci &amp;&amp; npm test</code>.</li>
+      <li><strong>Report back.</strong> <code>npm run upload</code> posts
+          the <code>allure-results</code> directory to this page, which
+          parses it in pure Python — no JVM anywhere.</li>
+    </ol>
+    <h3>Read the coverage report before you run anything</h3>
+    <p>It is computed from the pack, not from a run, and it exists
+       because of one rule: <strong>a check nobody performed must not
+       report green.</strong></p>
+    <ul>
+      <li><strong>Assertions to verify manually</strong> — the step
+          library could not bind them, so the scenario <em>skips</em>
+          with the assertion text as the reason. Neither passed nor
+          failed, and it says why.</li>
+      <li><strong>Preconditions to set up by hand</strong> — skipped
+          <em>before</em> acting, because a run from the wrong start
+          state produces a result about a different situation.</li>
+      <li><strong>Unbound action steps</strong> — these <em>fail</em>.
+          A step the suite cannot perform is a defect in the test case,
+          not something to pass over quietly.</li>
+    </ul>
+    <p>Skipped is its own column and is excluded from every pass rate,
+       which is computed over executed scenarios only.
+       <code>MANUAL-ASSERTIONS.md</code> in the bundle lists every gap
+       by test-case id.</p>
+    <h3>Result ingestion is off until you give it a token</h3>
+    <p>The endpoint writes run history, so an unauthenticated one is an
+       open write. Set <code>AUTOMATION_INGEST_TOKEN</code> on the
+       service and CI sends it in an <code>X-TFG-Token</code> header;
+       until then every upload is refused and the page says so.</p>
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Generating with the pack in plain <em>Manual</em> format —
+          the module finds no automation-targeted cases. Re-generate
+          with <em>Manual&nbsp;+&nbsp;BDD</em> selected.</li>
+      <li>Reading a high pass rate on a pack with a low bound-steps
+          percentage. Check what skipped first.</li>
+    </ul>
   </template>
 
   <template data-content="bug-reports">
