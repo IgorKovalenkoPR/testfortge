@@ -19,6 +19,7 @@ import re
 
 import pytest
 
+from engine import bug_report
 from engine import db as _db
 from engine import manual_run as mr
 from engine.testcase_generator import ChecklistItem, TestCase
@@ -353,6 +354,37 @@ class TestBugFiling:
         assert bugs[0]["actual_result"] == "The form returned HTTP 500"
         assert bugs[0]["expected_result"] == "A success message is displayed"
         assert "Go to the site" in bugs[0]["steps_to_reproduce"]
+
+    def test_the_status_is_one_the_rest_of_the_app_recognises(
+            self, client, walk):
+        """Found on prod: the filer wrote "New", which is not a status.
+
+        ``BUG_STATUSES`` has no "New", so ``routes/bugs.py`` counted 0
+        Open while an unresolved bug sat in the list, and any status
+        filter missed it. Every other bug factory writes "Open".
+        """
+        client.post(f"/test-execution/manual/{walk['run_id']}/verdict",
+                    data={"external_id": "SC1_001", "verdict": "Failed",
+                          "notes": "broken", "file_bug": "1"})
+        bug = _db.list_bugs(walk["pid"])[0]
+        assert bug["status"] in bug_report.BUG_STATUSES, bug["status"]
+        assert bug["status"] == "Open"
+
+    def test_the_title_states_the_defect_not_the_check(self, client, walk):
+        """A bug called "Verify that …" reads as a test case, not a bug."""
+        client.post(f"/test-execution/manual/{walk['run_id']}/verdict",
+                    data={"external_id": "SC1_001", "verdict": "Failed",
+                          "notes": "broken", "file_bug": "1"})
+        title = _db.list_bugs(walk["pid"])[0]["title"]
+        assert "verify" not in title.lower(), title
+
+    def test_the_preconditions_come_across(self, client, walk):
+        """The start state is what makes the report reproducible."""
+        client.post(f"/test-execution/manual/{walk['run_id']}/verdict",
+                    data={"external_id": "SC1_001", "verdict": "Failed",
+                          "notes": "broken", "file_bug": "1"})
+        bug = _db.list_bugs(walk["pid"])[0]
+        assert bug["preconditions"] == "The form is opened"
 
     def test_the_bug_is_linked_to_the_result_row(self, client, walk):
         client.post(f"/test-execution/manual/{walk['run_id']}/verdict",

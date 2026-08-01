@@ -23,6 +23,7 @@ from __future__ import annotations
 from flask import (Flask, abort, flash, redirect, render_template, request,
                    session, url_for)
 
+from engine import bug_report as _bug_report
 from engine import db as _db
 from engine import manual_run as mr
 from engine.log import get_logger
@@ -240,11 +241,22 @@ def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(item.steps, 1)) \
         or "1. Perform the check described in the summary"
     body = {
-        "title": f"[{item.section or 'Manual run'}] {item.summary}"[:500],
+        # NOT the test case's own title. Every objective opens "Verify
+        # that …", and a defect store where each headline is an
+        # instruction to check something tells the reader nothing about
+        # what broke. bug_report negates the clause instead.
+        "title": _bug_report.defect_title_from_objective(
+            item.summary, section=item.section, verdict=verdict),
         "severity": severity,
         "priority": priority,
-        "status": "New",
+        # Must be a member of bug_report.BUG_STATUSES — the Bug Reports
+        # "Open" tile and every status filter compare against it, so a
+        # value outside the vocabulary makes the bug invisible to both.
+        "status": "Open",
         "environment": (run.get("env_payload") or {}).get("environment", ""),
+        # The state the tester started from is what makes the report
+        # reproducible; dropping it puts the burden back on the reader.
+        "preconditions": item.preconditions or "",
         "steps_to_reproduce": steps,
         # The tester's own words are the actual result. Inventing one from
         # the expected result would put words in their mouth.

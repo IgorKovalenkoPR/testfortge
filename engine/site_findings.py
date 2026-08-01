@@ -131,7 +131,10 @@ def finding_from_check(check_key: str, result: Any, *,
         "bug_area": area,
         "severity": severity,
         "priority": priority,
-        "status": "New",
+        # Must be a member of bug_report.BUG_STATUSES — see the same
+        # note in routes/execution_manual.py. A value outside it drops
+        # the finding out of the "Open" tile and every status filter.
+        "status": "Open",
         "environment": f"{host}" if host else "",
         "preconditions": f"The site {base_url} is reachable" if base_url
                          else "",

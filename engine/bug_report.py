@@ -461,6 +461,160 @@ def _walkthrough_passive_title(
     return f"[{title_area}] {message}"
 
 
+# ── Test-case objective → defect statement ─────────────────────────
+#
+# A bug filed from a manual walk starts life as the test case's own
+# title, and every one of those opens "Verify that …" — the team's
+# house rule, enforced by engine.glossary. Copied across verbatim it
+# produces a defect store where every headline is an instruction to
+# check something, which is the opposite of what a bug list is for:
+# the reader wants to know what is broken, not what to test.
+#
+# The transforms below negate the clause. They are deliberately few:
+# each one matches a shape the reference corpus actually uses, and
+# anything unmatched falls through to a labelled — not invented —
+# headline. Guessing a negation wrong states the opposite of the
+# truth about the product, which is worse than an unpolished title.
+
+_VERIFY_OPENER_RE = re.compile(
+    r"^\s*verif(?:y|ies|ied)\s+(?:that\s+)?", re.I)
+
+#: Words that cannot follow a finite verb. If the "third-person -s"
+#: rule produces a tail starting with one of these, it has chopped a
+#: plural noun rather than a verb — "unauthorized users cannot …"
+#: parsed as subject "unauthorized" + verb "users". Reject and fall
+#: through instead of emitting "Unauthorized does not user cannot …".
+_NOT_A_VERB_TAIL = {
+    "cannot", "can", "is", "are", "was", "were", "do", "does", "did",
+    "must", "will", "shall", "should", "would", "may", "might", "has",
+    "have", "had",
+}
+
+_OBJECTIVE_NEGATIONS: list[tuple[re.Pattern[str], str]] = [
+    # "users cannot access X" → "users can access X". The objective
+    # already asserts a negative, so its failure is the positive —
+    # and on the security cases in the corpus that is the whole point.
+    # Must run before the copular rule so "cannot" is not left intact.
+    (re.compile(r"^(?P<head>.*?)\bcan\s?not\b\s+(?P<tail>\S.*)$", re.I),
+     "{head} can {tail}"),
+    # "login is completed successfully …" → "login is not completed …"
+    # "the fields are displayed"          → "the fields are not displayed"
+    # Covers the dominant corpus shape: copular "is/are" + participle.
+    (re.compile(r"^(?P<head>.*?\b(?:is|are|was|were))\s+(?P<tail>\S.*)$",
+                re.I),
+     "{head} not {tail}"),
+    # "the user can sign in" → "the user cannot sign in"
+    (re.compile(r"^(?P<head>.*?)\bcan\s+(?P<tail>\S.*)$", re.I),
+     "{head} cannot {tail}"),
+    # "the Back button does not restore the session" → "… does restore
+    # …". Another objective that asserts a negative; its failure is
+    # the positive. Emphatic "does" rather than re-inflecting the
+    # verb, which cannot be done reliably without a lexicon.
+    (re.compile(r"^(?P<head>.*?)\bdoes\s+not\s+(?P<tail>\S.*)$", re.I),
+     "{head} does {tail}"),
+    # "the system enforces 'X'" → "the system does not enforce 'X'".
+    # Third-person -s only, and only on a verb we can de-inflect
+    # safely: "-ies" → "-y", "-es" after a sibilant, plain "-s".
+    (re.compile(r"^(?P<subject>\S+(?:\s+\S+){0,3}?)\s+"
+                r"(?P<verb>[a-z]+(?:ies|ses|shes|ches|xes|zes|s))\s+"
+                r"(?P<tail>\S.*)$"),
+     None),  # handled in code — de-inflection is not a format string
+]
+
+
+def _deinflect(verb: str) -> str | None:
+    """Third-person singular → bare infinitive, or None when unsure.
+
+    Only the endings the corpus produces. An unknown shape returns
+    None so the caller falls through rather than emitting a word that
+    is not English.
+    """
+    lowered = verb.lower()
+    if lowered in {"is", "was", "has", "does", "as", "gets"}:
+        # "has"/"does" would need "does not have"/"does not do" —
+        # handled by the copular rule or not at all.
+        return None
+    if lowered.endswith("ies") and len(lowered) > 4:
+        return lowered[:-3] + "y"
+    for suffix in ("ses", "shes", "ches", "xes", "zes"):
+        if lowered.endswith(suffix) and len(lowered) > len(suffix) + 1:
+            return lowered[:-2]
+    if lowered.endswith("ss") or not lowered.endswith("s"):
+        return None
+    return lowered[:-1]
+
+
+def defect_title_from_objective(objective: str, *,
+                                section: str = "",
+                                verdict: str = "Failed") -> str:
+    """Turn a test-case objective into a headline about the product.
+
+    ``Verify that login is completed successfully with valid
+    credentials`` becomes ``[Authentication] Login is not completed
+    successfully with valid credentials``.
+
+    A ``Passed but`` verdict is NOT negated — the behaviour worked and
+    something else was wrong with it, so claiming the opposite would
+    misreport the run. It gets the deviation framing instead.
+
+    When no transform matches, the objective is kept with its opener
+    stripped and prefixed with the verdict, which reads as a defect
+    line without asserting anything the run did not establish.
+    """
+    label = (section or "").strip() or "Manual run"
+    clause = _VERIFY_OPENER_RE.sub("", (objective or "").strip()).strip()
+    if not clause:
+        return f"[{label}] Manual check failed"
+
+    if verdict == "Passed but":
+        body = clause[0].lower() + clause[1:]
+        return f"[{label}] Deviation while checking that {body}"
+
+    # Mask quoted spans before matching. A quote is the label of a
+    # control or a criterion being cited, not a claim this title is
+    # making — negating inside one flips the citation and leaves the
+    # real verb untouched, so the bug ends up asserting that the
+    # product works. Same rule the terminology linter follows.
+    quoted: list[str] = []
+
+    def _mask(m: re.Match[str]) -> str:
+        quoted.append(m.group(0))
+        return f"\x00{len(quoted) - 1}\x00"
+
+    masked = re.sub(r"\"[^\"]*\"|'[^']*'", _mask, clause)
+
+    def _unmask(text: str) -> str:
+        return re.sub(r"\x00(\d+)\x00",
+                      lambda m: quoted[int(m.group(1))], text)
+
+    negated = ""
+    for pattern, template in _OBJECTIVE_NEGATIONS:
+        m = pattern.match(masked)
+        if not m:
+            continue
+        if template is None:
+            tail = m.group("tail")
+            if tail.split(None, 1)[0].lower().strip(",;:") in _NOT_A_VERB_TAIL:
+                continue
+            bare = _deinflect(m.group("verb"))
+            if not bare:
+                continue
+            negated = f"{m.group('subject')} does not {bare} {tail}"
+        else:
+            negated = template.format(**{k: (v or "").strip()
+                                         for k, v in m.groupdict().items()})
+            negated = re.sub(r"\s{2,}", " ", negated).strip()
+        break
+
+    if not negated:
+        # Honest fallback: say what happened, quote what was checked.
+        return f"[{label}] {verdict}: {clause}"[:500]
+
+    negated = _unmask(negated)
+    negated = negated[0].upper() + negated[1:]
+    return f"[{label}] {negated}"[:500]
+
+
 # ── PR-H: dedup-signature builder ──────────────────────────────────
 #
 # Cross-run deduplication groups bugs by their *intent* — same
