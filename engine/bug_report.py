@@ -83,6 +83,15 @@ class BugReport:
     # external id through SQL. Defaults to 0 so older sessions and the
     # auto-bug factory don't have to pass it explicitly.
     db_id: int = 0
+    # ── PR-6: quality attribute ──
+    # WHAT KIND of broken, independent of severity's HOW BADLY. A
+    # Critical accessibility defect and a Critical payment defect go to
+    # different people and belong in different sections of a report.
+    # Derived from ``defect_class`` when nothing set it — see
+    # engine/bug_areas.py.
+    bug_area: str = "Functional"
+    # ── PR-6: the remaining columns of the team's own bug sheet ──
+    attachment: str = ""
     # ── PR-H: smart-filing metadata ──
     # ``defect_class`` mirrors the walkthrough heuristic's class tag
     # (``broken_image``, ``axe_critical``, …) so dedup can group by
@@ -877,6 +886,8 @@ def bug_to_dict(bug: BugReport) -> dict:
         # non-canonical keys into ``extra`` so these land in the
         # ``BugReport.extra`` JSON column without a schema change.
         "defect_class": bug.defect_class,
+        "bug_area": getattr(bug, "bug_area", "Functional"),
+        "attachment": getattr(bug, "attachment", ""),
         "page_url": bug.page_url,
         "dedup_signature": bug.dedup_signature,
         "occurrence_count": bug.occurrence_count,
@@ -923,7 +934,21 @@ def dict_to_bug(d: dict) -> BugReport:
         dedup_signature=d.get("dedup_signature", ""),
         occurrence_count=int(d.get("occurrence_count") or 1),
         annotation_status=d.get("annotation_status", ""),
+        # PR-6 quality attribute. Derived from the defect class when the
+        # snapshot predates the field, so an older session still files its
+        # bugs under the right chip instead of collapsing to Functional.
+        bug_area=(d.get("bug_area")
+                  or _derive_area(d.get("defect_class", ""))),
+        attachment=d.get("attachment", ""),
     )
+
+
+def _derive_area(defect_class: str) -> str:
+    try:
+        from engine.bug_areas import area_for_class
+        return area_for_class(defect_class)
+    except Exception:  # pragma: no cover — defensive
+        return "Functional"
 
 
 # ── Markdown export ────────────────────────────────────────────────

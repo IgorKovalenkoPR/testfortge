@@ -1469,6 +1469,12 @@ def register(app: Flask) -> None:
                       site_url=site_url,
                       manual_statuses=manual_statuses or None,
                       manual_bug_refs=manual_bug_refs or None,
+                      # Opt-in: file the site-wide Performance / Security /
+                      # Accessibility findings the pack never asked about.
+                      # Off unless the operator ticked it, because 20+
+                      # unrequested findings on top of a run's own results
+                      # is how a bug list stops being read.
+                      site_sweep=(request.form.get("site_sweep") == "1"),
                   )
 
                   # Promote pending bug IDs and stamp ISTQB metadata.

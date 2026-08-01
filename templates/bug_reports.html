@@ -127,6 +127,36 @@
     {% endif %}
 </div>
 
+{# ── Quality attribute (PR-6) ─────────────────────────────────────
+   Severity says how badly something is broken; this says what KIND of
+   broken. They are independent — a Critical accessibility defect and a
+   Critical payment defect go to different people.
+
+   Every chip is shown even at zero, deliberately. A chip that vanished
+   when its bucket was empty would read as "this product has no
+   accessibility defects", when what it means is "nobody has looked". #}
+<div class="bug-area-filter"
+     style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;
+            padding:6px 10px;border:1px solid #e2e8f0;
+            border-radius:8px;background:#f8fafc;align-items:center;">
+    <span style="font-size:0.85em;color:#475569;font-weight:600;">
+        {{ t.get('bug_area_filter_label', 'Area:') }}
+    </span>
+    <a href="{{ url_for('bug_reports_page', source=(source_filter or None), run=(run_filter or None)) }}"
+       class="btn btn-sm {% if not area_filter %}btn-primary{% else %}btn-secondary{% endif %}"
+       {% if not area_filter %}aria-current="page"{% endif %}>
+        {{ t.get('bug_area_all', 'All') }}
+    </a>
+    {% for area in areas %}
+    <a href="{{ url_for('bug_reports_page', area=area, source=(source_filter or None), run=(run_filter or None)) }}"
+       class="btn btn-sm {% if area_filter == area %}btn-primary{% else %}btn-secondary{% endif %}"
+       {% if area_filter == area %}aria-current="page"{% endif %}>
+        {{ area }}
+        <span class="badge">{{ area_counts.get(area, 0) }}</span>
+    </a>
+    {% endfor %}
+</div>
+
 {# ── Run filter (this PR) ─────────────────────────────────────────
    Scope the listing to a single Test Execution run so the operator
    isn't staring at every bug the project ever accumulated across
