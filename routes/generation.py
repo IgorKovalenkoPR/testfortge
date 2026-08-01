@@ -2101,6 +2101,23 @@ def register(app: Flask) -> None:
         stories = reconstruct_stories(session.get("user_stories", []))
         tc_list = reconstruct_test_cases(session.get("test_cases_data", []))
         cl_list = reconstruct_checklist(session.get("checklist_data", []))
+        # Fall back to the project's stored pack when the session has
+        # none — after a cold start, or in a second tab, the artefacts are
+        # in Postgres and only there. /automation/bundle.zip already did
+        # this; export did not, so the same project exported an empty file
+        # from one tab and a full one from another.
+        _pid = resolve_active_project(session)
+        if _pid:
+            if not tc_list:
+                try:
+                    tc_list = reconstruct_test_cases(_db.load_test_cases(_pid))
+                except Exception as exc:  # pragma: no cover — best-effort
+                    _log.warning("export: TC reload failed: %s", exc)
+            if not cl_list:
+                try:
+                    cl_list = reconstruct_checklist(_db.load_checklist(_pid))
+                except Exception as exc:  # pragma: no cover — best-effort
+                    _log.warning("export: CL reload failed: %s", exc)
 
         if stories and not tc_list:
             tc_list = generate_test_cases(stories)
