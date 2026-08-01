@@ -32,7 +32,7 @@ sections:
   - name: "Edit — Edge Cases"
     prefix: UPD
     items:
-      - objective: "Verify that concurrent edits to the same record are returns the expected outcome per the spec"
+      - objective: "Verify that the second of two concurrent edits is merged or rejected with a conflict message, and no field is silently lost"
         category: "Edge Case"
         priority: Medium
       - objective: "Verify that edit without any changes is handled gracefully"

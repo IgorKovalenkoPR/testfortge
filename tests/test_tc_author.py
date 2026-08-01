@@ -187,12 +187,12 @@ class TestDeclarativeVoice:
 
 def _case(**kw) -> tc_author.AuthoredCase:
     base = dict(
-        summary='Verify that User can save the record via the "Save" button',
+        summary='Verify that User saves the record via the "Save" button',
         preconditions="Record is created",
         steps=["Go to HR module -> Employees grid",
                'Click on the "Save" button'],
         test_data="",
-        expected_result='User can save the record via the "Save" button.',
+        expected_result='User saves the record via the "Save" button.',
         category="Positive",
         priority="High",
         section="Employees grid",
@@ -378,7 +378,7 @@ def _strategy() -> _strat.TestStrategy:
         site_url="https://x.test",
         matrix={
             "Functional": [
-                _strat.CheckSpec(objective="Verify that User can log in",
+                _strat.CheckSpec(objective="Verify that User logs in",
                                  priority="High"),
                 _strat.CheckSpec(objective="Verify that the grid filters",
                                  priority="Medium"),
@@ -562,7 +562,7 @@ class TestAuthorLLMPath:
         assert "Only smoke" in prompt
         # The strategy checks come through as objectives to expand, not
         # as finished cases.
-        assert "Verify that User can log in" in prompt
+        assert "Verify that User logs in" in prompt
         assert "objectives to expand" in prompt.lower() \
             or "OBJECTIVE, not" in prompt
 
@@ -732,7 +732,7 @@ class _TC:
 
     def __init__(self, **kw):
         self.id = kw.get("id", "SC1_001")
-        self.summary = kw.get("summary", "Verify that User can save")
+        self.summary = kw.get("summary", "Verify that User saves the record")
         self.preconditions = kw.get("preconditions", "")
         self.test_steps = kw.get("test_steps", "1. Go to the grid\n"
                                                "2. Click Save")
@@ -773,7 +773,7 @@ class TestTeamLeadHouseStyle:
     def test_negative_case_gains_the_feedback_assertion(self):
         from engine.qa_team_lead import review_test_cases
         tc = _TC(category="Negative",
-                 summary="Verify that User cannot save the record",
+                 summary="Verify that the record is not saved",
                  expected_result="User cannot save the record")
         fixed, report = review_test_cases([tc])
         assert tc_author.asserts_feedback(fixed[0].expected_result)
@@ -854,10 +854,14 @@ class TestTestCasesRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert ('Verify that User can filter Job Positions using the '
+        # The model wrote "User can filter …" / "User cannot create …";
+        # a summary carries no modal, so normalise_case rewrote both on
+        # the way through. The render path must show the rewritten form.
+        assert ('Verify that User filters Job Positions using the '
                 '&#34;Internal&#34; filter' in body
-                or "Verify that User can filter Job Positions" in body)
-        assert ("Verify that User cannot create Job Position without the "
+                or "Verify that User filters Job Positions" in body)
+        assert "can filter Job Positions" not in body
+        assert ("Verify that User does not create Job Position without the "
                 "required fields filling" in body)
         # "should" reaches the page unchanged — the operator's ruling
         # applies on the render path too, not only in the unit helpers.

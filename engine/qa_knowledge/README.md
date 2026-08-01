@@ -128,12 +128,33 @@ So they hold on every path, including the no-API-key fallback:
   expected result — they state a requirement on the product rather than
   something a tester can observe. `engine.tc_author.normalise_expected_result`
   rewrites them; `engine.qa_team_lead` review rule 2 applies it.
-- **`should` is accepted.** The two corpora disagree: the Odoo client
-  deliverable never writes it, the team's own reviewed training
+- **One modal, one place.** A summary — a test-case summary, a checklist
+  objective or a bug title — carries **no modal verb at all** and is
+  written in active or passive voice. `should` / `should be` is the sole
+  exception and belongs only in the **expected result** of a test case or
+  a bug report. Operator ruling, 2026-08-01.
+
+  | | summary / objective / bug title | expected result |
+  |---|---|---|
+  | `should` | flagged | **accepted** |
+  | `can`, `cannot` | rewritten | rewritten |
+  | `may`, `might`, `will`, `would`, `could` | flagged | flagged |
+  | `must`, `shall`, `ought to` | flagged | flagged + rewritten |
+
+  `can` / `cannot` are *rewritten* rather than merely reported because
+  the fix is mechanical and loses nothing — "User can save" → "User
+  saves", "User cannot save" → "User does not save". The rest change
+  meaning when removed, so they are reported and left alone.
+
+  Why `should` survives at all: the two corpora disagree. The Odoo
+  client deliverable never writes it; the team's own reviewed training
   deliverable writes it throughout and the reviewing team lead let every
   instance stand. The operator settled it in favour of the training
-  deliverable, so `should` is neither rewritten nor flagged. The full
-  provenance is in `engine/tc_author.py` at `_WEAK_MODAL_RE`.
+  deliverable, then scoped it to the expected result. Full provenance in
+  `engine/tc_author.py` at `_WEAK_MODAL_RE`; enforcement in
+  `engine/glossary.py` against the `modal_summary_only` bucket. Nothing
+  inside quotes is touched by either — a quoted criterion is a citation,
+  not a claim the sentence is making.
 - **Negative cases assert the feedback too.** A refusal case must state
   both that the action was blocked *and* what the user sees. On the
   corpus's dedicated error-message sheet, 8 of 25 rows failed precisely

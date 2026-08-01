@@ -11,10 +11,10 @@ sections:
       - objective: "Verify that the password field is masked (characters are hidden)"
         category: Positive
         priority: High
-      - objective: "Verify that 'Show password' toggle is revealed/hidden password characters"
+      - objective: "Verify that the 'Show password' toggle reveals and hides the password characters"
         category: Positive
         priority: Medium
-      - objective: "Verify that 'Forgot password' link is displayed and redirected to recovery page"
+      - objective: "Verify that the 'Forgot password' link is displayed and opens the recovery page"
         category: Positive
         priority: High
       - objective: "Verify that 'Remember me' checkbox is present and functional"
@@ -38,7 +38,7 @@ sections:
       - objective: "Verify that the username/avatar is displayed in the Header after login"
         category: Positive
         priority: Medium
-      - objective: "Verify that 'Remember me' is extended the session beyond browser close"
+      - objective: "Verify that 'Remember me' extends the session beyond browser close"
         category: Positive
         priority: Medium
   - name: "Login — Negative"
@@ -59,7 +59,7 @@ sections:
       - objective: "Verify that the error message does not reveal which specific field failed validation (uniform 'invalid credentials' message)"
         category: Negative
         priority: High
-      - objective: "Verify that multiple failed attempts are triggered account lockout or CAPTCHA"
+      - objective: "Verify that multiple failed attempts trigger account lockout or CAPTCHA"
         category: Negative
         priority: High
   - name: "Login — Edge Cases & Security"
@@ -71,7 +71,7 @@ sections:
       - objective: "Verify that password field is accepted with special characters (!@#$%^&*)"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that login returns the expected outcome per the spec after session timeout"
+      - objective: "Verify that login is required again after the session times out"
         category: "Edge Case"
         priority: Medium
       - objective: "Verify that concurrent sessions from different devices are handled per policy"
@@ -143,16 +143,16 @@ sections:
       - objective: "Verify that password reset email is sent for a valid registered email"
         category: Positive
         priority: High
-      - objective: "Verify that the reset link in the email is redirected to the password change form"
+      - objective: "Verify that the reset link in the email opens the password change form"
         category: Positive
         priority: High
       - objective: "Verify that the new password is saved successfully after reset"
         category: Positive
         priority: High
-      - objective: "Verify that the reset link is expired after a single use"
+      - objective: "Verify that the reset link expires after a single use"
         category: Security
         priority: High
-      - objective: "Verify that the reset link is expired after a timeout period (e.g. 24h)"
+      - objective: "Verify that the reset link expires after a timeout period (e.g. 24h)"
         category: Security
         priority: Medium
       - objective: "Verify that no information is revealed for non-existent email"

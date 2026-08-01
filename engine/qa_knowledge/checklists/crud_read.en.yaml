@@ -11,7 +11,7 @@ sections:
       - objective: "Verify that all data columns/fields are visible and formatted per the design spec (date format, currency symbol, thousands separator)"
         category: Positive
         priority: High
-      - objective: "Verify that pagination is producing the outcome defined in the design spec when records exceed page limit"
+      - objective: "Verify that pagination splits the rows into pages of the declared size when the record count exceeds the page limit"
         category: Positive
         priority: Medium
       - objective: "Verify that sorting reorders rows in ascending/descending order of the selected column"
@@ -26,7 +26,7 @@ sections:
       - objective: "Verify that empty state is handled gracefully when no records exist"
         category: Negative
         priority: High
-      - objective: "Verify that the page returns the expected outcome per the spec when data loading fails"
+      - objective: "Verify that an error state with a retry control is displayed when data loading fails"
         category: Negative
         priority: Medium
       - objective: "Verify that a large dataset (1000+ records) is loaded without performance issues"

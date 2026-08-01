@@ -103,6 +103,15 @@ PRIORITIES = ("High", "Medium", "Low")
 # object to a single instance. The operator settled it in favour of the
 # training deliverable — "should" is accepted and is never rewritten.
 # "must" and "shall" appear in neither corpus and stay banned.
+#
+# Scoped by a second ruling, 2026-08-01: "should" / "should be" is the
+# only modal permitted anywhere, and only in the **expected result** of a
+# test case or a bug report. A summary — a TC summary, a checklist
+# objective or a bug title — carries no modal at all and is written in
+# active or passive voice. That half is enforced by
+# ``glossary.lint_text(kind="title"|"objective")`` against the
+# ``modal_summary_only`` bucket, because it applies to fields this
+# regex never sees.
 _WEAK_MODAL_RE = re.compile(
     r"\b(must(?:\s+be)?|shall(?:\s+be)?|ought\s+to(?:\s+be)?|"
     r"is\s+expected\s+to(?:\s+be)?|are\s+expected\s+to(?:\s+be)?)\b",

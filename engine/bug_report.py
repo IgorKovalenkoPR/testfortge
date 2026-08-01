@@ -491,21 +491,25 @@ _NOT_A_VERB_TAIL = {
 }
 
 _OBJECTIVE_NEGATIONS: list[tuple[re.Pattern[str], str]] = [
-    # "users cannot access X" → "users can access X". The objective
-    # already asserts a negative, so its failure is the positive —
-    # and on the security cases in the corpus that is the whole point.
-    # Must run before the copular rule so "cannot" is not left intact.
+    # "users cannot access X" → "users access X". The objective already
+    # asserts a negative, so its failure is the positive; dropping the
+    # modal states it in plain active voice, which the 2026-08-01 ruling
+    # requires of a bug title. Must run before the copular rule so
+    # "cannot" is not left intact.
     (re.compile(r"^(?P<head>.*?)\bcan\s?not\b\s+(?P<tail>\S.*)$", re.I),
-     "{head} can {tail}"),
+     "{head} {tail}"),
     # "login is completed successfully …" → "login is not completed …"
     # "the fields are displayed"          → "the fields are not displayed"
     # Covers the dominant corpus shape: copular "is/are" + participle.
     (re.compile(r"^(?P<head>.*?\b(?:is|are|was|were))\s+(?P<tail>\S.*)$",
                 re.I),
      "{head} not {tail}"),
-    # "the user can sign in" → "the user cannot sign in"
-    (re.compile(r"^(?P<head>.*?)\bcan\s+(?P<tail>\S.*)$", re.I),
-     "{head} cannot {tail}"),
+    # No rule for a plain "can": negating it needs "does not" / "do not",
+    # and picking between them means guessing the subject's number from a
+    # noun phrase. Such an objective falls through to the labelled
+    # fallback instead — the title stays honest and no modal is invented.
+    # The generators no longer emit "can" in a summary either
+    # (tc_rules._third_person), so this is a hand-written edge case.
     # "the Back button does not restore the session" → "… does restore
     # …". Another objective that asserts a negative; its failure is
     # the positive. Emphatic "does" rather than re-inflecting the

@@ -69,17 +69,31 @@ class TestTheActiveShape:
         """
         out = defect_title_from_objective(
             "Verify that unauthorized users cannot access protected resources")
-        assert out == "[Manual run] Unauthorized users can access protected resources"
+        assert out == "[Manual run] Unauthorized users access protected resources"
         assert "does not user" not in out
 
 
 class TestObjectivesThatAlreadyAssertANegative:
     """Their failure is the positive — negating to "not" would be wrong."""
 
-    def test_cannot_becomes_can(self):
+    def test_cannot_drops_the_modal_rather_than_flipping_to_can(self):
+        """"can" is a modal, and a summary carries none.
+
+        Operator ruling 2026-08-01. Dropping "cannot" states the failure
+        in plain active voice and says the same thing.
+        """
         assert defect_title_from_objective(
             "Verify that unauthorized users cannot delete another user's data"
-        ) == ("[Manual run] Unauthorized users can delete another user's data")
+        ) == ("[Manual run] Unauthorized users delete another user's data")
+
+    def test_a_plain_can_falls_through_rather_than_guessing(self):
+        """Negating "can" needs "does not" vs "do not" — a guess at the
+        subject's number. The labelled fallback is preferred to a wrong
+        one; the generators no longer emit "can" in a summary anyway.
+        """
+        out = defect_title_from_objective(
+            "Verify that user can sign in with valid input")
+        assert out == "[Manual run] Failed: user can sign in with valid input"
 
     def test_does_not_becomes_does(self):
         assert defect_title_from_objective(

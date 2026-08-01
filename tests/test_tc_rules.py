@@ -85,7 +85,7 @@ class TestEvidenceGating:
 
     def test_dropdown_option_cases_need_options(self, cases):
         size = _for(cases, "Pizza size")
-        assert any("select an existing value" in c.summary.lower()
+        assert any("selects an existing value" in c.summary.lower()
                    for c in size)
 
     def test_unknown_evidence_tokens_never_fire(self, cases):
@@ -244,7 +244,7 @@ class TestHouseStyle:
         """A happy-path value must not be described as a 60-char string —
         that conflates the valid case with the boundary case."""
         valid = [c for c in _for(cases, "Customer name")
-                 if "enter a valid value" in c.summary.lower()]
+                 if "enters a valid value" in c.summary.lower()]
         assert valid
         assert "60-character" not in valid[0].test_data
 
@@ -406,7 +406,7 @@ class TestRealWorldMarkup:
 
     def test_radio_options_come_from_the_member_labels(self, httpbin_cases):
         pick = next(c for c in httpbin_cases
-                    if "select an existing value" in c.summary.lower())
+                    if "selects an existing value" in c.summary.lower())
         for opt in ("Small", "Medium", "Large"):
             assert opt in pick.test_data, pick.test_data
 

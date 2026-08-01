@@ -6,10 +6,10 @@ cases:
   - summary: "Verify that the language switcher changes UI strings without breaking the layout"
     preconditions: "Site is reachable at {url}."
     steps:
-      - "Open the homepage in the default language"
-      - "Use the language switcher (header / footer) to toggle to each available language"
-      - "Verify visible UI strings change consistently"
-      - "Verify no layout breaks (text overflow, clipped buttons, broken alignment)"
+      - "Open the Homepage in the default language"
+      - "Use the language switcher in the Header or Footer to toggle to each available language"
+      - "Pay attention to the visible UI strings after each switch"
+      - "Pay attention to text overflow, clipped buttons and alignment after each switch"
     test_data: "All language toggles exposed in nav/footer"
     expected_result: "Switching language replaces the visible UI strings end-to-end. The layout adapts to longer translations without overflow or clipping. The selected language persists on subsequent navigation."
     category: Positive
@@ -21,9 +21,9 @@ cases:
     steps:
       - "Switch to each available language"
       - "Open DevTools and inspect the <html lang=\"…\"> attribute"
-      - "Confirm it changes per locale (e.g. uk, en, ru, pl)"
+      - "Pay attention to the html[lang] value for each locale (e.g. uk, en, ru, pl)"
     test_data: "Locale toggles + DevTools"
-    expected_result: "The lang attribute on <html> changes to the active locale on every switch. Screen readers and browsers receive the correct language hint."
+    expected_result: "The lang attribute on <html> changes to the active locale on every switch. Screen readers and browsers receive the language hint matching that locale."
     category: Positive
     priority: Medium
     section: Localization

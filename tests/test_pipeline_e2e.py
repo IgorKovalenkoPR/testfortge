@@ -168,7 +168,7 @@ def cases():
                   tc_format="gherkin")
     return [
         TestCase(id="SC1_001", section="Contact form",
-                 summary='Verify that User cannot submit the Contact Form '
+                 summary='Verify that the Contact Form is not submitted '
                          'without marking the Consent checkbox',
                  preconditions=f"The Contact Form is opened on the {URL} page",
                  test_steps=(f"1. Go to the site: {URL}\n"

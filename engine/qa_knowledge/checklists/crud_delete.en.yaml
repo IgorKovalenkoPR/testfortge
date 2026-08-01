@@ -23,15 +23,15 @@ sections:
       - objective: "Verify that deletion is cancelled when 'Cancel' is clicked in confirmation"
         category: Negative
         priority: High
-      - objective: "Verify that related/dependent records are returns the expected outcome per the spec on deletion"
+      - objective: "Verify that related records are cascaded or the deletion is blocked with a message naming the dependency"
         category: Negative
         priority: Medium
   - name: "Delete — Edge Cases"
     prefix: DEL
     items:
-      - objective: "Verify that deleting the last record returns the expected outcome per the spec"
+      - objective: "Verify that the empty state is displayed after the last record is deleted"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that bulk deletion is producing the outcome defined in the design spec (if supported)"
+      - objective: "Verify that bulk deletion removes every selected record and leaves unselected records untouched (if supported)"
         category: "Edge Case"
         priority: Low

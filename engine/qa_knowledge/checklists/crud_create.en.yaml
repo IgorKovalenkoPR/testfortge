@@ -14,7 +14,7 @@ sections:
       - objective: "Verify that success confirmation is displayed after create"
         category: Positive
         priority: High
-      - objective: "Verify that the new record is appeared in the list view"
+      - objective: "Verify that the new record appears in the list view"
         category: Positive
         priority: High
       - objective: "Verify that every submitted field appears in the database row with the exact value entered"
@@ -29,7 +29,7 @@ sections:
       - objective: "Verify that create is rejected with invalid data format"
         category: Negative
         priority: High
-      - objective: "Verify that duplicate record create returns the expected outcome per the spec"
+      - objective: "Verify that create is rejected with a duplicate-value message when a record with the same unique field exists"
         category: Negative
         priority: Medium
       - objective: "Verify that validation errors are displayed per field"
@@ -38,15 +38,15 @@ sections:
   - name: "Create — Edge Cases"
     prefix: CRT
     items:
-      - objective: "Verify that create returns the expected outcome per the spec with minimum length data"
+      - objective: "Verify that create is accepted at the minimum allowed length of every field"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that create returns the expected outcome per the spec with maximum length data"
+      - objective: "Verify that create is accepted at the maximum allowed length of every field and the value is stored without truncation"
         category: "Edge Case"
         priority: Medium
       - objective: "Verify that special characters are accepted in text fields"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that concurrent create requests are returns the expected outcome per the spec"
+      - objective: "Verify that two concurrent create requests produce two distinct records without overwriting each other"
         category: "Edge Case"
         priority: Low

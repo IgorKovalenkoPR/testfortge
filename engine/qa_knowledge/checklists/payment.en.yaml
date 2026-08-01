@@ -77,7 +77,7 @@ sections:
       - objective: "Verify that double-charge is prevented on multiple submit clicks"
         category: "Edge Case"
         priority: High
-      - objective: "Verify that the order returns the expected outcome per the spec when payment gateway times out"
+      - objective: "Verify that no order is created and a retry message is displayed when the payment gateway times out"
         category: "Edge Case"
         priority: High
       - objective: "Verify that the cart is preserved when payment fails"
