@@ -14,8 +14,11 @@
     <h2>{{ t.get('automation_how_title', 'How this works') }}</h2>
     <ol class="steps-list">
         <li><strong>{{ t.get('automation_step1', 'Generate') }}</strong> —
+            {# Double-quoted on purpose: the apostrophe has to reach the page as
+               an apostrophe. A `&#39;` entity here gets escaped again on output
+               and renders literally. #}
             {{ t.get('automation_step1_body',
-               'download a self-contained Node project built from this project&#39;s BDD test cases, carrying the locators the recorder already learned.') }}</li>
+               "download a self-contained Node project built from this project's BDD test cases, carrying the locators the recorder already learned.") }}</li>
         <li><strong>{{ t.get('automation_step2', 'Run') }}</strong> —
             <code>npm ci &amp;&amp; npm test</code>
             {{ t.get('automation_step2_body',
