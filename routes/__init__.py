@@ -11,8 +11,8 @@ from __future__ import annotations
 from flask import Flask
 
 from . import (dashboard, projects, generation, execution,
-               execution_live, bugs, automation, estimation,
-               chat, ops, guide, debug)
+               execution_live, execution_manual, bugs, automation,
+               estimation, chat, ops, guide, debug)
 
 
 def register_all(app: Flask) -> None:
@@ -27,6 +27,10 @@ def register_all(app: Flask) -> None:
     # match the first-defined rule. ``bugs`` order is irrelevant
     # (distinct paths) but kept together with execution for cohesion.
     execution_live.register(app)
+    # The step-by-step manual walk. Its own module for the same reason
+    # execution_live is: routes/execution.py is 2,800 lines and a new
+    # surface belongs beside it, not inside it.
+    execution_manual.register(app)
     bugs.register(app)
     automation.register(app)
     estimation.register(app)

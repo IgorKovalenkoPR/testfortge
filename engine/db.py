@@ -2027,6 +2027,54 @@ def latest_automation_run(project_id: str | None = None) -> dict | None:
     return runs[0] if runs else None
 
 
+def list_case_results(run_id: int) -> list[dict]:
+    """Per-item results of one run, oldest first.
+
+    The manual runner uses this as its progress ledger: the queue lives in
+    the run's ``env_payload`` and "where am I" is derived from which items
+    already have a row here. That keeps the walk resumable across a reload,
+    a lost tab or a different browser, with no extra state to fall out of
+    sync with the results themselves.
+    """
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(ExecutionCaseResult)
+            .where(ExecutionCaseResult.run_id == run_id)
+            .order_by(ExecutionCaseResult.id.asc())
+        ).scalars().all()
+        return [_row_to_dict(r) for r in rows]
+
+
+def get_execution_run(run_id: int) -> dict | None:
+    with session_scope() as sess:
+        row = sess.get(ExecutionRun, run_id)
+        return _row_to_dict(row) if row is not None else None
+
+
+def update_case_result(run_id: int, case_external_id: str, **fields) -> bool:
+    """Overwrite an item's result. Returns ``False`` when it has none yet.
+
+    A tester who mis-clicks Passed has to be able to correct it, and a
+    second row for the same item would double-count in the run stats.
+    """
+    allowed = {"status", "evidence_path", "bug_report_id", "notes"}
+    payload = {k: v for k, v in fields.items() if k in allowed}
+    if not payload:
+        return False
+    with session_scope() as sess:
+        row = sess.execute(
+            select(ExecutionCaseResult)
+            .where(ExecutionCaseResult.run_id == run_id,
+                   ExecutionCaseResult.case_external_id == case_external_id)
+            .order_by(ExecutionCaseResult.id.desc())
+        ).scalars().first()
+        if row is None:
+            return False
+        for key, value in payload.items():
+            setattr(row, key, value)
+        return True
+
+
 def list_execution_runs(project_id: str, limit: int = 50) -> list[dict]:
     with session_scope() as sess:
         rows = sess.execute(

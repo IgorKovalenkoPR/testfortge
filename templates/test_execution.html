@@ -550,8 +550,20 @@
                    data-te-run-mode-input>
             <span>
                 <i data-lucide="list-checks" class="icon-sm"></i>
-                <strong>{{ t.get('te_mode_tc', 'TC / Checklist-driven') }}</strong>
-                <small>{{ t.get('te_mode_tc_help', 'Run the items you select below (default).') }}</small>
+                <strong>{{ t.get('te_mode_tc', 'Automated — built-in engine') }}</strong>
+                <small>{{ t.get('te_mode_tc_help', 'Playwright drives the items you select below. Watch it live or leave it in the background.') }}</small>
+            </span>
+        </label>
+        {# The manual walk. Not a lesser mode — most of a low-level
+           checklist cannot be automated at all, which is why the pack
+           carries 57 rows a person has to look at. #}
+        <label class="radio-card">
+            <input type="radio" name="run_mode" value="manual"
+                   data-te-run-mode-input>
+            <span>
+                <i data-lucide="user-check" class="icon-sm"></i>
+                <strong>{{ t.get('te_mode_manual', 'Manual — walk it yourself') }}</strong>
+                <small>{{ t.get('te_mode_manual_help', 'One item at a time with its steps and expected result on screen, one click per verdict. Resumable.') }}</small>
             </span>
         </label>
         <label class="radio-card">
@@ -564,6 +576,17 @@
             </span>
         </label>
     </div>
+
+    {# The fourth mode is not a radio because it does not run here. The
+       TypeScript suite runs where the browsers are and reports back — an
+       option that silently did nothing on this page would be worse than
+       a link that says where it lives. #}
+    <p class="hint">
+        <i data-lucide="bot" class="icon-sm"></i>
+        {{ t.get('te_mode_ts_note', 'Running the TypeScript + Playwright suite? That lives in') }}
+        <a href="{{ url_for('automation_page') }}">{{ t.get('nav_automation', 'Automation') }}</a>
+        — {{ t.get('te_mode_ts_note2', 'it is generated here, run where the browsers are, and its Allure results come back to the Dashboard.') }}
+    </p>
 
     {# ── Walkthrough options — only relevant when mode=walkthrough.
        Stays in the DOM so JS can show/hide without re-render; backend

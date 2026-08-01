@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}TestForTge — {{ t.get('manual_run_title', 'Manual run') }} #{{ run_id }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ t.get('manual_run_title', 'Manual run') }} #{{ run_id }}</h1>
+  <p class="subtitle">
+    {{ t.get('manual_run_sub', 'One item at a time, with everything needed to judge it on screen.') }}
+  </p>
+</div>
+
+{# ── Progress ─────────────────────────────────────────────────────
+   The pass rate is over EXECUTED items only. A Skipped item was never
+   looked at, so counting it as either a pass or a failure would
+   misreport the run — the same rule the automation ingest applies. #}
+<div class="card">
+    <div class="progress-bar" style="height:8px;background:#eee;border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:{{ progress.percent }}%;background:var(--tf-primary,#FF865C);transition:width .3s ease"></div>
+    </div>
+    <p class="hint" style="margin-top:.5rem">
+        <strong>{{ progress.done }} / {{ progress.total }}</strong>
+        {{ t.get('manual_run_judged', 'judged') }}
+        {% if progress.executed %}
+            · {{ progress.pass_rate }}% {{ t.get('manual_run_passed_of', 'passed of') }}
+            {{ progress.executed }} {{ t.get('manual_run_executed', 'executed') }}
+        {% endif %}
+        {% for verdict, count in progress.counts.items() %}
+            · {{ verdict }}: <strong>{{ count }}</strong>
+        {% endfor %}
+    </p>
+</div>
+
+{% if finished %}
+<div class="card">
+    <h2>{{ t.get('manual_run_done', 'Every item has a verdict') }}</h2>
+    <p class="hint">{{ t.get('manual_run_done_hint',
+        'Close the run to write its totals, or step back through any item to correct a verdict — a correction overwrites the old one rather than adding a second result.') }}</p>
+    <form method="POST" action="{{ url_for('manual_run_finish', run_id=run_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary">
+            <i data-lucide="check-circle" class="icon-sm"></i>
+            {{ t.get('manual_run_close', 'Close the run') }}
+        </button>
+    </form>
+</div>
+{% endif %}
+
+{% if current %}
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap">
+        <h2 style="margin:0">
+            {% if current.item_num %}<span class="cl-num">{{ current.item_num }}</span> {% endif %}
+            <span class="badge">{{ current.external_id }}</span>
+            {{ current.summary }}
+        </h2>
+        <span class="hint">
+            {{ index + 1 }} / {{ queue|length }}
+            {% if current.section %} · {{ current.section }}{% endif %}
+            {% if current.priority %} · {{ current.priority }}{% endif %}
+        </span>
+    </div>
+
+    {% if current.kind == 'test_case' %}
+    <table class="tc-detail-table" style="margin-top:.75rem">
+        {% if current.preconditions %}
+        <tr><th>{{ t.get('tc_preconditions', 'Preconditions') }}</th>
+            <td>{{ current.preconditions }}</td></tr>
+        {% endif %}
+        <tr><th>{{ t.get('tc_steps', 'Steps') }}</th>
+            <td>
+                {% if current.steps %}
+                <ol class="manual-steps">
+                    {% for step in current.steps %}<li>{{ step }}</li>{% endfor %}
+                </ol>
+                {% else %}—{% endif %}
+            </td></tr>
+        {% if current.test_data %}
+        <tr><th>{{ t.get('tc_test_data', 'Test data') }}</th>
+            <td>{{ current.test_data|nl2br }}</td></tr>
+        {% endif %}
+        <tr><th>{{ t.get('tc_expected', 'Expected result') }}</th>
+            <td><strong>{{ current.expected_result|nl2br }}</strong></td></tr>
+    </table>
+    {% else %}
+    {# A checklist row IS the observation — no steps, no separate expected
+       result. Rendering an empty Steps table for it would imply the
+       author left something out. #}
+    <p class="hint" style="margin-top:.5rem">
+        {{ t.get('manual_run_cl_hint', 'Checklist item — the objective above is the whole check.') }}
+    </p>
+    {% endif %}
+
+    {% if current_verdict.status %}
+    <p class="hint">
+        <i data-lucide="history" class="icon-sm"></i>
+        {{ t.get('manual_run_already', 'Already judged') }}:
+        <strong>{{ current_verdict.status }}</strong>
+        {% if current_verdict.bug_report_id %}
+            · {{ t.get('manual_run_bug', 'bug') }} #{{ current_verdict.bug_report_id }}
+        {% endif %}
+        — {{ t.get('manual_run_overwrite', 'submitting again overwrites it.') }}
+    </p>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('manual_run_verdict', run_id=run_id) }}"
+          class="manual-verdict-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="external_id" value="{{ current.external_id }}">
+
+        <div class="form-group">
+            <label for="manual-notes">{{ t.get('manual_run_notes', 'What did you see?') }}</label>
+            <textarea id="manual-notes" name="notes" rows="3"
+                      placeholder="{{ t.get('manual_run_notes_hint',
+                          'The actual result, in your words. Required reading if this becomes a bug — it is what the report will say happened.') }}">{{ current_verdict.notes or '' }}</textarea>
+        </div>
+
+        <label class="radio-inline" style="margin-bottom:.6rem">
+            <input type="checkbox" name="file_bug" value="1">
+            {{ t.get('manual_run_file_bug',
+               'File a bug from this item (Failed / Passed but only)') }}
+        </label>
+
+        <div class="verdict-row">
+            {% for verdict in all_verdicts %}
+            <button type="submit" name="verdict" value="{{ verdict }}"
+                    class="btn verdict-btn verdict-{{ verdict|lower|replace(' ', '-') }}">
+                {{ verdict }}
+            </button>
+            {% endfor %}
+        </div>
+    </form>
+</div>
+
+{# ── Walk navigation ──────────────────────────────────────────────── #}
+<div class="card">
+    <div class="export-row">
+        {% if index > 0 %}
+        <a href="{{ url_for('manual_run_page', run_id=run_id, i=index-1) }}"
+           class="btn btn-sm">← {{ t.get('manual_run_prev', 'Previous') }}</a>
+        {% endif %}
+        {% if index + 1 < queue|length %}
+        <a href="{{ url_for('manual_run_page', run_id=run_id, i=index+1) }}"
+           class="btn btn-sm">{{ t.get('manual_run_next', 'Next') }} →</a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('manual_run_finish', run_id=run_id) }}"
+              style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm">
+                {{ t.get('manual_run_close_early', 'Close the run early') }}
+            </button>
+        </form>
+    </div>
+    {% if not finished %}
+    <p class="hint">{{ t.get('manual_run_close_early_hint',
+        'Closing early is fine — the run records how many items actually got a verdict, so a partial walk is never reported as full coverage.') }}</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── The whole walk, for orientation ──────────────────────────────── #}
+<div class="card">
+    <h2>{{ t.get('manual_run_all', 'All items') }}</h2>
+    <table class="data-table">
+        <thead><tr>
+            <th width="60">#</th>
+            <th width="110">ID</th>
+            <th>{{ t.get('manual_run_item', 'Item') }}</th>
+            <th width="120">{{ t.get('status', 'Status') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for item in queue %}
+        {% set v = verdicts.get(item.external_id, {}) %}
+        <tr {% if loop.index0 == index %}class="section-row"{% endif %}>
+            <td><a href="{{ url_for('manual_run_page', run_id=run_id, i=loop.index0) }}">{{ loop.index }}</a></td>
+            <td>{{ item.external_id }}</td>
+            <td>{{ item.summary[:110] }}</td>
+            <td>
+                {% if v.status %}
+                <span class="badge badge-{{ v.status|lower|replace(' ', '-') }}">{{ v.status }}</span>
+                {% else %}—{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
