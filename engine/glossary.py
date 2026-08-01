@@ -290,6 +290,19 @@ def _iter_unquoted(text: str) -> Iterable[str]:
     return (parts[i] for i in range(0, len(parts), 2))
 
 
+# Both quote styles, for checks that must not fire on a citation. The
+# corpus quotes on-screen labels with either ('Show password', "Sign In"),
+# and a bug title derived from an objective reproduces the criterion it
+# cites verbatim — a modal inside that citation belongs to the quoted
+# text, not to the sentence being written.
+_ANY_QUOTED_RE = re.compile(r"(\"[^\"]*\"|'[^']*')")
+
+
+def _iter_unquoted_any(text: str) -> Iterable[str]:
+    parts = _ANY_QUOTED_RE.split(text or "")
+    return (parts[i] for i in range(0, len(parts), 2))
+
+
 # ── normalisation ────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
@@ -410,12 +423,59 @@ def tidy_spacing(text: str) -> str:
     return s.strip()
 
 
+#: Third-person singular for the regular verbs this corpus uses. Kept
+#: here rather than in a caller so the deterministic generator and the
+#: LLM normaliser inflect identically.
+_IRREGULAR_THIRD_PERSON = {"be": "is", "have": "has", "do": "does",
+                           "go": "goes"}
+
+
+def third_person(verb: str) -> str | None:
+    """Bare infinitive → third-person singular, or None if unsure."""
+    v = (verb or "").strip().lower()
+    if not re.fullmatch(r"[a-z]+", v):
+        return None
+    if v in _IRREGULAR_THIRD_PERSON:
+        return _IRREGULAR_THIRD_PERSON[v]
+    if re.search(r"(s|sh|ch|x|z|o)$", v):
+        return v + "es"
+    if re.search(r"[^aeiou]y$", v):
+        return v[:-1] + "ies"
+    return v + "s"
+
+
+# "User can save the record" -> "User saves the record"
+# "User cannot save the record" -> "User does not save the record"
+#
+# Both are mechanical and information-preserving, so they are rewritten
+# rather than merely reported (operator ruling 2026-08-01: a summary
+# carries no modal). The other modals — may, might, will, should — change
+# meaning when removed, so lint_text reports those and leaves them alone.
+_SUMMARY_CAN_RE = re.compile(r"\bcan\s?not\b\s+(?P<verb>[a-z]+)\b", re.I)
+_SUMMARY_CANNOT_RE = re.compile(r"\bcan\s+(?P<verb>[a-z]+)\b", re.I)
+
+
+def strip_summary_modal(text: str) -> str:
+    """Remove "can" / "cannot" from a summary, outside quotes."""
+    def _fix(chunk: str) -> str:
+        chunk = _SUMMARY_CAN_RE.sub(
+            lambda m: f"does not {m.group('verb').lower()}", chunk)
+
+        def _inflect(m: re.Match[str]) -> str:
+            form = third_person(m.group("verb"))
+            return form if form else m.group(0)
+
+        return _SUMMARY_CANNOT_RE.sub(_inflect, chunk)
+
+    return _outside_quotes(text or "", _fix)
+
+
 def normalise_text(text: str, *, kind: str = "prose") -> str:
     """Apply every information-preserving fix.
 
     ``kind="title"`` additionally strips the trailing period (titles and
     checklist objectives only — a multi-sentence expected result keeps
-    its punctuation).
+    its punctuation) and removes a "can" / "cannot" modal.
     """
     if not text:
         return text
@@ -424,6 +484,13 @@ def normalise_text(text: str, *, kind: str = "prose") -> str:
     out = capitalise_regions(out)
     if kind in ("title", "objective"):
         out = strip_trailing_period(out)
+    if kind in ("title", "objective", "expected"):
+        # "should" is the one modal the ruling permits, and only in an
+        # expected result — it is left alone everywhere by this helper
+        # and reported by lint_text where it does not belong. "can" and
+        # "cannot" are removed wherever they appear in these three
+        # fields, because the rewrite is mechanical either way.
+        out = strip_summary_modal(out)
     return out
 
 
@@ -518,6 +585,34 @@ def lint_text(text: str, *, kind: str = "prose",
             issues.append(
                 f'"{word}" reads as a requirement, not an observation — '
                 f"state what happens")
+
+    # Operator ruling 2026-08-01: a summary — a test-case summary, a
+    # checklist objective or a bug title — carries no modal verb at all.
+    # "should" is the single exception and only in an expected result,
+    # where the team's own reviewed deliverable uses it throughout.
+    #
+    # Applied to titles and objectives only. ``prose`` is excluded
+    # because it covers free text (preconditions, comments) where a
+    # modal can be a legitimate part of a quoted requirement.
+    if kind in ("title", "objective", "expected"):
+        # In a summary no modal is allowed at all. In an expected result
+        # exactly one is — "should" / "should be" — so it is excluded
+        # from the check there and nowhere else.
+        allowed = {"should"} if kind == "expected" else set()
+        where = ("an expected result" if kind == "expected"
+                 else "a summary")
+        pattern = _banned_re("modal_summary_only")
+        seen: set[str] = set()
+        for chunk in _iter_unquoted_any(raw):
+            for word in _hits(chunk, pattern):
+                low = word.lower()
+                if low in allowed or low in seen:
+                    continue
+                seen.add(low)
+                issues.append(
+                    f'modal "{word}" in {where} — "should" is the only '
+                    f"modal the house style permits, and only in an "
+                    f"expected result. State what happens")
 
     # Non-canonical element naming. Suggestion only — normalise_text
     # deliberately does not guess a semantic rename.

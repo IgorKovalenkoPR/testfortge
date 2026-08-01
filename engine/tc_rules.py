@@ -40,6 +40,7 @@ from typing import Any
 
 import yaml
 
+from engine import glossary as _glossary
 from engine.log import get_logger
 from engine.tc_author import AuthoredCase, navigation_step, normalise_case
 
@@ -142,6 +143,33 @@ _TYPE_MAP = {
     "file": "file_upload",
     "textarea": "rich_text",
 }
+
+
+def _third_person(objective: str) -> str | None:
+    """Imperative objective -> third-person singular statement.
+
+    "Enter a valid value" -> "enters a valid value". Every objective in
+    coverage_rules.yaml opens with an imperative verb and all 28 of them
+    are regular — measured, not assumed — so inflecting the first word is
+    enough to keep the composed summary modal-free (operator ruling
+    2026-08-01).
+
+    Returns None when the first word is not a plain verb: an objective
+    like ``'Launch' is displayed`` is already a statement, and prefixing
+    a subject to it produces "User 'launch' is displayed". The caller
+    composes those without the subject instead.
+
+    The inflection itself lives in ``glossary`` so the LLM normaliser
+    and this generator cannot drift apart.
+    """
+    text = (objective or "").strip()
+    if not text:
+        return None
+    head, _, tail = text.partition(" ")
+    inflected = _glossary.third_person(head)
+    if not inflected:
+        return None
+    return f"{inflected} {tail}".strip()
 
 
 def control_type(field: dict) -> str | None:
@@ -504,8 +532,18 @@ def _field_case(page: dict, form: dict, field: dict, kind: str,
     if title_tpl:
         summary = title_tpl.format(**fmt)
     else:
-        summary = (f'Verify that User can {objective[0].lower()}'
-                   f'{objective[1:]} in the "{label}" {noun}')
+        # No modal: a summary states what is checked, and "can" turns it
+        # into a statement about capability. Operator ruling 2026-08-01 —
+        # see banned_phrases.modal_summary_only in wording_rules.yaml.
+        # The objective is an imperative ("Enter a valid value"), so the
+        # verb is inflected to the third person to keep active voice.
+        inflected = _third_person(objective)
+        if inflected:
+            summary = (f'Verify that User {inflected}'
+                       f' in the "{label}" {noun}')
+        else:
+            summary = (f'Verify that {objective[0].lower()}{objective[1:]}'
+                       f' in the "{label}" {noun}')
 
     step_tpl = str(rule.get("step") or "").strip()
     action = (step_tpl.format(**fmt) if step_tpl
@@ -555,7 +593,7 @@ def _form_level_cases(page: dict, form: dict, section: str,
     req_names = ", ".join(f'"{field_label(f)}"' for f in required[:6])
 
     out.append(AuthoredCase(
-        summary=f"Verify that User can submit {section} with the required "
+        summary=f"Verify that User submits {section} with the required "
                 f"controls filled",
         preconditions=f"{section} is opened.",
         steps=[nav,
@@ -570,7 +608,10 @@ def _form_level_cases(page: dict, form: dict, section: str,
 
     if required:
         out.append(AuthoredCase(
-            summary=f"Verify that User cannot submit {section} with the "
+            # Modal-free per the 2026-08-01 ruling: the refusal is the
+            # observable fact, so state it in the passive rather than as
+            # a statement about what the user is unable to do.
+            summary=f"Verify that {section} is not submitted with the "
                     f"required controls left empty",
             preconditions=f"{section} is opened.",
             steps=[nav,

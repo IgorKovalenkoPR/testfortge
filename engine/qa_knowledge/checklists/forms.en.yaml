@@ -5,7 +5,7 @@ sections:
   - name: "Form Fields — UI"
     prefix: FRM
     items:
-      - objective: "Verify that all every form field has a visible label whose text matches the design spec"
+      - objective: "Verify that every form field has a visible label whose text matches the design spec"
         category: Positive
         priority: High
       - objective: "Verify that required fields are indicated with an asterisk (*)"
@@ -68,18 +68,18 @@ sections:
       - objective: "Verify that fields are accepted with maximum allowed length"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that fields are returns the expected outcome per the spec at boundary values (min-1, max+1)"
+      - objective: "Verify that min-1 and max+1 are rejected with a field-specific length message"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that special characters are returns the expected outcome per the spec in text fields"
+      - objective: "Verify that special characters are stored and redisplayed unchanged in text fields"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that copy-paste is producing the outcome defined in the design spec in all fields"
+      - objective: "Verify that pasted text is accepted in every field and passes the same validation as typed text"
         category: "Edge Case"
         priority: Low
       - objective: "Verify that double submission is prevented (double-click protection)"
         category: "Edge Case"
         priority: High
-      - objective: "Verify that the form can be submitted using only Tab to reach the submit button and Enter to trigger it"
+      - objective: "Verify that the form is submitted using only Tab to reach the submit button and Enter to trigger it"
         category: "Edge Case"
         priority: Medium

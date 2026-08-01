@@ -125,7 +125,7 @@ sections:
       - objective: "Verify that submission is blocked with a numeric-only message after entering letters into the phone field"
         category: Negative
         priority: Medium
-      - objective: "Verify that a success Message is displayed within 2 seconds and the URL state updates after submitting a valid form"
+      - objective: "Verify that a success message is displayed within 2 seconds and the URL state updates after submitting a valid form"
         category: Positive
         priority: High
       - objective: "Verify that the other fields keep their values when a validation error is triggered on one field"
@@ -206,7 +206,7 @@ sections:
       - objective: "Verify that focus indicators are visible on interactive elements"
         category: Positive
         priority: Medium
-      - objective: "Verify that screen reader can read all content in logical order"
+      - objective: "Verify that a screen reader reads all content in logical order"
         category: Positive
         priority: Medium
       - objective: "Verify that form fields have associated labels for assistive technologies"

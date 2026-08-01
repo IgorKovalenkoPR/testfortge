@@ -53,13 +53,13 @@ sections:
   - name: "Search — Edge Cases & Security"
     prefix: SRCH
     items:
-      - objective: "Verify that search returns the expected outcome per the spec with special characters (!@#$%^&*)"
+      - objective: "Verify that special characters in the query are escaped and the search completes without an error"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that search returns the expected outcome per the spec with very long query (500+ characters)"
+      - objective: "Verify that a query of 500+ characters is accepted or truncated with a message, and the page stays responsive"
         category: "Edge Case"
         priority: Medium
-      - objective: "Verify that search returns the expected outcome per the spec with Unicode/emoji characters"
+      - objective: "Verify that Unicode and emoji characters in the query return matching results"
         category: "Edge Case"
         priority: Low
       - objective: "Verify that SQL injection is blocked in the search field"
@@ -71,7 +71,7 @@ sections:
   - name: "Filter & Sort"
     prefix: FLT
     items:
-      - objective: "Verify that filter options are visible and matches the design spec"
+      - objective: "Verify that filter options are visible and match the design spec"
         category: Positive
         priority: High
       - objective: "Verify that results are updated when a filter is applied"

@@ -213,7 +213,21 @@ banned_phrases:
   grading:      [correctly, incorrectly, correct, incorrect, properly,
                  "as expected", "works fine", "works as designed",
                  appropriately]
+  # Modal verbs, split by where they are tolerated. Operator ruling,
+  # 2026-08-01: "Саммері для тест-кейсів, чек-лістів та баг-репортів має
+  # бути оформлено в Passive Voice / Active Voice без використання
+  # модальних дієслів. Єдине модальне дієслово, яке може
+  # використовуватися — should / should be, і то лише у Expected result
+  # тест-кейсів та баг-репортів."
+  #
+  # ``modal`` is banned everywhere, including the expected result.
   modal:        [must, shall, "ought to", "is expected to"]
+  # Banned in a summary, objective or bug title — a summary states what
+  # is checked, and a modal turns it into a requirement or a
+  # possibility. Permitted in an expected result, where "should" is the
+  # form the team's own reviewed deliverable uses throughout.
+  modal_summary_only: [should, can, cannot, "can not", could, may, might,
+                       will, "won't", would]
   generic_step: ["navigate to the relevant page", "perform the action",
                  "observe the result", "do the same for other fields",
                  "check everything", "verify all functionality"]

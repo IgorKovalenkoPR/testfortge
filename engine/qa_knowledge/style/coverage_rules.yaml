@@ -91,7 +91,7 @@ list_surface:
       category: Positive
       priority: High
       requires: row_links
-      title: 'Verify that User can open a record from the "{grid}" grid by clicking its row link'
+      title: 'Verify that User opens a record from the "{grid}" grid by clicking its row link'
       step: 'Click on the link in the first data row of the "{grid}" grid'
       expected: 'The detail surface of the clicked row is opened, and the record it renders is the one that row named.'
     - id: open_new_tab
@@ -99,7 +99,7 @@ list_surface:
       category: Positive
       priority: Low
       requires: row_links
-      title: 'Verify that User can open a row of the "{grid}" grid in a new browser tab'
+      title: 'Verify that User opens a row of the "{grid}" grid in a new browser tab'
       step: 'Middle-click the link in the first data row of the "{grid}" grid'
       expected: 'The record is opened in a new browser tab, and the "{grid}" grid is left as it was in the original tab.'
     - id: start_create
@@ -108,7 +108,7 @@ list_surface:
       priority: High
       requires: create_control
       fan_out: create_controls
-      title: 'Verify that User can start record creation from the "{grid}" grid via the "{control}" control'
+      title: 'Verify that User starts record creation from the "{grid}" grid via the "{control}" control'
       step: 'Click on the "{control}" control'
       expected: 'The creation surface is opened with its inputs empty, and the "{grid}" grid is left unchanged behind it.'
     - id: search_simple
@@ -116,7 +116,7 @@ list_surface:
       category: Positive
       priority: High
       requires: search
-      title: 'Verify that User can find a row of the "{grid}" grid by searching a value from its first column'
+      title: 'Verify that User finds a row of the "{grid}" grid by searching a value from its first column'
       step: 'Enter a value taken from the first column of an existing row into the "{search}" control'
       expected: 'The "{grid}" grid renders the matching row, and the rows that do not match it are no longer rendered.'
     - id: empty_state
@@ -151,7 +151,7 @@ list_surface:
       priority: Medium
       requires: sortable
       fan_out: sortable_columns
-      title: 'Verify that User can sort the "{grid}" grid by the "{column}" column in ascending order'
+      title: 'Verify that User sorts the "{grid}" grid by the "{column}" column in ascending order'
       step: 'Click on the "{column}" column header once'
       expected: 'The rows are reordered by "{column}" from the lowest value to the highest, and the header marks the ascending direction.'
     - id: sort_descending
@@ -160,7 +160,7 @@ list_surface:
       priority: Medium
       requires: sortable
       fan_out: sortable_columns
-      title: 'Verify that User can sort the "{grid}" grid by the "{column}" column in descending order'
+      title: 'Verify that User sorts the "{grid}" grid by the "{column}" column in descending order'
       step: 'Click on the "{column}" column header twice'
       expected: 'The rows are reordered by "{column}" from the highest value to the lowest, and the header marks the descending direction.'
     - id: pagination_next
@@ -168,7 +168,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: pagination
-      title: 'Verify that User can move to the next page of the "{grid}" grid via the pager'
+      title: 'Verify that User moves to the next page of the "{grid}" grid via the pager'
       step: 'Click on the next-page control of the pager'
       expected: 'The next page of records is rendered in the "{grid}" grid, and the pager marks the new page as the current one.'
     - id: pagination_previous
@@ -176,7 +176,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: pagination
-      title: 'Verify that User can return to the previous page of the "{grid}" grid via the pager'
+      title: 'Verify that User returns to the previous page of the "{grid}" grid via the pager'
       step: 'Move to the second page, then click on the previous-page control of the pager'
       expected: 'The first page of records is rendered again in the "{grid}" grid, and the pager marks it as the current page.'
     - id: multi_select
@@ -184,7 +184,7 @@ list_surface:
       category: Positive
       priority: Medium
       requires: checkboxes
-      title: 'Verify that User can mark and unmark rows of the "{grid}" grid via the row checkboxes'
+      title: 'Verify that User marks and unmark rows of the "{grid}" grid via the row checkboxes'
       step: 'Mark the checkboxes of two rows, then unmark one of them'
       expected: 'Both rows are marked after the first two clicks, and after the third only the row that stayed marked is selected.'
     - id: select_all
@@ -202,7 +202,7 @@ list_surface:
       requires: bulk_actions
       fan_out: bulk_actions
       note: One case per action the bulk control offers — delete, mass edit, export, related-task creation.
-      title: 'Verify that User can run the "{action}" bulk action on a multi-row selection in the "{grid}" grid'
+      title: 'Verify that User runs the "{action}" bulk action on a multi-row selection in the "{grid}" grid'
       step: 'Mark two rows, then choose "{action}" from the bulk-action control'
       expected: 'The "{action}" action is applied to both marked rows and to no other row, and the outcome that action defines is rendered.'
     - id: bulk_actions_no_selection
@@ -218,25 +218,25 @@ list_surface:
       category: Positive
       priority: Medium
       requires: group_by_control
-      title: 'Verify that User can group the "{grid}" grid by each Group By option'
+      title: 'Verify that User groups the "{grid}" grid by each Group By option'
     - id: search_advanced
       objective: Search via Advanced Search with parameter drop-downs
       category: Positive
       priority: Medium
       requires: advanced_search_control
-      title: 'Verify that User can narrow the "{grid}" grid via Advanced Search'
+      title: 'Verify that User narrows the "{grid}" grid via Advanced Search'
     - id: save_filter
       objective: Save the current filter set as a favourite
       category: Positive
       priority: Low
       requires: save_filter_control
-      title: 'Verify that User can save the current filter set of the "{grid}" grid as a favourite'
+      title: 'Verify that User saves the current filter set of the "{grid}" grid as a favourite'
     - id: column_picker
       objective: Add and remove columns via the field selector
       category: Positive
       priority: Low
       requires: column_picker_control
-      title: 'Verify that User can add and remove columns of the "{grid}" grid via the field selector'
+      title: 'Verify that User adds and remove columns of the "{grid}" grid via the field selector'
     - id: counter
       objective: Confirm the record counter matches the visible row count
       category: Positive
@@ -316,7 +316,7 @@ create_form:
         - objective: 'Leave empty when required'
           category: Negative
           requires: required
-          title: 'Verify that User cannot submit the form without the "{label}" {noun} filled'
+          title: 'Verify that the form is not submitted without the "{label}" {noun} filled'
           step: 'Leave the "{label}" {noun} empty'
         - objective: 'Enter a value at the maximum allowed length'
           category: Positive
@@ -379,10 +379,10 @@ create_form:
       cases:
         - objective: 'Pick a date via the date-picker'
           category: Positive
-          title: 'Verify that User can pick a date in the "{label}" {noun} via the date-picker'
+          title: 'Verify that User picks a date in the "{label}" {noun} via the date-picker'
         - objective: 'Type the date directly in the accepted format'
           category: Positive
-          title: 'Verify that User can type a date directly into the "{label}" {noun} in the accepted format'
+          title: 'Verify that User types a date directly into the "{label}" {noun} in the accepted format'
         - objective: 'Enter a date outside the allowed range'
           category: Negative
           requires: range
@@ -402,15 +402,15 @@ create_form:
         - objective: 'Select an existing value'
           category: Positive
           requires: options
-          title: 'Verify that User can select an existing value from the "{label}" {noun}'
+          title: 'Verify that User selects an existing value from the "{label}" {noun}'
         - objective: 'Filter by typing a prefix'
           category: Positive
           requires: options
-          title: 'Verify that User can filter the "{label}" {noun} by typing a prefix'
+          title: 'Verify that User filters the "{label}" {noun} by typing a prefix'
         - objective: 'Clear the selection'
           category: Positive
           requires: not_required
-          title: 'Verify that User can clear the selection in the "{label}" {noun}'
+          title: 'Verify that User clears the selection in the "{label}" {noun}'
         - objective: 'Open the full picker via "Search More" and select from it'
           category: Positive
           requires: search_more_control
@@ -424,7 +424,7 @@ create_form:
       cases:
         - objective: 'Mark and unmark the control'
           category: Positive
-          title: 'Verify that User can mark and unmark the "{label}" {noun}'
+          title: 'Verify that User marks and unmark the "{label}" {noun}'
           step: 'Mark the "{label}" {noun}, then unmark it'
         - objective: 'Confirm dependent controls follow the state'
           category: Positive
@@ -433,7 +433,7 @@ create_form:
       cases:
         - objective: 'Upload a file of an accepted type and size'
           category: Positive
-          title: 'Verify that User can upload an accepted file to the "{label}" {noun}'
+          title: 'Verify that User uploads an accepted file to the "{label}" {noun}'
         - objective: 'Upload a file of a rejected type'
           category: Negative
           requires: accept
@@ -443,7 +443,7 @@ create_form:
           requires: max_size
         - objective: 'Remove an uploaded file and upload it again'
           category: Positive
-          title: 'Verify that User can remove a file from the "{label}" {noun} and upload the same file again'
+          title: 'Verify that User removes a file from the "{label}" {noun} and upload the same file again'
     rich_text:
       cases:
         - objective: 'Enter formatted text and reload'
@@ -524,10 +524,10 @@ permissions:
     "User with special rights can …" with
     "User without special rights cannot …".
   checks:
-    - {objective: 'Confirm the privileged actor can perform the action', category: Positive, priority: High}
-    - {objective: 'Confirm the unprivileged actor cannot perform the action', category: Negative, priority: High}
+    - {objective: 'Confirm the privileged actor performs the action', category: Positive, priority: High}
+    - {objective: 'Confirm the action is refused for the unprivileged actor', category: Negative, priority: High}
     - {objective: 'Confirm the restricted tab / field / menu is hidden from the unprivileged actor', category: Negative, priority: High}
-    - {objective: 'Confirm the unprivileged actor cannot reach the restricted surface by its direct URL', category: Negative, priority: High}
+    - {objective: 'Confirm the restricted surface is not reachable by its direct URL for the unprivileged actor', category: Negative, priority: High}
     - {objective: 'Confirm each actor sees only the records their scope allows', category: Positive, priority: High}
   must_pair:
     - when: Any action is permission-gated
