@@ -150,10 +150,32 @@ class TestBrowserPassStaysOffOnTheFreePlan:
         )
 
 
+class TestAutomationIngestIsActuallyEnabled:
+    """`sync: false` reads as "configured" and behaves as "off".
+
+    An unset AUTOMATION_INGEST_TOKEN disables POST /automation/allure-results
+    entirely, so the module reports "Disabled" on prod while the blueprint
+    looks complete — which is exactly what happened between the module
+    shipping and 2026-08-01. `generateValue` is the difference between
+    declaring the var and the var having a value.
+    """
+
+    def test_token_is_generated_rather_than_dashboard_managed(
+        self, web_service
+    ) -> None:
+        assert _env_map(web_service).get("AUTOMATION_INGEST_TOKEN") == (
+            "__generated__"
+        ), (
+            "use generateValue: true — with sync: false the var ships "
+            "empty and CI result ingestion stays silently off"
+        )
+
+
 class TestSecretsAreNotCommitted:
     @pytest.mark.parametrize("secret", ["ANTHROPIC_API_KEY", "SECRET_KEY",
                                         "TESTFORTGE_BASIC_PASSWORD",
-                                        "MCP_BEARER_TOKEN", "FIGMA_PAT"])
+                                        "MCP_BEARER_TOKEN", "FIGMA_PAT",
+                                        "AUTOMATION_INGEST_TOKEN"])
     def test_secret_has_no_literal_value(self, blueprint, secret):
         for svc in blueprint["services"]:
             entry = next((e for e in (svc.get("envVars") or [])

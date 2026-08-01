@@ -118,12 +118,23 @@ services:
       # and `tfg record` (app.py, routes/generation.py).
       - key: RECORDER_ENABLED
         value: "1"
-      # Automation result ingestion. `sync: false` keeps it a dashboard
-      # secret; leaving it unset keeps POST /automation/allure-results
-      # disabled, which is the safe default — the endpoint writes run
-      # history, so an unauthenticated one is an open write.
+      # Automation result ingestion — the shared secret CI sends as
+      # `Authorization: Bearer <token>` to POST /automation/allure-results.
+      #
+      # `generateValue: true`, not `sync: false`: Render mints a random
+      # value on the next sync and stores it, the same way MCP_BEARER_TOKEN
+      # and SECRET_KEY are handled below and above. Nobody has to invent a
+      # token, nobody types one into a field, and it never exists in this
+      # repo. Read it once from the dashboard into the CI secret.
+      #
+      # It was `sync: false` while the endpoint had no consumer, and the
+      # module reported itself disabled on prod because an unset value is
+      # the safe default — the endpoint writes run history, so an
+      # unauthenticated one is an open write. Generating it turns step 3
+      # of the Automation module on; the endpoint still refuses every
+      # request that does not present this exact value.
       - key: AUTOMATION_INGEST_TOKEN
-        sync: false
+        generateValue: true
       # Basic Auth gate — fill these in the Render dashboard before deploy.
       # `sync: false` means Render will NOT pull them from a generated
       # value or the file; they stay in the dashboard as secrets.
