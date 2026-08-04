@@ -1,5 +1,19 @@
 # Identity model spike — input for Sprint 4.1 (Roles)
 
+> ⚠️ **SUPERSEDED (2026-08-04)** by
+> [team_platform_architecture.md](team_platform_architecture.md).
+> Two conclusions of this spike no longer hold under the owner's
+> multi-team requirements:
+> * §2 recommended **magic link only** — the new requirement asks for
+>   **email + password AND Google sign-in**. Magic link drops out of v1.
+> * §8 declared **per-org isolation a non-goal** — org-level tenancy is
+>   now in scope (requirements 2 and 3).
+>
+> What survives and is still worth reading: the `user` / `user_session`
+> table core (§3), the `owner_sid` → user migration story (§4), the
+> last-admin guard, and the test surface in §7. Do not implement the
+> magic-link flow from §5 without re-approval.
+
 **Status:** design draft, not implemented. Approve before starting S4.1
 coding (≈22 h). Sprint 4 plan
 ([sprint_4_polish.md](sprint_4_polish.md#L4-L13)) flags this as a
