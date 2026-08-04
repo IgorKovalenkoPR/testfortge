@@ -63,6 +63,14 @@ def register_all(app: Flask) -> None:
             # which is much worse than just hiding the picker.
             return {"projects": [], "active_project_id": ""}
 
+    # Access policy for every route (E2.3). Installed last so its
+    # before_request hook runs after the HTTP Basic gate — that gate is the
+    # outer perimeter during the rollout and should reject first — and
+    # after every rule exists, since it validates the table against the
+    # URL map at import time.
+    from engine import route_policy as _route_policy
+    _route_policy.install(app)
+
     # Identity + role, for every template. Lets the UI hide what the
     # server would refuse — which is politeness, not security; the
     # boundary is engine.permissions' decorators. Same defensive shape as

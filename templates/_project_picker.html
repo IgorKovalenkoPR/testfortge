@@ -65,6 +65,13 @@
       </form>
     </div>
 
+    {# Creating a project is admin work (requirement 2), enforced in
+       engine/route_policy.POLICY. Hiding the form is politeness, not
+       security — a plain user who posts here gets 403 either way — but
+       offering an action the server will refuse is a worse first day than
+       not offering it. `is_admin` is true whenever ORG_MODE is off, so the
+       legacy single-tenant UI is unchanged. #}
+    {% if is_admin %}
     <div style="flex:1 1 340px;min-width:280px;">
       <form method="POST" action="{{ url_for('db_create_project') }}"
             style="display:flex;gap:6px;align-items:center;">
@@ -80,6 +87,7 @@
         </button>
       </form>
     </div>
+    {% endif %}
   </div>
 
   <p style="margin:8px 0 0 0;font-size:0.82em;color:#64748b;">

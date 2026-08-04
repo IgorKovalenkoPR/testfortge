@@ -264,47 +264,22 @@ class TestSignOutEverywhere:
 class TestEveryRouteIsClassified:
     """The real defence against a missing check.
 
-    Every route on the production app is either declared open here — with
-    a reason — or must carry a policy from ``engine.permissions``. A new
-    route lands with neither and this test fails, which is the only
-    mechanism that scales past the point where a human reviews the whole
-    URL map.
+    Every route on the production app is either open on purpose (with a
+    reason recorded in ``engine.route_policy.OPEN``), gated by the policy
+    table, or self-enforcing via a decorator. A new route lands with none
+    of the three and this fails — the only mechanism that scales past the
+    point where a human reviews an 88-entry URL map.
     """
-
-    #: Routes that are open on purpose, and why.
-    #:
-    #: Anything not in this set, and not decorated, fails the test. Adding
-    #: an entry here is a deliberate act that shows up in review — which
-    #: is the point.
-    OPEN_ON_PURPOSE = {
-        # Ops probes. Monitors call these without credentials by design;
-        # /metrics is separately gated by OPS_ENDPOINTS_TOKEN.
-        "healthz", "readyz", "metrics",
-        # The authentication surface itself. Each is reachable before
-        # anyone is signed in, which is the whole point of it.
-        "auth_login", "auth_logout", "auth_accept_invite", "auth_me",
-        "auth_google_start", "auth_google_callback",
-        # Static files.
-        "static",
-        # Token-authenticated machine endpoints. Each carries its own
-        # bearer/token check and is csrf-exempt for that reason; a session
-        # role gate would be the wrong control for a caller that has no
-        # session at all — the browser extension, CI, the MCP service.
-        "api_recorder_session_start", "api_recorder_session_finish",
-        "api_browser_poll", "api_browser_result",
-        "automation_allure_results",
-        # The recorder's review page is reached by a one-time token in the
-        # URL, from a browser that may never have signed in.
-        "test_cases_review_session", "test_cases_review_session_save",
-        # The CSRF token endpoint — needed *before* a caller can post
-        # anything at all, including a sign-in.
-        "api_csrf_token",
-    }
 
     @staticmethod
     def _production_app():
         from app import app as flask_app
         return flask_app
+
+    @staticmethod
+    def _policy():
+        from engine import route_policy
+        return route_policy
 
     def test_the_url_map_is_not_empty(self):
         # A green result because the app failed to build would be the
@@ -312,50 +287,154 @@ class TestEveryRouteIsClassified:
         rules = list(self._production_app().url_map.iter_rules())
         assert len(rules) > 50, f"only {len(rules)} rules — did the app build?"
 
-    def test_no_route_is_both_open_and_protected(self):
+    def test_the_policy_table_is_internally_consistent(self):
+        # An endpoint in both tables, or a role that does not exist, would
+        # resolve by lookup order rather than by intent.
+        assert self._policy().validate() == []
+
+    def test_no_route_is_both_open_and_self_enforcing(self):
         app = self._production_app()
-        for endpoint in sorted(self.OPEN_ON_PURPOSE):
+        for endpoint in sorted(self._policy().OPEN):
             view = app.view_functions.get(endpoint)
             if view is None:
                 continue
             assert not hasattr(view, "_required_role"), (
                 f"{endpoint} is listed as open on purpose but also carries "
-                f"a policy decorator — remove it from OPEN_ON_PURPOSE."
+                f"a policy decorator — one of the two is a mistake."
             )
 
-    def test_the_open_list_has_no_stale_entries(self):
-        # An endpoint that no longer exists sitting in the allowlist is a
-        # hole waiting for someone to reuse the name.
+    def test_neither_table_has_stale_entries(self):
+        # An endpoint that no longer exists becomes a hole the moment the
+        # name is reused.
         app = self._production_app()
-        stale = sorted(e for e in self.OPEN_ON_PURPOSE
-                       if e not in app.view_functions)
-        assert not stale, (
-            f"OPEN_ON_PURPOSE names endpoints that no longer exist: "
-            f"{stale}. Remove them — a stale allowlist entry becomes a "
-            f"hole the moment the name is reused."
-        )
+        policy = self._policy()
+        for name, table in (("OPEN", policy.OPEN), ("POLICY", policy.POLICY)):
+            stale = sorted(e for e in table if e not in app.view_functions)
+            assert not stale, (
+                f"engine/route_policy.{name} names endpoints that no longer "
+                f"exist: {stale}. Remove them."
+            )
 
-    @pytest.mark.xfail(
-        reason="E2.3 has not run yet: the ~80 pre-existing routes still "
-               "carry the owner_sid check rather than a role policy. This "
-               "test is the acceptance criterion for that task, and is "
-               "expected to fail until it lands — it is xfail rather than "
-               "skip so it starts passing loudly the moment it is done.",
-        strict=False,
-    )
+    def test_every_open_entry_carries_a_reason(self):
+        # A bare allowlist accretes entries nobody can justify or remove.
+        for endpoint, reason in self._policy().OPEN.items():
+            assert len(reason) > 15, f"{endpoint} has a token reason"
+
     def test_every_route_declares_a_policy(self):
-        app = self._production_app()
-        undeclared = []
-        for rule in app.url_map.iter_rules():
-            endpoint = rule.endpoint
-            if endpoint in self.OPEN_ON_PURPOSE:
-                continue
-            view = app.view_functions.get(endpoint)
-            if view is None or not hasattr(view, "_required_role"):
-                undeclared.append(endpoint)
+        """The acceptance criterion for E2.3."""
+        undeclared = self._policy().unclassified(self._production_app())
         assert not undeclared, (
             f"{len(undeclared)} route(s) carry no access policy: "
-            f"{sorted(undeclared)[:12]}… Decorate each with "
-            f"@require_login or @require_role(...), or add it to "
-            f"OPEN_ON_PURPOSE with a reason."
+            f"{undeclared[:12]}… Add each to engine/route_policy.POLICY "
+            f"or OPEN (with a reason), or decorate it with @require_login "
+            f"/ @require_role(...)."
         )
+
+    def test_project_creation_is_admin_only(self):
+        # The owner's requirement 2, asserted against the table rather than
+        # trusted to a reading of it.
+        policy = self._policy().POLICY
+        for endpoint in ("db_create_project", "db_rename_project",
+                         "delete_project", "db_move_artifacts"):
+            assert policy[endpoint] == "admin", endpoint
+
+    def test_saving_current_work_is_not_treated_as_creating_a_project(self):
+        # save_project upserts, so it *can* create a row — but it is the
+        # "Save current work" button, and while the Flask session is still
+        # the source of truth (ADR 0001) gating it would mean a plain
+        # user's test cases are lost on the next dyno restart. Requirement
+        # 2 withholds creating projects, which is db_create_project above.
+        assert self._policy().POLICY["save_project"] == "user"
+
+    def test_doing_the_qa_work_does_not_need_admin(self):
+        # The other half of requirement 2: a user works with everything
+        # except project creation and configuration.
+        policy = self._policy().POLICY
+        for endpoint in ("test_cases_page", "checklist_page",
+                         "test_execution_page", "bug_reports_page",
+                         "estimation_page", "create_bug_report",
+                         "manual_run_verdict", "automation_run",
+                         "chat_route", "db_select_project"):
+            assert policy[endpoint] == "user", endpoint
+
+    def test_the_shell_is_reachable_before_joining_a_team(self):
+        # A user whose organisation was deleted must be able to reach the
+        # page that explains it, not a 403 on every URL including that one.
+        policy = self._policy().POLICY
+        assert policy["index"] == "login"
+        assert policy["guide_page"] == "login"
+
+
+class TestUnclassifiedRoutesFailClosed:
+    def test_an_unclassified_route_is_refused_rather_than_open(self, full_auth):
+        """The direction a mistake fails in.
+
+        A new route that nobody classified must be unreachable, not
+        public — the opposite of the usual accident. The coverage test
+        above should mean this is never reached in production, but the two
+        together are what make "we forgot one" harmless.
+        """
+        from engine import route_policy
+
+        app = Flask(__name__)
+        app.secret_key = "t"
+
+        @app.route("/brand-new-feature")
+        def brand_new_feature():
+            return "should not be reachable"
+
+        @app.route("/auth/login", endpoint="auth_login")
+        def login():
+            return "login"
+
+        @app.route("/", endpoint="index")
+        def index():
+            return "home"
+
+        route_policy.install(app)
+        client = app.test_client()
+        org, uid = _org_with("admin")
+        _as(client, org, uid)
+        resp = client.get("/brand-new-feature",
+                          headers={"Accept": "application/json"})
+        assert resp.status_code == 403
+
+    def test_the_hook_is_inert_while_auth_is_off(self, monkeypatch):
+        monkeypatch.delenv("AUTH_ENABLED", raising=False)
+        from engine import route_policy
+
+        app = Flask(__name__)
+        app.secret_key = "t"
+
+        @app.route("/brand-new-feature")
+        def brand_new_feature():
+            return "reachable"
+
+        route_policy.install(app)
+        assert app.test_client().get("/brand-new-feature").status_code == 200
+
+    def test_an_inconsistent_table_refuses_to_boot(self, monkeypatch):
+        # Serving requests under a policy nobody can predict is worse than
+        # not serving them.
+        from engine import route_policy
+
+        monkeypatch.setitem(route_policy.POLICY, "healthz", "admin")
+        app = Flask(__name__)
+        app.secret_key = "t"
+        with pytest.raises(route_policy.PolicyError):
+            route_policy.install(app)
+
+    def test_a_missing_endpoint_does_not_leak_that_it_is_missing(self, full_auth):
+        # A 401 on an unknown URL would tell an anonymous prober which
+        # paths exist.
+        from engine import route_policy
+
+        app = Flask(__name__)
+        app.secret_key = "t"
+
+        @app.route("/auth/login", endpoint="auth_login")
+        def login():
+            return "login"
+
+        route_policy.install(app)
+        assert app.test_client().get("/no-such-path").status_code == 404

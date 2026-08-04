@@ -30,6 +30,7 @@ from engine.bug_report import (
 
 from engine import db as _db
 from engine import bug_areas as _bug_areas
+from engine import permissions as _perm
 # CSV injection guard, shared with engine/exporter.py — a cell beginning
 # with = + - @ is executed as a formula by Excel on open.
 from engine.exporter import _sanitize_cell
@@ -442,6 +443,20 @@ def register(app: Flask) -> None:
             flash(g.t.get("bug_bulk_invalid",
                           "Pick at least one bug and a valid action."),
                   "error")
+            return redirect(url_for("bug_reports_page"))
+
+        # Most bulk actions are ordinary triage; `delete` destroys evidence
+        # a tester gathered and cannot be undone. The route as a whole is
+        # user-level (see engine/route_policy.POLICY) and this one action
+        # asks for admin — which is exactly what the note left in this
+        # function during Sprint 4 anticipated. Checked here rather than by
+        # splitting the endpoint, because the toolbar posts every action to
+        # one URL and changing that buys nothing.
+        if action == "delete" and not _perm.has_role("admin"):
+            flash(g.t.get(
+                "bug_bulk_delete_admin",
+                "Deleting bug reports is limited to admins. Close them "
+                "instead, or ask an admin."), "error")
             return redirect(url_for("bug_reports_page"))
 
         actor = get_session_id(session)[:8]

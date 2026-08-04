@@ -45,32 +45,56 @@ def _is_valid_project_id(s: str | None) -> bool:
 def _require_project_owner(project_id: str) -> dict | None:
     """Authorization gate for project-scoped routes.
 
-    Behaviour:
-      * Returns the project meta dict when the caller owns the project,
-        or when the project's ``owner_sid`` is NULL (legacy compat —
-        backfill is Sprint 2; we ``log.info`` the event so the gap is
-        visible in ops).
-      * Calls ``abort(400)`` on a malformed ``project_id``.
-      * Calls ``abort(403)`` when the project exists but is owned by a
-        different session (cross-tenant attempt).
-      * Returns ``None`` when the project simply doesn't exist; the
-        caller is responsible for the 404 / flash UX it wants there
-        (some routes redirect with a flash, others abort).
+    Two eras coexist here on purpose, and which one applies is decided per
+    project, not per instance:
 
-    Uses :func:`engine.db.get_project_owner` first so we don't hydrate
-    the whole project meta just to fail the auth check.
+    **Organisation era** — ``ORG_MODE`` is on *and* the project has an
+    ``org_id``. Access is membership in that organisation. This is the one
+    that matters going forward.
+
+    **Legacy era** — everything else: the project predates organisations
+    and its ``owner_sid`` is the only claim anyone has to it. Every project
+    that exists today is in this state, so removing the branch would lock
+    the current users out of their own work. The claim flow (E1.6) is what
+    moves a project from one era to the other.
+
+    Behaviour:
+      * Returns the project meta dict when the caller may act on it.
+      * ``abort(400)`` on a malformed ``project_id``.
+      * ``abort(403)`` when the project belongs to someone else.
+      * Returns ``None`` when the project does not exist, so the caller can
+        choose its own 404 / flash UX (some redirect, some abort).
+
+    Reads ownership before hydrating the full meta, so a failed check
+    costs one narrow query rather than a whole row.
     """
     if not _is_valid_project_id(project_id):
         abort(400)
-    owner = _db.get_project_owner(project_id)
-    # owner is None either because the project is missing OR because
-    # owner_sid is NULL. Disambiguate via get_project — only do the
-    # second round-trip when we have to.
+
+    meta = _db.get_project(project_id)
+    if not meta:
+        return None
+
+    from engine import permissions as _perm
+
+    project_org = meta.get("org_id")
+    if _perm.org_active() and project_org:
+        # The project belongs to an organisation: membership decides.
+        user_id = _perm.current_user_id()
+        role = _db.get_org_role(project_org, user_id) if user_id else None
+        if role is None:
+            log.warning(
+                "project access denied pid=%s org=%s user=%s — not a member",
+                project_id[:8], project_org[:8], (user_id or "-")[:8])
+            abort(403)
+        return meta
+
+    # Legacy: the anonymous session that made it is the only claimant.
+    owner = meta.get("owner_sid")
     if owner is None:
-        meta = _db.get_project(project_id)
-        if not meta:
-            return None
-        # Project exists but has no owner — legacy public-ish row.
+        # No owner at all. Pre-dates owner_sid being recorded; there is
+        # nobody to compare against, so allow and log so the size of the
+        # gap stays visible in ops until E1.6 has claimed them.
         log.info("project pid=%s has NULL owner_sid — allowing (legacy)",
                  project_id[:8])
         return meta
@@ -80,7 +104,7 @@ def _require_project_owner(project_id: str) -> dict | None:
             "project access denied pid=%s owner=%s sid=%s",
             project_id[:8], (owner or "")[:8], (sid or "")[:8])
         abort(403)
-    return _db.get_project(project_id)
+    return meta
 
 
 def _set_active_project(project_id: str, name: str,

@@ -20,7 +20,8 @@ from engine.test_metrics_generator import compute_session_metrics
 
 log = get_logger(__name__)
 
-from ._shared import get_session_id, kpi_value, kpi_defect_density
+from ._shared import (get_session_id, kpi_value, kpi_defect_density,
+                      visible_projects)
 
 
 def _compute_dashboard_metrics() -> dict:
@@ -85,10 +86,13 @@ def register(app: Flask) -> None:
     @app.route("/")
     def index():
         metrics = _compute_dashboard_metrics()
-        # Scope the project list by session-id so different browser
-        # sessions don't see each other's projects on the same DB.
+        # Scoped by organisation when ORG_MODE is on, and by session-id
+        # otherwise — the same two eras the access gate honours. Sharing one
+        # helper with the project picker is the point: the two lists
+        # disagreeing about what exists is how a user ends up looking at a
+        # project the sidebar says is not there.
         try:
-            projects = _db.list_projects(owner_sid=get_session_id())
+            projects = visible_projects(session)
         except Exception:  # pragma: no cover — surface UI even with a sad DB
             projects = []
         # Persist a metric snapshot when the active project actually has

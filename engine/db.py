@@ -1689,13 +1689,17 @@ def set_project_org(project_id: str, org_id: str) -> bool:
 
 
 def list_projects_for_org(org_id: str) -> list[dict]:
+    """The organisation's projects, in the shape templates expect.
+
+    A thin alias over :func:`list_projects` — it exists because the call
+    sites read better for it, not because it does anything else. Notably it
+    must **not** grow its own query: doing that once already produced rows
+    without the ``folder`` / ``saved_at`` back-compat keys and a 500 on the
+    dashboard.
+    """
     if not org_id:
         return []
-    with session_scope() as sess:
-        rows = sess.query(Project).filter(
-            Project.org_id == org_id,
-        ).order_by(Project.updated_at.desc()).all()
-        return [_row_to_dict(r) for r in rows]
+    return list_projects(org_id=org_id)
 
 
 # ── Invites ────────────────────────────────────────────────────────
@@ -2138,27 +2142,53 @@ def session_load(sid: str, *, lifetime: timedelta | None = None) -> str | None:
         return row.payload
 
 
+def _apply_session_update(sess, row, payload: str, expires_at: datetime,
+                          user_id: str | None, now: datetime) -> None:
+    row.payload = payload
+    row.expires_at = expires_at
+    row.accessed_at = now
+    # Only ever set, never cleared, by a save: signing out is an explicit
+    # delete, and a background write that happened to carry no user must
+    # not silently de-authenticate the tab.
+    if user_id:
+        row.user_id = user_id
+
+
 def session_save(sid: str, payload: str, expires_at: datetime, *,
                  user_id: str | None = None) -> bool:
-    """Upsert a session row."""
+    """Upsert a session row.
+
+    The INSERT is retried as an UPDATE on a uniqueness violation, because
+    get-then-insert races itself. One page load fires a dozen parallel
+    requests for assets and fetches, all carrying the same brand-new sid;
+    each sees no row and each inserts. Observed as
+    ``UNIQUE constraint failed: server_session.sid`` on the very first
+    page load of a signed-in session, which cost that request its session
+    write — and with the session holding the working pack, that is lost
+    work rather than a stray log line.
+    """
     if not sid:
         return False
     now = _utcnow()
     with session_scope() as sess:
         row = sess.get(ServerSession, sid)
-        if row is None:
-            sess.add(ServerSession(sid=sid, payload=payload,
-                                   user_id=user_id, created_at=now,
-                                   accessed_at=now, expires_at=expires_at))
-        else:
-            row.payload = payload
-            row.expires_at = expires_at
-            row.accessed_at = now
-            # Only ever set, never cleared, by a save: signing out is an
-            # explicit delete, and a background write that happened to
-            # carry no user must not silently de-authenticate the tab.
-            if user_id:
-                row.user_id = user_id
+        if row is not None:
+            _apply_session_update(sess, row, payload, expires_at, user_id, now)
+            return True
+        sess.add(ServerSession(sid=sid, payload=payload,
+                               user_id=user_id, created_at=now,
+                               accessed_at=now, expires_at=expires_at))
+        try:
+            sess.flush()
+        except IntegrityError:
+            # Somebody else inserted it between our read and our write.
+            # Their row is as good as ours would have been; merge into it.
+            sess.rollback()
+            row = sess.get(ServerSession, sid)
+            if row is None:  # pragma: no cover — vanished again, give up
+                log.warning("session %s… could not be written", sid[:8])
+                return False
+            _apply_session_update(sess, row, payload, expires_at, user_id, now)
         return True
 
 
@@ -2264,9 +2294,21 @@ def upsert_project(name: str, base_url: str | None = None,
         return proj.id
 
 
-def list_projects(owner_sid: str | None = None) -> list[dict]:
+def list_projects(owner_sid: str | None = None,
+                  org_id: str | None = None) -> list[dict]:
+    """Projects, newest first, with per-project artefact counts.
+
+    ``org_id`` filters by organisation and ``owner_sid`` by anonymous
+    session — the two eras of ownership. Both are parameters on this one
+    function rather than a second ``list_projects_for_org``, because the
+    shaping below is what templates depend on: the first attempt at a
+    separate org-scoped query returned raw rows and the dashboard 500'd on
+    ``p.saved_at``, a back-compat key only this code path adds.
+    """
     with session_scope() as sess:
         stmt = select(Project).order_by(Project.updated_at.desc())
+        if org_id:
+            stmt = stmt.where(Project.org_id == org_id)
         if owner_sid:
             stmt = stmt.where(Project.owner_sid == owner_sid)
         rows = sess.execute(stmt).scalars().all()

@@ -88,6 +88,25 @@ class TestSessionStore:
         assert _db.session_load(sid) is None
         assert _db.session_delete(sid) is False
 
+    def test_a_concurrent_insert_of_the_same_sid_does_not_lose_the_write(self):
+        """One page load fires a dozen parallel requests carrying the same
+        brand-new sid; each sees no row and each inserts.
+
+        Observed for real as ``UNIQUE constraint failed: server_session.sid``
+        on the first page load of a signed-in session, which cost that
+        request its session write — and with the session holding the working
+        pack, that is lost work rather than a stray log line.
+        """
+        sid = _sid()
+        # Simulate the loser of the race: a row appears between the read
+        # and the write of the call under test.
+        _db.session_save(sid, '{"first": 1}', _future())
+        assert _db.session_save(sid, '{"second": 2}', _future()) is True
+        assert json.loads(_db.session_load(sid)) == {"second": 2}
+        with _db.session_scope() as sess:
+            assert sess.query(_db.ServerSession).filter(
+                _db.ServerSession.sid == sid).count() == 1
+
     def test_a_later_save_without_a_user_does_not_deauthenticate(self):
         # A background write that happens to carry no user must not
         # silently sign the tab out.

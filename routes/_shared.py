@@ -514,6 +514,43 @@ def ensure_active_project(session_obj=None) -> str:
     return pid
 
 
+def visible_projects(session_obj=None) -> list:
+    """The projects the caller may see, scoped the same way access is.
+
+    Two eras, matching ``routes.projects._require_project_owner``:
+
+    * **Organisation** — ``ORG_MODE`` is on and the caller is in a team:
+      the team's projects. Scoping this by browser cookie instead was a
+      real bug and not a subtle one — a signed-in admin saw an empty
+      dashboard, because a team's projects belong to the organisation and
+      have no ``owner_sid`` at all. The access gate already read
+      membership; only the *list* was still asking the cookie.
+    * **Legacy** — everything else: the anonymous session's own projects,
+      exactly as before.
+
+    Best-effort: a DB outage returns an empty list rather than raising, so
+    the picker still renders and the user has a way forward.
+    """
+    sess = session_obj if session_obj is not None else session
+    from engine import db as _db
+
+    try:
+        from engine import permissions as _perm
+        if _perm.org_active():
+            org_id = _perm.current_org_id()
+            if not org_id:
+                # Signed in but in no team yet. Showing another era's
+                # projects here would be worse than showing none.
+                return []
+            return _db.list_projects_for_org(org_id) or []
+    except Exception as exc:
+        log.debug("visible_projects: org scoping unavailable (%s) — "
+                  "falling back to session scope", exc)
+
+    sid = get_session_id(sess)
+    return _db.list_projects(owner_sid=sid) or []
+
+
 def get_picker_context(session_obj=None) -> dict:
     """Build the ``projects`` + ``active_project_id`` template kwargs
     that ``_project_picker.html`` needs.
@@ -535,10 +572,7 @@ def get_picker_context(session_obj=None) -> dict:
     """
     sess = session_obj if session_obj is not None else session
     try:
-        from engine import db as _db
-        sid = get_session_id(sess)
-        projects = (_db.list_projects(owner_sid=sid)
-                    if hasattr(_db, "list_projects") else [])
+        projects = visible_projects(sess)
     except Exception as exc:
         log.debug("get_picker_context list_projects failed: %s", exc)
         projects = []
@@ -603,7 +637,7 @@ __all__ = [
     # session
     "get_session_id",
     # project picker
-    "get_picker_context",
+    "get_picker_context", "visible_projects",
     "ensure_active_project",
     # dashboard metric helpers
     "kpi_value", "kpi_defect_density",

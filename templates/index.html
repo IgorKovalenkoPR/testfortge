@@ -126,7 +126,11 @@
         {% endif %}
     </div>
 
-    <form method="POST" action="{{ url_for('db_create_project') }}" class="picker-create-form">
+    {# Admin-only per requirement 2, enforced in
+   engine/route_policy.POLICY. `is_admin` is true whenever ORG_MODE
+   is off, so the legacy single-tenant dashboard is unchanged. #}
+{% if is_admin %}
+<form method="POST" action="{{ url_for('db_create_project') }}" class="picker-create-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-row form-row-3">
             <div class="form-group">
@@ -152,6 +156,7 @@
             </button>
         </div>
     </form>
+{% endif %}
 </div>
 
 {% if active_project_id %}
@@ -160,7 +165,11 @@
   <h2>{{ t.get('move_artefacts_title', 'Move artefacts to another project') }}</h2>
   <p class="hint">{{ t.get('move_artefacts_hint',
       'Reassign every artefact (test cases, checklists, bug reports, runs, estimations) currently in the active project to a different one. Useful when you generated work in the wrong project (or in an auto-created Untitled one).') }}</p>
-  <form method="POST" action="{{ url_for('db_move_artifacts') }}" class="picker-create-form">
+  {# Admin-only per requirement 2, enforced in
+   engine/route_policy.POLICY. `is_admin` is true whenever ORG_MODE
+   is off, so the legacy single-tenant dashboard is unchanged. #}
+{% if is_admin %}
+<form method="POST" action="{{ url_for('db_move_artifacts') }}" class="picker-create-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="source_project_id" value="{{ active_project_id }}">
     <div class="form-row form-row-2">
@@ -189,6 +198,7 @@
       </button>
     </div>
   </form>
+{% endif %}
 </div>
 {% endif %}
 
@@ -547,6 +557,8 @@
                     {% if p.folder == active_project_id %}
                     <span class="pill pill-active">{{ t.get('active_project_label', 'Active') }}</span>
                     {% endif %}
+                    {# Renaming a project is admin work — engine/route_policy.POLICY. #}
+                    {% if is_admin %}
                     <button type="button" class="btn btn-xs btn-ghost rename-toggle"
                             data-target="rename-{{ p.folder }}"
                             aria-label="{{ t.get('rename', 'Rename') }}"
@@ -567,6 +579,7 @@
                         <button type="button" class="btn btn-xs btn-ghost rename-cancel"
                                 data-target="rename-{{ p.folder }}">{{ t.get('cancel', 'Cancel') }}</button>
                     </form>
+                    {% endif %}
                 </td>
                 <td>{{ p.get('test_cases_count', 0) }}</td>
                 <td>{{ p.get('checklist_count', 0) }}</td>
@@ -582,11 +595,14 @@
                     </form>
                     {% endif %}
                     <a href="{{ url_for('load_project', project_id=p.folder) }}" class="btn btn-xs">{{ t.load }}</a>
+                    {# Deleting a project is admin work. #}
+                    {% if is_admin %}
                     <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs btn-danger" aria-label="Delete"><i data-lucide="trash-2" class="icon-sm"></i></button>
                     </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
