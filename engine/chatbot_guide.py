@@ -413,7 +413,17 @@ def summarise_bugs_by_component_reply(lang: str) -> ChatReply:
     try:
         from flask import session, has_request_context
         if has_request_context():
-            bugs = session.get("bug_reports_data", []) or []
+            # The project's bugs, not this browser's. Reading
+            # ``bug_reports_data`` meant Tedgie summarised whatever the
+            # asker's session happened to hold — nothing at all after a
+            # restart, and a different answer for each teammate looking at
+            # the same project.
+            #
+            # Only the project *pointer* comes from the session here.
+            # Reading a pointer is a different thing from reading the data,
+            # and engine.permissions already does the same.
+            from engine import workspace as _workspace
+            bugs = _workspace.bugs(session.get("project_id") or "") or []
     except Exception:
         bugs = []
     if not bugs:

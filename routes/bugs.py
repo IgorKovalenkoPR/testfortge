@@ -37,7 +37,8 @@ from engine import workspace as _workspace
 from engine.exporter import _sanitize_cell
 
 from ._shared import (ensure_active_project, get_session_id,
-                      resolve_active_project)
+                      mirror_pack as _mirror_pack,
+                      pack_bugs as _pack_bugs, resolve_active_project)
 from .projects import _require_project_owner
 
 log = get_logger(__name__)
@@ -79,9 +80,9 @@ def _hydrate_bugs(project_id: str | None,
             # DB list_bugs is ordered desc by created_at; the template
             # has always shown newest-first, so we keep that order.
             return [dict_to_bug(_bug_row_to_session_dict(r)) for r in rows]
-    # Session fallback — older flow that wrote bug_reports_data directly.
-    bugs_data = session.get("bug_reports_data", []) or []
-    return [dict_to_bug(b) for b in bugs_data]
+    # No project yet — the pre-project flow, where the repository has
+    # nothing to scope and the session is the only possible answer.
+    return [dict_to_bug(b) for b in _pack_bugs()]
 
 
 def _run_filter_options(project_id: str,
@@ -203,7 +204,7 @@ def _persist_bug(bug_dict: dict, source: str = "manual",
 def register(app: Flask) -> None:
     @app.route("/create-bug-report", methods=["POST"])
     def create_bug_report():
-        bugs = session.get("bug_reports_data", [])
+        bugs = list(_pack_bugs())
         existing = [dict_to_bug(b) for b in bugs]
         new_id = generate_bug_id(existing)
 
@@ -244,9 +245,11 @@ def register(app: Flask) -> None:
         )
 
         bug_d = bug_to_dict(bug)
-        bugs.append(bug_d)
-        session["bug_reports_data"] = bugs
+        # Database first, then the session cache — _persist_bug is the
+        # write, mirror_pack only refreshes what a page will render.
         _persist_bug(bug_d, source="manual")
+        bugs.append(bug_d)
+        _mirror_pack("bug_reports_data", bugs)
 
         flash(g.t.get("bug_saved", "Bug report created successfully") + f" ({new_id})",
               "success")
@@ -432,11 +435,8 @@ def register(app: Flask) -> None:
         # Refresh the session cache so the next render shows the new
         # values without forcing a hard reload of the session pickle.
         try:
-            rows = _db.list_bugs(pid) or []
-            session["bug_reports_data"] = [
-                _bug_row_to_session_dict(r) for r in rows
-            ]
-            session.modified = True
+            _workspace.invalidate(pid, "bugs")
+            _mirror_pack("bug_reports_data", _pack_bugs())
         except Exception:  # pragma: no cover — best-effort cache refresh
             pass
 
@@ -497,8 +497,8 @@ def register(app: Flask) -> None:
 
         # Wipe the session cache so the next render doesn't show the
         # rows we just deleted from the DB.
-        session["bug_reports_data"] = []
-        session.modified = True
+        _workspace.invalidate(pid, "bugs")
+        _mirror_pack("bug_reports_data", [])
 
         suffix = "s" if n != 1 else ""
         flash(g.t.get(
@@ -559,8 +559,7 @@ def register(app: Flask) -> None:
 
     @app.route("/export-bug-reports")
     def export_bug_reports():
-        bugs_data = session.get("bug_reports_data", [])
-        bugs = [dict_to_bug(b) for b in bugs_data]
+        bugs = [dict_to_bug(b) for b in _pack_bugs()]
 
         if not bugs:
             flash("No bug reports to export.", "error")

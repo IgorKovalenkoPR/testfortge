@@ -28,6 +28,24 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _session_seeded(monkeypatch):
+    """These tests seed bugs by writing ``session["bug_reports_data"]``.
+
+    That is only visible while the session is the source of truth, so the
+    module is pinned to ``WORKSPACE_DB_FIRST=0``. What it covers is the
+    source-*classification* logic in ``/bug-reports`` — which bugs count as
+    walkthrough-sourced, runner-sourced or manual — and that logic is
+    independent of where the bugs were read from.
+
+    ``TestSourceFilterWithDatabaseSeededBugs`` at the bottom of this file
+    runs the same classification with the flag on and the bugs in Postgres,
+    so the behaviour is covered in both configurations without rewriting
+    four fixtures.
+    """
+    monkeypatch.delenv("WORKSPACE_DB_FIRST", raising=False)
+
+
 # ── Shared seed ─────────────────────────────────────────────────
 
 
@@ -282,3 +300,59 @@ class TestFilterUi:
         # the wrong message for a filter dead-end.
         assert "Run test execution to report bugs from failed test cases" \
                not in body
+
+
+# ── The same classification, with the bugs where they really live ──
+
+
+class TestSourceFilterWithDatabaseSeededBugs:
+    """The filter, exercised with WORKSPACE_DB_FIRST on.
+
+    The fixtures above seed the session because that is how they were
+    written. This one seeds a project, which is how the product does it, and
+    proves the classification survives the move.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _db_first(self, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
+
+    def _project_with_two_bugs(self, client):
+        import secrets
+        from engine import db as _db
+        pid = _db.upsert_project(name=f"SrcFilterDb-{secrets.token_hex(4)}")
+        with client.session_transaction() as s:
+            s["project_id"] = pid
+        _db.save_bug(pid, {
+            "id": "BUG-W01", "title": "[Images] Broken hero image",
+            "severity": "Critical", "priority": "Highest", "status": "Open",
+            "linked_item_id": "WALK-IMG-001",
+            "linked_item_type": "walkthrough",
+            "labels": ["source:walkthrough", "defect:broken_image"],
+        }, source="walkthrough")
+        _db.save_bug(pid, {
+            "id": "BUG-T01", "title": "[Login] Submit times out",
+            "severity": "Major", "priority": "High", "status": "Open",
+            "linked_item_id": "TC-001", "linked_item_type": "test_case",
+            "labels": [],
+        }, source="execution")
+        return pid
+
+    def test_both_bugs_render_without_a_filter(self, client):
+        self._project_with_two_bugs(client)
+        body = client.get("/bug-reports").get_data(as_text=True)
+        assert "BUG-W01" in body and "BUG-T01" in body
+
+    def test_the_walkthrough_filter_excludes_the_tc_bug(self, client):
+        self._project_with_two_bugs(client)
+        body = client.get("/bug-reports?source=walkthrough").get_data(
+            as_text=True)
+        assert "BUG-W01" in body
+        assert "BUG-T01" not in body
+
+    def test_the_manual_tc_filter_excludes_the_walkthrough_bug(self, client):
+        self._project_with_two_bugs(client)
+        body = client.get("/bug-reports?source=manual_tc").get_data(
+            as_text=True)
+        assert "BUG-T01" in body
+        assert "BUG-W01" not in body

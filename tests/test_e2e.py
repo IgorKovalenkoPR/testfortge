@@ -234,9 +234,15 @@ class TestE2ETestExecution:
         }, follow_redirects=True)
         assert resp.status_code == 200
 
+        # Via the repository: session["test_runs"] and
+        # session["bug_reports_data"] are mirrors that stop existing once
+        # the database is the source of truth (E3.4).
+        from engine import workspace
         with client.session_transaction() as s:
-            runs = s.get("test_runs", [])
-            bugs = s.get("bug_reports_data", [])
+            pid = s.get("project_id")
+        with client.application.test_request_context("/"):
+            runs = workspace.runs(pid)
+            bugs = workspace.bugs(pid)
 
         assert runs, "Expected at least one test run to be saved"
         run = runs[-1]
@@ -300,18 +306,17 @@ class TestE2ETestExecution:
                 assert bug.get("linked_item_id")
                 assert bug.get("linked_item_type") in ("test_case", "checklist")
 
-    @pytest.mark.xfail(
-        condition=os.environ.get("WORKSPACE_DB_FIRST") == "1",
-        reason="E3.4 has not run yet. /test-execution still reads "
-               "session['checklist_data'] directly, so with the database as "
-               "the source of truth generation no longer mirrors the pack "
-               "into the session and the run is built from nothing. This is "
-               "the remaining cross-module gap, not a defect in E3.3 — "
-               "xfail rather than skip so it starts passing loudly the "
-               "moment execution moves onto the repository.",
-        strict=False,
-    )
     def test_manual_status_overrides_auto(self, client):
+        """Passes with WORKSPACE_DB_FIRST either way, as of E3.4.
+
+        It carried a conditional xfail through E3.3, when /test-execution
+        still read the session directly and a run built from a
+        no-longer-mirrored pack had nothing in it. Getting here required
+        two real fixes, not just moving reads: runs read from the database
+        had a permanently empty ``results`` list, and nothing ever wrote
+        ``execution_case_result.bug_report_id``, so the link from a failed
+        item to the bug it filed existed only in the session.
+        """
         self._seed_checklist(client)
 
         # Grab one item ID to override. Read through the repository, not
@@ -338,9 +343,12 @@ class TestE2ETestExecution:
         }, follow_redirects=True)
         assert resp.status_code == 200
 
-        with client.session_transaction() as s:
-            runs = s.get("test_runs", [])
-
+        # Runs via the repository too, for the same reason as the
+        # checklist above: session["test_runs"] is a mirror that stops
+        # existing once the database is the source of truth (E3.4).
+        with client.application.test_request_context("/"):
+            runs = workspace.runs(pid)
+        assert runs, "the POST did not record a run"
         run = runs[-1]
         target = next(r for r in run["results"] if r["item_id"] == target_id)
         assert target["status"] == "Failed"

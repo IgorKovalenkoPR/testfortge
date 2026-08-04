@@ -43,6 +43,7 @@ from ._shared import (
     tc_to_dict, cl_to_dict, story_to_dict, get_session_id,
     parse_page_input, extract_resource_urls, ensure_active_project,
     resolve_active_project, SERVER_START_TIME,
+    pack_cleared, pack_test_cases, pack_checklist, mirror_pack,
 )
 
 # Hard cap on concurrent generation jobs per session — same threshold
@@ -565,60 +566,15 @@ def _requested_tc_format() -> str:
 # all, and the row shrinks from a few hundred kilobytes to nothing.
 
 
-def _pack_cleared() -> bool:
-    """True when the user asked for a clean slate on this boot.
-
-    ``/new-session`` stamps ``_pack_cleared_boot`` and drops
-    ``project_id``. That is not enough on its own: both
-    ``resolve_active_project`` and ``ensure_active_project`` recover the
-    most recent project owned by this session id, so the very next read
-    would find the project again — and, once Postgres is the source of
-    truth, hand back the pack the user just cleared. The stamp is the
-    discriminator, and it has to gate the read rather than only the
-    fallback.
-
-    Stamped with the boot time so a genuine restart takes it with the rest
-    of the session and cold-start recovery resumes on the next boot.
-    """
-    return session.get("_pack_cleared_boot") == SERVER_START_TIME
-
-
-def _tc_rows() -> list[dict]:
-    """The active project's test cases, wherever the truth currently is."""
-    if _pack_cleared():
-        return []
-    return _workspace.test_cases(resolve_active_project())
-
-
-def _cl_rows() -> list[dict]:
-    """The active project's checklist items."""
-    if _pack_cleared():
-        return []
-    return _workspace.checklist(resolve_active_project())
-
-
-def _mirror(session_key: str, rows: list[dict]) -> None:
-    """Record that a pack was written, and keep the session copy in step.
-
-    The ``_pack_cleared_boot`` pop comes first and is not subject to the
-    early return below, because **every** path that produces a pack ends
-    the cleared state — not just the synchronous one. Writing it only in
-    ``_store_*`` was a regression: a queued generation lands through the
-    job drain instead, so after "New session" the pack was written and
-    then hidden by a marker nothing had cleared, and /checklist rendered
-    its empty state over 82 freshly generated items.
-
-    The mirror itself is a no-op once ``WORKSPACE_DB_FIRST`` is on — at
-    that point the session is not consulted for artefacts, and writing a
-    few hundred kilobytes into it would keep the cost of the old model
-    without any of its behaviour. Until then it is load-bearing: the
-    execution, automation and chat modules still read these keys directly
-    (E3.4), so dropping it early would show them an empty pack.
-    """
-    session.pop("_pack_cleared_boot", None)
-    if _workspace.db_first():
-        return
-    session[session_key] = rows
+# The pack accessors live in routes/_shared so every module reads the
+# project the same way, including the "the user cleared this" check —
+# E3.4 moved them there when execution, estimation and the dashboard
+# needed the identical logic. These aliases keep the local call sites
+# short.
+_pack_cleared = pack_cleared
+_tc_rows = pack_test_cases
+_cl_rows = pack_checklist
+_mirror = mirror_pack
 
 
 def _store_test_cases(tc_dicts: list[dict]) -> None:

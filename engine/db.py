@@ -185,6 +185,7 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     _ensure_walkthrough_columns(engine)
     _ensure_project_org_column(engine)
+    _ensure_case_result_source_column(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -361,6 +362,32 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
         # the worker process keeps running; reads via the ORM will then
         # surface a clear OperationalError the operator can act on.
         log.warning("walkthrough migration ALTER failed: %s", exc)
+
+
+def _ensure_case_result_source_column(engine: Engine) -> None:
+    """Idempotent ``ALTER TABLE execution_case_result ADD COLUMN source`` — E3.4.
+
+    ``create_all`` makes missing tables, never missing columns, so an
+    instance that ran before this programme has the table without it and
+    the ORM would fail to read its own rows.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        existing = {c["name"] for c in
+                    _inspect(engine).get_columns("execution_case_result")}
+    except SQLAlchemyError as exc:
+        log.debug("case-result source probe skipped: %s", exc)
+        return
+    if "source" in existing:
+        return
+    try:
+        with engine.begin() as conn:
+            log.info("execution migration: adding execution_case_result.source")
+            conn.execute(text(
+                "ALTER TABLE execution_case_result ADD COLUMN source "
+                "VARCHAR(20) NOT NULL DEFAULT ''"))
+    except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+        log.warning("execution migration ALTER failed: %s", exc)
 
 
 def _ensure_project_org_column(engine: Engine) -> None:
@@ -706,6 +733,16 @@ class ExecutionCaseResult(Base):
                                                           index=True)
     case_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="test_case")
     status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    # How the verdict was reached: "manual" (a person clicked it),
+    # "real_check" / "simulated" (the runner), "auto" (derived).
+    #
+    # Added in E3.4. Without it a run read back from the database could not
+    # say how any of its verdicts were produced — and the first attempt at
+    # reading runs from Postgres guessed the value from whether the row had
+    # notes, which is exactly the plausible-but-wrong answer that makes a
+    # report untrustworthy.
+    source: Mapped[str] = mapped_column(String(20), nullable=False,
+                                         default="", server_default="")
     evidence_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     bug_report_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("bug_report.id", ondelete="SET NULL"), nullable=True)
@@ -3352,6 +3389,7 @@ def save_case_result(run_id: int, *, case_external_id: str | None = None,
                      case_id: int | None = None, case_kind: str = "test_case",
                      status: str | None = None, evidence_path: str | None = None,
                      bug_report_id: int | None = None,
+                     source: str | None = None,
                      notes: str | None = None) -> int:
     with session_scope() as sess:
         row = ExecutionCaseResult(
@@ -3360,6 +3398,7 @@ def save_case_result(run_id: int, *, case_external_id: str | None = None,
             case_external_id=case_external_id,
             case_kind=case_kind,
             status=status,
+            source=(source or "")[:20],
             evidence_path=evidence_path,
             bug_report_id=bug_report_id,
             notes=notes,
@@ -3438,6 +3477,61 @@ def list_case_results(run_id: int) -> list[dict]:
             .order_by(ExecutionCaseResult.id.asc())
         ).scalars().all()
         return [_row_to_dict(r) for r in rows]
+
+
+def merge_run_env(run_id: int, patch: dict) -> bool:
+    """Merge *patch* into a run's ``env_payload``.
+
+    Merge, not replace: the payload is written at ``start_execution_run``
+    with the tester and environment, and enriched afterwards with facts only
+    known once the run finished. A caller that PUT the whole object would
+    drop whichever half it did not have.
+    """
+    if not (run_id and isinstance(patch, dict) and patch):
+        return False
+    with session_scope() as sess:
+        row = sess.get(ExecutionRun, run_id)
+        if row is None:
+            return False
+        merged = dict(row.env_payload or {})
+        merged.update(patch)
+        # Reassigned, not mutated: SQLAlchemy does not track in-place
+        # changes to a JSON column, so mutating would look like it worked
+        # and write nothing.
+        row.env_payload = merged
+        return True
+
+
+def list_case_results_for_runs(run_ids: list[int]) -> dict[int, list[dict]]:
+    """Per-item results for several runs at once, grouped by run id.
+
+    One query rather than one per run. The run-history list shows twenty
+    runs, and calling :func:`list_case_results` in a loop would be twenty
+    round-trips per page load — on a free-tier database with a compute
+    quota, that is the difference between a page and a bill.
+    """
+    ids = [int(r) for r in (run_ids or []) if r]
+    if not ids:
+        return {}
+    out: dict[int, list[dict]] = {rid: [] for rid in ids}
+    with session_scope() as sess:
+        # Outer-joined to the bug's *display* id. The row carries the
+        # integer FK, but every consumer — templates, the results page, the
+        # exporters — treats a result's bug_id as the human "BUG-001"
+        # string. Returning the FK instead looks like it works until
+        # something calls .startswith on it.
+        rows = sess.execute(
+            select(ExecutionCaseResult, BugReport.external_id)
+            .outerjoin(BugReport,
+                       BugReport.id == ExecutionCaseResult.bug_report_id)
+            .where(ExecutionCaseResult.run_id.in_(ids))
+            .order_by(ExecutionCaseResult.id.asc())
+        ).all()
+        for row, bug_external_id in rows:
+            d = _row_to_dict(row)
+            d["bug_external_id"] = bug_external_id or ""
+            out.setdefault(int(row.run_id), []).append(d)
+    return out
 
 
 def get_execution_run(run_id: int) -> dict | None:
@@ -4090,6 +4184,7 @@ __all__ = [
     "latest_estimation",
     # execution
     "start_execution_run", "finish_execution_run", "save_case_result",
+    "merge_run_env", "list_case_results_for_runs",
     "list_execution_runs",
     # dashboard
     "save_metric_snapshot", "list_metric_snapshots",

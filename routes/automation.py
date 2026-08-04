@@ -41,7 +41,7 @@ from engine import automation_codegen as codegen
 from engine import db as _db
 from engine import gherkin
 
-from ._shared import (SAFE_ASSET_RE, get_session_id,
+from ._shared import (SAFE_ASSET_RE, get_session_id, pack_test_cases,
                       reconstruct_test_cases, resolve_active_project)
 
 log = get_logger(__name__)
@@ -91,7 +91,7 @@ def register(app: Flask) -> None:
         Test Execution stays the place you launch and watch a run.
         """
         pid = resolve_active_project(session)
-        cases = reconstruct_test_cases(session.get("test_cases_data", []))
+        cases = reconstruct_test_cases(pack_test_cases())
         if not cases and pid:
             try:
                 cases = reconstruct_test_cases(_db.load_test_cases(pid))
@@ -125,7 +125,7 @@ def register(app: Flask) -> None:
     def automation_bundle():
         """The generated TypeScript + Playwright + Allure project."""
         pid = resolve_active_project(session)
-        cases = reconstruct_test_cases(session.get("test_cases_data", []))
+        cases = reconstruct_test_cases(pack_test_cases())
         if not cases and pid:
             try:
                 cases = reconstruct_test_cases(_db.load_test_cases(pid))
@@ -254,7 +254,7 @@ def register(app: Flask) -> None:
 
     @app.route("/automation/run", methods=["POST"])
     def automation_run():
-        tc_data = session.get("test_cases_data", [])
+        tc_data = pack_test_cases()
         if not tc_data:
             flash("No test cases to automate. Generate Test Cases first.", "warning")
             return redirect(url_for("automation_page"))
@@ -297,7 +297,7 @@ def register(app: Flask) -> None:
         and, once ``status == "done"``, reload ``/automation`` to display
         the report (stored in the session by the job on completion).
         """
-        tc_data = session.get("test_cases_data", [])
+        tc_data = pack_test_cases()
         if not tc_data:
             return jsonify({"error": "no_test_cases",
                             "message": "Generate Test Cases first."}), 400

@@ -457,15 +457,17 @@ def snapshot_metrics(project_id: str) -> int | None:
     """
     if not project_id:
         return None
-    try:
-        from flask import session  # local import — keeps this module Flask-free at import time
-    except Exception:
-        return None
+    # From the database, as the name says. This read the caller's Flask
+    # session until E3.4 — which is wrong twice over: the numbers it
+    # snapshotted were one browser's rather than the project's, and the
+    # detached ``runner_worker`` this function exists for has no session at
+    # all, so there it either raised or silently snapshotted nothing.
+    from engine import workspace as _workspace
     metrics = compute_session_metrics(
-        tc_data=session.get("test_cases_data", []),
-        cl_data=session.get("checklist_data", []),
-        test_runs=session.get("test_runs", []),
-        bugs_data=session.get("bug_reports_data", []),
+        tc_data=_workspace.test_cases(project_id),
+        cl_data=_workspace.checklist(project_id),
+        test_runs=_workspace.runs(project_id),
+        bugs_data=_workspace.bugs(project_id),
     )
     if not metrics.get("has_data"):
         return None

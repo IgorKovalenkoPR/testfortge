@@ -390,7 +390,7 @@ def set_persistent_sid_cookie(response):
 
 # ── Active-project resolver (Phase 2) ────────────────────────────
 
-def resolve_active_project(session_obj=None) -> str:
+def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
     """Active project id, or "" — never creating one as a side effect.
 
     Same first two steps as :func:`ensure_active_project` (session pick,
@@ -426,10 +426,18 @@ def resolve_active_project(session_obj=None) -> str:
         if not pid:
             return ""
         # Cache it so the rest of the request behaves as if the session
-        # had never been wiped.
-        sess["project_id"] = pid
-        if hasattr(sess, "modified"):
-            sess.modified = True
+        # had never been wiped — unless the caller is only reading.
+        #
+        # ``pin=False`` exists because a read that changes what "active"
+        # means is not a read. The pack accessors below call this on every
+        # page, and with the write-back unconditional the dashboard
+        # resurrected a project pointer immediately after "New session"
+        # dropped it: the metrics read re-pinned it, and the page came back
+        # claiming an active project the user had just cleared.
+        if pin:
+            sess["project_id"] = pid
+            if hasattr(sess, "modified"):
+                sess.modified = True
         log.info("resolve_active_project: recovered project_id=%s from "
                  "owner_sid=%s (session store was wiped)", pid, sid[:8])
         return pid
@@ -512,6 +520,103 @@ def ensure_active_project(session_obj=None) -> str:
     sess["project_setup"] = setup
     sess.modified = True if hasattr(sess, "modified") else None
     return pid
+
+
+# ── The active project's pack (E3.3 / E3.4) ──────────────────────
+#
+# Every route module reads a project's artefacts through these. They are
+# here rather than in ``engine.workspace`` because they need two things the
+# repository deliberately does not know about: the Flask session's notion
+# of which project is active, and the "the user asked for a clean slate"
+# marker.
+#
+# The alternative — each module resolving the project and reading the
+# repository itself — is how the modules ended up disagreeing in the first
+# place. One of them would forget the cleared-pack check, and the symptom
+# would be work reappearing after the user cleared it, on one page only.
+
+
+def pack_cleared(session_obj=None) -> bool:
+    """True when the user asked for a clean slate on this boot.
+
+    ``/new-session`` stamps ``_pack_cleared_boot`` and drops
+    ``project_id``. Dropping the pointer is not enough on its own, because
+    :func:`resolve_active_project` recovers the most recent project owned by
+    this session — so the next read finds the project again and, once
+    Postgres is the source of truth, hands back the pack that was just
+    cleared. The stamp is the discriminator, and it has to gate the read
+    rather than only a fallback.
+
+    Boot-stamped, so a genuine restart takes it with the rest of the
+    session and cold-start recovery resumes on the next boot.
+    """
+    sess = session_obj if session_obj is not None else session
+    return sess.get("_pack_cleared_boot") == SERVER_START_TIME
+
+
+def pack_test_cases(session_obj=None) -> list:
+    from engine import workspace as _ws
+    if pack_cleared(session_obj):
+        return []
+    return _ws.test_cases(resolve_active_project(session_obj, pin=False))
+
+
+def pack_checklist(session_obj=None) -> list:
+    from engine import workspace as _ws
+    if pack_cleared(session_obj):
+        return []
+    return _ws.checklist(resolve_active_project(session_obj, pin=False))
+
+
+def pack_bugs(session_obj=None, *, run_id=None) -> list:
+    """Bug reports for the active project.
+
+    Not gated on :func:`pack_cleared`. "New session" clears the *generated
+    pack*; a filed bug is a finding about a real defect, and making it
+    vanish because somebody started a fresh generation would be a data-loss
+    bug wearing a feature's clothes. ``/bugs/reset`` is the deliberate way
+    to remove them, and it is admin-only.
+    """
+    from engine import workspace as _ws
+    return _ws.bugs(resolve_active_project(session_obj, pin=False),
+                    run_id=run_id)
+
+
+def pack_runs(session_obj=None, *, limit: int = 20) -> list:
+    """Execution runs for the active project. Not gated, same reason as
+    :func:`pack_bugs` — a run happened."""
+    from engine import workspace as _ws
+    return _ws.runs(resolve_active_project(session_obj, pin=False),
+                    limit=limit)
+
+
+def pack_estimation(session_obj=None):
+    from engine import workspace as _ws
+    if pack_cleared(session_obj):
+        return None
+    return _ws.latest_estimation(resolve_active_project(session_obj, pin=False))
+
+
+def mirror_pack(session_key: str, rows, session_obj=None) -> None:
+    """Record that a pack was written, and keep the session copy in step.
+
+    The ``_pack_cleared_boot`` pop is not subject to the early return
+    below: every path that produces artefacts ends the cleared state, and
+    writing that only in some of them is a bug that presents as "my
+    generated work is invisible" (see E3.3).
+
+    The mirror itself is a no-op once ``WORKSPACE_DB_FIRST`` is on. Until
+    then it is load-bearing for whichever modules have not moved onto these
+    accessors yet.
+    """
+    from engine import workspace as _ws
+    sess = session_obj if session_obj is not None else session
+    sess.pop("_pack_cleared_boot", None)
+    if _ws.db_first():
+        return
+    sess[session_key] = rows
+    if hasattr(sess, "modified"):
+        sess.modified = True
 
 
 def visible_projects(session_obj=None) -> list:
@@ -638,6 +743,9 @@ __all__ = [
     "get_session_id",
     # project picker
     "get_picker_context", "visible_projects",
+    # The active project's pack — the one way route modules read it.
+    "pack_cleared", "pack_test_cases", "pack_checklist", "pack_bugs",
+    "pack_runs", "pack_estimation", "mirror_pack",
     "ensure_active_project",
     # dashboard metric helpers
     "kpi_value", "kpi_defect_density",

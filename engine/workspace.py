@@ -258,16 +258,31 @@ def run_row_to_dict(row: dict) -> dict:
     if not isinstance(started, str):
         started = started.isoformat() if started else ""
     return {
+        # Filled by ``runs()`` from execution_case_result. Empty here so a
+        # caller that only needs a run's metadata does not pay for its
+        # items.
+        "results": [],
         "run_id": row.get("id") or row.get("run_id"),
         "db_run_id": row.get("id"),
         "source": env.get("source", ""),
+        # How the run was executed: "tc_driven", "walkthrough" or "live".
+        # /bug-reports filters on it, so a run whose mode is unknown cannot
+        # be filtered — which is what happened for every run read from the
+        # database until E3.4 started storing it.
+        "mode": env.get("mode", ""),
+        # Merged into the payload after the run finished — see
+        # engine.db.merge_run_env.
+        "walkthrough_findings": env.get("walkthrough_findings") or [],
+        "walkthrough_tc_bindings": env.get("walkthrough_tc_bindings") or [],
         "tester_id": env.get("tester_id", ""),
         "tester_name": env.get("tester_name", ""),
         "environment": env.get("environment", ""),
         "env_type": env.get("env_type", ""),
         "testing_types": ", ".join(env.get("testing_types") or []),
-        "results": [],
         "stats": row.get("stats") or {},
+        # Filled by ``runs()`` from count_bugs_by_run. Hardcoding it to 0
+        # here is what made every run read from the database claim it had
+        # filed no bugs, on a page whose whole job is to show that number.
         "bug_count": 0,
         "site_url": "",
         "base_url": row.get("base_url", ""),
@@ -330,13 +345,77 @@ def latest_estimation(project_id: str | None) -> dict | None:
     return _read(project_id or "", "estimation", _from_db)
 
 
-def runs(project_id: str | None, *, limit: int = 20) -> list[dict]:
-    """Execution runs, newest last, shaped as the templates expect."""
+def case_result_to_dict(row: dict) -> dict:
+    """An ``execution_case_result`` row → the per-item shape the run views use.
+
+    ``duration_ms`` is deliberately absent: the table has no column for it,
+    so a run read back from the database cannot report how long an item
+    took. The template already guards with ``| default(0, true)`` so this
+    degrades to a zero rather than an error — but it is a real gap, not a
+    rounding one, and closing it needs a migration. Same for ``video`` and
+    ``screenshots``, which are disk paths the row does not carry.
+
+    ``source`` used to be guessed here, from whether the row had notes.
+    That produced a plausible wrong answer — the worst kind in a report —
+    so E3.4 gave the table a column instead.
+    """
+    return {
+        "item_id": row.get("case_external_id") or "",
+        "status": row.get("status") or "",
+        "kind": row.get("case_kind") or "test_case",
+        "source": row.get("source") or "auto",
+        # The display id, and "" when there is none — matching the shape
+        # every consumer already assumes. The integer FK stays available
+        # separately for anything that needs to join on it.
+        "bug_id": row.get("bug_external_id") or "",
+        "bug_row_id": row.get("bug_report_id"),
+        "comment": row.get("notes") or "",
+        "evidence_path": row.get("evidence_path") or "",
+    }
+
+
+def runs(project_id: str | None, *, limit: int = 20,
+         with_results: bool = True) -> list[dict]:
+    """Execution runs, newest last, shaped as the templates expect.
+
+    ``with_results`` fills each run's per-item results from
+    ``execution_case_result`` in **one** grouped query. It defaults to True
+    because the run-history template reads ``run.results`` for its item
+    count and duration column: shipping runs with a permanently empty
+    ``results`` list was the E3.4 bug that made a run read from the
+    database look like a run that had executed nothing.
+    """
     from engine import db as _db
-    return _read(project_id or "", "runs",
-                 lambda: [run_row_to_dict(r) for r in
-                          (_db.list_execution_runs(project_id, limit=limit)
-                           or [])][-limit:])
+
+    def _from_db():
+        rows = _db.list_execution_runs(project_id, limit=limit) or []
+        shaped = [run_row_to_dict(r) for r in rows][-limit:]
+        if not (with_results and shaped):
+            return shaped
+        try:
+            grouped = _db.list_case_results_for_runs(
+                [r["db_run_id"] for r in shaped if r.get("db_run_id")])
+        except Exception as exc:      # pragma: no cover — best-effort
+            log.warning("workspace: case results unavailable: %s", exc)
+            return shaped
+        for run in shaped:
+            for item in grouped.get(run.get("db_run_id"), []):
+                run["results"].append(case_result_to_dict(item))
+
+        # The authoritative count, from the bug table's own run_id — not
+        # derived from the results above, because a bug can be filed for a
+        # run without a per-item result behind it (an infrastructure
+        # summary bug, for one). One grouped query for the whole list.
+        try:
+            per_run = _db.count_bugs_by_run(project_id) or {}
+        except Exception as exc:      # pragma: no cover — best-effort
+            log.warning("workspace: bug counts unavailable: %s", exc)
+            return shaped
+        for run in shaped:
+            run["bug_count"] = int(per_run.get(run.get("db_run_id"), 0) or 0)
+        return shaped
+
+    return _read(project_id or "", "runs", _from_db)
 
 
 def counts(project_id: str | None) -> dict[str, int]:
@@ -393,6 +472,7 @@ def save_estimation(project_id: str, input_payload: dict,
 __all__ = [
     "KINDS", "SESSION_ONLY_KEYS", "db_first",
     "test_cases", "checklist", "bugs", "latest_estimation", "runs", "counts",
+    "bug_row_to_dict", "run_row_to_dict", "case_result_to_dict",
     "save_test_cases", "save_checklist", "save_bug", "save_estimation",
     "invalidate",
 ]

@@ -41,7 +41,9 @@ from engine.test_credentials import (
 
 from engine import db as _db
 
-from ._shared import extract_resource_urls, ensure_active_project, get_session_id
+from ._shared import (extract_resource_urls, ensure_active_project,
+                      get_session_id, pack_bugs, pack_checklist,
+                      pack_runs, pack_test_cases, mirror_pack)
 # ``_persist_bug`` lives in routes/bugs.py since the Stage 7 refactor.
 # ``test_execution_results`` still mirrors each TC-driven / walkthrough
 # / LiveExecutor bug into the DB through it, so we re-import here.
@@ -685,102 +687,57 @@ def _reconcile_with_automation(execution: dict,
 
 
 def _maybe_restore_pack_from_db() -> None:
-    """If the session has no TC / CL pack but the active project does,
-    rehydrate the session keys from the DB so the run page shows what
-    the user uploaded earlier (Phase 2 persistence).
+    """Re-pin the active project to one that actually has a pack.
 
-    No-op when:
-      * session already carries a pack (avoid clobbering);
-      * neither session nor owner_sid resolves a project;
-      * DB read raises or returns empty.
+    Not cold-start recovery — the repository does that on its own now, and
+    this function used to duplicate it in a third place (generation had
+    ``_hydrate_from_db``, projects had an inline block). What is left is the
+    part neither of those does, and which an operator reported on
+    2026-05-04: the session can be pinned to a freshly auto-created
+    "Untitled project" with nothing in it while the real pack sits under a
+    different project owned by the same session. Recovery from Postgres
+    cannot help, because it faithfully loads the empty project.
 
-    Recovery path (added 2026-05-04 after operator reported their
-    project + TC pack vanished after a Render dyno restart): when
-    ``session["project_id"]`` is missing, fall through to
-    :func:`ensure_active_project` which now consults
-    ``list_projects(owner_sid=...)`` before auto-creating. That re-pins
-    the original project and lets us load its pack from Postgres.
+    So: if the active project has a pack, do nothing. Otherwise look through
+    this owner's other projects, prefer ones with content, and re-pin. The
+    accessors then read the pack from the project we just chose.
 
     Best-effort — never raises. Failures are debug-logged.
     """
-    if session.get("test_cases_data") or session.get("checklist_data"):
+    if pack_test_cases() or pack_checklist():
         return
-    pid = session.get("project_id")
-    candidate_pids: list[str] = []
-    if pid:
-        candidate_pids.append(pid)
-    # Owner_sid-wide search ALWAYS runs (even when session.project_id
-    # exists) — operator-reported case 2026-05-04: their session pinned
-    # a freshly-created "Untitled project" that had no TCs while the
-    # actual generated pack lived under a different project for the
-    # same owner_sid. We try the active one first, then fall back to
-    # other owned projects (most-recent first, with non-zero counts
-    # preferred) until we find one with content.
+
+    from engine import db as _db
+    from engine import workspace as _workspace
+
+    active = session.get("project_id") or ""
     try:
-        from engine import db as _db
-        from routes._shared import get_session_id
-        sid = get_session_id(session)
-        if hasattr(_db, "list_projects"):
-            existing = _db.list_projects(owner_sid=sid) or []
-            # Sort by has-content first, then by recency. list_projects
-            # already returns updated_at desc, so a stable sort that
-            # ranks projects with TCs above empty ones gives us the
-            # right order.
-            ranked = sorted(
-                existing,
-                key=lambda p: (
-                    -(int(p.get("test_cases_count", 0) or 0)
-                       + int(p.get("checklist_count", 0) or 0)),
-                ),
-            )
-            for p in ranked:
-                p_id = p.get("id") if isinstance(p, dict) else None
-                if p_id and p_id not in candidate_pids:
-                    candidate_pids.append(p_id)
+        owned = _db.list_projects(owner_sid=get_session_id(session)) or []
     except Exception as exc:
-        log.debug("restore: owner_sid project lookup failed: %s", exc)
-    if not candidate_pids:
+        log.debug("restore: owner project lookup failed: %s", exc)
         return
-    chosen_pid = ""
-    chosen_tc: list = []
-    chosen_cl: list = []
-    try:
-        from engine import db as _db
-        for cand in candidate_pids:
-            try:
-                tc = (_db.load_test_cases(cand)
-                      if hasattr(_db, "load_test_cases") else [])
-                cl = (_db.load_checklist(cand)
-                      if hasattr(_db, "load_checklist") else [])
-            except Exception as exc:
-                log.debug("restore: load failed for %s: %s", cand, exc)
-                continue
-            if tc or cl:
-                chosen_pid = cand
-                chosen_tc = tc
-                chosen_cl = cl
-                break
-    except Exception as exc:  # pragma: no cover
-        log.debug("restore: db read failed: %s", exc)
+
+    # list_projects already returns updated_at desc, and its per-project
+    # counts come from the same query — so ranking by "has content" is a
+    # stable sort away, with no extra round-trip per candidate. The previous
+    # version loaded every candidate's full pack to find out.
+    ranked = sorted(
+        (p for p in owned if p.get("id") and p.get("id") != active),
+        key=lambda p: -(int(p.get("test_cases_count", 0) or 0)
+                        + int(p.get("checklist_count", 0) or 0)),
+    )
+    for candidate in ranked:
+        if (int(candidate.get("test_cases_count", 0) or 0)
+                + int(candidate.get("checklist_count", 0) or 0)) <= 0:
+            break                      # ranked, so the rest are empty too
+        session["project_id"] = candidate["id"]
+        # The accessors cache per request, and they cached the empty answer
+        # for the project we just left.
+        _workspace.invalidate()
+        log.info("restore: re-pinned active project to %s (%d TC + %d CL)",
+                 candidate["id"], candidate.get("test_cases_count", 0),
+                 candidate.get("checklist_count", 0))
         return
-    if not chosen_pid:
-        return
-    if chosen_pid != session.get("project_id"):
-        # Re-pin the active project to the one with content. Without
-        # this, the next request would see project_id pointing at the
-        # empty project again and recovery would loop indefinitely.
-        session["project_id"] = chosen_pid
-        log.info("restore: re-pinned active project to %s "
-                 "(had %d TC + %d CL)",
-                 chosen_pid, len(chosen_tc), len(chosen_cl))
-    if chosen_tc:
-        session["test_cases_data"] = chosen_tc
-        log.info("restore: rehydrated %d test cases from project %s",
-                 len(chosen_tc), chosen_pid)
-    if chosen_cl:
-        session["checklist_data"] = chosen_cl
-        log.info("restore: rehydrated %d checklist items from project %s",
-                 len(chosen_cl), chosen_pid)
 
 
 def register(app: Flask) -> None:
@@ -798,13 +755,13 @@ def register(app: Flask) -> None:
             except Exception as exc:  # pragma: no cover
                 log.debug("pack restore skipped: %s", exc)
 
-        tc_data = session.get("test_cases_data", [])
-        cl_data = session.get("checklist_data", [])
+        tc_data = pack_test_cases()
+        cl_data = pack_checklist()
         has_tc = bool(tc_data)
         has_cl = bool(cl_data)
         resource_urls = extract_resource_urls()
 
-        test_runs = session.get("test_runs", [])
+        test_runs = pack_runs()
 
         if request.method == "POST":
           try:
@@ -1051,7 +1008,7 @@ def register(app: Flask) -> None:
               )
               tester = get_tester(tester_id)
               tester_name = tester.name if tester else tester_id
-              all_bugs = session.get("bug_reports_data", [])
+              all_bugs = pack_bugs()
               existing_bugs = [dict_to_bug(b) for b in all_bugs]
 
               # Resolve "Re-run failed only" scope by trimming selected_ids
@@ -1450,6 +1407,7 @@ def register(app: Flask) -> None:
                                   "tester_name": tester_name,
                                   "testing_types": testing_types,
                                   "source": source,
+                                  "mode": run_mode,
                                   "site_url": site_url,
                               },
                               browser_visibility=("headless" if headless else "visible"),
@@ -1482,6 +1440,13 @@ def register(app: Flask) -> None:
                   # exactly once, then increment locally — avoids O(N²)
                   # rebuild on every new bug for large runs.
                   bug_id_map: dict[str, str] = {}
+                  # item_id -> execution_case_result.bug_report_id. _persist_bug has
+                  # always returned the row id and this code has always thrown it
+                  # away, so the FK was never populated: "which bug did this failed
+                  # item file" was answerable only from the session, and unanswerable
+                  # once the session was gone. E3.4 made it visible by reading runs
+                  # back from the database.
+                  bug_row_ids: dict[str, int] = {}
                   running_bugs = list(existing_bugs) + [
                       dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
                   ]
@@ -1598,8 +1563,10 @@ def register(app: Flask) -> None:
                               "bug rewrite skipped (%s): %s",
                               type(_rw_exc).__name__, _rw_exc)
                       # Mirror to Postgres with execution context attached.
-                      _persist_bug(bug_dict, source="execution",
-                                   run_id=db_run_id)
+                      _row_id = _persist_bug(bug_dict, source="execution",
+                                             run_id=db_run_id)
+                      if _row_id:
+                          bug_row_ids[bug_dict.get("linked_item_id", "")] = _row_id
                       all_bugs.append(bug_dict)
                       # Cheap appends keep generate_bug_id stable for
                       # subsequent iterations without re-marshalling dicts.
@@ -1635,6 +1602,9 @@ def register(app: Flask) -> None:
                                   status=r.get("status"),
                                   evidence_path=(r.get("video")
                                                   or (r.get("screenshots") or [None])[0]),
+                                  bug_report_id=bug_row_ids.get(
+                                      r.get("item_id")),
+                                  source=r.get("source"),
                                   notes=r.get("comment"),
                               )
                           except Exception as exc:  # pragma: no cover
@@ -1698,8 +1668,8 @@ def register(app: Flask) -> None:
               # quickly (avoids filesystem-session lock contention when two
               # browser tabs run in parallel).
               test_runs = test_runs[-20:]
-              session["bug_reports_data"] = all_bugs
-              session["test_runs"] = test_runs
+              mirror_pack("bug_reports_data", all_bugs)
+              mirror_pack("test_runs", test_runs)
 
               # Aggregated flash message: one line per env + grand totals
               parts = [g.t.get("te_results_saved",
@@ -1745,7 +1715,7 @@ def register(app: Flask) -> None:
 
         cred = credentials_from_session(session.get("test_execution_credentials"))
         existing_bug_ids = [
-            b.get("id") for b in session.get("bug_reports_data", []) if b.get("id")
+            b.get("id") for b in pack_bugs() if b.get("id")
         ]
         # An "active_automation_run" session entry — set by the POST
         # handler when a Playwright pass is dispatched — drives the
@@ -1839,8 +1809,8 @@ def register(app: Flask) -> None:
         (no Playwright / no Base URL), all selected items.
         """
         _maybe_restore_pack_from_db()
-        tc_data = session.get("test_cases_data", []) or []
-        cl_data = session.get("checklist_data", []) or []
+        tc_data = pack_test_cases()
+        cl_data = pack_checklist()
 
         if not tc_data and not cl_data:
             flash(g.t.get(
@@ -1901,7 +1871,7 @@ def register(app: Flask) -> None:
              "screenshots": (r.get("screenshots") or [])[:6]}
             for r in (execution.get("results") or [])
         ]
-        test_runs = session.get("test_runs", [])
+        test_runs = pack_runs()
         run_record = {
             "run_id": len(test_runs) + 1,
             "db_run_id": None,
@@ -1922,19 +1892,19 @@ def register(app: Flask) -> None:
             "created_at": datetime.now().isoformat(),
         }
         test_runs.append(run_record)
-        session["test_runs"] = test_runs
+        mirror_pack("test_runs", test_runs)
 
         # Bug reports also flow into the session so the Bug Reports
         # page picks them up. Mirrors the normal POST handler's
         # treatment without the per-bug ISTQB stamping (auto-run is a
         # quick smoke, not a release-grade run).
-        bugs_session = session.get("bug_reports_data", [])
+        bugs_session = pack_bugs()
         for bug_dict in execution.get("bugs", []) or []:
             new_id = generate_bug_id([dict_to_bug(b) for b in bugs_session])
             bug_dict["id"] = new_id
             bug_dict.setdefault("environment", environment)
             bugs_session.append(bug_dict)
-        session["bug_reports_data"] = bugs_session
+        mirror_pack("bug_reports_data", bugs_session)
 
         stats = run_record["stats"] or {}
         passed = stats.get("passed", 0)
@@ -2037,8 +2007,8 @@ def register(app: Flask) -> None:
         # Operator-reported on 2026-05-05: log showed session_test_cases
         # = 0 and the user got stuck on /test-execution/live without
         # any dispatch happening, because the form was empty.
-        out["session_test_cases"] = len(session.get("test_cases_data") or [])
-        out["session_checklist"]  = len(session.get("checklist_data") or [])
+        out["session_test_cases"] = len(pack_test_cases())
+        out["session_checklist"]  = len(pack_checklist())
         out["session_active_run"] = (session.get(
             "active_automation_run") or {}).get("run_id", "")
 
@@ -2290,8 +2260,8 @@ def register(app: Flask) -> None:
         # path used to run inline. Most fields come from the worker's
         # config echo (so the user's selection of envs / tester etc. is
         # honoured even though we're in a different request now).
-        items_data = cfg.get("items_data") or session.get(
-            "test_cases_data", []) or session.get("checklist_data", [])
+        items_data = (cfg.get("items_data") or pack_test_cases()
+                      or pack_checklist())
         env_types = cfg.get("env_types") or ["web"]
         manual_statuses = cfg.get("manual_statuses") or {}
         manual_bug_refs = cfg.get("manual_bug_refs") or {}
@@ -2310,11 +2280,11 @@ def register(app: Flask) -> None:
         affects_version = cfg.get("affects_version", "")
 
         existing_bugs = [
-            dict_to_bug(b) for b in session.get("bug_reports_data", [])
+            dict_to_bug(b) for b in pack_bugs()
             if b.get("id")
         ]
-        all_bugs = list(session.get("bug_reports_data", []) or [])
-        test_runs = list(session.get("test_runs", []) or [])
+        all_bugs = list(pack_bugs())
+        test_runs = list(pack_runs())
 
         run_summaries = []
         bug_total = 0
@@ -2348,6 +2318,11 @@ def register(app: Flask) -> None:
                             "tester_name": tester_name,
                             "testing_types": testing_types,
                             "source": source,
+                            # The run mode belongs in the row, not only in
+                            # the session record: /bug-reports filters by
+                            # it and a run read back from the database
+                            # could not say how it had been executed.
+                            "mode": run_mode,
                             "site_url": site_url,
                         },
                         browser_visibility=("headless" if headless else "visible"),
@@ -2386,6 +2361,13 @@ def register(app: Flask) -> None:
             _bug_aliases = execution.get("_bug_alias") or {}
 
             bug_id_map: dict[str, str] = {}
+            # item_id -> execution_case_result.bug_report_id. _persist_bug has
+            # always returned the row id and this code has always thrown it
+            # away, so the FK was never populated: "which bug did this failed
+            # item file" was answerable only from the session, and unanswerable
+            # once the session was gone. E3.4 made it visible by reading runs
+            # back from the database.
+            bug_row_ids: dict[str, int] = {}
             running_bugs = list(existing_bugs) + [
                 dict_to_bug(b) for b in all_bugs[len(existing_bugs):]
             ]
@@ -2459,8 +2441,10 @@ def register(app: Flask) -> None:
                     )
                 except Exception as _rw_exc:
                     log.warning("results: bug rewrite skipped: %s", _rw_exc)
-                _persist_bug(bug_dict, source="execution",
-                             run_id=db_run_id)
+                _row_id = _persist_bug(bug_dict, source="execution",
+                                       run_id=db_run_id)
+                if _row_id:
+                    bug_row_ids[bug_dict.get("linked_item_id", "")] = _row_id
                 all_bugs.append(bug_dict)
                 try:
                     running_bugs.append(dict_to_bug(bug_dict))
@@ -2516,10 +2500,18 @@ def register(app: Flask) -> None:
                     len(walkthrough_findings) - len(processed_findings)
                 )
 
-                # Active project id for the cross-run dedup lookup.
-                # ``ensure_active_project`` is the same helper
-                # ``_persist_bug`` already calls.
-                from routes._shared import ensure_active_project
+                # Active project id for the cross-run dedup lookup. Uses the
+                # module-level import; a local ``from routes._shared import
+                # ensure_active_project`` here made the name a local of the
+                # whole enclosing function, so the *earlier* call at the top
+                # of the loop raised "cannot access local variable
+                # 'ensure_active_project' where it is not associated with a
+                # value" — and that call is the one that creates the
+                # execution_run row. It was swallowed by a log.warning, so
+                # every walkthrough and live run existed only in the
+                # session: nothing on /bug-reports could be filtered by it
+                # and nothing survived a restart. Found by reading runs back
+                # from the database in E3.4.
                 active_pid = ensure_active_project()
 
                 for finding in processed_findings:
@@ -2681,6 +2673,8 @@ def register(app: Flask) -> None:
                             evidence_path=(r.get("video")
                                             or (r.get("screenshots")
                                                 or [None])[0]),
+                            bug_report_id=bug_row_ids.get(r.get("item_id")),
+                            source=r.get("source"),
                             notes=r.get("comment"),
                         )
                     except Exception as exc:
@@ -2750,14 +2744,28 @@ def register(app: Flask) -> None:
                 "walkthrough_findings": attached_findings,
                 "walkthrough_tc_bindings": attached_bindings,
             }
+            # Into the row as well as the session record. Both are computed
+            # after start_execution_run, so they are merged into the run's
+            # env_payload here rather than passed at creation — and without
+            # this, a walkthrough run read back from the database could not
+            # say what it had attached, which is the one thing that
+            # distinguishes it from any other run.
+            if db_run_id is not None:
+                try:
+                    _db.merge_run_env(db_run_id, {
+                        "walkthrough_findings": attached_findings,
+                        "walkthrough_tc_bindings": attached_bindings,
+                    })
+                except Exception as exc:      # pragma: no cover
+                    log.warning("merge_run_env failed: %s", exc)
             test_runs.append(run_record)
             run_summaries.append(
                 (environment, execution["stats"], run_bug_count))
             bug_total += run_bug_count
 
         test_runs = test_runs[-20:]
-        session["bug_reports_data"] = all_bugs
-        session["test_runs"] = test_runs
+        mirror_pack("bug_reports_data", all_bugs)
+        mirror_pack("test_runs", test_runs)
         session["automation_report"] = {
             "passed":  int(report.get("passed", 0)),
             "failed":  int(report.get("failed", 0)),

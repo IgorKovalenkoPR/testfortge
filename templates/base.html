@@ -108,7 +108,7 @@
         {% if session.get('project_setup', {}).get('project_name') %}
         <div class="sidebar-project">
             <small>{{ t.sidebar_project }}</small>
-            <strong>{{ session['project_setup'].get('project_name', '') }}</strong>
+            <strong>{{ session.get('project_setup', {}).get('project_name', '') }}</strong>
         </div>
         {% endif %}
         {% if auth_active and current_user %}

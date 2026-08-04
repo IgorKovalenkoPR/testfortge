@@ -355,9 +355,7 @@ class TestResultsWalkthroughPath:
         # interesting assertions live in the session.
         assert resp.status_code in (200, 302, 303), resp.get_data(as_text=True)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
-            runs = sess.get("test_runs", []) or []
+        bugs, runs = _project_artefacts(client)
 
         wt_bugs = [b for b in bugs
                    if b.get("linked_item_type") == "walkthrough"]
@@ -418,8 +416,7 @@ class TestResultsWalkthroughPath:
         resp = client.get(f"/test-execution/results/{run_id}",
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303)
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
+        bugs, _ = _project_artefacts(client)
         assert [b for b in bugs
                 if b.get("linked_item_type") == "walkthrough"] == []
 
@@ -522,9 +519,7 @@ class TestResultsLivePath:
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303), resp.get_data(as_text=True)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
-            runs = sess.get("test_runs", []) or []
+        bugs, runs = _project_artefacts(client)
 
         # Two findings → two walkthrough-typed bugs even though
         # ``mode=='live'`` (not ``'walkthrough'``).
@@ -563,8 +558,7 @@ class TestResultsLivePath:
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
+        bugs, _ = _project_artefacts(client)
 
         infra_bugs = [b for b in bugs
                       if b.get("linked_item_type") == "live_executor"]
@@ -593,8 +587,7 @@ class TestResultsLivePath:
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
+        bugs, _ = _project_artefacts(client)
 
         infra_bugs = [b for b in bugs
                       if b.get("linked_item_type") == "live_executor"]
@@ -615,8 +608,7 @@ class TestResultsLivePath:
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
+        bugs, _ = _project_artefacts(client)
         assert [b for b in bugs
                 if b.get("linked_item_type") == "live_executor"] == []
 
@@ -642,8 +634,7 @@ class TestResultsLivePath:
                           follow_redirects=False)
         assert resp.status_code in (200, 302, 303)
 
-        with client.session_transaction() as sess:
-            bugs = sess.get("bug_reports_data", []) or []
+        bugs, _ = _project_artefacts(client)
         infra_bugs = [b for b in bugs
                       if b.get("linked_item_type") == "live_executor"]
         # Exactly one — not two even though the per-env loop ran twice.
@@ -727,3 +718,25 @@ class TestTemplateSmoke:
         assert 'Hero image broken' in body
         # TC-binding panel is below the sub-tabs.
         assert 'TC-002' in body
+
+
+def _project_artefacts(client):
+    """The active project's bugs and runs, wherever the truth currently is.
+
+    These tests read ``session["bug_reports_data"]`` and
+    ``session["test_runs"]``. Those are mirrors the app stops writing once
+    Postgres is the source of truth (E3.4), so going through the repository
+    keeps the same assertions honest in either configuration.
+    """
+    from engine import workspace
+    with client.session_transaction() as sess:
+        pid = sess.get("project_id") or ""
+        cookie_state = {k: v for k, v in sess.items()}
+    # No early return on a missing project: with none, the repository
+    # answers from the session, which is the right answer for the
+    # pre-project flow these tests exercise. Deciding that here would be a
+    # second copy of a rule that already lives in one place.
+    with client.application.test_request_context("/"):
+        from flask import session as _s
+        _s.update(cookie_state)
+        return list(workspace.bugs(pid)), list(workspace.runs(pid))

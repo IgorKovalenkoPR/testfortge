@@ -115,7 +115,7 @@
             <span class="picker-active-badge">
                 <i data-lucide="folder-open" class="icon-sm"></i>
                 {{ t.get('active_project_label', 'Active') }}:
-                <strong>{{ session['project_setup'].get('project_name', '—') }}</strong>
+                <strong>{{ session.get('project_setup', {}).get('project_name', '—') }}</strong>
             </span>
         {% else %}
             <span class="picker-empty">
@@ -204,7 +204,7 @@
 
 {% if session.get('test_cases_data') or session.get('checklist_data') %}
 <div class="card card-highlight">
-    <h2>{{ t.current_project }}{% if session.get('project_setup', {}).get('project_name') %}: {{ session['project_setup'].get('project_name', '') }}{% endif %}</h2>
+    <h2>{{ t.current_project }}{% if session.get('project_setup', {}).get('project_name') %}: {{ session.get('project_setup', {}).get('project_name', '') }}{% endif %}</h2>
     <div class="quick-stats">
         <div class="qs-item">
             <span class="qs-label">{{ t.dash_requirements }}</span>

@@ -16,16 +16,30 @@ import io
 
 class TestAutoRunEndpoint:
     def _seed_tc(self, client, n=3):
+        """A project with a pack — both in the database and in the session.
+
+        Seeding only the session was enough while the session was the
+        source of truth. The project write is what makes the pack visible
+        to a run once Postgres is (E3.4), and it also gives the test a
+        project id to read the resulting run back from.
+        """
+        import secrets
+        from engine import db as _db
+        rows = [{
+            "id": f"TC-{i}", "section": "X", "section_num": 1,
+            "summary": "s", "preconditions": "", "test_steps": "",
+            "test_data": "", "expected_result": "", "issues": "",
+            "comment": "", "user_story_id": "",
+            "category": "Positive", "priority": "High",
+            "status": "Unchecked", "testing_type": "Functional",
+        } for i in range(n)]
+        pid = _db.upsert_project(name=f"AutoRun-{secrets.token_hex(4)}")
+        _db.save_test_cases(pid, rows)
         with client.session_transaction() as s:
-            s["test_cases_data"] = [{
-                "id": f"TC-{i}", "section": "X", "section_num": 1,
-                "summary": "s", "preconditions": "", "test_steps": "",
-                "test_data": "", "expected_result": "", "issues": "",
-                "comment": "", "user_story_id": "",
-                "category": "Positive", "priority": "High",
-                "status": "Unchecked", "testing_type": "Functional",
-            } for i in range(n)]
+            s["project_id"] = pid
+            s["test_cases_data"] = rows
             s["_session_active_since"] = 9_999_999_999
+        return pid
 
     def test_auto_run_with_pack_creates_test_run(self, client):
         self._seed_tc(client, n=4)
@@ -33,8 +47,13 @@ class TestAutoRunEndpoint:
         assert r.status_code == 302
         assert r.headers["Location"].endswith("/test-execution")
 
+        # Via the repository — session["test_runs"] is a mirror that stops
+        # existing once the database is the source of truth (E3.4).
+        from engine import workspace
         with client.session_transaction() as s:
-            runs = s.get("test_runs") or []
+            pid = s.get("project_id")
+        with client.application.test_request_context("/"):
+            runs = list(workspace.runs(pid))
             assert len(runs) == 1
             run = runs[0]
             assert run["env_type"] == "web"
@@ -93,10 +112,13 @@ class TestPackRehydrate:
 
         r = client.get("/test-execution")
         assert r.status_code == 200
-        with client.session_transaction() as s:
-            tc = s.get("test_cases_data") or []
-            assert tc, "rehydrate failed to populate test_cases_data"
-            assert tc[0]["id"] == "TC-DB-1"
+        # The page has to show the project's pack. It used to assert that
+        # session["test_cases_data"] got populated, but E3.4 stopped copying
+        # artefacts into the session — /test-execution reads the project
+        # directly now, so the mirror is an implementation detail that no
+        # longer exists while the user-visible contract is unchanged.
+        body = r.get_data(as_text=True)
+        assert "TC-DB-1" in body, "the page does not show the project's pack"
 
     def test_rehydrate_does_not_clobber_existing_session(self, client):
         from engine import db as _db

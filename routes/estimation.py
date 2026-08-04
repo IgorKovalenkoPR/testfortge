@@ -120,7 +120,9 @@ def _historical_calibration(result, owner_sid: str) -> None:
             "regression, bug rechecks)."
         )
 
-from ._shared import get_session_id, ensure_active_project
+from ._shared import (ensure_active_project, get_session_id,
+                      mirror_pack as _mirror_pack,
+                      pack_estimation as _pack_estimation)
 
 
 def _persist_estimation(input_payload: dict, result_dict: dict) -> None:
@@ -247,9 +249,9 @@ def register(app: Flask) -> None:
             try:
                 result = dict(job.result)
                 extracted = result.pop("_extracted_text", "")
-                session["estimation_result"] = result
                 if extracted:
                     session["estimation_extracted_text"] = extracted
+                _mirror_pack("estimation_result", result)
                 _persist_estimation(
                     input_payload=getattr(job, "meta", {}) or {},
                     result_dict=result,
@@ -277,7 +279,7 @@ def register(app: Flask) -> None:
         return render_template(
             "estimation.html",
             t=t, lang=lang,
-            result=session.get("estimation_result"),
+            result=_pack_estimation(),
             last=session.get("estimation_form", {}),
             mockup_env=_mockup_env_state(),
         )
@@ -452,7 +454,7 @@ def register(app: Flask) -> None:
         except Exception as exc:  # pragma: no cover — best-effort
             log.warning("history calibration skipped: %s", exc)
 
-        session["estimation_result"] = out.result_dict
+        _mirror_pack("estimation_result", out.result_dict)
         # Mirror the system-suggested team size back into the form
         # snapshot so the next GET render shows the badge with the
         # fresh recommendation rather than the user's last manual
@@ -602,7 +604,7 @@ def register(app: Flask) -> None:
         if job.status == DONE and job.result is not None:
             result = dict(job.result)  # don't mutate the queued payload
             extracted = result.pop("_extracted_text", "")
-            session["estimation_result"] = result
+            _mirror_pack("estimation_result", result)
             if extracted:
                 session["estimation_extracted_text"] = extracted
             session.pop("estimation_job_id", None)
@@ -639,7 +641,7 @@ def register(app: Flask) -> None:
         """
         prefill = (session.get("estimation_extracted_text") or "").strip()
         if not prefill:
-            data = session.get("estimation_result") or {}
+            data = _pack_estimation() or {}
             features = data.get("features") or []
             if features:
                 prefill = "\n".join(
@@ -665,7 +667,7 @@ def register(app: Flask) -> None:
 
     @app.route("/estimation/export", methods=["GET"])
     def estimation_export():
-        data = session.get("estimation_result")
+        data = _pack_estimation()
         if not data:
             flash("Nothing to export — run an estimation first.", "warning")
             return redirect(url_for("estimation_page"))

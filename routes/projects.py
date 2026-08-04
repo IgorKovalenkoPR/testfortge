@@ -25,7 +25,7 @@ from engine.log import get_logger
 
 from ._shared import (
     GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
-    resolve_active_project, tc_to_dict,
+    mirror_pack, resolve_active_project, tc_to_dict,
 )
 
 log = get_logger(__name__)
@@ -249,14 +249,18 @@ def register(app: Flask) -> None:
         tcs = _workspace.test_cases(project_id)
         cls = _workspace.checklist(project_id)
         bugs = _workspace.bugs(project_id)
+        # Mirrors, not saves: the rows are already in the project. Once
+        # WORKSPACE_DB_FIRST is on these are no-ops and the pages read the
+        # project directly, which is the point — "load" stops meaning
+        # "copy a project into this browser".
         if tcs:
-            session["test_cases_data"] = tcs
+            mirror_pack("test_cases_data", tcs)
             session["_show_tc_once"] = True
         if cls:
-            session["checklist_data"] = cls
+            mirror_pack("checklist_data", cls)
             session["_show_cl_once"] = True
         if bugs:
-            session["bug_reports_data"] = bugs
+            mirror_pack("bug_reports_data", bugs)
 
         flash(f"Project '{meta['name']}' loaded.", "success")
         return redirect(url_for("index"))
@@ -354,11 +358,11 @@ def register(app: Flask) -> None:
             cls = _workspace.checklist(project_id)
             bugs = _workspace.bugs(project_id)
             if tcs:
-                session["test_cases_data"] = tcs
+                mirror_pack("test_cases_data", tcs)
             if cls:
-                session["checklist_data"] = cls
+                mirror_pack("checklist_data", cls)
             if bugs:
-                session["bug_reports_data"] = bugs
+                mirror_pack("bug_reports_data", bugs)
 
             # Latest estimation snapshot — Estimation page reads
             # session["estimation_result"] to render the result card.
@@ -371,7 +375,7 @@ def register(app: Flask) -> None:
                     rp = (latest.get("result_payload")
                           or latest.get("result") or {})
                     if isinstance(rp, dict) and rp:
-                        session["estimation_result"] = rp
+                        mirror_pack("estimation_result", rp)
                     ip = (latest.get("input_payload")
                           or latest.get("input") or {})
                     if isinstance(ip, dict) and ip:
@@ -394,7 +398,7 @@ def register(app: Flask) -> None:
             # place to add the next field.
             runs = _workspace.runs(project_id, limit=20)
             if runs:
-                session["test_runs"] = runs
+                mirror_pack("test_runs", runs)
         except Exception as exc:
             log.warning("project select: hydrate failed: %s", exc)
 

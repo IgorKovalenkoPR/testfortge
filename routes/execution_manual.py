@@ -28,7 +28,8 @@ from engine import db as _db
 from engine import manual_run as mr
 from engine.log import get_logger
 
-from ._shared import (reconstruct_checklist, reconstruct_test_cases,
+from ._shared import (pack_checklist, pack_test_cases,
+                      reconstruct_checklist, reconstruct_test_cases,
                       resolve_active_project)
 
 log = get_logger(__name__)
@@ -36,8 +37,8 @@ log = get_logger(__name__)
 
 def _pack(project_id: str | None) -> tuple[list, list]:
     """The project's test cases and checklist, session first then DB."""
-    tcs = reconstruct_test_cases(session.get("test_cases_data", []))
-    cls = reconstruct_checklist(session.get("checklist_data", []))
+    tcs = reconstruct_test_cases(pack_test_cases())
+    cls = reconstruct_checklist(pack_checklist())
     if project_id:
         if not tcs:
             try:
@@ -180,6 +181,8 @@ def register(app: Flask) -> None:
                 _db.save_case_result(
                     run_id, case_external_id=external_id,
                     case_kind=item.kind, status=verdict, notes=notes,
+                    # A person clicked this one.
+                    source="manual",
                     bug_report_id=bug_id)
         except Exception as exc:
             log.exception("manual verdict save failed")

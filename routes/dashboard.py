@@ -21,7 +21,8 @@ from engine.test_metrics_generator import compute_session_metrics
 log = get_logger(__name__)
 
 from ._shared import (get_session_id, kpi_value, kpi_defect_density,
-                      visible_projects)
+                      pack_bugs, pack_checklist, pack_runs,
+                      pack_test_cases, visible_projects)
 
 
 def _compute_dashboard_metrics() -> dict:
@@ -35,10 +36,14 @@ def _compute_dashboard_metrics() -> dict:
     opportunistic snapshot trigger below keep working untouched.
     """
     return compute_session_metrics(
-        tc_data=session.get("test_cases_data", []),
-        cl_data=session.get("checklist_data", []),
-        test_runs=session.get("test_runs", []),
-        bugs_data=session.get("bug_reports_data", []),
+        # Per-project, not per-browser. Computing these from the
+        # caller's session is what made "project metrics" mean
+        # "metrics of whoever is looking" — empty after a restart and
+        # different in a second tab.
+        tc_data=pack_test_cases(),
+        cl_data=pack_checklist(),
+        test_runs=pack_runs(),
+        bugs_data=pack_bugs(),
     )
 
 

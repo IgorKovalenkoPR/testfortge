@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 
 from engine import db as _db
 
-from ._shared import ensure_active_project
+from ._shared import ensure_active_project, mirror_pack, pack_bugs
 
 from engine import chatbot as _chatbot_mod
 from engine.chatbot import respond_dict as _chatbot_respond
@@ -381,7 +381,7 @@ def register(app: Flask) -> None:
 
         note = f.get("note", "").strip()
 
-        bugs = session.get("bug_reports_data", [])
+        bugs = list(pack_bugs())
         existing = [dict_to_bug(b) for b in bugs]
         new_id = generate_bug_id(existing)
         project_setup = session.get("project_setup", {}) or {}
@@ -423,7 +423,7 @@ def register(app: Flask) -> None:
         )
         bug_d = bug_to_dict(bug)
         bugs.append(bug_d)
-        session["bug_reports_data"] = bugs
+        mirror_pack("bug_reports_data", bugs)
         session.modified = True
 
         # Mirror to Postgres: a Tedgie-sourced BugReport row + an audit
