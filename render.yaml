@@ -106,9 +106,42 @@ services:
       # layout) — and /test-execution still does a real browser pass in a
       # detached subprocess that survives a gunicorn restart.
       #
-      # Flip to 1 after moving to a paid plan with more RAM.
+      # Stays 0. The budget for this platform is zero (see
+      # docs/plans/cost_model.md), so there is no paid plan coming and no
+      # extra RAM to flip this into. The automation half of the Execute
+      # module is served instead by running Playwright in GitHub Actions
+      # and posting the Allure results to /automation/allure-results
+      # below — free minutes, 16 GB runners, and the ingest endpoint
+      # already exists.
       - key: TESTFORTGE_BROWSER_ENABLED
         value: "0"
+      # ── Programme feature flags (docs/plans/team_platform_architecture.md)
+      #
+      # All five declared at "0" from the start rather than added one per
+      # epic. The reason is the RECORDER_ENABLED incident this file's test
+      # was written for: a flag that exists in code but not in the
+      # blueprint gets deleted by the next Manual Sync, silently. Declaring
+      # them up front means the epic that ships one only has to change a
+      # value, and tests/test_render_blueprint.py fails the build if a new
+      # flag reaches engine/features.py without landing here too.
+      - key: AUTH_ENABLED
+        value: "0"
+      - key: ORG_MODE
+        value: "0"
+      - key: EDITORS_ENABLED
+        value: "0"
+      - key: DASHBOARD_V2
+        value: "0"
+      - key: STORAGE_BACKEND_CONFIGURABLE
+        value: "0"
+      # Where Flask sessions live. "filesystem" is the legacy behaviour
+      # and loses every session when the dyno restarts — which on the free
+      # plan is several times a day, and today the session is where a
+      # project's working pack lives. "db" moves them into Postgres
+      # (engine/server_session.py). Declared explicitly so the rollout is
+      # one dashboard edit and the rollback is the same edit back.
+      - key: SESSION_BACKEND
+        value: "filesystem"
       # Web Recorder (Sprint 8 PR-B/E). Declared here because it was
       # already set to 1 by hand on the live service while being absent
       # from this blueprint — so a Manual Sync would have deleted it, and

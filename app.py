@@ -40,6 +40,8 @@ from flask_compress import Compress
 import config as _config
 from engine import basic_auth
 from engine import db as _db
+from engine import features
+from engine import server_session
 from engine.i18n import get_lang
 from engine.log import get_logger
 from routes import register_all
@@ -152,6 +154,19 @@ def _start_snapshot_catchup_thread() -> None:
 
 _start_snapshot_catchup_thread()
 Session(app)
+# …then, when SESSION_BACKEND=db, replace what Flask-Session just
+# installed with the Postgres-backed interface (E0.2). Order matters:
+# Session(app) sets app.session_interface, so this has to run after it.
+# The filesystem store it displaces loses every session whenever the dyno
+# restarts, which on the free tier is several times a day.
+server_session.install(app)
+
+# A flag that is set but neutered by a missing prerequisite is the one
+# failure mode nobody can see from the outside: the dashboard says ON and
+# the app behaves as OFF. Say so once, at boot, in the container log.
+for _flag_warning in features.misconfigurations():
+    log.warning("feature flags: %s", _flag_warning)
+
 # Gzip/Brotli responses — static assets + JSON payloads benefit most.
 Compress(app)
 # CSRF protection for every state-changing request. Individual endpoints

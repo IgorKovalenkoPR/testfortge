@@ -184,6 +184,7 @@ def init_db() -> None:
     # follow-up ALTERs) have gone through.
     Base.metadata.create_all(engine)
     _ensure_walkthrough_columns(engine)
+    _ensure_project_org_column(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -362,6 +363,45 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
         log.warning("walkthrough migration ALTER failed: %s", exc)
 
 
+def _ensure_project_org_column(engine: Engine) -> None:
+    """Idempotent ``ALTER TABLE project ADD COLUMN org_id`` — E2.1.
+
+    Same reason the walkthrough helper above exists: ``create_all`` makes
+    missing *tables*, never missing columns, so an instance that booted
+    before this programme has a ``project`` table the ORM can no longer
+    read once ``Project.org_id`` is declared.
+
+    Added nullable with no default and no foreign key. Nullable because
+    every project that exists right now predates organisations and has
+    nothing to point at; no FK because SQLite cannot add a constrained
+    column to a populated table, so declaring one would give fresh
+    installs a check that production does not have — the worst of both,
+    since dev would then be unable to reproduce a prod integrity bug.
+    Referential integrity for this column is enforced in the helpers
+    (:func:`set_project_org`) until a real migration tool arrives.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        insp = _inspect(engine)
+        existing = {c["name"] for c in insp.get_columns("project")}
+    except SQLAlchemyError as exc:
+        # No project table yet — fresh install, create_all already made
+        # it with org_id present.
+        log.debug("project.org_id probe skipped: %s", exc)
+        return
+
+    if "org_id" in existing:
+        return
+
+    try:
+        with engine.begin() as conn:
+            log.info("tenancy migration: adding project.org_id")
+            conn.execute(text(
+                "ALTER TABLE project ADD COLUMN org_id VARCHAR(32)"))
+    except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+        log.warning("tenancy migration ALTER failed: %s", exc)
+
+
 def get_engine() -> Engine:
     if _engine is None:
         init_db()
@@ -424,6 +464,19 @@ class Project(Base):
     base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_sid: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    # E2.1 — the organisation this project belongs to. Nullable through
+    # the whole migration window: every project that exists today was
+    # created by an anonymous session and has no org until its owner
+    # claims an account (E1.6). Routes must treat NULL as "legacy,
+    # owner_sid still governs" rather than "belongs to everyone".
+    #
+    # No ForeignKey declared here on purpose. The column is added to an
+    # existing table by ALTER (see _ensure_project_org_column), and
+    # SQLite cannot add a constrained column to a populated table — the
+    # constraint would only exist on fresh installs, which is worse than
+    # not having it, because it would hide the missing check in dev.
+    org_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -910,6 +963,796 @@ class BrowserCommand(Base):
         DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True)
+
+
+# ── Identity, tenancy, audit (programme epics E0.2 / E1.1 / E2.1) ──
+#
+# Declared together because they are one dependency cluster: a role
+# belongs to a membership, a membership needs a user, and a server-side
+# session is what turns a browser into that user for the next request.
+# See docs/plans/team_platform_architecture.md §3 for the target shape
+# and docs/plans/adr/0001 for why the workspace has to follow.
+
+#: The two roles the owner asked for. ``admin`` creates projects and
+#: changes settings; ``user`` does everything else.
+ORG_ROLES: tuple[str, ...] = ("admin", "user")
+
+#: Comparable ranks, so a guard can ask for "at least user" without
+#: enumerating roles. Kept deliberately small — a third role is a
+#: product decision, not a constant somebody adds in passing.
+ROLE_RANK: dict[str, int] = {"user": 1, "admin": 2}
+
+
+def normalize_email(raw: str | None) -> str:
+    """Lowercase and strip an email for storage and lookup.
+
+    Uniqueness lives on this normalised form, so ``Bob@Example.com`` and
+    ``bob@example.com`` are one account. Without normalising at the only
+    door into the table, a user signs up twice and then reports that
+    "sign-in with Google made a second empty workspace".
+
+    Note we do *not* touch the local part beyond casing — gmail-style
+    dot and ``+tag`` folding is provider-specific, and applying it
+    universally would merge two genuinely different addresses.
+    """
+    return (raw or "").strip().lower()
+
+
+class ServerSession(Base):
+    """One server-side session record — E0.2.
+
+    Replaces the filesystem session store, which lost every logged-in
+    user and every in-progress pack whenever the dyno restarted (Render's
+    free tier sleeps after ~15 idle minutes, and the filesystem goes with
+    it). Rows here outlive the process and are visible to every gunicorn
+    worker, which is also what makes E1.5's "sign out on all devices"
+    a single DELETE rather than a hunt through a directory.
+
+    ``user_id`` is nullable on purpose: anonymous browsing keeps working
+    exactly as it does today, and the column is filled in at sign-in.
+    """
+    __tablename__ = "server_session"
+
+    sid: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Not a ForeignKey. A session row must survive its user being
+    # deleted long enough for the delete to be *audited*; the cleanup is
+    # an explicit delete_sessions_for_user() call, not a cascade we
+    # cannot observe.
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                 index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    accessed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
+
+class User(Base):
+    """A human. The identifier the whole platform hangs off.
+
+    Table is ``app_user``, not ``user``: ``user`` is a reserved word in
+    Postgres. SQLAlchemy quotes it correctly in generated SQL, but this
+    module also issues hand-written ``ALTER TABLE`` statements for
+    migrations (see the ``_ensure_*_columns`` helpers), and every one of
+    those becomes a quoting trap. Renaming the table costs nothing and
+    removes the whole category.
+
+    ``password_hash`` is nullable — a Google-only account has no
+    password, and inventing one would be a credential nobody rotates.
+    """
+    __tablename__ = "app_user"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True,
+                                     default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), nullable=False,
+                                        unique=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(120),
+                                                      nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255),
+                                                       nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                  default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                             default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Brute-force counters. Live on the user rather than in a cache so
+    # the lockout survives a restart — an in-memory counter on a dyno
+    # that sleeps every 15 minutes is not a lockout.
+    failed_logins: Mapped[int] = mapped_column(Integer, nullable=False,
+                                                default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    identities = relationship("Identity", back_populates="user",
+                              cascade="all, delete-orphan",
+                              passive_deletes=True)
+
+
+class Identity(Base):
+    """An external sign-in provider bound to a :class:`User`.
+
+    Keyed on ``(provider, subject)`` — the OIDC ``sub`` claim, *not* the
+    email. Google documents ``sub`` as the stable identifier and email as
+    changeable; keying on email means a user who renames their Google
+    account arrives as a stranger.
+
+    ``email`` here is only what the provider last told us, kept for the
+    audit trail when an account-linking decision needs explaining.
+    """
+    id: Mapped[str] = mapped_column(String(32), primary_key=True,
+                                     default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+
+    user = relationship("User", back_populates="identities")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "subject", name="uq_identity_provider_subject"),
+    )
+
+
+class Organization(Base):
+    """The team boundary. Projects belong to one; users join via
+    :class:`OrgMember`.
+
+    ``settings`` carries the admin-configurable bits (storage target,
+    retention window, KPI targets) as JSON rather than a column each,
+    because those are product knobs that change every sprint and a
+    migration per knob is a tax with no payer.
+    """
+    id: Mapped[str] = mapped_column(String(32), primary_key=True,
+                                     default=_uuid)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    slug: Mapped[str] = mapped_column(String(180), nullable=False,
+                                       unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class OrgMember(Base):
+    """A user's role inside an organisation."""
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    org_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    added_by_user_id: Mapped[str | None] = mapped_column(String(32),
+                                                          nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "user_id", name="uq_org_member"),
+    )
+
+
+class Invite(Base):
+    """A pending invitation to join an organisation at a given role.
+
+    There is deliberately **no** ``UNIQUE (org_id, email)`` constraint,
+    though the earlier identity spike proposed one. It would mean a
+    person who is invited, joins, and later leaves can never be invited
+    back — the used row blocks the seat forever. "One *pending* invite
+    per address" is the rule we actually want, and it is enforced in
+    :func:`create_invite` (which revokes any live invite for that address
+    first) because a partial unique index is Postgres-only and this
+    schema also has to build on SQLite.
+    """
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    invited_by_user_id: Mapped[str | None] = mapped_column(String(32),
+                                                            nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class AuditLog(Base):
+    """Who changed what, when — E2.7.
+
+    Supersedes the trick of appending a line to a bug's ``comment``
+    field, which was cheap and worked for one entity but is unfilterable
+    and destroys the data it annotates. Every mutation from the editing
+    substrate (E4.1) and every role change writes a row here.
+
+    Nullable ``org_id`` / ``project_id`` / ``user_id`` so the table can
+    also record events with no project (a sign-in) or no user (a
+    system-initiated retention delete).
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    org_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                index=True)
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                    index=True)
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                 index=True)
+    entity: Mapped[str] = mapped_column(String(40), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                          default=_utcnow, index=True)
+
+
+# ── Identity / tenancy helpers ─────────────────────────────────────
+
+def create_user(email: str, *, display_name: str | None = None,
+                password_hash: str | None = None,
+                email_verified: bool = False) -> str | None:
+    """Create a user, returning the new id — or ``None`` if the email is
+    already taken.
+
+    ``None`` rather than an exception because "this address already has
+    an account" is an ordinary branch at every call site (sign-up,
+    invite-claim, first Google sign-in), not an error. The uniqueness
+    check is the DB constraint, caught below, so two concurrent sign-ups
+    for the same address cannot both win.
+    """
+    email = normalize_email(email)
+    if not email:
+        return None
+    with session_scope() as sess:
+        row = User(
+            email=email,
+            display_name=(display_name or "").strip() or None,
+            password_hash=password_hash,
+            email_verified=bool(email_verified),
+        )
+        sess.add(row)
+        try:
+            sess.flush()
+        except IntegrityError:
+            sess.rollback()
+            return None
+        return row.id
+
+
+def get_user(user_id: str | None) -> dict | None:
+    if not user_id:
+        return None
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        return _row_to_dict(row) if row else None
+
+
+def get_user_by_email(email: str | None) -> dict | None:
+    email = normalize_email(email)
+    if not email:
+        return None
+    with session_scope() as sess:
+        row = sess.query(User).filter(User.email == email).one_or_none()
+        return _row_to_dict(row) if row else None
+
+
+def link_identity(user_id: str, provider: str, subject: str,
+                  email: str | None = None) -> bool:
+    """Bind an external provider identity to an existing user.
+
+    Idempotent: linking the same ``(provider, subject)`` to the same user
+    twice is a no-op returning True. Linking it to a *different* user
+    returns False — that is an account-takeover attempt or a bug, and
+    silently re-pointing the row would hand one person's workspace to
+    another.
+    """
+    if not (user_id and provider and subject):
+        return False
+    with session_scope() as sess:
+        existing = sess.query(Identity).filter(
+            Identity.provider == provider,
+            Identity.subject == subject,
+        ).one_or_none()
+        if existing is not None:
+            if existing.user_id != user_id:
+                log.warning(
+                    "identity %s:%s already bound to a different user",
+                    provider, subject[:12])
+                return False
+            return True
+        sess.add(Identity(user_id=user_id, provider=provider,
+                          subject=subject,
+                          email=normalize_email(email) or None))
+        try:
+            sess.flush()
+        except IntegrityError:
+            sess.rollback()
+            return False
+        return True
+
+
+def get_user_by_identity(provider: str, subject: str) -> dict | None:
+    """Look up a user by external identity — the Google sign-in path."""
+    if not (provider and subject):
+        return None
+    with session_scope() as sess:
+        ident = sess.query(Identity).filter(
+            Identity.provider == provider,
+            Identity.subject == subject,
+        ).one_or_none()
+        if ident is None:
+            return None
+        row = sess.get(User, ident.user_id)
+        return _row_to_dict(row) if row else None
+
+
+def create_organization(name: str, *, settings: dict | None = None) -> str:
+    """Create an org with a unique slug derived from *name*."""
+    name = (name or "").strip() or "Team"
+    base = _slugify(name, fallback="team")[:160]
+    with session_scope() as sess:
+        slug = base
+        # Two teams may legitimately be called "QA" — disambiguate rather
+        # than reject, since the name is a label and the slug is plumbing.
+        if sess.query(Organization).filter(
+                Organization.slug == slug).one_or_none() is not None:
+            slug = f"{base}-{_uuid()[:8]}"
+        row = Organization(name=name, slug=slug, settings=settings or {})
+        sess.add(row)
+        sess.flush()
+        return row.id
+
+
+def add_org_member(org_id: str, user_id: str, role: str, *,
+                   added_by_user_id: str | None = None) -> bool:
+    """Add or update a membership. Returns False on an unknown role.
+
+    Re-adding an existing member updates their role, which is what the
+    members page needs for "change role" — one code path instead of two.
+    """
+    if role not in ORG_ROLES:
+        log.warning("add_org_member: unknown role %r", role)
+        return False
+    if not (org_id and user_id):
+        return False
+    with session_scope() as sess:
+        existing = sess.query(OrgMember).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+        ).one_or_none()
+        if existing is not None:
+            existing.role = role
+            return True
+        sess.add(OrgMember(org_id=org_id, user_id=user_id, role=role,
+                           added_by_user_id=added_by_user_id))
+        try:
+            sess.flush()
+        except IntegrityError:
+            sess.rollback()
+            return False
+        return True
+
+
+def get_org_role(org_id: str | None, user_id: str | None) -> str | None:
+    """The user's role in the org, or ``None`` when they are not a member.
+
+    ``None`` means no access. Callers must not treat it as a default
+    role — that is how a stranger becomes a tester.
+    """
+    if not (org_id and user_id):
+        return None
+    with session_scope() as sess:
+        return sess.query(OrgMember.role).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+        ).scalar()
+
+
+def list_org_members(org_id: str) -> list[dict]:
+    """Members with their email and display name, admins first."""
+    if not org_id:
+        return []
+    with session_scope() as sess:
+        rows = sess.query(OrgMember, User).join(
+            User, User.id == OrgMember.user_id,
+        ).filter(OrgMember.org_id == org_id).all()
+        out = [{
+            "user_id": m.user_id,
+            "email": u.email,
+            "display_name": u.display_name,
+            "role": m.role,
+            "added_at": m.added_at.isoformat() if m.added_at else "",
+            "is_active": bool(u.is_active),
+        } for m, u in rows]
+        out.sort(key=lambda r: (-ROLE_RANK.get(r["role"], 0), r["email"]))
+        return out
+
+
+def count_org_admins(org_id: str) -> int:
+    """How many admins the org has — the last-admin guard's input.
+
+    Split out as its own query so the guard is a cheap COUNT rather than
+    loading the whole member list on every role change.
+    """
+    if not org_id:
+        return 0
+    with session_scope() as sess:
+        return int(sess.query(func.count(OrgMember.id)).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.role == "admin",
+        ).scalar() or 0)
+
+
+def remove_org_member(org_id: str, user_id: str) -> bool:
+    """Remove a membership, refusing to strand the org without an admin.
+
+    Returns False when the target is the only admin. The caller turns
+    that into the 400 + "promote someone first" message; enforcing it
+    here means no route can forget.
+    """
+    if not (org_id and user_id):
+        return False
+    with session_scope() as sess:
+        row = sess.query(OrgMember).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+        ).one_or_none()
+        if row is None:
+            return False
+        if row.role == "admin":
+            admins = int(sess.query(func.count(OrgMember.id)).filter(
+                OrgMember.org_id == org_id,
+                OrgMember.role == "admin",
+            ).scalar() or 0)
+            if admins <= 1:
+                return False
+        sess.delete(row)
+        return True
+
+
+def set_project_org(project_id: str, org_id: str) -> bool:
+    """Attach a project to an org, verifying the org exists first.
+
+    Stands in for the foreign key the column cannot carry (see
+    :func:`_ensure_project_org_column`) — without this check a typo'd
+    org_id would produce a project no membership query can ever reach,
+    i.e. silently orphaned data.
+    """
+    if not (project_id and org_id):
+        return False
+    with session_scope() as sess:
+        if sess.get(Organization, org_id) is None:
+            log.warning("set_project_org: no such org %s", org_id[:8])
+            return False
+        proj = sess.get(Project, project_id)
+        if proj is None:
+            return False
+        proj.org_id = org_id
+        return True
+
+
+def list_projects_for_org(org_id: str) -> list[dict]:
+    if not org_id:
+        return []
+    with session_scope() as sess:
+        rows = sess.query(Project).filter(
+            Project.org_id == org_id,
+        ).order_by(Project.updated_at.desc()).all()
+        return [_row_to_dict(r) for r in rows]
+
+
+# ── Invites ────────────────────────────────────────────────────────
+
+#: How long an invite stays claimable. Long enough to survive a weekend
+#: and a forgotten inbox, short enough that a leaked link in a chat
+#: history is not a permanent back door.
+INVITE_TTL_HOURS = 168  # 7 days
+
+
+def create_invite(org_id: str, email: str, role: str, token: str, *,
+                  invited_by_user_id: str | None = None,
+                  ttl_hours: int | None = None) -> bool:
+    """Issue an invite, revoking any still-live invite for that address.
+
+    *token* is minted by the caller (``secrets.token_urlsafe(32)``) so the
+    secret never comes from the database's random source and never has to
+    be read back out.
+
+    The revoke-first step is what enforces "one pending invite per
+    address" in place of a unique constraint the schema deliberately does
+    not carry — see :class:`Invite`. It also means re-inviting someone
+    invalidates the older link, so a forwarded stale email cannot be used
+    to join at a role that was since downgraded.
+    """
+    email = normalize_email(email)
+    if not (org_id and email and token) or role not in ORG_ROLES:
+        return False
+    now = _utcnow()
+    with session_scope() as sess:
+        if sess.get(Organization, org_id) is None:
+            return False
+        live = sess.query(Invite).filter(
+            Invite.org_id == org_id,
+            Invite.email == email,
+            Invite.used_at.is_(None),
+            Invite.revoked_at.is_(None),
+            Invite.expires_at > now,
+        ).all()
+        for old in live:
+            old.revoked_at = now
+        ttl = timedelta(hours=max(1, ttl_hours or INVITE_TTL_HOURS))
+        sess.add(Invite(
+            token=token, org_id=org_id, email=email, role=role,
+            invited_by_user_id=invited_by_user_id,
+            created_at=now, expires_at=now + ttl,
+        ))
+        try:
+            sess.flush()
+        except IntegrityError:
+            sess.rollback()
+            return False
+        return True
+
+
+def get_invite(token: str) -> dict | None:
+    """Return a *claimable* invite, or ``None``.
+
+    Used, revoked and expired invites all read as ``None`` — the caller
+    gets one answer to "may this token be redeemed" and cannot
+    accidentally branch on a stale row's fields.
+    """
+    if not token:
+        return None
+    with session_scope() as sess:
+        row = sess.get(Invite, token)
+        if row is None:
+            return None
+        if row.used_at is not None or row.revoked_at is not None:
+            return None
+        if _dt_is_past(row.expires_at):
+            return None
+        return _row_to_dict(row)
+
+
+def consume_invite(token: str, user_id: str) -> str | None:
+    """Redeem an invite: mark it used and add the membership.
+
+    Returns the org id on success, ``None`` if the token is not
+    claimable. Both writes happen in one transaction, so a crash cannot
+    leave a burned token with no membership behind it — which would lock
+    the invitee out with no way to retry.
+    """
+    if not (token and user_id):
+        return None
+    now = _utcnow()
+    with session_scope() as sess:
+        row = sess.get(Invite, token)
+        if row is None or row.used_at is not None \
+                or row.revoked_at is not None or _dt_is_past(row.expires_at):
+            return None
+        if row.role not in ORG_ROLES:
+            return None
+        member = sess.query(OrgMember).filter(
+            OrgMember.org_id == row.org_id,
+            OrgMember.user_id == user_id,
+        ).one_or_none()
+        if member is None:
+            sess.add(OrgMember(org_id=row.org_id, user_id=user_id,
+                               role=row.role,
+                               added_by_user_id=row.invited_by_user_id))
+        else:
+            member.role = row.role
+        row.used_at = now
+        return row.org_id
+
+
+def revoke_invite(token: str) -> bool:
+    if not token:
+        return False
+    with session_scope() as sess:
+        row = sess.get(Invite, token)
+        if row is None or row.used_at is not None:
+            return False
+        row.revoked_at = _utcnow()
+        return True
+
+
+def list_pending_invites(org_id: str) -> list[dict]:
+    if not org_id:
+        return []
+    now = _utcnow()
+    with session_scope() as sess:
+        rows = sess.query(Invite).filter(
+            Invite.org_id == org_id,
+            Invite.used_at.is_(None),
+            Invite.revoked_at.is_(None),
+            Invite.expires_at > now,
+        ).order_by(Invite.created_at.desc()).all()
+        # Token deliberately omitted: this list renders on the members
+        # page, and a pending invite's token is a bearer credential for
+        # somebody else's seat.
+        return [{k: v for k, v in _row_to_dict(r).items() if k != "token"}
+                for r in rows]
+
+
+# ── Audit log ──────────────────────────────────────────────────────
+
+def append_audit(*, entity: str, action: str,
+                 user_id: str | None = None,
+                 org_id: str | None = None,
+                 project_id: str | None = None,
+                 entity_id: str | None = None,
+                 diff: dict | None = None) -> int | None:
+    """Record one mutation. Never raises — auditing must not be the
+    reason a user's edit fails.
+
+    Keyword-only on purpose: the five id-ish string parameters are
+    trivially transposable positionally, and an audit trail that
+    attributes edits to the wrong project is worse than none.
+    """
+    if not (entity and action):
+        return None
+    try:
+        with session_scope() as sess:
+            row = AuditLog(entity=entity, action=action, user_id=user_id,
+                           org_id=org_id, project_id=project_id,
+                           entity_id=str(entity_id) if entity_id else None,
+                           diff=diff)
+            sess.add(row)
+            sess.flush()
+            return row.id
+    except SQLAlchemyError as exc:
+        log.warning("append_audit failed (%s %s): %s", entity, action, exc)
+        return None
+
+
+def list_audit(*, org_id: str | None = None, project_id: str | None = None,
+               entity: str | None = None, entity_id: str | None = None,
+               limit: int = 100) -> list[dict]:
+    """Most-recent-first audit rows for the given scope."""
+    limit = max(1, min(int(limit or 100), 1000))
+    with session_scope() as sess:
+        q = sess.query(AuditLog)
+        if org_id:
+            q = q.filter(AuditLog.org_id == org_id)
+        if project_id:
+            q = q.filter(AuditLog.project_id == project_id)
+        if entity:
+            q = q.filter(AuditLog.entity == entity)
+        if entity_id:
+            q = q.filter(AuditLog.entity_id == str(entity_id))
+        rows = q.order_by(AuditLog.at.desc()).limit(limit).all()
+        return [_row_to_dict(r) for r in rows]
+
+
+# ── Server-side session store (E0.2) ───────────────────────────────
+
+#: A session used within this window of its deadline gets pushed forward.
+#: This is what makes expiry *sliding* — an active user is never logged
+#: out mid-task — while keeping the extension out of the write path on
+#: every request. Read side owns it so exactly one place decides whether
+#: a session is still alive.
+SESSION_SLIDE_WITHIN = timedelta(hours=24)
+
+#: How far forward a slide pushes the deadline when the caller does not
+#: say. The session interface passes its own configured lifetime; this
+#: default only covers direct callers (tests, maintenance scripts).
+SESSION_DEFAULT_LIFETIME = timedelta(days=14)
+
+
+def session_load(sid: str, *, lifetime: timedelta | None = None) -> str | None:
+    """Return a live session's payload, or ``None`` if absent/expired.
+
+    Touches ``accessed_at`` so an idle-timeout policy (E1.5) has
+    something to read, and slides ``expires_at`` forward when the row is
+    within :data:`SESSION_SLIDE_WITHIN` of expiring. Both writes are
+    deliberately part of the read: a separate "touch" call is the kind of
+    thing one code path forgets, and the symptom — a session that expires
+    under an actively working user — is close to impossible to reproduce
+    on purpose.
+    """
+    if not sid:
+        return None
+    with session_scope() as sess:
+        row = sess.get(ServerSession, sid)
+        if row is None:
+            return None
+        if _dt_is_past(row.expires_at):
+            # Drop it here rather than waiting for the vacuum, so a
+            # replayed cookie cannot resurrect anything.
+            sess.delete(row)
+            return None
+        now = _utcnow()
+        row.accessed_at = now
+        exp = row.expires_at
+        if exp is not None:
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if (exp - now) < SESSION_SLIDE_WITHIN:
+                row.expires_at = now + (lifetime or SESSION_DEFAULT_LIFETIME)
+        return row.payload
+
+
+def session_save(sid: str, payload: str, expires_at: datetime, *,
+                 user_id: str | None = None) -> bool:
+    """Upsert a session row."""
+    if not sid:
+        return False
+    now = _utcnow()
+    with session_scope() as sess:
+        row = sess.get(ServerSession, sid)
+        if row is None:
+            sess.add(ServerSession(sid=sid, payload=payload,
+                                   user_id=user_id, created_at=now,
+                                   accessed_at=now, expires_at=expires_at))
+        else:
+            row.payload = payload
+            row.expires_at = expires_at
+            row.accessed_at = now
+            # Only ever set, never cleared, by a save: signing out is an
+            # explicit delete, and a background write that happened to
+            # carry no user must not silently de-authenticate the tab.
+            if user_id:
+                row.user_id = user_id
+        return True
+
+
+def session_delete(sid: str) -> bool:
+    if not sid:
+        return False
+    with session_scope() as sess:
+        row = sess.get(ServerSession, sid)
+        if row is None:
+            return False
+        sess.delete(row)
+        return True
+
+
+def delete_sessions_for_user(user_id: str, *, except_sid: str | None = None) -> int:
+    """Invalidate every session belonging to *user_id*.
+
+    This is "sign out on all devices", and the same call a password reset
+    must make — a reset that leaves the attacker's existing session alive
+    has not recovered the account. ``except_sid`` lets the user who
+    initiated it stay signed in where they are.
+    """
+    if not user_id:
+        return 0
+    with session_scope() as sess:
+        q = sess.query(ServerSession).filter(
+            ServerSession.user_id == user_id)
+        if except_sid:
+            q = q.filter(ServerSession.sid != except_sid)
+        rows = q.all()
+        for row in rows:
+            sess.delete(row)
+        return len(rows)
+
+
+def purge_expired_sessions() -> int:
+    """Delete expired session rows. Called from the same periodic sweep
+    as the other purge helpers."""
+    now = _utcnow()
+    with session_scope() as sess:
+        rows = sess.query(ServerSession).filter(
+            ServerSession.expires_at <= now).all()
+        for row in rows:
+            sess.delete(row)
+        return len(rows)
 
 
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
@@ -2776,6 +3619,20 @@ __all__ = [
     "enqueue_browser_command", "dequeue_browser_command",
     "complete_browser_command", "get_browser_command",
     "purge_expired_browser_control",
+    # identity / tenancy / audit (E0.2, E1.1, E2.1, E2.7)
+    "ServerSession", "User", "Identity", "Organization", "OrgMember",
+    "Invite", "AuditLog",
+    "ORG_ROLES", "ROLE_RANK", "INVITE_TTL_HOURS", "normalize_email",
+    "create_user", "get_user", "get_user_by_email",
+    "link_identity", "get_user_by_identity",
+    "create_organization", "add_org_member", "get_org_role",
+    "list_org_members", "count_org_admins", "remove_org_member",
+    "set_project_org", "list_projects_for_org",
+    "create_invite", "get_invite", "consume_invite", "revoke_invite",
+    "list_pending_invites",
+    "append_audit", "list_audit",
+    "session_load", "session_save", "session_delete",
+    "delete_sessions_for_user", "purge_expired_sessions",
     # aggregates
     "count_records",
 ]

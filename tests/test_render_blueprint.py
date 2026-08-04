@@ -123,6 +123,56 @@ class TestBehaviourGatingFlagsAreDeclared:
         )
 
 
+class TestProgrammeFlagsAreDeclared:
+    """Every flag in the registry must also exist in the blueprint.
+
+    Derived from ``engine.features.FLAGS`` rather than a second hand-kept
+    list, so the failure mode this whole file exists to prevent cannot
+    recur for programme flags: adding a flag to the registry and
+    forgetting the blueprint now fails the build instead of surviving
+    until a Manual Sync quietly deletes it.
+    """
+
+    @staticmethod
+    def _registry() -> dict:
+        from engine import features
+        return features.FLAGS
+
+    def test_registry_is_not_empty(self):
+        # A green suite because the registry got emptied would be the
+        # least useful kind of green.
+        assert self._registry()
+
+    def test_web_service_declares_every_registry_flag(self, web_service):
+        env = _env_map(web_service)
+        missing = sorted(set(self._registry()) - set(env))
+        assert not missing, (
+            f"declared in engine/features.py but not in render.yaml: "
+            f"{missing}. A Manual Sync deletes undeclared vars, so a flag "
+            f"turned on in the dashboard would silently revert."
+        )
+
+    def test_registry_flags_carry_an_explicit_boolean(self, web_service):
+        env = _env_map(web_service)
+        for flag in sorted(self._registry()):
+            value = env.get(flag)
+            assert str(value) in ("0", "1"), (
+                f"{flag} must carry an explicit \"0\" or \"1\" so a fresh "
+                f"environment reproduces production rather than the code "
+                f"default. Got {value!r}."
+            )
+
+    def test_session_backend_is_declared(self, web_service):
+        # Not a boolean, so it sits outside the loop above — but it is the
+        # single most consequential value in this file: "filesystem" loses
+        # every session on restart, "db" does not.
+        value = _env_map(web_service).get("SESSION_BACKEND")
+        assert value in ("filesystem", "db"), (
+            f"SESSION_BACKEND must be declared as \"filesystem\" or "
+            f"\"db\"; got {value!r}"
+        )
+
+
 class TestRecorderFlagMatchesProduction:
     def test_web_recorder_is_on(self, web_service):
         # Read off the live dashboard on 2026-07-30. If this is ever

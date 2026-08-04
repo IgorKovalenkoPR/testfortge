@@ -13,6 +13,8 @@ references, code sketches, tests, risks, and an estimate.
 | [identity_model_spike.md](identity_model_spike.md) | S5 pre-spike | Email-vs-sid identifier model design; locks the open questions blocking Sprint 4.1 (Roles) | 1 day |
 | [tfweflo_walkthrough_integration.md](tfweflo_walkthrough_integration.md) | TFWefloLab | Port QA walkthrough heuristics from Node into Python; URL-pattern TC binding; cross-env bug dedup | ~52 h |
 | [recorder_integration.md](recorder_integration.md) | Recorder | TestLum-inspired Web Recorder via Playwright codegen CLI + multi-locator Page Object + Assertion Mode | ~70 h |
+| [cost_model.md](cost_model.md) | Programme · money | **Running TestFortge on $0/month**: free-tier component map, why the DB must leave Render free, LLM cost per active QA, BYOK, and what $0 genuinely cannot buy | — |
+| [adr/0001-project-workspace-source-of-truth.md](adr/0001-project-workspace-source-of-truth.md) | ADR | Postgres, not the Flask session, is the source of truth for a project's artefacts — the gate E4 and E7 wait on | — |
 | [team_platform_architecture.md](team_platform_architecture.md) | **Programme** | **Single-tenant tool → multi-team platform**: auth (password + Google OIDC), org/roles, session→DB workspace refactor, editors for Estimation/TC/Checklist/Bugs, storage choice, Tedgie mentor, Dashboard v2 + full test & regression stages | ~1 100 h |
 
 ## Recommended sequencing
