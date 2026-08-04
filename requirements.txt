@@ -42,3 +42,8 @@ cryptography>=42.0.0
 # hand-picked memory budget ages badly and check_needs_rehash() upgrades
 # stored hashes on the next login when the defaults move.
 argon2-cffi>=23.1.0
+# Google sign-in over OIDC — Authorization Code + PKCE (engine/oauth.py —
+# E1.4). Authlib owns state, nonce, the PKCE verifier, and the id_token's
+# signature / issuer / audience / expiry checks; hand-rolling any of those
+# is how an OIDC integration acquires a silent authentication bypass.
+Authlib>=1.3.0

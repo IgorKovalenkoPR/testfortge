@@ -45,7 +45,15 @@ a:hover { text-decoration: underline; }
 /* ── Sidebar ──────────────────────────────────────────────────── */
 .sidebar {
     width: var(--sidebar-w);
-    min-height: 100vh;
+    /* height, not min-height. With min-height on a position:fixed box the
+       sidebar simply grows past the bottom of the window when its content
+       exceeds 100vh, and overflow-y:auto below never engages — there is no
+       overflow, the box itself is just too tall, so whatever sits at the
+       end becomes unreachable. Latent until the signed-in identity block
+       (E1.2) made the nav tall enough to cross the line on a 720px-high
+       window, which put "Sign out" 55px below the fold with no way to
+       scroll to it. Bounding the height makes overflow-y do its job. */
+    height: 100vh;
     background: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
     color: #e0e7ff;
     padding: 1.5rem 0;
@@ -2231,3 +2239,121 @@ input[type="text"]:focus, textarea:focus, select:focus {
     color: var(--text-muted);
     line-height: 1.5;
 }
+
+/* Google sign-in button + "or" divider (E1.4). */
+.auth-divider {
+    position: relative;
+    margin: 1.4rem 0 1rem;
+    text-align: center;
+}
+.auth-divider::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    border-top: 1px solid var(--border);
+}
+.auth-divider span {
+    position: relative;
+    padding: 0 .7rem;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: .8rem;
+}
+.auth-google {
+    display: block;
+    width: 100%;
+    text-align: center;
+    text-decoration: none;
+    box-sizing: border-box;
+}
+
+/* Members page (E2.4). */
+.invite-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .6rem;
+    align-items: center;
+}
+.invite-row input[type="email"] { flex: 1 1 14rem; min-width: 0; }
+.invite-row select { flex: 1 1 18rem; min-width: 0; }
+.invite-note { margin: .8rem 0 0; font-size: .82rem; line-height: 1.5; }
+.inline-form { display: inline-flex; gap: .4rem; align-items: center; }
+.col-actions { text-align: right; white-space: nowrap; }
+.pill {
+    display: inline-block;
+    margin-left: .4rem;
+    padding: .05rem .4rem;
+    border-radius: 999px;
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-size: .7rem;
+    font-weight: 600;
+}
+.pill-muted { background: var(--border); color: var(--text-muted); }
+/* Wide tables scroll inside their own box rather than the page body. */
+.table-wrap { overflow-x: auto; }
+/* Visually hidden but reachable by a screen reader — used for the labels
+   on the invite row, where the placeholder carries the visual cue. */
+.sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Signed-in identity block in the sidebar (E1.2 / E2.4). Mirrors
+   .sidebar-project's treatment — dark surface, light text — rather than
+   the light-card tokens the main content uses.
+
+   It claims the free space with `margin-top: auto`, and gives that up
+   when a .sidebar-project block precedes it. The first draft skipped the
+   auto margin on the reasoning that .sidebar-project already pins the
+   bottom — but that block only renders when a project is active, which is
+   not the common case, so with no project this one just followed the nav
+   and fell off the end. Two auto margins in a flex column split the free
+   space between them, which would leave a gap mid-nav, hence the
+   adjacent-sibling override rather than putting it on both. */
+.sidebar-user {
+    padding: .8rem 1.2rem;
+    border-top: 1px solid rgba(255,255,255,.1);
+    font-size: .8rem;
+    margin-top: auto;
+    /* Sticky, not merely last. Bounding the sidebar's height made the nav
+       scrollable, which is correct — but it left "Sign out" below the fold
+       on a 720px-high window, reachable only by scrolling a sidebar most
+       people never scroll. Pinning it to the bottom of the scrollport
+       keeps the account controls where they are always visible.
+       An opaque background is required: the sidebar's own fill is a
+       gradient on the parent, so without one the nav items would show
+       through this block wherever they overlap. */
+    position: sticky;
+    bottom: 0;
+    background: #1A1D24;
+}
+.sidebar-project + .sidebar-user { margin-top: 0; }
+.sidebar-user small {
+    display: block;
+    color: #a5b4fc;
+    overflow-wrap: anywhere;   /* long email addresses must not widen the nav */
+}
+.sidebar-user .pill {
+    margin: .3rem 0 0;
+    background: rgba(255,255,255,.14);
+    color: #fff;
+}
+.sidebar-user form { margin: .5rem 0 0; }
+.sidebar-signout {
+    padding: 0;
+    font: inherit;
+    color: #a5b4fc;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    text-decoration: underline;
+}
+.sidebar-signout:hover { color: #fff; }

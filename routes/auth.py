@@ -30,10 +30,19 @@ from flask import (Flask, flash, jsonify, redirect, render_template, request,
 
 from engine import auth as _auth
 from engine import db as _db
+from engine import oauth as _oauth
 from engine import permissions as _perm
 from engine.log import get_logger
 
 log = get_logger(__name__)
+
+#: Session key holding the invite a Google sign-in is redeeming.
+#:
+#: Carried in the session rather than round-tripped through the OAuth
+#: ``state`` parameter, which is Authlib's to manage, and rather than
+#: through the redirect URI, which has to match a value registered with
+#: Google exactly and therefore cannot carry a token.
+_PENDING_INVITE_KEY = "_pending_invite"
 
 
 def _safe_next(raw: str | None, default_endpoint: str = "index") -> str:
@@ -76,6 +85,11 @@ def _first_org_for(user_id: str) -> str | None:
 def register(app: Flask) -> None:
     """Attach the authentication routes."""
 
+    # Built once at registration. ``None`` when GOOGLE_CLIENT_ID /
+    # GOOGLE_CLIENT_SECRET are unset, in which case the button is hidden
+    # rather than rendered to 500 at the callback.
+    oauth = _oauth.build_oauth(app)
+
     @app.route("/auth/login", methods=["GET", "POST"])
     def auth_login():
         if _perm.current_user() is not None:
@@ -83,7 +97,8 @@ def register(app: Flask) -> None:
 
         if request.method == "GET":
             return render_template("auth_login.html",
-                                   next_url=request.args.get("next", ""))
+                                   next_url=request.args.get("next", ""),
+                                   google_enabled=oauth is not None)
 
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
@@ -105,6 +120,7 @@ def register(app: Flask) -> None:
                 "auth_login.html",
                 next_url=request.form.get("next", ""),
                 email=email,
+                google_enabled=oauth is not None,
             ), 401
 
         user = result.user or {}
@@ -138,12 +154,14 @@ def register(app: Flask) -> None:
             # were real to anyone spraying guesses at the endpoint.
             flash("That invitation link is no longer valid. Ask an admin "
                   "to send a new one.", "error")
-            return render_template("auth_invite.html", invalid=True), 410
+            return render_template("auth_invite.html", invalid=True,
+                                   google_enabled=oauth is not None), 410
 
         org = _db.get_organization(invite["org_id"]) or {}
 
         if request.method == "GET":
             return render_template("auth_invite.html", invite=invite,
+                                   google_enabled=oauth is not None,
                                    org_name=org.get("name", "the team"),
                                    min_password_len=_auth.MIN_PASSWORD_LEN)
 
@@ -174,6 +192,7 @@ def register(app: Flask) -> None:
             flash("The two passwords do not match.", "error")
             return render_template(
                 "auth_invite.html", invite=invite,
+                                   google_enabled=oauth is not None,
                 org_name=org.get("name", "the team"),
                 display_name=display_name,
                 min_password_len=_auth.MIN_PASSWORD_LEN), 400
@@ -184,6 +203,7 @@ def register(app: Flask) -> None:
             flash(str(exc), "error")
             return render_template(
                 "auth_invite.html", invite=invite,
+                                   google_enabled=oauth is not None,
                 org_name=org.get("name", "the team"),
                 display_name=display_name,
                 min_password_len=_auth.MIN_PASSWORD_LEN), 400
@@ -219,6 +239,134 @@ def register(app: Flask) -> None:
         _perm.login_user(user_id, org_id=org_id)
         flash(f"Welcome to {org.get('name', 'the team')}.", "success")
         return redirect(url_for("index"))
+
+    # ── Google sign-in (E1.4) ─────────────────────────────────────
+
+    @app.route("/auth/google", methods=["GET"])
+    def auth_google_start():
+        """Kick off the Authorization Code + PKCE flow.
+
+        Authlib mints and stores ``state``, ``nonce`` and the PKCE
+        verifier in the session; the callback below relies on it to check
+        all three. We add only the invite token, when the user arrived
+        from an invitation and chose Google instead of a password.
+        """
+        if oauth is None:
+            flash("Google sign-in is not configured on this instance.",
+                  "error")
+            return redirect(url_for("auth_login"))
+
+        invite_token = (request.args.get("invite") or "").strip()
+        if invite_token:
+            session[_PENDING_INVITE_KEY] = invite_token
+        else:
+            session.pop(_PENDING_INVITE_KEY, None)
+
+        # Where to land afterwards. Validated on the way out, not here,
+        # so a hostile value cannot survive in the session and be honoured
+        # by some later redirect.
+        session["_post_login_next"] = _safe_next(request.args.get("next"))
+
+        redirect_uri = url_for("auth_google_callback", _external=True)
+        return oauth.google.authorize_redirect(redirect_uri)
+
+    @app.route("/auth/google/callback", methods=["GET"])
+    def auth_google_callback():
+        if oauth is None:
+            return redirect(url_for("auth_login"))
+
+        invite_token = session.pop(_PENDING_INVITE_KEY, None)
+        next_url = _safe_next(session.pop("_post_login_next", None))
+
+        try:
+            # Exchanges the code, verifies the id_token's signature,
+            # issuer, audience, expiry and nonce. Everything after this
+            # line may treat the claims as authentic — and nothing before
+            # it may.
+            token = oauth.google.authorize_access_token()
+        except Exception as exc:
+            # Covers a mismatched state (CSRF on the OAuth flow), a
+            # replayed or expired code, and a user who clicked "cancel".
+            log.warning("google callback rejected: %s: %s",
+                        type(exc).__name__, exc)
+            flash(_oauth.GENERIC_REFUSAL, "error")
+            return redirect(url_for("auth_login"))
+
+        claims = (token or {}).get("userinfo") or {}
+        if not claims:
+            try:
+                claims = oauth.google.parse_id_token(token) or {}
+            except Exception as exc:  # pragma: no cover — defensive
+                log.warning("google id_token unreadable: %s", exc)
+                claims = {}
+        if not claims:
+            flash(_oauth.GENERIC_REFUSAL, "error")
+            return redirect(url_for("auth_login"))
+
+        decision = _oauth.decide(claims, invite_token)
+        log.info("google sign-in decision=%s reason=%s",
+                 decision.action, decision.reason or "-")
+
+        if decision.action == "refuse":
+            # One message for every refusal. The reasons distinguish "no
+            # account here" from "your address is unverified", and the
+            # first is an account-enumeration oracle that needs no
+            # password at all.
+            flash(_oauth.GENERIC_REFUSAL, "error")
+            return redirect(url_for("auth_login"))
+
+        subject = str(claims.get("sub"))
+
+        if decision.action == "provision":
+            user_id = _db.create_user(
+                decision.email,
+                display_name=_oauth.display_name_from(claims),
+                # No password: this account signs in with Google. Setting
+                # one would be a credential nobody rotates.
+                password_hash=None,
+                # Google asserted email_verified for this address, and
+                # engine.oauth.decide refuses to get here otherwise.
+                email_verified=True,
+            )
+            if not user_id:
+                # Lost a race with another claim of the same invite.
+                flash(_oauth.GENERIC_REFUSAL, "error")
+                return redirect(url_for("auth_login"))
+            org_id = _db.consume_invite(decision.invite_token, user_id)
+            if not org_id:
+                log.warning("invite went stale during google provisioning "
+                            "for user %s", user_id[:8])
+                flash("Your account was created, but the invitation had "
+                      "expired. Ask an admin to invite you again.", "error")
+                return redirect(url_for("auth_login"))
+            _db.link_identity(user_id, _oauth.PROVIDER, subject,
+                              email=decision.email)
+            _db.append_audit(entity="user", action="create", user_id=user_id,
+                             org_id=org_id,
+                             diff={"via": "google", "invite": True})
+            _perm.login_user(user_id, org_id=org_id)
+            flash("Welcome to TestForTge.", "success")
+            return redirect(next_url)
+
+        user_id = decision.user_id
+        if decision.action == "link":
+            if not _db.link_identity(user_id, _oauth.PROVIDER, subject,
+                                     email=decision.email):
+                # The identity is already bound to somebody else. Refuse
+                # rather than re-point it — that would hand one person's
+                # workspace to another.
+                log.warning("google identity for user %s could not be "
+                            "linked", (user_id or "")[:8])
+                flash(_oauth.GENERIC_REFUSAL, "error")
+                return redirect(url_for("auth_login"))
+            _db.append_audit(entity="identity", action="link",
+                             user_id=user_id, diff={"provider": "google"})
+
+        _perm.login_user(user_id, org_id=_first_org_for(user_id))
+        _db.append_audit(entity="user", action="login", user_id=user_id,
+                         org_id=_perm.current_org_id(),
+                         diff={"via": "google"})
+        return redirect(next_url)
 
     @app.route("/auth/me", methods=["GET"])
     def auth_me():

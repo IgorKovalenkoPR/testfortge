@@ -165,6 +165,20 @@ services:
       # than stored in the clear, and the platform key is used.
       - key: TESTFORTGE_ENCRYPTION_KEY
         generateValue: true
+      # ── Google sign-in (E1.4) ─────────────────────────────────────
+      #
+      # `sync: false` — both live in the dashboard. The secret must not be
+      # in this repository, and the client id is declared alongside it so a
+      # Manual Sync cannot delete one and leave the other: half-configured
+      # means the button renders and then fails at the callback, which is
+      # worse than the button not being there.
+      #
+      # Register this redirect URI on the OAuth client:
+      #   https://testfortge.onrender.com/auth/google/callback
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       # Web Recorder (Sprint 8 PR-B/E). Declared here because it was
       # already set to 1 by hand on the live service while being absent
       # from this blueprint — so a Manual Sync would have deleted it, and

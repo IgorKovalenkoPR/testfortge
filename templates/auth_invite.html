@@ -43,8 +43,24 @@
            autocomplete="new-password" required
            minlength="{{ min_password_len }}">
 
-    <button type="submit" class="btn-primary">Create account and join</button>
+    <button type="submit" class="btn btn-primary">Create account and join</button>
   </form>
+
+  {% if google_enabled %}
+  <div class="auth-divider"><span>or</span></div>
+  {# The invite token rides along so the callback can consume it. Google
+     must assert the *same* verified address the invite was issued to —
+     engine/oauth.decide refuses a mismatch, otherwise anyone holding the
+     link could join as whoever they liked. #}
+  <a class="btn btn-secondary auth-google"
+     href="{{ url_for('auth_google_start', invite=invite.token) }}">
+    Join with Google instead
+  </a>
+  <p class="auth-hint">
+    Use the Google account for {{ invite.email }} — the invitation is tied
+    to that address.
+  </p>
+  {% endif %}
 {% endif %}
 </div>
 {% endblock %}

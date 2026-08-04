@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Team — TestForTge{% endblock %}
+
+{% block content %}
+{% if not org %}
+  <div class="card">
+    <h1>You are not on a team yet</h1>
+    <p class="text-muted">
+      Ask whoever set up TestForTge for your organisation to invite you,
+      or create an organisation from Settings.
+    </p>
+  </div>
+{% else %}
+<div class="page-head">
+  <h1>{{ org.name }}</h1>
+  <p class="text-muted">
+    {{ members|length }} member{{ '' if members|length == 1 else 's' }}{% if is_admin and invites %},
+    {{ invites|length }} pending invitation{{ '' if invites|length == 1 else 's' }}{% endif %}.
+  </p>
+</div>
+
+{% if is_admin %}
+<div class="card">
+  <h2>Invite someone</h2>
+  <form method="post" action="{{ url_for('org_invite') }}" class="invite-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="invite-row">
+      <label class="sr-only" for="invite_email">Email address</label>
+      <input type="email" id="invite_email" name="email" required
+             placeholder="colleague@company.com" autocomplete="off">
+
+      <label class="sr-only" for="invite_role">Role</label>
+      <select id="invite_role" name="role">
+        <option value="user" selected>User — works with everything</option>
+        <option value="admin">Admin — also creates projects and changes settings</option>
+      </select>
+
+      <button type="submit" class="btn btn-primary">Create invitation</button>
+    </div>
+  </form>
+  <p class="text-muted invite-note">
+    {# Honest about the mechanism: promising an email while delivery is
+       unbuilt (E0.4) would leave the admin waiting for a message that
+       never arrives. #}
+    You will get a link to send them yourself — TestForTge does not send
+    email on this plan. Links are valid for 7 days, and inviting the same
+    address again cancels the earlier link.
+  </p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Members</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          {% if is_admin %}<th class="col-actions">Actions</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in members %}
+        <tr>
+          <td>
+            {{ m.display_name or '—' }}
+            {% if m.user_id == me %}<span class="pill">you</span>{% endif %}
+            {% if not m.is_active %}<span class="pill pill-muted">deactivated</span>{% endif %}
+          </td>
+          <td>{{ m.email }}</td>
+          <td>
+            {% if is_admin %}
+            <form method="post"
+                  action="{{ url_for('org_change_role', user_id=m.user_id) }}"
+                  class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="role" aria-label="Role for {{ m.email }}">
+                {% for r in roles %}
+                <option value="{{ r }}" {% if r == m.role %}selected{% endif %}>{{ r }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-secondary btn-sm">Save</button>
+            </form>
+            {% else %}
+              {{ m.role }}
+            {% endif %}
+          </td>
+          {% if is_admin %}
+          <td class="col-actions">
+            <form method="post"
+                  action="{{ url_for('org_remove_member', user_id=m.user_id) }}"
+                  class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if is_admin and admin_count == 1 %}
+  <p class="text-muted invite-note">
+    {# Surfaced before they try, rather than as an error afterwards. #}
+    You are the only admin. Promote someone else before changing your own
+    role or removing yourself — otherwise nobody could create projects or
+    change settings.
+  </p>
+  {% endif %}
+</div>
+
+{% if is_admin and invites %}
+<div class="card">
+  <h2>Pending invitations</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>Email</th><th>Role</th><th>Expires</th><th class="col-actions"></th></tr>
+      </thead>
+      <tbody>
+        {% for inv in invites %}
+        <tr>
+          <td>{{ inv.email }}</td>
+          <td>{{ inv.role }}</td>
+          <td>{{ (inv.expires_at or '')[:10] }}</td>
+          <td class="col-actions">
+            {# Keyed on the address, not the token: the token is a bearer
+               credential for this person's seat, so it never reaches the
+               page. The server scopes the lookup to this organisation. #}
+            <form method="post" action="{{ url_for('org_revoke_invite') }}"
+                  class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="email" value="{{ inv.email }}">
+              <button type="submit" class="btn btn-secondary btn-sm">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
+{% endblock %}

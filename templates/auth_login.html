@@ -23,8 +23,20 @@
     <input type="password" id="password" name="password"
            autocomplete="current-password" required>
 
-    <button type="submit" class="btn-primary">Sign in</button>
+    <button type="submit" class="btn btn-primary">Sign in</button>
   </form>
+
+  {% if google_enabled %}
+  <div class="auth-divider"><span>or</span></div>
+  {# A link, not a form: the OAuth flow starts with a GET redirect and
+     carries no user input, so there is nothing for a CSRF token to
+     protect. The flow's own CSRF defence is the `state` parameter,
+     which Authlib mints and checks. #}
+  <a class="btn btn-secondary auth-google"
+     href="{{ url_for('auth_google_start', next=next_url or '') }}">
+    Continue with Google
+  </a>
+  {% endif %}
 
   <p class="auth-note">
     TestForTge is invite-only. Ask an admin on your team to send you an

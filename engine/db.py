@@ -1605,6 +1605,41 @@ def count_org_admins(org_id: str) -> int:
         ).scalar() or 0)
 
 
+def change_org_role(org_id: str, user_id: str, role: str) -> bool:
+    """Change a member's role, refusing to demote the last admin.
+
+    Separate from :func:`add_org_member` precisely because of that guard.
+    ``remove_org_member`` has always had it, but demotion is the same
+    failure with a different verb: an org whose only admin becomes a plain
+    user has nobody who can create a project, change settings, or promote
+    anyone back — and no way to recover without a DBA. The two doors to
+    that state need the same lock.
+    """
+    if role not in ORG_ROLES:
+        log.warning("change_org_role: unknown role %r", role)
+        return False
+    if not (org_id and user_id):
+        return False
+    with session_scope() as sess:
+        row = sess.query(OrgMember).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+        ).one_or_none()
+        if row is None:
+            return False
+        if row.role == role:
+            return True                     # idempotent
+        if row.role == "admin" and role != "admin":
+            admins = int(sess.query(func.count(OrgMember.id)).filter(
+                OrgMember.org_id == org_id,
+                OrgMember.role == "admin",
+            ).scalar() or 0)
+            if admins <= 1:
+                return False
+        row.role = role
+        return True
+
+
 def remove_org_member(org_id: str, user_id: str) -> bool:
     """Remove a membership, refusing to strand the org without an admin.
 
@@ -1766,6 +1801,35 @@ def consume_invite(token: str, user_id: str) -> str | None:
             member.role = row.role
         row.used_at = now
         return row.org_id
+
+
+def revoke_invites_for_email(org_id: str, email: str) -> int:
+    """Cancel every live invitation for *email* in *org_id*.
+
+    Keyed on the address rather than the token so the members page can
+    offer a cancel button without rendering a token that is a bearer
+    credential for somebody else's seat. Scoped to one organisation, so an
+    admin of one team cannot cancel another team's invitations.
+
+    Returns how many rows were revoked — normally 0 or 1, since
+    :func:`create_invite` already revokes older ones, but written as a
+    count so a historical duplicate cannot survive the cancel.
+    """
+    email = normalize_email(email)
+    if not (org_id and email):
+        return 0
+    now = _utcnow()
+    with session_scope() as sess:
+        rows = sess.query(Invite).filter(
+            Invite.org_id == org_id,
+            Invite.email == email,
+            Invite.used_at.is_(None),
+            Invite.revoked_at.is_(None),
+            Invite.expires_at > now,
+        ).all()
+        for row in rows:
+            row.revoked_at = now
+        return len(rows)
 
 
 def revoke_invite(token: str) -> bool:
@@ -4021,9 +4085,12 @@ __all__ = [
     "purge_llm_usage",
     "create_organization", "add_org_member", "get_org_role",
     "list_org_members", "count_org_admins", "remove_org_member",
+    "change_org_role", "set_password_hash", "mark_email_verified",
+    "touch_last_login", "bump_login_failure", "clear_login_failures",
+    "lock_user", "set_user_active",
     "set_project_org", "list_projects_for_org",
     "create_invite", "get_invite", "consume_invite", "revoke_invite",
-    "list_pending_invites",
+    "revoke_invites_for_email", "list_pending_invites",
     "append_audit", "list_audit",
     "session_load", "session_save", "session_delete",
     "delete_sessions_for_user", "purge_expired_sessions",

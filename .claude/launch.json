@@ -8,6 +8,23 @@
       "port": 5000
     },
     {
+      "name": "qa-forge-auth",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5001,
+      "env": {
+        "FLASK_DEBUG": "1",
+        "TESTFORTGE_PORT": "5001",
+        "TESTFORTGE_DB": "storage/devpreview.db",
+        "SECRET_KEY": "dev-preview-only-not-a-secret",
+        "AUTH_ENABLED": "1",
+        "ORG_MODE": "1",
+        "SESSION_BACKEND": "db",
+        "TESTFORTGE_BASIC_USER": "",
+        "TESTFORTGE_BASIC_PASSWORD": ""
+      }
+    },
+    {
       "name": "marketing",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5173", "--directory", "marketing"],

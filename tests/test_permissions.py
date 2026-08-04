@@ -280,8 +280,10 @@ class TestEveryRouteIsClassified:
         # Ops probes. Monitors call these without credentials by design;
         # /metrics is separately gated by OPS_ENDPOINTS_TOKEN.
         "healthz", "readyz", "metrics",
-        # The authentication surface itself.
+        # The authentication surface itself. Each is reachable before
+        # anyone is signed in, which is the whole point of it.
         "auth_login", "auth_logout", "auth_accept_invite", "auth_me",
+        "auth_google_start", "auth_google_callback",
         # Static files.
         "static",
         # Token-authenticated machine endpoints. Each carries its own
