@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Not allowed — TestForTge{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <h1>You do not have access to this</h1>
+  <p class="auth-sub">
+    {% if required_role == 'admin' %}
+      Creating projects and changing settings is limited to admins on your
+      team.
+    {% else %}
+      This action needs the <strong>{{ required_role }}</strong> role.
+    {% endif %}
+  </p>
+  <p class="auth-note">
+    {# Naming the way out matters more than naming the rule: a 403 that
+       only says "forbidden" turns into a support message, and the answer
+       is almost always "ask the admin who invited you". #}
+    Ask an admin on your team to change your role, or to do this for you.
+    <br>
+    <a href="{{ url_for('index') }}">Back to the dashboard</a>
+  </p>
+</div>
+{% endblock %}

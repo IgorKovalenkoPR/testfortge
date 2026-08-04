@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Sign in — TestForTge{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <h1>Sign in</h1>
+  <p class="auth-sub">TestForTge — QA documentation, execution and metrics
+    for your team.</p>
+
+  <form method="post" action="{{ url_for('auth_login') }}" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {# Carried through the POST so the redirect lands where the user was
+       heading. Validated server-side in routes/auth.py::_safe_next — a
+       sign-in page is the most attractive place in any app for an open
+       redirect, because the user has just been asked to trust it. #}
+    <input type="hidden" name="next" value="{{ next_url or '' }}">
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ email or '' }}"
+           autocomplete="username" required autofocus>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="current-password" required>
+
+    <button type="submit" class="btn-primary">Sign in</button>
+  </form>
+
+  <p class="auth-note">
+    TestForTge is invite-only. Ask an admin on your team to send you an
+    invitation.
+  </p>
+</div>
+
+{% endblock %}

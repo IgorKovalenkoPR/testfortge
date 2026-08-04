@@ -1326,6 +1326,106 @@ def get_user_by_email(email: str | None) -> dict | None:
         return _row_to_dict(row) if row else None
 
 
+def set_password_hash(user_id: str, password_hash: str) -> bool:
+    """Store a new password hash. Used by sign-up, reset, and the
+    on-login rehash when cost parameters change."""
+    if not (user_id and password_hash):
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.password_hash = password_hash
+        return True
+
+
+def mark_email_verified(user_id: str) -> bool:
+    if not user_id:
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.email_verified = True
+        return True
+
+
+def touch_last_login(user_id: str) -> bool:
+    if not user_id:
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.last_login_at = _utcnow()
+        return True
+
+
+def bump_login_failure(user_id: str) -> int:
+    """Increment the failed-login counter and return the new value.
+
+    Incremented with a SQL expression rather than read-modify-write. Two
+    concurrent wrong-password attempts — which is precisely the shape of
+    an attack — would otherwise both read the same value and each write
+    n+1, so the counter would advance by one instead of two and the
+    lockout threshold would take twice as many attempts to reach.
+    """
+    if not user_id:
+        return 0
+    with session_scope() as sess:
+        sess.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(failed_logins=User.failed_logins + 1)
+        )
+        sess.flush()
+        return int(sess.query(User.failed_logins).filter(
+            User.id == user_id).scalar() or 0)
+
+
+def clear_login_failures(user_id: str) -> bool:
+    """Reset the counters after a successful login."""
+    if not user_id:
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.failed_logins = 0
+        row.locked_until = None
+        row.last_login_at = _utcnow()
+        return True
+
+
+def lock_user(user_id: str, until: datetime) -> bool:
+    if not (user_id and until):
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.locked_until = until
+        return True
+
+
+def set_user_active(user_id: str, active: bool) -> bool:
+    """Deactivate or reactivate an account.
+
+    Deactivation rather than deletion is the default for a departing
+    colleague: their name still has to resolve on every test case they
+    wrote and every bug they filed, and a deleted row turns an audit
+    trail into a list of orphaned ids.
+    """
+    if not user_id:
+        return False
+    with session_scope() as sess:
+        row = sess.get(User, user_id)
+        if row is None:
+            return False
+        row.is_active = bool(active)
+        return True
+
+
 def link_identity(user_id: str, provider: str, subject: str,
                   email: str | None = None) -> bool:
     """Bind an external provider identity to an existing user.

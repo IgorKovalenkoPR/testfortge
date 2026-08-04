@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Accept invitation — TestForTge{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+{% if invalid %}
+  <h1>This invitation has expired</h1>
+  <p class="auth-sub">
+    Invitation links are valid for seven days, and are cancelled when a
+    newer one is sent to the same address.
+  </p>
+  <p class="auth-note">
+    Ask an admin on your team to send a new invitation.
+    <a href="{{ url_for('auth_login') }}">Already have an account? Sign in.</a>
+  </p>
+{% else %}
+  <h1>Join {{ org_name }}</h1>
+  <p class="auth-sub">
+    You were invited as <strong>{{ invite.email }}</strong>
+    with the <strong>{{ invite.role }}</strong> role.
+  </p>
+
+  <form method="post" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="display_name">Your name</label>
+    <input type="text" id="display_name" name="display_name"
+           value="{{ display_name or '' }}" autocomplete="name"
+           placeholder="How your name appears on test cases and bugs">
+
+    <label for="password">Choose a password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="new-password" required
+           minlength="{{ min_password_len }}">
+    <p class="auth-hint">
+      At least {{ min_password_len }} characters. A short phrase of a few
+      words is stronger than a scrambled word, and easier to remember —
+      there are no symbol or digit requirements.
+    </p>
+
+    <label for="password_confirm">Confirm password</label>
+    <input type="password" id="password_confirm" name="password_confirm"
+           autocomplete="new-password" required
+           minlength="{{ min_password_len }}">
+
+    <button type="submit" class="btn-primary">Create account and join</button>
+  </form>
+{% endif %}
+</div>
+{% endblock %}

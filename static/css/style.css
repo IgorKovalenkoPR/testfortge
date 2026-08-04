@@ -2164,3 +2164,70 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .badge-failed      { background: #fee2e2; color: #991b1b; }
 .badge-blocked     { background: #fef3c7; color: #92400e; }
 .badge-skipped     { background: #e2e8f0; color: #475569; }
+
+/* ── Auth pages (E1.2) ─────────────────────────────────────────────
+   Shared by auth_login.html and auth_invite.html. Lives here rather
+   than in a <style> block in each template for the obvious reason —
+   two copies of a card style drift — and for a less obvious one: the
+   app serves a strict CSP with a per-request nonce, so a stylesheet is
+   the path that needs no exception. Uses the existing :root tokens so
+   these pages inherit the theme instead of inventing a second one. */
+.auth-card {
+    max-width: 26rem;
+    margin: 3rem auto;
+    padding: 2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+}
+.auth-card h1 { margin: 0 0 .35rem; font-size: 1.45rem; }
+.auth-sub {
+    margin: 0 0 1.5rem;
+    color: var(--text-muted);
+    font-size: .9rem;
+    line-height: 1.5;
+}
+.auth-card label {
+    display: block;
+    margin: 1rem 0 .3rem;
+    font-weight: 600;
+    font-size: .875rem;
+}
+.auth-card input[type="email"],
+.auth-card input[type="password"],
+.auth-card input[type="text"] {
+    width: 100%;
+    padding: .6rem .7rem;
+    font: inherit;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+.auth-card input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+.auth-card button[type="submit"] {
+    width: 100%;
+    margin-top: 1.5rem;
+    padding: .7rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    border: 0;
+    border-radius: 6px;
+}
+.auth-note {
+    margin: 1.5rem 0 0;
+    font-size: .82rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+.auth-hint {
+    margin: .35rem 0 0;
+    font-size: .8rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}

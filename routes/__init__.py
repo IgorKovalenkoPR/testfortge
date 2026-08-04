@@ -10,13 +10,17 @@ from __future__ import annotations
 
 from flask import Flask
 
-from . import (dashboard, projects, generation, execution,
+from . import (auth, dashboard, projects, generation, execution,
                execution_live, execution_manual, bugs, automation,
                estimation, chat, ops, guide, debug)
 
 
 def register_all(app: Flask) -> None:
     """Attach every routes/*.py module to the app."""
+    # First, so ``url_for("auth_login")`` resolves for the redirect that
+    # engine.permissions issues when an unauthenticated caller reaches a
+    # protected route.
+    auth.register(app)
     dashboard.register(app)
     projects.register(app)
     generation.register(app)
@@ -55,6 +59,21 @@ def register_all(app: Flask) -> None:
             # Defensive: a context-processor exception 500s the page,
             # which is much worse than just hiding the picker.
             return {"projects": [], "active_project_id": ""}
+
+    # Identity + role, for every template. Lets the UI hide what the
+    # server would refuse — which is politeness, not security; the
+    # boundary is engine.permissions' decorators. Same defensive shape as
+    # above: a failure here must not 500 the page, and the fallback is the
+    # least-privileged reading of every flag.
+    @app.context_processor
+    def _inject_identity_context():
+        try:
+            from engine import permissions as _perm
+            return _perm.template_context()
+        except Exception:
+            return {"auth_active": False, "org_active": False,
+                    "current_user": None, "current_role": None,
+                    "is_admin": False}
 
 
 __all__ = ["register_all"]

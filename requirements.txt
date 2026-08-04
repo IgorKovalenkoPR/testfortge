@@ -37,3 +37,8 @@ psutil>=5.9.0
 # dependency is how a fresh CI install breaks on a version bump nobody
 # made.
 cryptography>=42.0.0
+# Argon2id password hashing (engine/auth.py — E1.2). The library's own
+# defaults track RFC 9106; we do not pin cost parameters here, because a
+# hand-picked memory budget ages badly and check_needs_rehash() upgrades
+# stored hashes on the next login when the defaults move.
+argon2-cffi>=23.1.0
