@@ -597,6 +597,19 @@ def pack_estimation(session_obj=None):
     return _ws.latest_estimation(resolve_active_project(session_obj, pin=False))
 
 
+def pack_version(kind: str, session_obj=None) -> int:
+    """The active project's current version for *kind*.
+
+    Read this before a read-modify-write and pass it back to
+    :func:`store_pack`, so a save that lost a race is refused instead of
+    deleting the winner's rows. ``kind`` is ``"test_cases"`` or
+    ``"checklist"``.
+    """
+    from engine import workspace as _ws
+    pid = resolve_active_project(session_obj, pin=False)
+    return int(_ws.pack_versions(pid).get(kind, 0)) if pid else 0
+
+
 def mirror_pack(session_key: str, rows, session_obj=None) -> None:
     """Record that a pack was written, and keep the session copy in step.
 
@@ -745,7 +758,7 @@ __all__ = [
     "get_picker_context", "visible_projects",
     # The active project's pack — the one way route modules read it.
     "pack_cleared", "pack_test_cases", "pack_checklist", "pack_bugs",
-    "pack_runs", "pack_estimation", "mirror_pack",
+    "pack_runs", "pack_estimation", "mirror_pack", "pack_version",
     "ensure_active_project",
     # dashboard metric helpers
     "kpi_value", "kpi_defect_density",

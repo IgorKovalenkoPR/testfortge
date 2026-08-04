@@ -44,6 +44,7 @@ from ._shared import (
     parse_page_input, extract_resource_urls, ensure_active_project,
     resolve_active_project, SERVER_START_TIME,
     pack_cleared, pack_test_cases, pack_checklist, mirror_pack,
+    pack_version,
 )
 
 # Hard cap on concurrent generation jobs per session — same threshold
@@ -577,7 +578,36 @@ _cl_rows = pack_checklist
 _mirror = mirror_pack
 
 
-def _store_test_cases(tc_dicts: list[dict]) -> None:
+def _conflict_response(exc, *, redirect_to: str = "test_cases_page"):
+    """One answer to a lost race, for every site that can lose one.
+
+    409, not 400 or 500: the request was well-formed and the server is
+    healthy — the caller's copy of the pack is simply out of date, and the
+    fix is to reload and redo. A single responder because a conflict is
+    confusing enough without three pages explaining it three ways.
+    """
+    message = (
+        "Someone else changed this project while you were working. "
+        "Reload the page to see their version, then make your change again."
+    )
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify({
+            "error": "conflict",
+            "message": message,
+            # Enough for a client to say how far behind it is, without
+            # revealing anything about who made the change.
+            "expected_version": getattr(exc, "expected", None),
+            "current_version": getattr(exc, "actual", None),
+        }), 409
+    flash(message, "error")
+    # 409 with a redirect: the status is the machine-readable fact and the
+    # flash is the human one. A bare 302 would let a fetch() caller believe
+    # the edit landed.
+    return redirect(url_for(redirect_to)), 409
+
+
+def _store_test_cases(tc_dicts: list[dict], *,
+                      expected_version: int | None = None) -> None:
     """Write the pack: database first, session mirror second.
 
     Best-effort on the database: an outage must not stop the user seeing
@@ -588,18 +618,28 @@ def _store_test_cases(tc_dicts: list[dict]) -> None:
     pid = ensure_active_project()
     if pid:
         try:
-            _workspace.save_test_cases(pid, tc_dicts)
+            _workspace.save_test_cases(pid, tc_dicts,
+                                       expected_version=expected_version)
+        except _db.WriteConflict:
+            # Never swallowed. A conflict means somebody else's work is at
+            # stake, and the caller has to tell the user rather than let the
+            # save look as though it landed.
+            raise
         except Exception as exc:  # pragma: no cover — best-effort write
             _log.warning("persist test cases failed: %s", exc)
     _mirror("test_cases_data", tc_dicts)
 
 
-def _store_checklist(cl_dicts: list[dict]) -> None:
+def _store_checklist(cl_dicts: list[dict], *,
+                     expected_version: int | None = None) -> None:
     """Same contract as :func:`_store_test_cases`, for the checklist."""
     pid = ensure_active_project()
     if pid:
         try:
-            _workspace.save_checklist(pid, cl_dicts)
+            _workspace.save_checklist(pid, cl_dicts,
+                                      expected_version=expected_version)
+        except _db.WriteConflict:
+            raise
         except Exception as exc:  # pragma: no cover
             _log.warning("persist checklist failed: %s", exc)
     _mirror("checklist_data", cl_dicts)
@@ -1274,9 +1314,17 @@ def register(app: Flask) -> None:
             return redirect(_back_to_caller(default="test_cases_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
+        # An append is a read-modify-write; a replace is not, and asking
+        # for a version there would refuse an upload the user explicitly
+        # asked to overwrite with.
+        pack_v = pack_version("test_cases") if mode == "append" else None
         existing = _tc_rows() if mode == "append" else []
         merged = existing + [tc_to_dict(tc) for tc in cases]
-        _store_test_cases(merged)
+        try:
+            _store_test_cases(merged, expected_version=pack_v)
+        except _db.WriteConflict as exc:
+            _log.info("test-case upload conflict: %s", exc)
+            return _conflict_response(exc)
         # Imported packs don't carry their own user stories, so reset
         # the traceability matrix — it would otherwise reference IDs
         # that no longer exist.
@@ -1310,6 +1358,10 @@ def register(app: Flask) -> None:
     # fetch) or a redirect back to /test-cases (for noscript posts).
     @app.route("/test-cases/<tc_id>/walkthrough-meta", methods=["POST"])
     def test_cases_update_walkthrough_meta(tc_id: str):
+        # Read the version with the pack: everything between here and
+        # the write below is a read-modify-write, which is exactly
+        # where a lost update comes from.
+        pack_v = pack_version("test_cases")
         tc_data = _tc_rows()
         target = None
         for tc in tc_data:
@@ -1335,9 +1387,15 @@ def register(app: Flask) -> None:
 
         target["url_pattern"] = url_pattern
         target["trigger"] = trigger
-        # Whole-pack write: save_test_cases is wipe-and-replace, and
-        # ``tc_data`` is the pack as it now stands, edit included.
-        _store_test_cases(tc_data)
+        # Whole-pack write: save_test_cases is wipe-and-replace and
+        # ``tc_data`` is the pack as it now stands, edit included. Guarded by
+        # the version read above, so a colleague's concurrent change becomes
+        # a 409 instead of a silent deletion of their rows.
+        try:
+            _store_test_cases(tc_data, expected_version=pack_v)
+        except _db.WriteConflict as exc:
+            _log.info("walkthrough-meta conflict on %s: %s", tc_id, exc)
+            return _conflict_response(exc)
 
         if request.accept_mimetypes.best == "application/json":
             return jsonify({
@@ -1372,6 +1430,10 @@ def register(app: Flask) -> None:
         if not _recorder_enabled():
             return jsonify({"error": "recorder_disabled"}), 403
 
+        # Read the version with the pack: everything between here and
+        # the write below is a read-modify-write, which is exactly
+        # where a lost update comes from.
+        pack_v = pack_version("test_cases")
         tc_data = _tc_rows()
         target = None
         for tc in tc_data:
@@ -1437,7 +1499,11 @@ def register(app: Flask) -> None:
 
         # Resave for the live view and for the runner's next pass.
         target["automation_steps_json"] = _json.dumps(steps, ensure_ascii=False)
-        _store_test_cases(tc_data)
+        try:
+            _store_test_cases(tc_data, expected_version=pack_v)
+        except _db.WriteConflict as exc:
+            _log.info("step-kind conflict on %s: %s", tc_id, exc)
+            return _conflict_response(exc)
 
         # resolve_active_project(), not session["active_project_id"] —
         # which has never been a session key. It is a template variable
@@ -2120,9 +2186,14 @@ def register(app: Flask) -> None:
             return redirect(_back_to_caller(default="checklist_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
+        pack_v = pack_version("checklist") if mode == "append" else None
         existing = _cl_rows() if mode == "append" else []
         merged = existing + [cl_to_dict(it) for it in items]
-        _store_checklist(merged)
+        try:
+            _store_checklist(merged, expected_version=pack_v)
+        except _db.WriteConflict as exc:
+            _log.info("checklist upload conflict: %s", exc)
+            return _conflict_response(exc, redirect_to="checklist_page")
 
         flash(
             g.t.get("upload_cl_ok",

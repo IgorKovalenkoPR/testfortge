@@ -186,6 +186,7 @@ def init_db() -> None:
     _ensure_walkthrough_columns(engine)
     _ensure_project_org_column(engine)
     _ensure_case_result_source_column(engine)
+    _ensure_pack_version_columns(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -364,6 +365,40 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
         log.warning("walkthrough migration ALTER failed: %s", exc)
 
 
+def _ensure_pack_version_columns(engine: Engine) -> None:
+    """Idempotent ALTERs for ``project.tc_version`` / ``cl_version`` — E3.5.
+
+    ``create_all`` makes missing tables, never missing columns, so an
+    instance that ran before this programme has ``project`` without them and
+    the ORM cannot read its own rows.
+
+    Existing projects start at 0, which is right: nobody holds a version for
+    them yet, so the first versioned write from any client will conflict
+    once and succeed on the reload. Starting them at 0 and having callers
+    read the value before writing is what makes that self-correcting rather
+    than sticky.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        existing = {c["name"] for c in
+                    _inspect(engine).get_columns("project")}
+    except SQLAlchemyError as exc:
+        log.debug("pack-version probe skipped: %s", exc)
+        return
+    missing = [c for c in ("tc_version", "cl_version") if c not in existing]
+    if not missing:
+        return
+    try:
+        with engine.begin() as conn:
+            for column in missing:
+                log.info("concurrency migration: adding project.%s", column)
+                conn.execute(text(
+                    f"ALTER TABLE project ADD COLUMN {column} "
+                    f"INTEGER NOT NULL DEFAULT 0"))
+    except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+        log.warning("concurrency migration ALTER failed: %s", exc)
+
+
 def _ensure_case_result_source_column(engine: Engine) -> None:
     """Idempotent ``ALTER TABLE execution_case_result ADD COLUMN source`` — E3.4.
 
@@ -504,6 +539,23 @@ class Project(Base):
     # not having it, because it would hide the missing check in dev.
     org_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
                                                 index=True)
+    # Optimistic-concurrency counters, one per artefact pack (E3.5).
+    #
+    # ``save_test_cases`` and ``save_checklist`` are wipe-and-replace, so a
+    # caller that read a pack, changed one item and wrote it all back would
+    # delete whatever a colleague added in between — silently, because
+    # replacing a pack looks identical whether or not the copy was stale. A
+    # version the caller has to present turns that into a 409.
+    #
+    # Two counters, not one: a checklist save has no business conflicting
+    # with a test-case save. Integers rather than a JSON blob because a
+    # counter needs an atomic ``SET v = v + 1 WHERE v = ?``, and that is
+    # what makes the check race-free — read-modify-write on JSON could miss
+    # a bump and weaken the guard it implements.
+    tc_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                             default=0, server_default="0")
+    cl_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                             default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -2275,6 +2327,73 @@ def purge_expired_sessions() -> int:
 
 # ── Helpers (slug, dict serialisation) ─────────────────────────────
 
+class WriteConflict(RuntimeError):
+    """The pack changed between the caller reading it and writing it back.
+
+    Carries what was expected and what was found, so a route can tell the
+    user how stale their copy is rather than only that it is.
+    """
+
+    def __init__(self, kind: str, expected: int, actual: int):
+        self.kind = kind
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"{kind} pack was at version {actual}, caller had {expected}")
+
+
+#: Pack kind → the column holding its version counter.
+_PACK_VERSION_COLUMN = {"test_cases": "tc_version", "checklist": "cl_version"}
+
+
+def pack_versions(project_id: str) -> dict[str, int]:
+    """Each artefact pack's current version. Zeroes for an unknown project."""
+    out = {kind: 0 for kind in _PACK_VERSION_COLUMN}
+    if not project_id:
+        return out
+    with session_scope() as sess:
+        row = sess.get(Project, project_id)
+        if row is None:
+            return out
+        out["test_cases"] = int(row.tc_version or 0)
+        out["checklist"] = int(row.cl_version or 0)
+        return out
+
+
+def _claim_pack_write(sess, project_id: str, kind: str,
+                      expected_version: int | None) -> None:
+    """Bump a pack's version, refusing a stale write.
+
+    One conditional UPDATE, so the check and the bump cannot be interleaved
+    by another writer — which is what a read-then-compare gets wrong exactly
+    when it matters. ``rowcount == 0`` means somebody else got there first.
+
+    ``expected_version=None`` bumps unconditionally. Deliberate rather than a
+    loophole: generating a pack is an intentional replacement, and every
+    pre-E3.5 caller passes nothing and has to keep working.
+    """
+    column = _PACK_VERSION_COLUMN[kind]
+    if expected_version is None:
+        sess.execute(
+            update(Project).where(Project.id == project_id)
+            .values(**{column: getattr(Project, column) + 1}))
+        return
+    result = sess.execute(
+        update(Project)
+        .where(Project.id == project_id,
+               getattr(Project, column) == int(expected_version))
+        .values(**{column: getattr(Project, column) + 1}))
+    if result.rowcount:
+        return
+    # Distinguish "someone else wrote" from "no such project": the first is
+    # a conflict a reload resolves, the second is not.
+    actual = sess.query(getattr(Project, column)).filter(
+        Project.id == project_id).scalar()
+    if actual is None:
+        raise ValueError(f"no such project: {project_id}")
+    raise WriteConflict(kind, int(expected_version), int(actual))
+
+
 def _slugify(name: str, fallback: str = "project") -> str:
     """Lowercase, hyphen-separated, ASCII-only slug."""
     s = re.sub(r"[^a-zA-Z0-9]+", "-", (name or "").strip().lower()).strip("-")
@@ -2527,16 +2646,25 @@ def delete_project(project_id: str) -> None:
 
 # ── Test cases ─────────────────────────────────────────────────────
 
-def save_test_cases(project_id: str, test_cases: list) -> int:
+def save_test_cases(project_id: str, test_cases: list, *,
+                    expected_version: int | None = None) -> int:
     """Replace all TC for a project with the new list. Returns rows written.
 
     Bumps ``project.updated_at`` so the picker dropdown shows
     recently-touched projects at the top.
+
+    ``expected_version`` opts into optimistic concurrency: pass the value
+    :func:`pack_versions` reported when the pack was read, and a write that
+    lost a race raises :class:`WriteConflict` instead of quietly deleting
+    the winner's rows. Omit it for an intentional replacement.
     """
     if not project_id:
         raise ValueError("project_id is required")
     written = 0
     with session_scope() as sess:
+        # Before the delete below, and in the same transaction: a conflict
+        # has to abort the whole write, not leave the pack half-replaced.
+        _claim_pack_write(sess, project_id, "test_cases", expected_version)
         # Bump updated_at on the parent project so list_projects()
         # surfaces this row to the top of the dropdown.
         proj = sess.get(Project, project_id)
@@ -2910,11 +3038,18 @@ def load_test_cases(project_id: str) -> list[dict]:
 
 # ── Checklist ──────────────────────────────────────────────────────
 
-def save_checklist(project_id: str, items: list) -> int:
+def save_checklist(project_id: str, items: list, *,
+                   expected_version: int | None = None) -> int:
+    """Replace all checklist items for a project. Returns rows written.
+
+    ``expected_version`` behaves exactly as in :func:`save_test_cases` —
+    see there for why a stale write has to be refused rather than merged.
+    """
     if not project_id:
         raise ValueError("project_id is required")
     written = 0
     with session_scope() as sess:
+        _claim_pack_write(sess, project_id, "checklist", expected_version)
         # Bump project recency for the picker dropdown.
         proj = sess.get(Project, project_id)
         if proj is not None:
@@ -4175,6 +4310,8 @@ __all__ = [
     "delete_project", "move_artifacts",
     # test cases
     "save_test_cases", "load_test_cases", "create_test_case",
+    # Optimistic concurrency on pack writes (E3.5).
+    "WriteConflict", "pack_versions",
     # checklist
     "save_checklist", "load_checklist",
     # bugs

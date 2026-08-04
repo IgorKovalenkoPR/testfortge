@@ -440,16 +440,43 @@ def counts(project_id: str | None) -> dict[str, int]:
 # exist so a caller never has to remember to, and so that when E3.5 adds
 # optimistic locking there is one place per artefact to add it.
 
-def save_test_cases(project_id: str, rows: list[dict]) -> int:
+def pack_versions(project_id: str | None) -> dict[str, int]:
+    """Each pack's current version, for a caller about to write one back.
+
+    Read it *before* mutating and hand it to the matching ``save_*``.
+
+    Deliberately not cached per request: the point is to notice a change
+    made after this request started, and a cached value would report the
+    version the page was rendered with — precisely the stale answer the
+    guard exists to catch.
+    """
     from engine import db as _db
-    written = _db.save_test_cases(project_id, rows)
+    if not project_id:
+        return {"test_cases": 0, "checklist": 0}
+    return _db.pack_versions(project_id)
+
+
+def save_test_cases(project_id: str, rows: list[dict], *,
+                    expected_version: int | None = None) -> int:
+    """Write the pack. Raises ``engine.db.WriteConflict`` on a stale write.
+
+    The cache is invalidated on success only. Dropping it after a conflict
+    would discard a reader's copy of a pack that did not change, making the
+    next read look as though the refused write had partly landed.
+    """
+    from engine import db as _db
+    written = _db.save_test_cases(project_id, rows,
+                                  expected_version=expected_version)
     invalidate(project_id, "test_cases")
     return written
 
 
-def save_checklist(project_id: str, rows: list[dict]) -> int:
+def save_checklist(project_id: str, rows: list[dict], *,
+                   expected_version: int | None = None) -> int:
+    """As :func:`save_test_cases`, for the checklist."""
     from engine import db as _db
-    written = _db.save_checklist(project_id, rows)
+    written = _db.save_checklist(project_id, rows,
+                                 expected_version=expected_version)
     invalidate(project_id, "checklist")
     return written
 
@@ -474,5 +501,6 @@ __all__ = [
     "test_cases", "checklist", "bugs", "latest_estimation", "runs", "counts",
     "bug_row_to_dict", "run_row_to_dict", "case_result_to_dict",
     "save_test_cases", "save_checklist", "save_bug", "save_estimation",
+    "pack_versions",
     "invalidate",
 ]
