@@ -31,3 +31,9 @@ jsonschema>=4.0
 # result and exiting gracefully. live_executor falls back to a no-op
 # guard if psutil is absent, so the dependency is functionally optional.
 psutil>=5.9.0
+# Fernet, for encrypting each organisation's own Anthropic API key at
+# rest (engine/llm_keys.py — E0.9). Present transitively today via other
+# packages, pinned explicitly here because relying on a transitive
+# dependency is how a fresh CI install breaks on a version bump nobody
+# made.
+cryptography>=42.0.0

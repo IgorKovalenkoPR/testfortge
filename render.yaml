@@ -142,6 +142,29 @@ services:
       # one dashboard edit and the rollback is the same edit back.
       - key: SESSION_BACKEND
         value: "filesystem"
+      # ── LLM cost controls (docs/plans/cost_model.md) ──────────────
+      #
+      # Monthly ceiling, in USD, on what one organisation may spend on the
+      # *platform's* API key. A BYOK org is exempt — that is their key and
+      # their bill. Not optional on a zero-budget platform: without a cap,
+      # one team's runaway tab spends the operator's money with no limit.
+      # Over the cap, generation falls back to the deterministic engine
+      # rather than erroring (engine/llm_client.LLMBudgetExceeded).
+      - key: LLM_ORG_BUDGET_USD
+        value: "5"
+      # Fernet key encrypting each org's own Anthropic key at rest.
+      # `generateValue: true` so Render mints it and it never exists in
+      # this repo — same handling as SECRET_KEY and MCP_BEARER_TOKEN.
+      #
+      # Deliberately NOT derived from SECRET_KEY: that is the
+      # cookie-signing key, and rotating it to invalidate sessions is a
+      # normal thing to do. Sharing them would make every stored customer
+      # API key undecryptable the day someone did.
+      #
+      # Without this, BYOK is simply off — storing a key is refused rather
+      # than stored in the clear, and the platform key is used.
+      - key: TESTFORTGE_ENCRYPTION_KEY
+        generateValue: true
       # Web Recorder (Sprint 8 PR-B/E). Declared here because it was
       # already set to 1 by hand on the live service while being absent
       # from this blueprint — so a Manual Sync would have deleted it, and

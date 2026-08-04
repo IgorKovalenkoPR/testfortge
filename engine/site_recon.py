@@ -44,7 +44,8 @@ _logger = get_logger(__name__)
 # Sonnet 4.6 by default; operator can swap via env without code change.
 # Separate from the chatbot's ANTHROPIC_MODEL so changing the chat
 # model never accidentally drags the recon prompt with it.
-_RECON_MODEL = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
+# Routed by work kind at call time — see engine/llm_models.py.
+_RECON_KIND = "analysis"
 _RECON_MAX_TOKENS = int(os.environ.get("RECON_MAX_TOKENS", "1500"))
 
 
@@ -221,7 +222,7 @@ def _call_llm(evidence: dict) -> str:
     transient or terminal failure (caller turns that into a rule-based
     fallback)."""
     resp = call_messages(
-        model=_RECON_MODEL,
+        kind=_RECON_KIND,
         max_tokens=_RECON_MAX_TOKENS,
         system=[{
             "type": "text",

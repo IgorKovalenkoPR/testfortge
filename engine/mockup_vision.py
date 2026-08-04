@@ -408,7 +408,8 @@ def _call_claude_vision(
         _logger.info("ANTHROPIC_API_KEY not set or empty; skipping vision "
                      "call. Set it in Render env vars to enable Mockups.")
         return "", "", "ANTHROPIC_API_KEY is not set on the server."
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+    # Routed by work kind — see engine/llm_models.py.
+    kind = "vision"
     max_tokens = int(os.environ.get("ANTHROPIC_VISION_MAX_TOKENS", "2000"))
     content: list[dict] = []
     for img in images:
@@ -424,7 +425,7 @@ def _call_claude_vision(
     content.append({"type": "text", "text": _build_user_text(len(images), context)})
     try:
         resp = call_messages(
-            model=model,
+            kind=kind,
             max_tokens=max_tokens,
             # System-blocks list so the persona block honours the
             # ``cache_control={"type": "ephemeral"}`` marker — repeated

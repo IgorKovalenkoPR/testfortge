@@ -51,7 +51,12 @@ from engine.log import get_logger
 
 _logger = get_logger(__name__)
 
-_AUTHOR_MODEL = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
+# Model comes from engine.llm_models, routed by work kind, resolved at
+# call time. It used to be this module-level constant, which pinned an
+# older Sonnet and — because it read the environment at import — could not
+# be repointed without a restart. ``ANTHROPIC_MODEL_SONNET`` still
+# overrides the tier, so an existing deployment's override keeps working.
+_AUTHOR_KIND = "authoring"
 
 # Output budget. ~8k tokens is 30-45 authored cases, which matches what
 # the coverage model asks for from a form with a dozen controls, and it
@@ -604,7 +609,7 @@ def _build_user_prompt(profile, strategy, artifacts: Artifacts) -> str:
 def _call_llm(profile, strategy, artifacts: Artifacts, grounding: str) -> str:
     resp = call_messages(
         timeout=_AUTHOR_TIMEOUT,
-        model=_AUTHOR_MODEL,
+        kind=_AUTHOR_KIND,
         max_tokens=_AUTHOR_MAX_TOKENS,
         system=_system_blocks(grounding),
         messages=[{"role": "user",

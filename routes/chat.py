@@ -27,10 +27,46 @@ from engine.chatbot import respond_dict as _chatbot_respond
 from engine.bug_report import (
     BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
 )
+from engine import llm_models as _llm_models
 from engine.llm_safety import wrap_user_input
 from engine.log import get_logger
 
 _logger = get_logger(__name__)
+
+
+def _meter_stream(final) -> None:
+    """Record a streamed Tedgie reply's token usage (E0.7).
+
+    Separate from ``engine.llm_client._meter`` because the streaming path
+    never goes through ``call_messages``: the SDK's streaming helper has no
+    equivalent there, so this route builds its own client. Keeping the
+    accounting identical in effect, if not in code, is the point — a usage
+    report that silently omitted the chattiest surface in the product would
+    be worse than no report.
+
+    Swallows everything. The user has already received their answer by the
+    time this runs; an accounting error must not turn a delivered reply
+    into a 500.
+    """
+    try:
+        from engine import llm_cost as _llm_cost
+        usage = _llm_cost.extract_usage(final)
+        if not any(usage):
+            return
+        model = _llm_models.model_for("consult")
+        _db.record_llm_usage(
+            kind="consult", model=model,
+            org_id=session.get("org_id"),
+            project_id=session.get("project_id"),
+            user_id=session.get("_user_id"),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            cost_micros=_llm_cost.cost_micros(model, usage),
+        )
+    except Exception as exc:  # pragma: no cover — accounting is never fatal
+        _logger.debug("stream usage metering skipped: %s", exc)
 
 
 # ── SSE helpers ────────────────────────────────────────────────────
@@ -197,7 +233,12 @@ def register(app: Flask) -> None:
                 client = Anthropic(api_key=api_key)
                 last_emit = time.monotonic()
                 with client.messages.stream(
-                    model=_chatbot_mod._ANTHROPIC_MODEL,
+                    # Routed by work kind, same as every non-streaming
+                    # call. This path builds its own SDK client rather
+                    # than going through engine.llm_client (streaming has
+                    # no equivalent there), so the routing has to be
+                    # repeated here — and so does the metering, below.
+                    model=_llm_models.model_for("consult"),
                     max_tokens=_chatbot_mod._ANTHROPIC_MAX_TOKENS,
                     # System-blocks list (not a string) so the cached
                     # persona block actually hits Anthropic's ephemeral
@@ -247,6 +288,11 @@ def register(app: Flask) -> None:
                             getattr(usage, "cache_creation_input_tokens", 0),
                             getattr(usage, "cache_read_input_tokens", 0),
                         )
+                        # …and into the meter, not just the log. Tedgie is
+                        # the highest-volume LLM surface in the product, so
+                        # a usage report that omitted it would understate
+                        # spend by more than everything else combined.
+                        _meter_stream(final)
 
                 reply_dict = {
                     "text": full_text,

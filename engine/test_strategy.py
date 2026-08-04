@@ -41,7 +41,8 @@ from engine.site_recon import SiteProfile
 _logger = get_logger(__name__)
 
 
-_STRATEGY_MODEL = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
+# Routed by work kind at call time — see engine/llm_models.py.
+_STRATEGY_KIND = "analysis"
 _STRATEGY_MAX_TOKENS = int(os.environ.get("STRATEGY_MAX_TOKENS", "4000"))
 
 
@@ -247,7 +248,7 @@ def _build_user_prompt(profile: SiteProfile) -> str:
 
 def _call_llm(profile: SiteProfile, grounding: str) -> str:
     resp = call_messages(
-        model=_STRATEGY_MODEL,
+        kind=_STRATEGY_KIND,
         max_tokens=_STRATEGY_MAX_TOKENS,
         system=_system_blocks(grounding),
         messages=[{

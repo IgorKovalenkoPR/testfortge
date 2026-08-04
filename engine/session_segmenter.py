@@ -48,7 +48,11 @@ _logger = get_logger(__name__)
 # output tokens are intentionally small — the JSON shape we ask for
 # is short.
 import os
-_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+# Routed by work kind at call time. This one lands on Haiku: the
+# output is a short JSON shape validated against a schema, with a
+# deterministic fallback when it fails, so the cheaper model is
+# verifiably good enough rather than hopefully good enough.
+_KIND = "segmentation"
 _MAX_TOKENS = int(os.environ.get("SESSION_SEGMENTER_MAX_TOKENS", "1500"))
 
 
@@ -142,7 +146,7 @@ def _call_llm(steps: list[AutomationStep]) -> list[dict]:
     failure path so the caller can fall back."""
     try:
         resp = call_messages(
-            model=_MODEL,
+            kind=_KIND,
             max_tokens=_MAX_TOKENS,
             system=_SYSTEM_PROMPT,
             messages=[{

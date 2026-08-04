@@ -1172,6 +1172,82 @@ class Invite(Base):
         DateTime(timezone=True), nullable=True)
 
 
+class OrgSecret(Base):
+    """A credential an organisation gave us, encrypted (E0.9).
+
+    Separate table rather than a field in ``Organization.settings``, and
+    the reason is not tidiness. ``settings`` is a JSON blob that gets
+    read, rendered in an admin form, logged when something goes wrong,
+    and included in an export bundle. A ciphertext in there leaks by
+    accident eventually. A dedicated table has one reader
+    (``engine.llm_keys``), never appears in a ``_row_to_dict`` of
+    anything else, and is trivially excluded from exports.
+
+    Only the ciphertext is stored — see ``engine.llm_keys`` for the
+    Fernet envelope and why its key is a separate env var from
+    ``SECRET_KEY``.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    org_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_org_secret"),
+    )
+
+
+class LlmUsage(Base):
+    """One LLM call's token counts and cost (E0.7).
+
+    A row per call, not a running total, because the questions that get
+    asked are "which module is expensive", "which org", "did that change
+    help" — and a counter cannot answer any of them retrospectively.
+
+    Cost is stored as integer **micro-dollars** (1e-6 USD). Floats would
+    be fine for one row and wrong for a month of them: summing a hundred
+    thousand rounded floats drifts, and this number ends up in front of
+    whoever pays.
+
+    ``key_source`` records who paid — ``org`` (the team's own BYOK key) or
+    ``platform`` (the operator's). Without it a total cannot be attributed,
+    and the whole point of BYOK is that most of the bill is not ours.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    org_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                index=True)
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                    index=True)
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    key_source: Mapped[str] = mapped_column(String(16), nullable=False,
+                                             default="platform")
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False,
+                                               default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False,
+                                                default=0)
+    # Cache reads are billed at 10% of the input rate and cache writes at
+    # 125%, so they have to be counted separately or the cost is wrong in
+    # both directions at once.
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, nullable=False,
+                                                    default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False,
+                                                     default=0)
+    cost_micros: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=0)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                          default=_utcnow, index=True)
+
+
 class AuditLog(Base):
     """Who changed what, when — E2.7.
 
@@ -1315,6 +1391,38 @@ def create_organization(name: str, *, settings: dict | None = None) -> str:
         sess.add(row)
         sess.flush()
         return row.id
+
+
+def get_organization(org_id: str | None) -> dict | None:
+    if not org_id:
+        return None
+    with session_scope() as sess:
+        row = sess.get(Organization, org_id)
+        return _row_to_dict(row) if row else None
+
+
+def update_org_settings(org_id: str, patch: dict) -> bool:
+    """Merge *patch* into the org's settings blob.
+
+    Merge rather than replace, because the settings blob is shared by
+    several unrelated features (storage target, retention window, LLM
+    budget, KPI targets). A settings form that PUTs the whole object
+    silently drops whatever the form did not render — and the symptom
+    lands on a different feature than the one that was edited.
+    """
+    if not (org_id and isinstance(patch, dict)):
+        return False
+    with session_scope() as sess:
+        row = sess.get(Organization, org_id)
+        if row is None:
+            return False
+        merged = dict(row.settings or {})
+        merged.update(patch)
+        # Reassign rather than mutate: SQLAlchemy does not track in-place
+        # changes to a JSON column, so mutating row.settings would look
+        # like it worked and write nothing.
+        row.settings = merged
+        return True
 
 
 def add_org_member(org_id: str, user_id: str, role: str, *,
@@ -1587,6 +1695,185 @@ def list_pending_invites(org_id: str) -> list[dict]:
         # somebody else's seat.
         return [{k: v for k, v in _row_to_dict(r).items() if k != "token"}
                 for r in rows]
+
+
+# ── Org secrets (E0.9) ─────────────────────────────────────────────
+#
+# Only ``engine.llm_keys`` should call these. The ciphertext is
+# deliberately not reachable through any list_* / _row_to_dict path that
+# feeds a template, an export or a log line.
+
+def set_org_secret(org_id: str, name: str, ciphertext: str) -> bool:
+    if not (org_id and name and ciphertext):
+        return False
+    with session_scope() as sess:
+        if sess.get(Organization, org_id) is None:
+            return False
+        row = sess.query(OrgSecret).filter(
+            OrgSecret.org_id == org_id, OrgSecret.name == name,
+        ).one_or_none()
+        if row is None:
+            sess.add(OrgSecret(org_id=org_id, name=name,
+                               ciphertext=ciphertext))
+        else:
+            row.ciphertext = ciphertext
+        return True
+
+
+def get_org_secret(org_id: str, name: str) -> str | None:
+    if not (org_id and name):
+        return None
+    with session_scope() as sess:
+        return sess.query(OrgSecret.ciphertext).filter(
+            OrgSecret.org_id == org_id, OrgSecret.name == name,
+        ).scalar()
+
+
+def delete_org_secret(org_id: str, name: str) -> bool:
+    if not (org_id and name):
+        return False
+    with session_scope() as sess:
+        row = sess.query(OrgSecret).filter(
+            OrgSecret.org_id == org_id, OrgSecret.name == name,
+        ).one_or_none()
+        if row is None:
+            return False
+        sess.delete(row)
+        return True
+
+
+def has_org_secret(org_id: str, name: str) -> bool:
+    """Whether a secret exists, without decrypting or returning it.
+
+    What the settings page needs in order to render "a key is configured"
+    without the ciphertext ever leaving this module.
+    """
+    return bool(get_org_secret(org_id, name))
+
+
+# ── LLM usage accounting (E0.7) ────────────────────────────────────
+
+def record_llm_usage(*, kind: str, model: str,
+                     org_id: str | None = None,
+                     project_id: str | None = None,
+                     user_id: str | None = None,
+                     key_source: str = "platform",
+                     input_tokens: int = 0, output_tokens: int = 0,
+                     cache_read_tokens: int = 0,
+                     cache_write_tokens: int = 0,
+                     cost_micros: int = 0) -> int | None:
+    """Record one call. Never raises — metering must not break a feature.
+
+    Keyword-only for the same reason :func:`append_audit` is: five id-ish
+    strings and five integers next to each other are trivially
+    transposable positionally, and silently mis-attributed spend is worse
+    than none.
+    """
+    if not (kind and model):
+        return None
+    try:
+        with session_scope() as sess:
+            row = LlmUsage(
+                kind=kind, model=model, org_id=org_id,
+                project_id=project_id, user_id=user_id,
+                key_source=key_source,
+                input_tokens=max(0, int(input_tokens or 0)),
+                output_tokens=max(0, int(output_tokens or 0)),
+                cache_read_tokens=max(0, int(cache_read_tokens or 0)),
+                cache_write_tokens=max(0, int(cache_write_tokens or 0)),
+                cost_micros=max(0, int(cost_micros or 0)),
+            )
+            sess.add(row)
+            sess.flush()
+            return row.id
+    except SQLAlchemyError as exc:
+        log.warning("record_llm_usage failed (%s/%s): %s", kind, model, exc)
+        return None
+
+
+def _month_start(now: datetime | None = None) -> datetime:
+    now = now or _utcnow()
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def org_spend_micros(org_id: str, *, since: datetime | None = None,
+                     key_source: str | None = "platform") -> int:
+    """Spend for *org_id* since *since* (default: start of this month).
+
+    ``key_source`` defaults to ``"platform"`` on purpose. The budget guard
+    exists to cap what the *operator* pays; an org spending its own BYOK
+    key's money is none of the platform's business and must not be
+    throttled. Pass ``None`` to total everything for a usage report.
+    """
+    if not org_id:
+        return 0
+    since = since or _month_start()
+    try:
+        with session_scope() as sess:
+            q = sess.query(func.coalesce(func.sum(LlmUsage.cost_micros), 0)) \
+                .filter(LlmUsage.org_id == org_id, LlmUsage.at >= since)
+            if key_source:
+                q = q.filter(LlmUsage.key_source == key_source)
+            return int(q.scalar() or 0)
+    except SQLAlchemyError as exc:
+        # Fail *open*: a metering outage must not lock every org out of
+        # generation. The budget is a cost guard, not a security control.
+        log.warning("org_spend_micros failed for %s: %s", org_id[:8], exc)
+        return 0
+
+
+def llm_usage_summary(org_id: str, *, since: datetime | None = None) -> dict:
+    """Per-kind and per-model totals for an org — the usage report."""
+    since = since or _month_start()
+    out: dict = {"since": since.isoformat(), "by_kind": {},
+                 "by_model": {}, "total_micros": 0, "calls": 0}
+    if not org_id:
+        return out
+    try:
+        with session_scope() as sess:
+            rows = sess.query(
+                LlmUsage.kind, LlmUsage.model,
+                func.count(LlmUsage.id), func.sum(LlmUsage.cost_micros),
+                func.sum(LlmUsage.input_tokens),
+                func.sum(LlmUsage.output_tokens),
+            ).filter(
+                LlmUsage.org_id == org_id, LlmUsage.at >= since,
+            ).group_by(LlmUsage.kind, LlmUsage.model).all()
+    except SQLAlchemyError as exc:
+        log.warning("llm_usage_summary failed for %s: %s", org_id[:8], exc)
+        return out
+
+    for kind, model, calls, cost, tin, tout in rows:
+        cost = int(cost or 0)
+        calls = int(calls or 0)
+        k = out["by_kind"].setdefault(
+            kind, {"calls": 0, "cost_micros": 0,
+                   "input_tokens": 0, "output_tokens": 0})
+        k["calls"] += calls
+        k["cost_micros"] += cost
+        k["input_tokens"] += int(tin or 0)
+        k["output_tokens"] += int(tout or 0)
+        m = out["by_model"].setdefault(model, {"calls": 0, "cost_micros": 0})
+        m["calls"] += calls
+        m["cost_micros"] += cost
+        out["total_micros"] += cost
+        out["calls"] += calls
+    return out
+
+
+def purge_llm_usage(older_than_days: int = 400) -> int:
+    """Drop usage rows past their retention window.
+
+    A row per call adds up, and the free database has a 0.5 GB cap for
+    everything (see docs/plans/cost_model.md). 400 days keeps a full
+    year of month-on-month comparison and nothing beyond it.
+    """
+    cutoff = _utcnow() - timedelta(days=max(1, older_than_days))
+    with session_scope() as sess:
+        rows = sess.query(LlmUsage).filter(LlmUsage.at < cutoff).all()
+        for row in rows:
+            sess.delete(row)
+        return len(rows)
 
 
 # ── Audit log ──────────────────────────────────────────────────────
@@ -3621,10 +3908,17 @@ __all__ = [
     "purge_expired_browser_control",
     # identity / tenancy / audit (E0.2, E1.1, E2.1, E2.7)
     "ServerSession", "User", "Identity", "Organization", "OrgMember",
-    "Invite", "AuditLog",
+    "Invite", "AuditLog", "OrgSecret", "LlmUsage",
     "ORG_ROLES", "ROLE_RANK", "INVITE_TTL_HOURS", "normalize_email",
     "create_user", "get_user", "get_user_by_email",
     "link_identity", "get_user_by_identity",
+    "get_organization", "update_org_settings",
+    # org secrets — engine.llm_keys is the only intended caller
+    "set_org_secret", "get_org_secret", "delete_org_secret",
+    "has_org_secret",
+    # LLM usage accounting
+    "record_llm_usage", "org_spend_micros", "llm_usage_summary",
+    "purge_llm_usage",
     "create_organization", "add_org_member", "get_org_role",
     "list_org_members", "count_org_admins", "remove_org_member",
     "set_project_org", "list_projects_for_org",

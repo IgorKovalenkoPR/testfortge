@@ -45,7 +45,8 @@ from engine.log import get_logger
 
 _logger = get_logger(__name__)
 
-_AUTHOR_MODEL = os.environ.get("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
+# Routed by work kind at call time — see engine/llm_models.py.
+_AUTHOR_KIND = "authoring"
 
 # A 60-row checklist is ~4k tokens of JSON. 6k leaves room for the
 # rationale and gaps without letting a runaway response cost real money.
@@ -331,7 +332,7 @@ def _baseline_text(checklist: _rules.LowLevelChecklist,
 def _call_llm(artifacts: Artifacts, profile: Any) -> str:
     resp = call_messages(
         timeout=_AUTHOR_TIMEOUT,
-        model=_AUTHOR_MODEL,
+        kind=_AUTHOR_KIND,
         max_tokens=_AUTHOR_MAX_TOKENS,
         system=_system_blocks(),
         messages=[{"role": "user",

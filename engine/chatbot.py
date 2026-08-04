@@ -47,7 +47,11 @@ except Exception as _exc:  # pragma: no cover — import-time defensive
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.llm_safety import wrap_user_input
 
-_ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+# Routed by work kind at call time — see engine/llm_models.py. Still
+# on Sonnet: moving Tedgie to Haiku would cut the bill sharply, but
+# nothing can yet measure whether the answers got worse. That is the
+# eval harness in E6.7, and the default moves when it exists.
+_CHAT_KIND = "consult"
 _ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "600"))
 
 
@@ -1436,7 +1440,7 @@ def _ai_respond(message: str, lang: str) -> ChatReply | None:
         return None
     try:
         resp = call_messages(
-            model=_ANTHROPIC_MODEL,
+            kind=_CHAT_KIND,
             max_tokens=_ANTHROPIC_MAX_TOKENS,
             # System-blocks list (not a string) so the Anthropic API
             # honours ``cache_control`` on the persona block — see
