@@ -69,7 +69,7 @@ def staged_draft(client):
     ])
     with client.session_transaction() as s:
         s["project_id"] = pid
-        s["active_project_id"] = pid
+        s["project_id"] = pid
         s["test_cases_data"] = db.load_test_cases(pid)
         s["_session_active_since"] = 9_999_999_999
     yield {"project_id": pid, "token": token}
@@ -228,10 +228,16 @@ class TestReviewGet:
         assert resp.status_code == 403
 
     def test_wrong_active_project_returns_403(self, client, staged_draft):
-        # Switch active_project_id to something unrelated; the route
+        # Point the active project at something unrelated; the route
         # must refuse to leak the draft into the wrong project.
+        #
+        # The key is project_id. This test used to set
+        # active_project_id, which is a *template* variable and never a
+        # session key — it only worked because the route read the same
+        # non-existent key, so the guard was verified through a door
+        # production never opens (E3.3).
         with client.session_transaction() as s:
-            s["active_project_id"] = "ffffffff" * 4
+            s["project_id"] = "ffffffff" * 4
         with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
             resp = client.get(
                 f"/test-cases/review-session/{staged_draft['token']}")
@@ -369,7 +375,7 @@ class TestReviewPost:
             with app.test_client() as csrf_client:
                 with csrf_client.session_transaction() as s:
                     s["project_id"] = staged_draft["project_id"]
-                    s["active_project_id"] = staged_draft["project_id"]
+                    s["project_id"] = staged_draft["project_id"]
                     s["_session_active_since"] = 9_999_999_999
 
                 # 1) Fetch the GET page so we have a session that owns

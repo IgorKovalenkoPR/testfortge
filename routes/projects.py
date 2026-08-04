@@ -25,7 +25,7 @@ from engine.log import get_logger
 
 from ._shared import (
     GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
-    tc_to_dict,
+    resolve_active_project, tc_to_dict,
 )
 
 log = get_logger(__name__)
@@ -169,12 +169,16 @@ def register(app: Flask) -> None:
 
     @app.route("/save-project", methods=["POST"])
     def save_project():
-        """Upsert the active project and snapshot in-session TC / CL.
+        """Upsert the active project and snapshot the current pack into it.
 
-        The form only requires ``project_name`` — everything else is
-        sourced from the current session so we keep the existing
-        "Save current work" UX with a single click.
+        The form only requires ``project_name``; everything else comes from
+        the active project, so the one-click "Save current work" UX is
+        unchanged.
         """
+        # Captured before the upsert below, which can create a different
+        # project and repoint the session at it. The work being saved
+        # belongs to whatever was active a moment ago.
+        previous_pid = resolve_active_project()
         project_name = (request.form.get("project_name") or "").strip()
         if not project_name:
             project_name = (session.get("project_setup") or {}) \
@@ -196,15 +200,25 @@ def register(app: Flask) -> None:
 
         _set_active_project(project_id, project_name, base_url)
 
-        # Persist current TC/CL snapshots so /load-project later
-        # rehydrates exactly what the user had on screen.
-        tc_data = session.get("test_cases_data") or []
-        cl_data = session.get("checklist_data") or []
+        # Snapshot the current pack into the project so /load-project
+        # rehydrates what the user had on screen.
+        #
+        # Read through the repository, not out of the session. Reading the
+        # session here meant that once the pack stopped being mirrored into
+        # it (E3.3, WORKSPACE_DB_FIRST), "Save current work" quietly saved
+        # *nothing* — and the failure was invisible, because saving an
+        # empty pack looks exactly like saving successfully.
+        #
+        # ``previous_pid``, not ``project_id``: upsert_project may well have
+        # created a new project just now, and the work being snapshotted
+        # belongs to the one the user was in a moment ago.
+        tc_data = _workspace.test_cases(previous_pid) if previous_pid else []
+        cl_data = _workspace.checklist(previous_pid) if previous_pid else []
         try:
             if tc_data:
-                _db.save_test_cases(project_id, tc_data)
+                _workspace.save_test_cases(project_id, tc_data)
             if cl_data:
-                _db.save_checklist(project_id, cl_data)
+                _workspace.save_checklist(project_id, cl_data)
         except Exception:  # pragma: no cover — flash-and-survive
             log.exception("save-project: failed to persist TC/CL snapshot")
 

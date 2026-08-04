@@ -89,19 +89,30 @@ class TestTestCasesColdStart:
     def test_restored_rows_land_back_in_the_session(self, client,
                                                     project_with_pack):
         _simulate_cold_start(client, project_with_pack)
-        client.get("/test-cases")
-        with client.session_transaction() as sess:
-            assert len(sess.get("test_cases_data") or []) == 2
+        body = client.get("/test-cases").get_data(as_text=True)
+        # The recovered pack has to reach the *page*. Asserting on
+        # session["test_cases_data"] pinned this to WORKSPACE_DB_FIRST=0,
+        # where that key is a mirror; the page is the user-visible contract
+        # in both positions (E3.3).
+        # The fixture's ids are SC1_001 / SC2_001, not "TC-".
+        assert "SC1_001" in body and "SC2_001" in body
 
-    def test_session_data_wins_over_the_db(self, client,
-                                           project_with_pack):
+    def test_session_data_wins_over_the_db(self, client, project_with_pack,
+                                           monkeypatch):
         """A fresh in-session pack must not be clobbered by an old one.
 
         ``_session_active_since`` has to be stamped with the current
         SERVER_START_TIME, otherwise ``before_request`` treats the
         session as predating this boot and purges GENERATED_KEYS — which
         is the very wipe this module exists to recover from.
+
+        Pinned to ``WORKSPACE_DB_FIRST=0``, and unlike the others in this
+        module that is not incidental: "the session wins" *is* the old
+        contract, and the flag exists to invert it. The test documents the
+        behaviour that still ships, and retires with the mirror in E3.4
+        rather than being rewritten.
         """
+        monkeypatch.delenv("WORKSPACE_DB_FIRST", raising=False)
         with client.session_transaction() as sess:
             sess["project_id"] = project_with_pack
             sess["_session_active_since"] = SERVER_START_TIME

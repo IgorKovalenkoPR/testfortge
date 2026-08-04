@@ -107,8 +107,7 @@ class TestGenerationAsyncEndToEnd:
         assert final["status"] == "done"
         assert final.get("redirect_url", "").endswith("/test-cases")
 
-        with client.session_transaction() as s:
-            assert s.get("test_cases_data"), "test cases not in session"
+        assert _pack_rows(client, "tc"), "test cases were not persisted"
 
         page = client.get("/test-cases")
         assert page.status_code == 200
@@ -124,8 +123,7 @@ class TestGenerationAsyncEndToEnd:
         assert final["status"] == "done"
         assert final.get("redirect_url", "").endswith("/checklist")
 
-        with client.session_transaction() as s:
-            assert s.get("checklist_data"), "checklist not in session"
+        assert _pack_rows(client, "cl"), "checklist was not persisted"
 
     def test_status_404_carries_machine_readable_error(self, client):
         r = client.get("/test-cases/status/deadbeefdeadbeefdeadbeef")
@@ -189,8 +187,8 @@ class TestPostSyncBudgetDrain:
         r = client.get("/test-cases")
         body = r.get_data(as_text=True)
         assert "TC-DRAIN" in body, "drain never copied result into session"
+        assert _pack_rows(client, "tc"), "the drained pack was not persisted"
         with client.session_transaction() as s:
-            assert s.get("test_cases_data"), "session was not populated"
             assert "tc_gen_job_id" not in s, "job_id should be cleared after drain"
 
     def test_get_drains_finished_cl_job_into_session(self, client):
@@ -217,8 +215,8 @@ class TestPostSyncBudgetDrain:
         r = client.get("/checklist")
         body = r.get_data(as_text=True)
         assert "CL-DRAIN" in body, "drain never copied checklist into session"
+        assert _pack_rows(client, "cl"), "the drained pack was not persisted"
         with client.session_transaction() as s:
-            assert s.get("checklist_data"), "session was not populated"
             assert "cl_gen_job_id" not in s
 
     def test_get_ignores_pending_job(self, client):
@@ -239,3 +237,22 @@ class TestPostSyncBudgetDrain:
                 assert not s.get("test_cases_data")
         finally:
             gate.set()
+
+
+def _pack_rows(client, kind: str = "tc") -> list:
+    """The active project's pack, wherever the truth currently is.
+
+    These tests used to read ``session["test_cases_data"]`` directly. That
+    key is a mirror the pack keeps only while ``WORKSPACE_DB_FIRST`` is off
+    (E3.3), so asserting on it pins the test to one side of a flag whose
+    whole purpose is to be flipped. Going through the repository keeps the
+    same coverage in both positions.
+    """
+    from engine import workspace
+    with client.session_transaction() as sess:
+        pid = sess.get("project_id")
+    if not pid:
+        return []
+    with client.application.test_request_context("/"):
+        return (workspace.test_cases(pid) if kind == "tc"
+                else workspace.checklist(pid))

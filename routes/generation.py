@@ -14,6 +14,7 @@ from flask import (Flask, Response, flash, g, jsonify, redirect, render_template
                    request, session, url_for)
 from werkzeug.utils import secure_filename
 
+from engine import workspace as _workspace
 from engine.file_parser import split_into_requirements
 from engine.qa_persona import is_instruction
 from engine.user_story_generator import generate_user_stories
@@ -551,29 +552,114 @@ def _requested_tc_format() -> str:
     return _gk.coerce_format(raw)
 
 
-def _persist_test_cases(tc_dicts: list[dict]) -> None:
-    """Mirror the in-session TC list into Postgres for the active project.
+# ── The pack: reading and writing it (E3.3) ──────────────────────
+#
+# Every access to this project's test cases and checklist goes through the
+# four functions below, which go through engine.workspace. Before E3.3 the
+# module read ``session["test_cases_data"]`` in eleven places and wrote it
+# in nine, each with its own idea of when to fall back to Postgres — which
+# is why the same pack could be present on one page and missing on another.
+#
+# While WORKSPACE_DB_FIRST is off these behave exactly as the old code did,
+# session included. When it is on, the session stops carrying the pack at
+# all, and the row shrinks from a few hundred kilobytes to nothing.
 
-    Best-effort: a DB outage must not block the user from seeing their
-    generated cases on screen. Errors are logged and swallowed."""
-    pid = ensure_active_project()
-    if not pid:
+
+def _pack_cleared() -> bool:
+    """True when the user asked for a clean slate on this boot.
+
+    ``/new-session`` stamps ``_pack_cleared_boot`` and drops
+    ``project_id``. That is not enough on its own: both
+    ``resolve_active_project`` and ``ensure_active_project`` recover the
+    most recent project owned by this session id, so the very next read
+    would find the project again — and, once Postgres is the source of
+    truth, hand back the pack the user just cleared. The stamp is the
+    discriminator, and it has to gate the read rather than only the
+    fallback.
+
+    Stamped with the boot time so a genuine restart takes it with the rest
+    of the session and cold-start recovery resumes on the next boot.
+    """
+    return session.get("_pack_cleared_boot") == SERVER_START_TIME
+
+
+def _tc_rows() -> list[dict]:
+    """The active project's test cases, wherever the truth currently is."""
+    if _pack_cleared():
+        return []
+    return _workspace.test_cases(resolve_active_project())
+
+
+def _cl_rows() -> list[dict]:
+    """The active project's checklist items."""
+    if _pack_cleared():
+        return []
+    return _workspace.checklist(resolve_active_project())
+
+
+def _mirror(session_key: str, rows: list[dict]) -> None:
+    """Record that a pack was written, and keep the session copy in step.
+
+    The ``_pack_cleared_boot`` pop comes first and is not subject to the
+    early return below, because **every** path that produces a pack ends
+    the cleared state — not just the synchronous one. Writing it only in
+    ``_store_*`` was a regression: a queued generation lands through the
+    job drain instead, so after "New session" the pack was written and
+    then hidden by a marker nothing had cleared, and /checklist rendered
+    its empty state over 82 freshly generated items.
+
+    The mirror itself is a no-op once ``WORKSPACE_DB_FIRST`` is on — at
+    that point the session is not consulted for artefacts, and writing a
+    few hundred kilobytes into it would keep the cost of the old model
+    without any of its behaviour. Until then it is load-bearing: the
+    execution, automation and chat modules still read these keys directly
+    (E3.4), so dropping it early would show them an empty pack.
+    """
+    session.pop("_pack_cleared_boot", None)
+    if _workspace.db_first():
         return
-    try:
-        _db.save_test_cases(pid, tc_dicts)
-    except Exception as exc:  # pragma: no cover — best-effort write
-        _log.warning("persist test cases failed: %s", exc)
+    session[session_key] = rows
 
 
-def _persist_checklist(cl_dicts: list[dict]) -> None:
-    """Same contract as :func:`_persist_test_cases` but for Checklist."""
+def _store_test_cases(tc_dicts: list[dict]) -> None:
+    """Write the pack: database first, session mirror second.
+
+    Best-effort on the database: an outage must not stop the user seeing
+    what was just generated. Errors are logged and swallowed, which is the
+    behaviour the old ``_persist_test_cases`` had and the reason a pack can
+    briefly exist only on screen.
+    """
     pid = ensure_active_project()
-    if not pid:
-        return
-    try:
-        _db.save_checklist(pid, cl_dicts)
-    except Exception as exc:  # pragma: no cover
-        _log.warning("persist checklist failed: %s", exc)
+    if pid:
+        try:
+            _workspace.save_test_cases(pid, tc_dicts)
+        except Exception as exc:  # pragma: no cover — best-effort write
+            _log.warning("persist test cases failed: %s", exc)
+    _mirror("test_cases_data", tc_dicts)
+
+
+def _store_checklist(cl_dicts: list[dict]) -> None:
+    """Same contract as :func:`_store_test_cases`, for the checklist."""
+    pid = ensure_active_project()
+    if pid:
+        try:
+            _workspace.save_checklist(pid, cl_dicts)
+        except Exception as exc:  # pragma: no cover
+            _log.warning("persist checklist failed: %s", exc)
+    _mirror("checklist_data", cl_dicts)
+
+
+#: Retained names for the call sites that still use them.
+#:
+#: The async workers persist to Postgres themselves, so a job drain could
+#: in principle mirror into the session and stop there. It does not: making
+#: the drain's correctness depend on a closure three hundred lines away
+#: means a stubbed job, or a worker whose own write failed, loses the result
+#: with nothing in the logs. ``save_test_cases`` is wipe-and-replace with
+#: identical content, so writing again is idempotent and costs one query on
+#: the rare GET that actually drains.
+_persist_test_cases = _store_test_cases
+_persist_checklist = _store_checklist
 
 
 
@@ -630,33 +716,16 @@ def _hydrate_from_db(kind: str) -> list[dict]:
     ``kind`` is "tc" or "cl". Returns the rows loaded (empty on any
     failure — a DB hiccup must not break the page render).
     """
-    # An explicit "New session" must stay cleared. /new-session stamps
-    # the clear with the current boot; a restart takes that stamp with the
-    # rest of the session, so recovery resumes on the next boot but never
-    # undoes what the user just asked for.
-    if session.get("_pack_cleared_boot") == SERVER_START_TIME:
-        return []
-    # resolve_active_project(), not session["project_id"]: the cold start
-    # this function exists to survive is the same event that empties the
-    # session store, so reading the session directly made hydration miss
-    # every time it mattered.
-    pid = resolve_active_project()
-    if not pid:
-        return []
-    loader_name = "load_test_cases" if kind == "tc" else "load_checklist"
-    session_key = "test_cases_data" if kind == "tc" else "checklist_data"
-    loader = getattr(_db, loader_name, None)
-    if loader is None:  # pragma: no cover — defensive
-        return []
-    try:
-        rows = loader(pid) or []
-    except Exception as exc:  # pragma: no cover — best-effort read
-        _log.warning("hydrate %s from DB failed: %s", kind, exc)
-        return []
+    rows = _tc_rows() if kind == "tc" else _cl_rows()
     if rows:
-        session[session_key] = rows
+        # Mirror so the modules that still read the session key directly
+        # (execution, automation, chat — E3.4) see the recovered pack too.
+        # ``_mirror`` is a no-op once the database is the source of truth,
+        # at which point they will be reading through the repository and
+        # will not need it.
+        _mirror("test_cases_data" if kind == "tc" else "checklist_data", rows)
         _log.info("hydrated %d %s rows from DB for project %s",
-                  len(rows), kind, pid)
+                  len(rows), kind, resolve_active_project())
     return rows
 
 
@@ -677,7 +746,7 @@ def _drain_tc_job_into_session() -> None:
         return
     if job.status == DONE and job.result:
         r = job.result
-        session["test_cases_data"]   = r.get("tc_dicts", [])
+        _store_test_cases(r.get("tc_dicts", []))
         session["user_stories"]      = r.get("stories", [])
         session["raw_requirements"]  = r.get("raw_requirements", [])
         session["traceability_data"] = r.get("trace", [])
@@ -708,7 +777,7 @@ def _drain_cl_job_into_session() -> None:
         return
     if job.status == DONE and job.result:
         r = job.result
-        session["checklist_data"]    = r.get("cl_dicts", [])
+        _store_checklist(r.get("cl_dicts", []))
         session["user_stories"]      = r.get("stories", [])
         session["raw_requirements"]  = r.get("raw_requirements", [])
         session.pop("cl_gen_job_id", None)
@@ -885,7 +954,7 @@ def register(app: Flask) -> None:
                 return redirect(url_for("test_cases_page"))
 
             r = job.result or {}
-            session["test_cases_data"] = r.get("tc_dicts", [])
+            _store_test_cases(r.get("tc_dicts", []))
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             session["traceability_data"] = r.get("trace", [])
@@ -904,7 +973,7 @@ def register(app: Flask) -> None:
                     "warning",
                 )
 
-            tc_list = reconstruct_test_cases(session["test_cases_data"])
+            tc_list = reconstruct_test_cases(r.get("tc_dicts", []))
             trace = session["traceability_data"]
             if not tc_list:
                 flash(g.t.get(
@@ -956,9 +1025,8 @@ def register(app: Flask) -> None:
 
             trace = generate_traceability(new_stories, tc_list)
             tc_dicts = [tc_to_dict(tc) for tc in tc_list]
-            session["test_cases_data"] = tc_dicts
+            _store_test_cases(tc_dicts)
             session["traceability_data"] = trace
-            _persist_test_cases(tc_dicts)
             return render_template("test_cases.html",
                                    test_cases=tc_list, traceability=trace,
                                    has_data=True, errors=errors,
@@ -971,14 +1039,12 @@ def register(app: Flask) -> None:
         # running when the 60 s sync budget expired, redirected with a
         # flash, and nothing else moved the result into the session.
         _drain_tc_job_into_session()
-        tc_data = session.get("test_cases_data", [])
-        # Nothing in the session — but the pack may still be in Postgres
-        # from before the last cold start. Reload it rather than showing
-        # the empty state, which reads as "my work is gone".
-        restored_from_db = False
-        if not tc_data:
-            tc_data = _hydrate_from_db("tc")
-            restored_from_db = bool(tc_data)
+        # One read. ``restored_from_db`` drives the "we found your work"
+        # flash, so it has to mean "the session had none of this" — which
+        # is exactly the cold-start case the message is for.
+        had_in_session = bool(session.get("test_cases_data"))
+        tc_data = _hydrate_from_db("tc")
+        restored_from_db = bool(tc_data) and not had_in_session
         trace_data = session.get("traceability_data", [])
         if tc_data:
             tc_list = reconstruct_test_cases(tc_data)
@@ -1113,7 +1179,7 @@ def register(app: Flask) -> None:
                 return redirect(url_for("checklist_page"))
 
             r = job.result or {}
-            session["checklist_data"] = r.get("cl_dicts", [])
+            _store_checklist(r.get("cl_dicts", []))
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
 
@@ -1129,7 +1195,7 @@ def register(app: Flask) -> None:
                     "warning",
                 )
 
-            cl_list = reconstruct_checklist(session["checklist_data"])
+            cl_list = reconstruct_checklist(r.get("cl_dicts", []))
             if not cl_list:
                 flash(g.t.get(
                     "mvp_no_quality_requirements",
@@ -1170,8 +1236,7 @@ def register(app: Flask) -> None:
                                        checklist=[], has_data=False, errors=errors)
 
             cl_dicts = [cl_to_dict(cl) for cl in cl_list]
-            session["checklist_data"] = cl_dicts
-            _persist_checklist(cl_dicts)
+            _store_checklist(cl_dicts)
             return render_template("checklist.html", checklist=cl_list,
                                    has_data=True, errors=errors,
                                    resource_urls=extract_resource_urls())
@@ -1179,13 +1244,10 @@ def register(app: Flask) -> None:
         # GET — drain any background checklist job that finished
         # after the sync POST returned. Same bug as the TC path.
         _drain_cl_job_into_session()
-        cl_data = session.get("checklist_data", [])
-        # Same cold-start recovery as /test-cases — the pack outlives the
-        # session because it lives in Postgres.
-        restored_from_db = False
-        if not cl_data:
-            cl_data = _hydrate_from_db("cl")
-            restored_from_db = bool(cl_data)
+        # Same shape as the /test-cases GET above.
+        had_in_session = bool(session.get("checklist_data"))
+        cl_data = _hydrate_from_db("cl")
+        restored_from_db = bool(cl_data) and not had_in_session
         if cl_data:
             cl_list = reconstruct_checklist(cl_data)
             if restored_from_db:
@@ -1256,10 +1318,9 @@ def register(app: Flask) -> None:
             return redirect(_back_to_caller(default="test_cases_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
-        existing = session.get("test_cases_data", []) if mode == "append" else []
+        existing = _tc_rows() if mode == "append" else []
         merged = existing + [tc_to_dict(tc) for tc in cases]
-        session["test_cases_data"] = merged
-        _persist_test_cases(merged)
+        _store_test_cases(merged)
         # Imported packs don't carry their own user stories, so reset
         # the traceability matrix — it would otherwise reference IDs
         # that no longer exist.
@@ -1293,7 +1354,7 @@ def register(app: Flask) -> None:
     # fetch) or a redirect back to /test-cases (for noscript posts).
     @app.route("/test-cases/<tc_id>/walkthrough-meta", methods=["POST"])
     def test_cases_update_walkthrough_meta(tc_id: str):
-        tc_data = session.get("test_cases_data", []) or []
+        tc_data = _tc_rows()
         target = None
         for tc in tc_data:
             if tc.get("id") == tc_id:
@@ -1318,15 +1379,9 @@ def register(app: Flask) -> None:
 
         target["url_pattern"] = url_pattern
         target["trigger"] = trigger
-        # Persist the whole pack — the DB save_test_cases path does
-        # wipe-and-replace which is fine here because session_data is
-        # always the source of truth for the *current* pack.
-        session["test_cases_data"] = tc_data
-        try:
-            _persist_test_cases(tc_data)
-        except Exception as exc:
-            log.warning("walkthrough-meta: persist failed for %s: %s",
-                         tc_id, exc)
+        # Whole-pack write: save_test_cases is wipe-and-replace, and
+        # ``tc_data`` is the pack as it now stands, edit included.
+        _store_test_cases(tc_data)
 
         if request.accept_mimetypes.best == "application/json":
             return jsonify({
@@ -1361,7 +1416,7 @@ def register(app: Flask) -> None:
         if not _recorder_enabled():
             return jsonify({"error": "recorder_disabled"}), 403
 
-        tc_data = session.get("test_cases_data", []) or []
+        tc_data = _tc_rows()
         target = None
         for tc in tc_data:
             if tc.get("id") == tc_id:
@@ -1424,13 +1479,18 @@ def register(app: Flask) -> None:
             step["assertion_type"] = atype
             changed += 1
 
-        # Resave both into session (for the live view) and DB (for the
-        # runner's next pass). Wipe-and-replace through the helper so
-        # the column stays consistent with the session snapshot.
+        # Resave for the live view and for the runner's next pass.
         target["automation_steps_json"] = _json.dumps(steps, ensure_ascii=False)
-        session["test_cases_data"] = tc_data
+        _store_test_cases(tc_data)
 
-        pid = session.get("active_project_id") or ""
+        # resolve_active_project(), not session["active_project_id"] —
+        # which has never been a session key. It is a template variable
+        # (routes/_shared.get_picker_context sets it from
+        # session["project_id"]), so this read was always "" and the
+        # update_tc_automation_steps call below never ran. The step kind
+        # reached the live view and never the runner it was for, which is
+        # the whole point of the endpoint.
+        pid = resolve_active_project()
         if pid:
             try:
                 _db.update_tc_automation_steps(pid, tc_id, steps)
@@ -1463,8 +1523,10 @@ def register(app: Flask) -> None:
 
         Body (JSON, optional):
           ``{"project_id": "<pid>"}`` — overrides the session's active
-          project. Falls back to ``session['active_project_id']`` when
-          omitted (the usual path from the TestForTge UI button).
+          project. Falls back to ``session['project_id']`` when omitted
+          (the usual path from the TestForTge UI button). The docstring
+          said ``active_project_id`` until E3.3; that has never been a
+          session key, only a template variable derived from this one.
 
         Returns ``{token, project_id, finish_url, review_url_template}``
         on success. 403 when RECORDER_ENABLED is off, 400 when neither
@@ -1476,7 +1538,7 @@ def register(app: Flask) -> None:
             return _json_with_cors({"error": "recorder_disabled"}, 403)
         payload = request.get_json(silent=True) or {}
         pid = (payload.get("project_id")
-                or session.get("active_project_id")
+
                 or session.get("project_id") or "").strip()
         if not pid:
             return _json_with_cors({"error": "no_active_project"}, 400)
@@ -1709,7 +1771,7 @@ def register(app: Flask) -> None:
         # the rendering to the currently-active project. An operator
         # juggling multiple projects shouldn't accidentally land TCs
         # into the wrong one because they followed a stale link.
-        active_pid = session.get("active_project_id") or session.get("project_id") or ""
+        active_pid = resolve_active_project()
         if active_pid and active_pid != draft["project_id"]:
             return render_template(
                 "review_session.html",
@@ -1746,7 +1808,7 @@ def register(app: Flask) -> None:
         if draft is None:
             return jsonify({"error": "draft_not_found"}), 404
 
-        active_pid = session.get("active_project_id") or session.get("project_id") or ""
+        active_pid = resolve_active_project()
         if active_pid and active_pid != draft["project_id"]:
             return jsonify({"error": "wrong_project"}), 403
         pid = draft["project_id"]
@@ -1822,9 +1884,12 @@ def register(app: Flask) -> None:
         # Seal the draft so a refresh of the GET doesn't double-insert.
         _db.consume_session_draft(token)
 
-        # Push the new pack into the session so /test-cases renders
-        # the additions immediately without a manual project switch.
-        session["test_cases_data"] = _db.load_test_cases(pid)
+        # Surface the additions on /test-cases immediately, without a
+        # manual project switch. The rows were just written above, so this
+        # is a cache refresh rather than a save — and a no-op once the
+        # database is the source of truth.
+        _workspace.invalidate(pid, "test_cases")
+        _mirror("test_cases_data", _workspace.test_cases(pid))
 
         return jsonify({
             "ok": True,
@@ -1987,7 +2052,7 @@ def register(app: Flask) -> None:
         payload = job.to_public_dict()
         if job.status == DONE and job.result:
             r = job.result
-            session["test_cases_data"] = r.get("tc_dicts", [])
+            _store_test_cases(r.get("tc_dicts", []))
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             session["traceability_data"] = r.get("trace", [])
@@ -2067,7 +2132,7 @@ def register(app: Flask) -> None:
         payload = job.to_public_dict()
         if job.status == DONE and job.result:
             r = job.result
-            session["checklist_data"] = r.get("cl_dicts", [])
+            _store_checklist(r.get("cl_dicts", []))
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             payload["redirect_url"] = url_for("checklist_page")
@@ -2099,10 +2164,9 @@ def register(app: Flask) -> None:
             return redirect(_back_to_caller(default="checklist_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
-        existing = session.get("checklist_data", []) if mode == "append" else []
+        existing = _cl_rows() if mode == "append" else []
         merged = existing + [cl_to_dict(it) for it in items]
-        session["checklist_data"] = merged
-        _persist_checklist(merged)
+        _store_checklist(merged)
 
         flash(
             g.t.get("upload_cl_ok",
@@ -2116,8 +2180,8 @@ def register(app: Flask) -> None:
     @app.route("/export/<fmt>")
     def export(fmt):
         stories = reconstruct_stories(session.get("user_stories", []))
-        tc_list = reconstruct_test_cases(session.get("test_cases_data", []))
-        cl_list = reconstruct_checklist(session.get("checklist_data", []))
+        tc_list = reconstruct_test_cases(_tc_rows())
+        cl_list = reconstruct_checklist(_cl_rows())
         # Fall back to the project's stored pack when the session has
         # none — after a cold start, or in a second tab, the artefacts are
         # in Postgres and only there. /automation/bundle.zip already did
