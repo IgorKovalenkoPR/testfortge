@@ -2357,3 +2357,72 @@ input[type="text"]:focus, textarea:focus, select:focus {
     text-decoration: underline;
 }
 .sidebar-signout:hover { color: #fff; }
+
+/* ── Settings screen (E2.5) ────────────────────────────────────── */
+.settings-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .6rem;
+    align-items: center;
+    margin: .8rem 0 0;
+}
+.settings-row label { min-width: 12rem; font-weight: 600; font-size: .875rem; }
+.settings-row input[type="text"],
+.settings-row input[type="password"],
+.settings-row input[type="number"] {
+    flex: 1 1 16rem;
+    min-width: 0;
+    padding: .5rem .7rem;
+    font: inherit;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.settings-note { margin: .5rem 0 0; font-size: .82rem; line-height: 1.5; }
+.settings-status {
+    margin: 0 0 1rem;
+    padding: .7rem .9rem;
+    border-radius: 6px;
+    background: var(--info-bg);
+    border: 1px solid var(--info-border);
+    font-size: .875rem;
+    line-height: 1.5;
+}
+.settings-status-ok {
+    background: var(--success-light);
+    border-color: var(--success);
+}
+.settings-status-warn {
+    background: var(--warning-light);
+    border-color: var(--warning);
+}
+
+/* Spend against the monthly allowance. A meter rather than a number
+   because "how close are we" is the question people actually have. */
+.settings-meter { margin: 1rem 0; }
+.settings-meter-label {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    justify-content: space-between;
+    font-size: .875rem;
+    margin-bottom: .35rem;
+}
+.settings-meter-track {
+    height: .55rem;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;   /* the fill's width is data-derived; clamp visually
+                           as well as in the template */
+}
+.settings-meter-fill {
+    height: 100%;
+    background: var(--success);
+    transition: width .3s ease;
+}
+.settings-meter-fill.is-over { background: var(--danger); }
+.pill-danger { background: var(--danger-light); color: #991b1b; }
+@media (prefers-reduced-motion: reduce) {
+    .settings-meter-fill { transition: none; }
+}

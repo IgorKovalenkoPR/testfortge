@@ -20,6 +20,7 @@
         "AUTH_ENABLED": "1",
         "ORG_MODE": "1",
         "SESSION_BACKEND": "db",
+        "TESTFORTGE_ENCRYPTION_KEY": "dev-preview-encryption-secret-not-real-32ch",
         "TESTFORTGE_BASIC_USER": "",
         "TESTFORTGE_BASIC_PASSWORD": ""
       }

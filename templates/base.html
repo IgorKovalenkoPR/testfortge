@@ -93,6 +93,16 @@
                     {{ t.get('nav_team', 'Team') }}
                 </a>
             </li>
+            {# Visible to every member, not just admins: a plain user whose
+               generation fell back to the rule engines needs somewhere that
+               says the team is over its allowance. The page itself is
+               read-only for them. #}
+            <li class="{% if request.endpoint and request.endpoint.startswith('org_settings') %}active{% endif %}">
+                <a href="{{ url_for('org_settings') }}">
+                    <span class="step-icon"><i data-lucide="settings" class="icon-sm"></i></span>
+                    {{ t.get('nav_settings', 'Settings') }}
+                </a>
+            </li>
             {% endif %}
         </ul>
         {% if session.get('project_setup', {}).get('project_name') %}

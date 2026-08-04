@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Settings — TestForTge{% endblock %}
+
+{% block content %}
+{% if not org %}
+  <div class="card">
+    <h1>No team selected</h1>
+    <p class="text-muted">
+      Settings belong to a team. Ask an admin to invite you to one.
+    </p>
+  </div>
+{% else %}
+
+<div class="page-head">
+  <h1>Settings</h1>
+  <p class="text-muted">
+    {% if is_admin %}
+      Configuration for {{ org.name }}.
+    {% else %}
+      Configuration for {{ org.name }}. Only admins can change these —
+      you are seeing them so you know how the team is set up.
+    {% endif %}
+  </p>
+</div>
+
+{# ── Team name ────────────────────────────────────────────────── #}
+<div class="card">
+  <h2>Team</h2>
+  {% if is_admin %}
+  <form method="post" action="{{ url_for('org_settings_general') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="settings-row">
+      <label for="org-name">Name</label>
+      <input type="text" id="org-name" name="name" value="{{ org.name }}"
+             maxlength="160" required>
+      <button type="submit" class="btn btn-secondary">Save</button>
+    </div>
+  </form>
+  {% else %}
+  <p><strong>{{ org.name }}</strong></p>
+  {% endif %}
+</div>
+
+{# ── LLM spend ────────────────────────────────────────────────── #}
+<div class="card">
+  <h2>AI usage and cost</h2>
+
+  {% if byok_configured %}
+    <p class="settings-status settings-status-ok">
+      This team uses its own Anthropic API key{% if byok_hint %}
+      (ending {{ byok_hint }}){% endif %}. Generation bills to your own
+      account, and the platform allowance below does not apply.
+    </p>
+  {% elif platform_key_present %}
+    <p class="settings-status">
+      This team uses the platform's shared API key, capped by the monthly
+      allowance below.
+    </p>
+  {% else %}
+    <p class="settings-status settings-status-warn">
+      No API key is configured anywhere, so AI generation is unavailable.
+      {# Worth saying plainly: a large part of the product needs no LLM at
+         all, and a blank screen would suggest otherwise. #}
+      Test cases, checklists and estimation still work from the built-in
+      rule engines and the ISTQB knowledge base — they are just not
+      LLM-assisted.
+    </p>
+  {% endif %}
+
+  {# Spend against the allowance. Shown to every member on purpose: a
+     plain user whose generation quietly fell back to the deterministic
+     engine needs to be able to find out why. #}
+  {% if budget.limit_micros %}
+  <div class="settings-meter">
+    <div class="settings-meter-label">
+      <span>{{ budget_spent }} of {{ budget_limit }} used this month</span>
+      {% if budget.over %}
+      <span class="pill pill-danger">allowance reached</span>
+      {% endif %}
+    </div>
+    <div class="settings-meter-track">
+      {# Width is clamped in the style attribute rather than in CSS because
+         the value is data-derived; a ratio above 1 must not paint past the
+         track. #}
+      <div class="settings-meter-fill{% if budget.over %} is-over{% endif %}"
+           style="width: {{ [budget.ratio * 100, 100]|min|round|int }}%"></div>
+    </div>
+    {% if budget.over %}
+    <p class="text-muted settings-note">
+      AI generation is falling back to the built-in rule engines until the
+      allowance resets or an admin raises it. Nothing is failing — the
+      output is just not LLM-assisted.
+    </p>
+    {% endif %}
+  </div>
+  {% elif not byok_configured %}
+  <p class="text-muted settings-note">No monthly allowance is set, so
+    generation is not capped.</p>
+  {% endif %}
+
+  {% if is_admin %}
+  <form method="post" action="{{ url_for('org_settings_budget') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="settings-row">
+      <label for="budget">Monthly allowance (USD)</label>
+      <input type="number" id="budget" name="budget_usd" step="0.50"
+             min="0" max="{{ max_budget_usd }}"
+             value="{{ '%.2f'|format(budget_limit_usd) }}">
+      <button type="submit" class="btn btn-secondary">Save</button>
+    </div>
+    <p class="text-muted settings-note">
+      0 removes the cap. Applies only to spend on the platform's shared
+      key — a team using its own key is never capped.
+    </p>
+  </form>
+  {% endif %}
+
+  {# ── What was actually spent on ────────────────────────────── #}
+  {% if usage.calls %}
+  <h3>This month</h3>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>Feature</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr>
+      </thead>
+      <tbody>
+        {% for kind, k in usage.by_kind|dictsort %}
+        <tr>
+          <td>{{ kind }}</td>
+          <td>{{ k.calls }}</td>
+          <td>{{ '{:,}'.format(k.input_tokens) }}</td>
+          <td>{{ '{:,}'.format(k.output_tokens) }}</td>
+          <td>{{ format_usd(k.cost_micros) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Total</th><th>{{ usage.calls }}</th><th></th><th></th>
+          <th>{{ usage_total }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted settings-note">No AI calls recorded this month.</p>
+  {% endif %}
+</div>
+
+{# ── The team's own API key. Admins only: this is a credential
+     management surface, not information a member needs. ─────────── #}
+{% if is_admin %}
+<div class="card">
+  <h2>Your own Anthropic API key</h2>
+  <p class="text-muted">
+    Supplying a key means your team's AI usage bills to your own Anthropic
+    account instead of the platform's, and stops counting against the
+    allowance above. It is encrypted before it is stored and is never shown
+    again afterwards.
+  </p>
+
+  {% if not byok_available %}
+    <p class="settings-status settings-status-warn">
+      This instance cannot store API keys — the server has no encryption
+      key configured (<code>TESTFORTGE_ENCRYPTION_KEY</code>). Rather than
+      keep your key in plain text, saving is refused.
+    </p>
+  {% else %}
+    <form method="post" action="{{ url_for('org_settings_set_llm_key') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="settings-row">
+        <label for="api-key">
+          {% if byok_configured %}Replace key{% else %}API key{% endif %}
+        </label>
+        {# type=password and autocomplete=off: a browser offering to
+           remember an API key is not a feature. #}
+        <input type="password" id="api-key" name="api_key"
+               placeholder="sk-ant-…" autocomplete="off" required>
+        <button type="submit" class="btn btn-primary">Save key</button>
+      </div>
+      <p class="text-muted settings-note">
+        From console.anthropic.com → API keys. There is no way to reveal a
+        stored key — to change it, paste a new one.
+      </p>
+    </form>
+
+    {% if byok_configured %}
+    <form method="post" action="{{ url_for('org_settings_clear_llm_key') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-secondary">Remove key</button>
+      <span class="text-muted settings-note">
+        Generation goes back to the platform key and its allowance.
+      </span>
+    </form>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── Which model does what. Read-only for everyone: it is set by the
+     server, and knowing it explains cost differences between features. #}
+<div class="card">
+  <h2>Models</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Feature</th><th>Model</th></tr></thead>
+      <tbody>
+        {% for kind, model in models|dictsort %}
+        <tr><td>{{ kind }}</td><td><code>{{ model }}</code></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted settings-note">
+    Set on the server, not per team. Cheaper models handle work whose
+    output can be checked automatically.
+  </p>
+</div>
+
+{# ── Storage. Declared here rather than omitted, so the screen tells
+     the truth about what exists. ────────────────────────────────── #}
+<div class="card">
+  <h2>Storage</h2>
+  {% if storage_configurable %}
+  <p class="text-muted">Choose where screenshots, videos and export
+    bundles are stored.</p>
+  {% else %}
+  <p class="settings-status">
+    Screenshots, videos and export bundles are stored on the server.
+    Choosing your own storage — S3-compatible, Azure Blob, or a local
+    disk — is not available on this instance yet.
+  </p>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

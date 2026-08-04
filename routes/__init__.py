@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from flask import Flask
 
-from . import (auth, members, dashboard, projects, generation, execution,
+from . import (auth, members, settings, dashboard, projects, generation,
+               execution,
                execution_live, execution_manual, bugs, automation,
                estimation, chat, ops, guide, debug)
 
@@ -24,6 +25,7 @@ def register_all(app: Flask) -> None:
     # After auth: members.py imports new_invite_token from it, and its
     # routes are decorated with the same permission layer.
     members.register(app)
+    settings.register(app)
     dashboard.register(app)
     projects.register(app)
     generation.register(app)
