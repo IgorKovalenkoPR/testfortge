@@ -66,6 +66,15 @@ FLAGS: dict[str, Flag] = {
             "without a user. See require_org_mode().",
         ),
         Flag(
+            "WORKSPACE_DB_FIRST", False, "E3",
+            "Makes Postgres the source of truth for a project's artefacts "
+            "instead of the caller's Flask session. While off, "
+            "engine/workspace.py reads the session first and the database "
+            "second — today's behaviour exactly — so modules can be moved "
+            "onto the repository one at a time without changing what a "
+            "page shows. See docs/plans/adr/0001.",
+        ),
+        Flag(
             "EDITORS_ENABLED", False, "E4",
             "Inline editing of generated artefacts (estimation, test "
             "cases, checklist, bugs). Requires the DB-backed workspace "
@@ -146,6 +155,13 @@ def is_enabled(name: str) -> bool:
 # remember, the dependency is declared and enforced in one place.
 _REQUIRES: dict[str, tuple[str, ...]] = {
     "ORG_MODE": ("AUTH_ENABLED",),
+    # ADR 0001's gate, expressed where it cannot be forgotten: an editor
+    # writing into a Flask session edits a private copy of shared team
+    # data, so it would have to be written twice.
+    "EDITORS_ENABLED": ("WORKSPACE_DB_FIRST",),
+    # Same reason: per-project metrics computed from the caller's session
+    # are per-browser metrics wearing a project's name.
+    "DASHBOARD_V2": ("WORKSPACE_DB_FIRST",),
 }
 
 

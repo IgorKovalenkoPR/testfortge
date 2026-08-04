@@ -20,6 +20,7 @@ from __future__ import annotations
 from flask import Flask, abort, flash, redirect, request, session, url_for
 
 from engine import db as _db
+from engine import workspace as _workspace
 from engine.log import get_logger
 
 from ._shared import (
@@ -225,9 +226,15 @@ def register(app: Flask) -> None:
 
         _set_active_project(meta["id"], meta["name"], meta.get("base_url"))
 
-        tcs = _db.load_test_cases(project_id)
-        cls = _db.load_checklist(project_id)
-        bugs = _db.list_bugs(project_id=project_id)
+        # Read through engine.workspace, so every hydrate site agrees on
+        # the shape. This one used to assign raw ``list_bugs`` rows into
+        # ``bug_reports_data`` — a key that holds session-flat dicts
+        # everywhere else — which only stayed invisible because
+        # ``_hydrate_bugs`` prefers the database whenever a project is
+        # active and never actually read the malformed fallback.
+        tcs = _workspace.test_cases(project_id)
+        cls = _workspace.checklist(project_id)
+        bugs = _workspace.bugs(project_id)
         if tcs:
             session["test_cases_data"] = tcs
             session["_show_tc_once"] = True
@@ -324,12 +331,14 @@ def register(app: Flask) -> None:
         # confused why their previous project's estimation table was
         # empty after switching back.
         try:
-            tcs = _db.load_test_cases(project_id) if hasattr(
-                _db, "load_test_cases") else []
-            cls = _db.load_checklist(project_id) if hasattr(
-                _db, "load_checklist") else []
-            bugs = (_db.list_bugs(project_id=project_id)
-                    if hasattr(_db, "list_bugs") else [])
+            # The GENERATED_KEYS wipe above emptied the session, so these
+            # reads fall through to the database — but drop the
+            # per-request cache too, in case an earlier read in this same
+            # request populated it from the project we are leaving.
+            _workspace.invalidate()
+            tcs = _workspace.test_cases(project_id)
+            cls = _workspace.checklist(project_id)
+            bugs = _workspace.bugs(project_id)
             if tcs:
                 session["test_cases_data"] = tcs
             if cls:
@@ -364,38 +373,14 @@ def register(app: Flask) -> None:
             # session["test_runs"] as a list of past runs. We keep the
             # last 20 (matching the in-page cap) so switching back
             # shows the actual run table the user remembers.
-            if hasattr(_db, "list_execution_runs"):
-                runs = _db.list_execution_runs(project_id, limit=20) or []
-                if runs:
-                    # Shape the DB rows so the existing template's
-                    # iterators don't trip on missing keys.
-                    test_runs_session: list[dict] = []
-                    for r in runs:
-                        env_payload = r.get("env_payload") or {}
-                        test_runs_session.append({
-                            "run_id": r.get("id") or r.get("run_id"),
-                            "db_run_id": r.get("id"),
-                            "source": env_payload.get("source", ""),
-                            "tester_id": env_payload.get("tester_id", ""),
-                            "tester_name": env_payload.get(
-                                "tester_name", ""),
-                            "environment": env_payload.get(
-                                "environment", ""),
-                            "env_type": env_payload.get("env_type", ""),
-                            "testing_types": ", ".join(
-                                env_payload.get("testing_types") or []),
-                            "results": [],
-                            "stats": r.get("stats") or {},
-                            "bug_count": 0,
-                            "site_url": "",
-                            "base_url": r.get("base_url", ""),
-                            "headless": (r.get("browser_visibility")
-                                         == "headless"),
-                            "record_video": bool(r.get("record_video")),
-                            "automation_used": True,
-                            "created_at": r.get("started_at", ""),
-                        })
-                    session["test_runs"] = test_runs_session[-20:]
+            # Shaped by engine.workspace, not inline here. This block used
+            # to carry its own copy of the mapping, and that is exactly how
+            # run history went missing when switching projects: the copy
+            # did not know about a field the template read. One shaper, one
+            # place to add the next field.
+            runs = _workspace.runs(project_id, limit=20)
+            if runs:
+                session["test_runs"] = runs
         except Exception as exc:
             log.warning("project select: hydrate failed: %s", exc)
 

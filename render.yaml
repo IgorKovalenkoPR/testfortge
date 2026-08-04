@@ -128,6 +128,12 @@ services:
         value: "0"
       - key: ORG_MODE
         value: "0"
+      # Makes Postgres the source of truth for a project's artefacts
+      # instead of the caller's session (ADR 0001). Must be "1" before
+      # EDITORS_ENABLED or DASHBOARD_V2 do anything — engine/features.py
+      # enforces that dependency and warns at boot if it is violated.
+      - key: WORKSPACE_DB_FIRST
+        value: "0"
       - key: EDITORS_ENABLED
         value: "0"
       - key: DASHBOARD_V2

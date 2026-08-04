@@ -80,6 +80,23 @@ class TestDependencies:
             monkeypatch.delenv(name, raising=False)
         assert features.misconfigurations() == []
 
+    def test_editors_do_nothing_without_the_db_backed_workspace(self, monkeypatch):
+        # ADR 0001's gate, expressed where it cannot be forgotten: an
+        # editor writing into a Flask session edits a private copy of
+        # shared team data, so it would have to be written twice.
+        monkeypatch.setenv("EDITORS_ENABLED", "1")
+        monkeypatch.delenv("WORKSPACE_DB_FIRST", raising=False)
+        assert features.effective("EDITORS_ENABLED") is False
+        monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
+        assert features.effective("EDITORS_ENABLED") is True
+
+    def test_dashboard_v2_has_the_same_prerequisite(self, monkeypatch):
+        # Per-project metrics computed from the caller's session are
+        # per-browser metrics wearing a project's name.
+        monkeypatch.setenv("DASHBOARD_V2", "1")
+        monkeypatch.delenv("WORKSPACE_DB_FIRST", raising=False)
+        assert features.effective("DASHBOARD_V2") is False
+
 
 class TestSnapshot:
     def test_snapshot_covers_every_flag_and_is_sorted(self, monkeypatch):

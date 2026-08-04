@@ -31,6 +31,7 @@ from engine.bug_report import (
 from engine import db as _db
 from engine import bug_areas as _bug_areas
 from engine import permissions as _perm
+from engine import workspace as _workspace
 # CSV injection guard, shared with engine/exporter.py — a cell beginning
 # with = + - @ is executed as a formula by Excel on open.
 from engine.exporter import _sanitize_cell
@@ -42,57 +43,14 @@ from .projects import _require_project_owner
 log = get_logger(__name__)
 
 
-def _bug_row_to_session_dict(row: dict) -> dict:
-    """Convert a row returned by :func:`engine.db.list_bugs` into the
-    session-flat shape :func:`dict_to_bug` consumes.
-
-    Three notable mappings:
-      * ``row.id`` (int DB row id) → ``db_id`` on the session BugReport
-      * ``row.external_id`` (e.g. ``"BUG-001"``) → display ``id``
-      * ``row.extra.assignee`` → first-class ``assignee`` field so the
-        existing template renders it without an attribute lookup hack
-
-    Anything in ``row.extra`` that ``BugReport`` already knows about
-    (``frequency``, ``component``, etc.) is unpacked too so the JSON
-    blob doesn't shadow first-class fields after a re-render.
-    """
-    extra = row.get("extra") or {}
-    out = {
-        "id":                 row.get("external_id") or f"BUG-{int(row.get('id') or 0):03d}",
-        "db_id":              int(row.get("id") or 0),
-        "title":              row.get("title") or "",
-        "severity":           row.get("severity") or "Minor",
-        "priority":           row.get("priority") or "Medium",
-        "status":             row.get("status") or "Open",
-        "environment":        row.get("environment") or "",
-        # First-class columns as of PR-6; ``extra`` is the fallback for
-        # rows written before the migration, whose values still live in
-        # the JSON blob.
-        "preconditions":      row.get("preconditions")
-                              or extra.get("preconditions", ""),
-        "attachment":         row.get("attachment") or "",
-        "bug_area":           row.get("bug_area")
-                              or extra.get("bug_area", "") or "Functional",
-        "steps_to_reproduce": row.get("steps_to_reproduce") or "",
-        "actual_result":      row.get("actual_result") or "",
-        "expected_result":    row.get("expected_result") or "",
-        "frequency":          extra.get("frequency", "Always"),
-        "affects_version":    row.get("version") or "",
-        "found_in_build":     extra.get("found_in_build", ""),
-        "attachments":        extra.get("attachments") or [],
-        "linked_item_id":     extra.get("linked_item_id", ""),
-        "linked_item_type":   extra.get("linked_item_type", ""),
-        "reporter":           row.get("reporter") or "",
-        "assignee":           row.get("assignee") or extra.get("assignee", ""),
-        "created_at":         (row.get("created_at") or "")
-                                if isinstance(row.get("created_at"), str)
-                                else (row.get("created_at").isoformat()
-                                      if row.get("created_at") else ""),
-        "component":          extra.get("component", ""),
-        "labels":             extra.get("labels") or [],
-        "comment":            row.get("comment") or "",
-    }
-    return out
+#: DB row → the session-flat shape ``dict_to_bug`` consumes.
+#:
+#: The mapping itself moved to :func:`engine.workspace.bug_row_to_dict` in
+#: E3.2, so the repository and this module cannot disagree about it. They
+#: did once: the copy that shaped runs in ``routes/projects.py`` did not
+#: know about every field, which is how switching projects lost run
+#: history. Kept as an alias because the name is used throughout this file.
+_bug_row_to_session_dict = _workspace.bug_row_to_dict
 
 
 def _hydrate_bugs(project_id: str | None,
