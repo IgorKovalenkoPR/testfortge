@@ -148,11 +148,15 @@ class TestChatbot:
 
 class TestChatRoute:
     @pytest.fixture
-    def client(self):
+    def client(self, sign_in):
         import app as flask_app
         flask_app.app.config["TESTING"] = True
         flask_app.app.config["WTF_CSRF_ENABLED"] = False
         with flask_app.app.test_client() as c:
+            # Signed in when the run is authenticated; a no-op otherwise.
+            # Without it every request here 302s to the sign-in page in a
+            # file whose subject is the chat endpoint.
+            sign_in(c)
             yield c
 
     def test_chat_endpoint_returns_json(self, client):

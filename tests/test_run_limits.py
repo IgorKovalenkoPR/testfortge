@@ -188,8 +188,17 @@ class TestTheRouteRefusesPolitely:
     """The acceptance criterion: a comprehensible queue, not a 500."""
 
     @pytest.fixture
-    def project(self, client, request):
-        pid = _db.upsert_project(f"limit-route-{request.node.name}")
+    def project(self, client, request, fresh_org, make_project):
+        # fresh_org, because the limit's scope IS the organisation: sharing
+        # one with the rest of the suite means an open run left behind by
+        # another file counts here, and the test fails for something that
+        # happened elsewhere.
+        #
+        # make_project rather than upsert_project for the same reason in
+        # reverse: a project outside the caller's organisation is correctly
+        # invisible to the check, and the test would measure nothing.
+        pid = make_project(f"limit-route-{request.node.name}",
+                           **({"org_id": fresh_org} if fresh_org else {}))
         _db.save_test_cases(pid, [tc_to_dict(TestCase(
             id="TC_001", section="S", section_num=1, summary="Verify it",
             preconditions="", test_steps="1. do it", test_data="",

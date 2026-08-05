@@ -225,7 +225,8 @@ class TestSessionStoreWipedEntirely:
         assert body["count"] == len(TC_ROWS)
         assert body["project"] == pid
 
-    def test_resolver_does_not_create_a_project_on_a_read_path(self, client):
+    def test_resolver_does_not_create_a_project_on_a_read_path(self, client,
+                                                              sign_in):
         """ensure_active_project() auto-creates; the resolver must not."""
         pid = self._project_via_app(client)
         with client.session_transaction() as sess:
@@ -233,6 +234,7 @@ class TestSessionStoreWipedEntirely:
         # A GET that finds nothing must still not mint a project. Point the
         # cookie at a session with no owned projects by using a fresh client.
         fresh = client.application.test_client()
+        sign_in(fresh)
         before = fresh.get("/test-cases").status_code
         assert before == 200
         with fresh.session_transaction() as sess:

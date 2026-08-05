@@ -116,7 +116,7 @@ class TestRunsAreScopedToTheirProject:
         assert got.status_code == 404
 
     def test_following_a_run_link_with_no_project_selects_it(
-            self, client, two_projects):
+            self, client, two_projects, forget_workspace):
         """A read with nothing active adopts the run's project.
 
         This is the hand-off: a colleague on another machine opens the link
@@ -128,9 +128,7 @@ class TestRunsAreScopedToTheirProject:
         refusing would have been theatre at the price of a real workflow.
         The write path is where the line is drawn instead; see below.
         """
-        with client.session_transaction() as sess:
-            sess.clear()
-            sess["_session_active_since"] = SERVER_START_TIME
+        forget_workspace(client)
         got = client.get(f"/test-execution/manual/{two_projects['run_id']}")
         assert got.status_code == 200
         assert "AAA the summary" in got.get_data(as_text=True)
@@ -138,14 +136,12 @@ class TestRunsAreScopedToTheirProject:
             assert sess.get("project_id") == two_projects["a"]
 
     def test_a_session_with_no_project_cannot_write_a_verdict(
-            self, client, two_projects):
+            self, client, two_projects, forget_workspace):
         """Writes do not adopt. A verdict is what damages data, and the
         hand-off flow loads the page first — which adopts — so a POST that
         arrives having never read the run is not that flow."""
         run_id = two_projects["run_id"]
-        with client.session_transaction() as sess:
-            sess.clear()
-            sess["_session_active_since"] = SERVER_START_TIME
+        forget_workspace(client)
         resp = client.post(f"/test-execution/manual/{run_id}/verdict",
                            data={"external_id": "TC_001", "kind": "test_case",
                                  "verdict": "Failed"})
@@ -422,7 +418,7 @@ class TestAnItemWithNothingInIt:
 
 class TestAssignment:
     def test_a_run_records_who_it_belongs_to_when_auth_is_off(
-            self, client, two_projects):
+            self, auth_off, client, two_projects):
         # With authentication off there is no user to attach, so the
         # machine-readable field stays empty and the free-text tester name
         # is what the run carries. Asserted so the field's absence is a

@@ -198,11 +198,9 @@ class TestTheManualJourney:
         assert f"#{walked['run_id']}" in page
         assert "Review" in page
 
-    def test_the_walk_is_resumable_after_the_browser_is_lost(self, client,
-                                                             walked):
-        with client.session_transaction() as sess:
-            sess.clear()
-            sess["_session_active_since"] = SERVER_START_TIME
+    def test_the_walk_is_resumable_after_the_browser_is_lost(
+            self, client, walked, forget_workspace):
+        forget_workspace(client)
         body = client.get(
             f"/test-execution/manual/{walked['run_id']}").get_data(as_text=True)
         # The cursor is derived from the results, so a new browser lands on

@@ -120,3 +120,24 @@ jobs:
 
       - name: Run test suite
         run: python run_tests.py
+
+      # The authenticated leg (E9.9). The product ships with AUTH_ENABLED
+      # and ORG_MODE on, and until this existed the suite could only be run
+      # with them off — 405 failures and 61 errors in the on state, almost
+      # all of them "no fixture signs in, so every request redirects to the
+      # sign-in page". Regressions in E1 and E2 were therefore invisible in
+      # the mode they would actually ship in.
+      #
+      # It found a real defect on the first green run: nothing wrote
+      # Project.org_id while the listing filtered by it, so a project
+      # vanished from the picker the moment it was created.
+      #
+      # Only on one interpreter, and last: it doubles the suite's wall clock
+      # and the flags-off leg above already covers the matrix. The point of
+      # this leg is the mode, not the Python version.
+      - name: Run test suite with authentication on
+        if: matrix.python-version == '3.12'
+        env:
+          AUTH_ENABLED: "1"
+          ORG_MODE: "1"
+        run: python -m pytest tests/ -q --tb=short -p no:cacheprovider

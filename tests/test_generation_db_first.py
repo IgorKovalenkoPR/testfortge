@@ -178,7 +178,7 @@ class TestSessionStopsCarryingThePack:
 # ── Two callers, one project ──────────────────────────────────────
 
 class TestSharedProject:
-    def test_a_second_browser_sees_the_first_ones_pack(self, client, db_first):
+    def test_a_second_browser_sees_the_first_ones_pack(self, client, sign_in, db_first):
         """The reason ADR 0001 exists.
 
         Two clients means two sessions. With the database as the source of
@@ -192,11 +192,12 @@ class TestSharedProject:
             pid = sess.get("project_id")
 
         other = client.application.test_client()
+        sign_in(other)
         with other.session_transaction() as sess:
             sess["project_id"] = pid
         assert _count(other.get("/checklist")) == posted
 
-    def test_without_the_flag_the_second_browser_cannot(self, client):
+    def test_without_the_flag_the_second_browser_cannot(self, client, sign_in):
         # Documenting the old behaviour rather than wishing it away: this
         # is what the flag is for, and what E3.4 finishes.
         client.post("/new-session")
@@ -205,6 +206,7 @@ class TestSharedProject:
             pid = sess.get("project_id")
 
         other = client.application.test_client()
+        sign_in(other)
         with other.session_transaction() as sess:
             sess["project_id"] = pid
         # The other session is empty, so the repository falls through to

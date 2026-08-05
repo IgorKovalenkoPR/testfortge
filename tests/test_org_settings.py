@@ -70,8 +70,8 @@ def _as(client, team, who):
 # ── Visibility ────────────────────────────────────────────────────
 
 class TestPageAccess:
-    def test_anonymous_is_sent_to_sign_in(self, client):
-        resp = client.get("/org/settings")
+    def test_anonymous_is_sent_to_sign_in(self, anon_client):
+        resp = anon_client.get("/org/settings")
         assert resp.status_code == 302
         assert "/auth/login" in resp.headers["Location"]
 
@@ -103,6 +103,9 @@ class TestPageAccess:
         uid = _db.create_user(_email())
         with client.session_transaction() as sess:
             sess[_perm.SESSION_USER_KEY] = uid
+            # …and no organisation. The shared client signs in with one, so
+            # "a user with no team" has to say so rather than inherit it.
+            sess.pop(_perm.SESSION_ORG_KEY, None)
         resp = client.get("/org/settings")
         assert resp.status_code == 200
         assert b"No team selected" in resp.data

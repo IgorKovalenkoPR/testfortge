@@ -96,11 +96,50 @@ def browser():
         pytest.skip(f"Playwright launch failed: {exc}")
 
 
+#: A password strong enough for engine.auth.validate_password, so the
+#: browser can sign in the way a person does.
+_BROWSER_PASSWORD = "Suite-Browser-9182!"
+
+
+def _browser_sign_in(p, base_url: str) -> None:
+    """Sign the browser in through the real form, when auth is on.
+
+    A no-op with the flags off, which is every deployment today.
+
+    The other fixtures in the suite write session keys directly; a browser
+    cannot. It has a cookie jar and nothing else, so the only way in is the
+    form — and doing it that way is worth more than a shortcut would be: it
+    is the one place in the suite where the sign-in flow is exercised end to
+    end, through the real page, the real CSRF token and the real redirect.
+    """
+    from engine import permissions as _perm
+    if not _perm.auth_active():
+        return
+    from engine import auth as _auth
+    from engine import db as _db
+    email = "browser-suite@testfortge.test"
+    user = _db.get_user_by_email(email)
+    if not user:
+        uid = _db.create_user(
+            email, display_name="Browser Suite",
+            password_hash=_auth.hash_password(_BROWSER_PASSWORD, email=email),
+            email_verified=True)
+        org = _db.create_organization("Browser Suite Org")
+        if uid and org:
+            _db.add_org_member(org, uid, "admin")
+    p.goto(f"{base_url}/auth/login?lang=en", timeout=15_000)
+    p.fill('input[name="email"]', email)
+    p.fill('input[name="password"]', _BROWSER_PASSWORD)
+    p.click('button[type="submit"], input[type="submit"]')
+    p.wait_for_load_state("networkidle", timeout=15_000)
+
+
 @pytest.fixture
 def page(browser, live_server):
     """Fresh BrowserContext per test for clean cookies/storage."""
     ctx = browser.new_context(viewport={"width": 1280, "height": 800})
     p = ctx.new_page()
+    _browser_sign_in(p, live_server)
     yield p
     ctx.close()
 

@@ -73,8 +73,8 @@ class TestTheRunsPage:
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"#{other_run}" not in page
 
-    def test_it_says_why_everything_is_listed_when_auth_is_off(self, client,
-                                                              project):
+    def test_it_says_why_everything_is_listed_when_auth_is_off(
+            self, auth_off, client, project):
         _start(client)
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert "needs authentication" in page
@@ -92,8 +92,8 @@ class TestTheRunsPage:
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert "Review" in page
 
-    def test_a_run_with_no_walk_is_not_offered_a_resume_link(self, client,
-                                                            project):
+    def test_a_run_with_no_walk_is_not_offered_a_resume_link(
+            self, auth_off, client, project):
         # Live and walkthrough runs share ExecutionRun and have no queue, so
         # a resume link would 404 — worse than no link.
         live_id = _db.start_execution_run(project, {"mode": "live"})
@@ -101,15 +101,15 @@ class TestTheRunsPage:
         assert f"#{live_id}" in page
         assert f"/manual/{live_id}/resume" not in page
 
-    def test_no_project_redirects_rather_than_erroring(self, client):
-        with client.session_transaction() as sess:
-            sess.clear()
-            sess["_session_active_since"] = SERVER_START_TIME
+    def test_no_project_redirects_rather_than_erroring(self, client,
+                                                       forget_workspace):
+        forget_workspace(client)
         resp = client.get("/test-execution/runs")
         assert resp.status_code == 302
         assert "/test-execution" in resp.headers["Location"]
 
-    def test_the_empty_state_offers_a_way_to_start_one(self, client, project):
+    def test_the_empty_state_offers_a_way_to_start_one(self, auth_off,
+                                                       client, project):
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert "no runs yet" in page
         assert "/test-execution" in page
@@ -129,82 +129,66 @@ class TestScopeIsAnAccessRuleWithAuthOn:
             _db.assign_run(rid, uid)
         return {"mine": run_mine, "theirs": run_theirs}
 
-    def _as(self, monkeypatch, *, user="u-me", admin=False):
-        """Sign in as *user* for both the route-policy gate and the view.
-
-        The gate calls auth_active / current_user / has_role, and the view
-        calls current_user_id / is_admin. Patching only the second set turns
-        the fail-closed policy on with nobody signed in, and every request
-        redirects to /auth/login — which is the policy working correctly and
-        a confusing way to fail a scoping test.
-        """
-        from engine import permissions as perm
-        monkeypatch.setattr(perm, "auth_active", lambda: True)
-        monkeypatch.setattr(perm, "current_user_id", lambda: user)
-        monkeypatch.setattr(perm, "current_user",
-                            lambda: {"id": user, "name": user})
-        monkeypatch.setattr(perm, "is_admin", lambda: admin)
-        monkeypatch.setattr(perm, "has_role", lambda minimum: True)
+    def _as(self, as_user, *, user="u-me", admin=False):
+        """Become *user*. See the ``as_user`` fixture for why the gate is
+        patched open as well as the view's own identity functions."""
+        return as_user(user, admin=admin)
 
     def test_a_tester_sees_only_their_own(self, client, two_testers,
-                                         monkeypatch):
-        self._as(monkeypatch)
+                                         as_user):
+        self._as(as_user)
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"#{two_testers['mine']}" in page
         assert f"#{two_testers['theirs']}" not in page
 
     def test_a_tester_cannot_widen_the_scope_by_url(self, client, two_testers,
-                                                    monkeypatch):
-        self._as(monkeypatch)
+                                                    as_user):
+        self._as(as_user)
         page = client.get(
             "/test-execution/runs?scope=all").get_data(as_text=True)
         assert f"#{two_testers['theirs']}" not in page
 
     def test_a_tester_is_not_offered_the_switch(self, client, two_testers,
-                                               monkeypatch):
-        self._as(monkeypatch)
+                                               as_user):
+        self._as(as_user)
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert "scope=all" not in page
 
     def test_an_admin_defaults_to_their_own(self, client, two_testers,
-                                           monkeypatch):
+                                           as_user):
         # Defaults to "mine" so an admin's own queue is the landing view;
         # everything is one click away.
-        self._as(monkeypatch, admin=True)
+        self._as(as_user, admin=True)
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"#{two_testers['mine']}" in page
         assert f"#{two_testers['theirs']}" not in page
 
     def test_an_admin_can_see_everything(self, client, two_testers,
-                                        monkeypatch):
-        self._as(monkeypatch, admin=True)
+                                        as_user):
+        self._as(as_user, admin=True)
         page = client.get(
             "/test-execution/runs?scope=all").get_data(as_text=True)
         assert f"#{two_testers['mine']}" in page
         assert f"#{two_testers['theirs']}" in page
 
     def test_the_empty_mine_state_says_it_is_about_assignment(
-            self, client, two_testers, monkeypatch):
-        self._as(monkeypatch, user="u-nobody")
+            self, client, two_testers, as_user):
+        self._as(as_user, user="u-nobody")
         page = client.get("/test-execution/runs").get_data(as_text=True)
         assert "assigned to you" in page
 
 
 class TestAssigningARun:
-    def test_with_auth_off_no_assignee_is_recorded(self, client, project):
+    def test_with_auth_off_no_assignee_is_recorded(self, auth_off, client,
+                                                  project):
         # Asserted so the empty field is a decision rather than an accident:
         # there is no identity to attach when authentication is off.
         run = _db.get_execution_run(_start(client))
         assert run["env_payload"]["assignee_id"] == ""
 
     def test_a_run_belongs_to_whoever_started_it(self, client, project,
-                                                monkeypatch):
-        from engine import permissions as perm
-        monkeypatch.setattr(perm, "auth_active", lambda: True)
-        monkeypatch.setattr(perm, "current_user_id", lambda: "u-me")
-        monkeypatch.setattr(perm, "is_admin", lambda: False)
-        monkeypatch.setattr(perm, "current_user", lambda: {"id": "u-me",
-                                                           "name": "Me"})
+                                                as_user):
+        as_user("u-me", name="Me")
         run = _db.get_execution_run(_start(client, tester=""))
         assert run["env_payload"]["assignee_id"] == "u-me"
         # The display name fills the free-text tester field when the form
@@ -212,29 +196,21 @@ class TestAssigningARun:
         assert run["env_payload"]["tester"] == "Me"
 
     def test_a_tester_cannot_assign_work_to_someone_else(self, client, project,
-                                                         monkeypatch):
-        from engine import permissions as perm
-        monkeypatch.setattr(perm, "auth_active", lambda: True)
-        monkeypatch.setattr(perm, "current_user_id", lambda: "u-me")
-        monkeypatch.setattr(perm, "is_admin", lambda: False)
-        monkeypatch.setattr(perm, "current_user", lambda: {"id": "u-me"})
+                                                         as_user):
+        as_user("u-me")
         run = _db.get_execution_run(_start(client, assignee_id="u-them"))
         # Without this check "assign" would be a way to write into another
         # tester's queue.
         assert run["env_payload"]["assignee_id"] == "u-me"
 
     def test_an_admin_can_assign_work_to_someone_else(self, client, project,
-                                                      monkeypatch):
-        from engine import permissions as perm
-        monkeypatch.setattr(perm, "auth_active", lambda: True)
-        monkeypatch.setattr(perm, "current_user_id", lambda: "u-admin")
-        monkeypatch.setattr(perm, "is_admin", lambda: True)
-        monkeypatch.setattr(perm, "current_user", lambda: {"id": "u-admin"})
+                                                      as_user):
+        as_user("u-admin", admin=True)
         run = _db.get_execution_run(_start(client, assignee_id="u-them"))
         assert run["env_payload"]["assignee_id"] == "u-them"
 
-    def test_the_assignee_picker_is_absent_when_auth_is_off(self, client,
-                                                           project):
+    def test_the_assignee_picker_is_absent_when_auth_is_off(
+            self, auth_off, client, project):
         page = client.get("/test-execution").get_data(as_text=True)
         # A disabled select that explains nothing is worse than no select.
         assert 'name="assignee_id"' not in page

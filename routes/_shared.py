@@ -510,7 +510,8 @@ def ensure_active_project(session_obj=None) -> str:
 
     name = "Untitled project " + _dt.now().strftime("%Y-%m-%d %H:%M")
     try:
-        pid = _db.upsert_project(name=name, owner_sid=sid)
+        pid = _db.upsert_project(name=name, owner_sid=sid,
+                                 org_id=org_for_new_project())
     except Exception as exc:
         log.warning("ensure_active_project: auto-create failed: %s", exc)
         return ""
@@ -630,6 +631,30 @@ def mirror_pack(session_key: str, rows, session_obj=None) -> None:
     sess[session_key] = rows
     if hasattr(sess, "modified"):
         sess.modified = True
+
+
+def org_for_new_project() -> str | None:
+    """The organisation a project created right now should belong to.
+
+    ``None`` when org mode is off, which is every deployment today — the
+    column stays NULL and nothing scopes by it.
+
+    This exists because the two halves disagreed. ``visible_projects``
+    lists only the caller's organisation's projects under ``ORG_MODE``,
+    and nothing ever wrote ``Project.org_id``, so a project vanished from
+    the picker the moment it was created. One helper, used by every
+    creation path, is the only shape in which the two halves cannot drift
+    again — four call sites each remembering to pass an argument is how
+    this happened the first time.
+    """
+    try:
+        from engine import permissions as _perm
+        if not _perm.org_active():
+            return None
+        return _perm.current_org_id() or None
+    except Exception as exc:  # pragma: no cover — defensive
+        log.debug("org_for_new_project unavailable (%s)", exc)
+        return None
 
 
 def visible_projects(session_obj=None) -> list:

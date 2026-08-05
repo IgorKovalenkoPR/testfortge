@@ -113,12 +113,13 @@ def test_aggregator_handles_empty_inputs():
 
 
 @pytest.fixture
-def client(fresh_db):
+def client(fresh_db, sign_in):
     """Flask test client wired against the temp SQLite DB."""
     from app import app
     app.config["TESTING"] = True
     app.config["WTF_CSRF_ENABLED"] = False
     with app.test_client() as c:
+        sign_in(c)
         yield c
 
 

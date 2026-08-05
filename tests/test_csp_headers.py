@@ -11,11 +11,13 @@ import pytest
 
 
 @pytest.fixture
-def client():
+def client(sign_in):
     from app import app as flask_app
     flask_app.config["TESTING"] = True
     flask_app.config["WTF_CSRF_ENABLED"] = False
-    return flask_app.test_client()
+    c = flask_app.test_client()
+    sign_in(c)
+    return c
 
 
 def _csp(resp):

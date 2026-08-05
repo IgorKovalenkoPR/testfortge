@@ -2849,8 +2849,26 @@ def _row_to_dict(obj: Base) -> dict:
 
 def upsert_project(name: str, base_url: str | None = None,
                    description: str | None = None,
-                   owner_sid: str | None = None) -> str:
-    """Create-or-return-existing by (owner_sid, slug)."""
+                   owner_sid: str | None = None,
+                   org_id: str | None = None) -> str:
+    """Create-or-return-existing by (owner_sid, slug).
+
+    ``org_id`` was missing entirely until the suite was first run with
+    ``ORG_MODE=1``, and its absence was not a cosmetic gap: nothing wrote
+    the column, ``visible_projects`` lists **only** the caller's
+    organisation's projects when org mode is on, and the result was that a
+    project became invisible to the person who had just created it. The
+    flag is off in production, so nobody had met it — the listing side of
+    E2 shipped without the writing side.
+
+    An existing row is adopted rather than left alone when it has no
+    organisation yet. That is the migration path: a project created before
+    the flag went on belongs to whoever is working in it now, and refusing
+    to stamp it would leave it permanently unreachable. A row that already
+    names a *different* organisation is never moved here — that would be a
+    silent transfer between teams, and it is what
+    :func:`adopt_orphan_projects` exists to do deliberately.
+    """
     name = (name or "").strip()
     if not name:
         raise ValueError("Project name is required")
@@ -2869,6 +2887,8 @@ def upsert_project(name: str, base_url: str | None = None,
                 existing.base_url = base_url
             if description is not None:
                 existing.description = description
+            if org_id and not existing.org_id:
+                existing.org_id = org_id
             return existing.id
 
         proj = Project(
@@ -2878,10 +2898,49 @@ def upsert_project(name: str, base_url: str | None = None,
             base_url=base_url,
             description=description,
             owner_sid=owner_sid,
+            org_id=org_id,
         )
         sess.add(proj)
         sess.flush()
         return proj.id
+
+
+def adopt_orphan_projects(org_id: str, *, only_when_sole_org: bool = True) -> int:
+    """Attach projects with no organisation to *org_id*. Returns the count.
+
+    The migration when ``ORG_MODE`` is switched on: every project that
+    exists at that moment has ``org_id = NULL``, because nothing ever wrote
+    the column, and the moment the flag goes on they all disappear from
+    every listing. Doing nothing is therefore not a neutral option.
+
+    ``only_when_sole_org`` refuses the sweep when more than one
+    organisation exists, and that refusal is the point. With several teams
+    on one deployment there is no way to tell whose an orphan project is,
+    and guessing would hand one team's work to another. In that case the
+    operator has to say, project by project — a slower answer and the only
+    honest one.
+    """
+    if not org_id:
+        return 0
+    with session_scope() as sess:
+        if only_when_sole_org:
+            org_count = sess.execute(
+                select(func.count()).select_from(Organization)
+            ).scalar() or 0
+            if org_count > 1:
+                log.warning(
+                    "adopt_orphan_projects: %d organisations exist — refusing "
+                    "to guess which owns the unassigned projects", org_count)
+                return 0
+        rows = sess.execute(
+            select(Project).where(Project.org_id.is_(None))
+        ).scalars().all()
+        for row in rows:
+            row.org_id = org_id
+        if rows:
+            log.info("adopted %d unassigned project(s) into org %s",
+                     len(rows), org_id[:8])
+        return len(rows)
 
 
 def list_projects(owner_sid: str | None = None,

@@ -232,28 +232,30 @@ class TestRehashOnLogin:
 # ── The HTTP surface ──────────────────────────────────────────────
 
 class TestLoginRoute:
-    def test_the_page_renders(self, client):
-        assert client.get("/auth/login").status_code == 200
+    def test_the_page_renders(self, anon_client):
+        # The sign-in page, seen by somebody who is not signed in. With the
+        # shared client that is a redirect straight past it.
+        assert anon_client.get("/auth/login").status_code == 200
 
-    def test_a_good_password_signs_in(self, client):
+    def test_a_good_password_signs_in(self, anon_client):
         uid, email = _user()
-        resp = client.post("/auth/login",
+        resp = anon_client.post("/auth/login",
                            data={"email": email, "password": GOOD_PASSWORD})
         assert resp.status_code == 302
-        assert client.get("/auth/me").get_json()["authenticated"] is True
+        assert anon_client.get("/auth/me").get_json()["authenticated"] is True
 
-    def test_a_bad_password_returns_401_and_the_generic_message(self, client):
+    def test_a_bad_password_returns_401_and_the_generic_message(self, anon_client):
         _, email = _user()
-        resp = client.post("/auth/login",
+        resp = anon_client.post("/auth/login",
                            data={"email": email, "password": "wrong wrong"})
         assert resp.status_code == 401
         assert _auth.GENERIC_LOGIN_FAILURE.encode() in resp.data
 
-    def test_an_unknown_address_returns_the_identical_body(self, client):
+    def test_an_unknown_address_returns_the_identical_body(self, anon_client):
         _, email = _user()
-        known = client.post("/auth/login",
+        known = anon_client.post("/auth/login",
                             data={"email": email, "password": "wrong wrong"})
-        unknown = client.post("/auth/login",
+        unknown = anon_client.post("/auth/login",
                               data={"email": _email(),
                                     "password": "wrong wrong"})
         assert known.status_code == unknown.status_code == 401
@@ -290,9 +292,9 @@ class TestLoginRoute:
         assert resp.status_code == 302
         assert "evil.example.com" not in resp.headers["Location"]
 
-    def test_a_same_origin_next_is_honoured(self, client):
+    def test_a_same_origin_next_is_honoured(self, anon_client):
         _, email = _user()
-        resp = client.post("/auth/login",
+        resp = anon_client.post("/auth/login",
                            data={"email": email, "password": GOOD_PASSWORD,
                                  "next": "/estimation"})
         assert resp.headers["Location"].endswith("/estimation")
@@ -315,18 +317,19 @@ class TestSessionFixation:
         assert before is not None and after is not None
         assert before.value != after.value
 
-    def test_the_pre_login_session_row_is_not_reused(self, client, monkeypatch):
+    def test_the_pre_login_session_row_is_not_reused(self, anon_client,
+                                                     monkeypatch):
         monkeypatch.setenv("SESSION_BACKEND", "db")
         from engine import server_session
-        server_session.install(client.application)
+        server_session.install(anon_client.application)
 
-        client.get("/auth/login")
-        stale = client.get_cookie("session").value
+        anon_client.get("/auth/login")
+        stale = anon_client.get_cookie("session").value
         _, email = _user()
-        client.post("/auth/login",
+        anon_client.post("/auth/login",
                     data={"email": email, "password": GOOD_PASSWORD})
         # Replaying the pre-login cookie must not be authenticated.
-        other = client.application.test_client()
+        other = anon_client.application.test_client()
         other.set_cookie("session", stale)
         assert other.get("/auth/me").get_json()["authenticated"] is False
 

@@ -53,8 +53,8 @@ def _signed_in_as(client, org: str, uid: str):
 # ── Visibility ────────────────────────────────────────────────────
 
 class TestPageAccess:
-    def test_anonymous_callers_are_sent_to_sign_in(self, client):
-        resp = client.get("/org/members")
+    def test_anonymous_callers_are_sent_to_sign_in(self, anon_client):
+        resp = anon_client.get("/org/members")
         assert resp.status_code == 302
         assert "/auth/login" in resp.headers["Location"]
 
@@ -79,6 +79,8 @@ class TestPageAccess:
         uid = _db.create_user(_email())
         with client.session_transaction() as sess:
             sess[_perm.SESSION_USER_KEY] = uid
+            # …and no organisation: that is the state being described.
+            sess.pop(_perm.SESSION_ORG_KEY, None)
         resp = client.get("/org/members")
         assert resp.status_code == 200
         assert b"not on a team yet" in resp.data

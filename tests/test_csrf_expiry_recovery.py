@@ -30,13 +30,17 @@ from app import app as flask_app
 
 
 @pytest.fixture
-def csrf_client():
+def csrf_client(sign_in):
     """A client with CSRF enforcement ON, like production."""
     prev = flask_app.config.get("WTF_CSRF_ENABLED")
     flask_app.config["WTF_CSRF_ENABLED"] = True
     flask_app.config["TESTING"] = True
     try:
         with flask_app.test_client() as c:
+            # Signed in when the run is authenticated: this file is about
+            # CSRF token expiry, and an auth redirect would pre-empt every
+            # assertion in it.
+            sign_in(c)
             yield c
     finally:
         flask_app.config["WTF_CSRF_ENABLED"] = prev

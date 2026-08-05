@@ -324,7 +324,8 @@ class TestVerdicts:
                     data={"external_id": "NOPE", "verdict": "Passed"})
         assert _db.list_case_results(walk["run_id"]) == []
 
-    def test_walk_survives_a_lost_session(self, client, walk):
+    def test_walk_survives_a_lost_session(self, client, walk,
+                                          forget_workspace):
         """The cursor lives in the database, so a new browser resumes it.
 
         This is why the position is derived from the results rather than
@@ -333,8 +334,10 @@ class TestVerdicts:
         """
         client.post(f"/test-execution/manual/{walk['run_id']}/verdict",
                     data={"external_id": "SC1_001", "verdict": "Passed"})
-        with client.session_transaction() as sess:
-            sess.clear()
+        # The workspace half only: with the flags on, clearing the whole
+        # session also signs the client out, and the test would then
+        # measure the login redirect rather than the resumable cursor.
+        forget_workspace(client)
         body = client.get(
             f"/test-execution/manual/{walk['run_id']}").get_data(as_text=True)
         assert "1 / 2" in body

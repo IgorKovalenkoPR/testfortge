@@ -25,7 +25,7 @@ from engine.log import get_logger
 
 from ._shared import (
     GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
-    mirror_pack, resolve_active_project, tc_to_dict,
+    mirror_pack, org_for_new_project, resolve_active_project, tc_to_dict,
 )
 
 log = get_logger(__name__)
@@ -193,6 +193,7 @@ def register(app: Flask) -> None:
                 base_url=base_url,
                 description=None,
                 owner_sid=get_session_id(),
+                org_id=org_for_new_project(),
             )
         except ValueError as exc:
             flash(str(exc), "error")
@@ -304,6 +305,7 @@ def register(app: Flask) -> None:
             project_id = _db.upsert_project(
                 name=name, base_url=base_url, description=description,
                 owner_sid=get_session_id(),
+                org_id=org_for_new_project(),
             )
         except ValueError as exc:
             flash(str(exc), "error")
@@ -487,6 +489,7 @@ def register(app: Flask) -> None:
             try:
                 target_pid = _db.upsert_project(
                     name=new_name, owner_sid=get_session_id(),
+                    org_id=org_for_new_project(),
                 )
             except ValueError as exc:
                 flash(str(exc), "error")
