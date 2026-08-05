@@ -76,13 +76,34 @@ class TestPacksLoad:
         specific = mentoring.answer("A rare crash loses the user's unsaved form. Severity?")
         assert specific is not None and not specific.is_catch_all
 
-    def test_missing_localisation_falls_back_to_english(self):
-        # No uk packs exist yet (E6.8). The fallback must be visible, not
-        # silent, so a half-done localisation shows up in the eval rather
-        # than reading as fluent Ukrainian.
-        found = mentoring.answer("What severity for a footer typo?", "uk")
-        assert found is not None
-        assert found.fell_back_to_english is True
+    def test_every_pack_is_localised(self):
+        """A new pack must not ship English-only and go unnoticed.
+
+        The app serves Ukrainian to half its users; a pack with no `.ua`
+        file answers them in English, which reads as an answer and is
+        therefore not reported as a defect.
+        """
+        for name in mentoring.PACKS:
+            pack = mentoring.load_pack(name, "ua")
+            assert pack is not None and pack.lang == "ua", name
+
+    def test_the_localised_pack_covers_the_same_ground(self):
+        # Entry ids are the contract between the two files. A UA pack
+        # missing an entry means one question silently answers in English.
+        for name in mentoring.PACKS:
+            en = {e.id for e in mentoring.load_pack(name, "en").entries}
+            ua = {e.id for e in mentoring.load_pack(name, "ua").entries}
+            assert en == ua, f"{name}: {en ^ ua}"
+
+    def test_a_missing_localisation_is_visible_rather_than_silent(self):
+        # Exercised through a pack name that has no `.ua` file at all, so
+        # the flag keeps being tested after E6.8 completed the four real
+        # ones. The flag is what makes a half-done localisation show up in
+        # the eval instead of reading as fluent Ukrainian.
+        pack = mentoring.load_pack("severity_priority", "de")
+        assert pack is not None and pack.lang == "en"
+        found = mentoring.answer("What severity for a footer typo?", "de")
+        assert found is not None and found.fell_back_to_english is True
 
     def test_english_answers_are_not_marked_as_fallback(self):
         found = mentoring.answer("What severity for a footer typo?", "en")
@@ -333,15 +354,13 @@ class TestQuestionsAboutBugsAreNotReportsOfBugs:
 #: English is at 100% and is gated there: every EN item has a deterministic
 #: owner, so any drop is a real regression rather than a coverage gap.
 #:
-#: Ukrainian is at 7/19 with one of the four packs localised (E6.8 is
-#: partly done: severity_priority.ua.yaml exists, layer / naming / process
-#: do not). It is gated at the measured floor so the number cannot quietly
-#: get worse while the localisation is outstanding, and the floor must be
-#: raised as each UA pack lands. Gating UA at 100% today would just mean a
-#: permanently red build, which teaches everyone to ignore it.
+#: Ukrainian is gated at 100% too, now that all four packs are localised.
+#: Both floors are exact rather than approximate because every item has a
+#: deterministic owner: there is no coverage gap left to excuse a drop, so
+#: any drop is a regression.
 BASELINE_EN = 85
-BASELINE_UK = 7
-BASELINE_TOTAL = 92
+BASELINE_UK = 20
+BASELINE_TOTAL = 105
 
 
 class TestTheGate:
@@ -365,6 +384,18 @@ class TestTheGate:
             f"{passed}/{len(uk)} — regressed from {BASELINE_UK}:\n"
             + "\n".join(f"  {r.item.id}: {r.explain()}" for r in uk if not r.passed)
         )
+
+    def test_ukrainian_is_no_worse_than_english(self, report):
+        """E6.8's acceptance criterion, asserted rather than assumed.
+
+        A localisation can be fluent and still lose the reasoning — the
+        requirements are the same in both languages precisely so that a UA
+        answer which skips the "why" fails even though it reads well.
+        """
+        by_lang = report.by_lang()
+        en_ok, en_total = by_lang["en"]
+        uk_ok, uk_total = by_lang["uk"]
+        assert uk_ok / uk_total >= en_ok / en_total, by_lang
 
     def test_the_whole_set_does_not_regress(self, report):
         assert report.passed >= BASELINE_TOTAL, ev.format_report(report, verbose=True)

@@ -1071,17 +1071,38 @@ items:
   route: pack:naming
   require:
     - ["verify that"]
-  avoid: [is able to, "перевірити що", "переконатися що"]
+  # Guards name the wrong ADVICE, not the wrong term: the answer lists
+  # "is able to" precisely in order to forbid it.
+  avoid: ["перевірити що", "переконатися що", відкривач не важлив]
 
 - id: NAM-U4
   pack: naming
   lang: uk
-  q: "Чи писати «система повинна показати помилку» в очікуваному результаті?"
+  q: "Чи писати «форма валідується коректно» в очікуваному результаті?"
   route: pack:naming
   require:
-    - [не варто, уникай, натоміст, неправильн, некорект]
-    - [теперішн, показує, відображається, displays]
-  avoid: [так, правильно, добре]
+    - [не варто, уникай, натоміст, забороне, замініть]
+    - [спостережн, підсвіч, повідомлення про помилку, назвіть, що саме]
+  why: >
+    The UA mirror of NAM-008, and it carried the same defect: it asked about
+    "повинна" and demanded the answer forbid it. The arbitrated rule accepts
+    "should" in an expected result. What is banned is grading the outcome,
+    so the question now asks about the grade.
+  avoid: [це правильно, цілком нормально, можна залишити]
+
+- id: NAM-U5
+  pack: naming
+  lang: uk
+  q: "Чи можна писати «повинна» в очікуваному результаті?"
+  route: pack:naming
+  require:
+    - [дозвол, прийнят, можна, обидв]
+    - [назв, заголов, "verify that"]
+  why: >
+    Pins the split in Ukrainian too: accepted in an expected result, banned
+    in a title. Advice that bans it everywhere contradicts the file the
+    generator reads.
+  avoid: [ніколи не пишіть повинна, повинна заборонен]
 
 - id: PRC-U1
   pack: process
@@ -1152,7 +1173,11 @@ items:
   q: "Як згенерувати чекліст?"
   route: fast_path:module_help
   require:
-    - [чекліст, checklist]
+    # Both spellings are in live use and the requirement is about the
+    # subject, not the orthography. The help text itself used two
+    # spellings in one sentence, which is what this item surfaced.
+    - [чек-ліст, чекліст, чеклист, checklist]
+    - [секці, пункт, покритт, регрес, смоук]
 
 - id: PRD-U2
   pack: product
