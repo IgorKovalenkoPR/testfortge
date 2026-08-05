@@ -611,6 +611,26 @@
                 <small>{{ t.get('te_mode_manual_help', 'One item at a time with its steps and expected result on screen, one click per verdict. Resumable.') }}</small>
             </span>
         </label>
+        {# Who the walk is for. Only rendered when there is somebody to pick
+           from — with authentication off there is no identity to assign to,
+           and a disabled select that explains nothing is worse than no
+           select. The run always records its starter as the assignee; this
+           only exists so an admin can hand a walk to someone else. #}
+        {% if assignee_options %}
+        <div class="form-group te-assignee">
+            <label for="manual-assignee">{{ t.get('te_assignee', 'Assign the manual walk to') }}</label>
+            <select id="manual-assignee" name="assignee_id">
+                <option value="">{{ t.get('te_assignee_me', 'Me') }}</option>
+                {% for opt in assignee_options %}
+                <option value="{{ opt.user_id }}">
+                    {{ opt.display_name or opt.email }}{% if opt.role %} · {{ opt.role }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <p class="hint">{{ t.get('te_assignee_hint',
+                'The assignee is who can record verdicts in the run. Admins can always open any run in the project.') }}</p>
+        </div>
+        {% endif %}
         <label class="radio-card">
             <input type="radio" name="run_mode" value="walkthrough"
                    data-te-run-mode-input>

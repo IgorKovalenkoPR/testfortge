@@ -686,6 +686,42 @@ def _reconcile_with_automation(execution: dict,
     }
 
 
+def _run_limit_scope() -> list[str]:
+    """The projects a browser run competes with.
+
+    The organisation when there is one, because the memory is shared by the
+    whole service — two projects in one team starting a run each costs
+    exactly as much as one project starting two, and scoping per project
+    would make the limit bypassable by switching project. With
+    organisations off, the honest scope is the caller's own projects.
+    """
+    from engine import permissions as _perm_mod
+    org_id = None
+    try:
+        org_id = _perm_mod.current_org_id()
+    except Exception:  # pragma: no cover — defensive
+        org_id = None
+    try:
+        if org_id:
+            return [p["id"] for p in _db.list_projects_for_org(org_id)
+                    if p.get("id")]
+        owned = _db.list_projects(owner_sid=get_session_id(session)) or []
+        ids = [p["id"] for p in owned if p.get("id")]
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("run limit scope lookup failed: %s", exc)
+        ids = []
+    active = ensure_active_project()
+    if active and active not in ids:
+        ids.append(active)
+    return ids
+
+
+def _run_limit_decision():
+    """Whether another browser run may start now."""
+    from engine import run_limits
+    return run_limits.check(_run_limit_scope())
+
+
 def _maybe_restore_pack_from_db() -> None:
     """Re-pin the active project to one that actually has a pack.
 
@@ -784,6 +820,19 @@ def register(app: Flask) -> None:
               # arrive intact and the mode still works with JS disabled.
               if run_mode == "manual":
                   return redirect(url_for("manual_run_start"), code=307)
+
+              # Fair use, before anything expensive happens (E5.5). The
+              # manual walk is above this line on purpose: it is a person
+              # reading a page and costs nothing to have ten of. A browser
+              # run is a Chromium on a box with half a gigabyte, and two at
+              # once are OOM-killed rather than queued — which shows up as a
+              # run that stops with no verdict and no explanation. Refusing
+              # the second one with a message naming the first is the whole
+              # improvement.
+              gate = _run_limit_decision()
+              if not gate.allowed:
+                  flash(gate.message(), "warning")
+                  return redirect(url_for("test_execution_page"))
               # Walkthrough sub-config — only consulted when run_mode ==
               # "walkthrough". Numeric coercion is permissive so a
               # missing/empty field falls back to the conservative
@@ -1748,6 +1797,21 @@ def register(app: Flask) -> None:
         # browser history, and resumable-but-unfindable is not resumable.
         # Scoped to the active project, which is also the isolation
         # boundary the run pages enforce.
+        # Who a walk can be handed to. Empty unless authentication is on and
+        # the caller is an admin — with auth off there is no identity to
+        # assign to, and a tester cannot assign work to a colleague.
+        assignee_options = []
+        try:
+            from engine import permissions as _perm_mod
+            if _perm_mod.auth_active() and _perm_mod.is_admin():
+                _org = _perm_mod.current_org_id()
+                if _org:
+                    assignee_options = [
+                        m for m in _db.list_org_members(_org)
+                        if m.get("is_active")]
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("assignee options lookup failed: %s", exc)
+
         open_manual_runs = []
         _pid = ensure_active_project()
         if _pid:
@@ -1761,6 +1825,7 @@ def register(app: Flask) -> None:
 
         return render_template("test_execution.html",
                                open_manual_runs=open_manual_runs,
+                               assignee_options=assignee_options,
                                has_tc_data=has_tc, has_cl_data=has_cl,
                                tc_count=len(tc_data), cl_count=len(cl_data),
                                tc_items=tc_data, cl_items=cl_data,

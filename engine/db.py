@@ -4260,6 +4260,33 @@ def update_case_result(run_id: int, case_external_id: str,
         return True
 
 
+def assign_run(run_id: int, assignee_id: str, *,
+               tester: str | None = None) -> bool:
+    """Hand a run to somebody. Returns False when the run is gone.
+
+    Merges into ``env_payload`` rather than replacing it: the payload also
+    holds the manual queue, the environment and the base URL, and a walk
+    reassigned mid-flight must not lose the queue it is walking.
+
+    Reassignment exists because a walk can outlive its owner's availability
+    — sixty checks span days, and an admin needs a way to move one rather
+    than starting it again and losing the verdicts already recorded.
+    """
+    with session_scope() as sess:
+        row = sess.get(ExecutionRun, run_id)
+        if row is None:
+            return False
+        payload = dict(row.env_payload or {})
+        payload["assignee_id"] = str(assignee_id or "")
+        if tester is not None:
+            payload["tester"] = str(tester)
+        # Reassigned wholesale: SQLAlchemy tracks JSON columns by identity,
+        # so mutating the dict in place would not mark the row dirty and the
+        # write would be silently dropped.
+        row.env_payload = payload
+        return True
+
+
 def list_open_runs(project_id: str, *, mode: str | None = None,
                    limit: int = 20) -> list[dict]:
     """Runs in this project that were started and never closed.

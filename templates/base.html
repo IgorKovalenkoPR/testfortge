@@ -58,6 +58,16 @@
                     {{ t.get('nav_test_execution', 'Test Execution') }}
                 </a>
             </li>
+            {# Runs, separate from the page that starts them. A walk that
+               spans days needs somewhere to come back to that is not the
+               configuration form — and with authentication on this is where
+               a tester finds what has been assigned to them. #}
+            <li class="{% if request.endpoint in ('manual_runs_page', 'manual_run_page', 'manual_run_resume') %}active{% endif %}">
+                <a href="{{ url_for('manual_runs_page') }}">
+                    <span class="step-icon"><i data-lucide="list-todo" class="icon-sm"></i></span>
+                    {{ t.get('nav_runs', 'Runs') }}
+                </a>
+            </li>
             {# Automation is its own module again. The built-in Python
                runner still lives inside Test Execution — that is where a
                run is launched and watched. This module owns the OTHER

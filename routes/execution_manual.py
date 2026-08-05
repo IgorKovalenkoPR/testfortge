@@ -269,6 +269,85 @@ def register(app: Flask) -> None:
             finished=progress.finished,
         )
 
+    @app.route("/test-execution/runs", methods=["GET"])
+    def manual_runs_page():
+        """The runs in this project, and which of them are the caller's.
+
+        Scope is a *restriction* for a non-admin, not a default they can
+        override: passing ``?scope=all`` as a tester shows their own runs
+        anyway. A filter that a URL parameter can widen is a filter, not an
+        access rule, and this one has to be an access rule — the epic's
+        acceptance is that a user sees what is assigned to them and an admin
+        sees everything.
+
+        With authentication off there is nothing to scope by, so everything
+        in the project is listed and the page says why rather than showing an
+        empty "mine" and letting the tester conclude their runs are gone.
+        """
+        pid = resolve_active_project(session)
+        if not pid:
+            flash("Select or create a project first.", "warning")
+            return redirect(url_for("test_execution_page"))
+
+        try:
+            runs = _db.list_execution_runs(pid, limit=100)
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("runs listing failed: %s", exc)
+            runs = []
+
+        auth_on = _perm.auth_active()
+        me = _perm.current_user_id() or ""
+        admin = _perm.is_admin() if auth_on else False
+        requested = (request.args.get("scope") or "").strip().lower()
+
+        if not auth_on:
+            scope = "all"
+        elif admin:
+            scope = "all" if requested == "all" else "mine"
+        else:
+            scope = "mine"
+
+        if scope == "mine" and me:
+            runs = [r for r in runs
+                    if str((r.get("env_payload") or {}).get("assignee_id")
+                           or "") == me]
+
+        for run in runs:
+            payload = run.get("env_payload") or {}
+            run["mode_label"] = str(payload.get("mode") or "—")
+            run["tester_label"] = str(payload.get("tester") or "")
+            run["is_open"] = not run.get("finished_at")
+            run["is_manual"] = payload.get("manual_queue") is not None
+
+        return render_template(
+            "test_execution_runs.html",
+            runs=runs, scope=scope, auth_on=auth_on, is_admin=admin,
+            can_switch_scope=bool(auth_on and admin),
+        )
+
+    @app.route("/test-execution/manual/<int:run_id>/assign", methods=["POST"])
+    @_perm.require_role("admin")
+    def manual_run_assign(run_id):
+        """Hand an existing walk to somebody else. Admin only.
+
+        Needed because a walk outlives a working day: sixty checks span
+        laptop sleeps and holidays, and the alternative to reassigning is
+        starting a second run, which loses every verdict already recorded.
+
+        Admin-only by decorator rather than by an inline check, so the
+        restriction is visible at the route and cannot be lost in an edit to
+        the body. Without it, "assign" would be a way to push work into a
+        colleague's queue.
+        """
+        run, _queue, _results, _pk = _load_run(run_id)
+        assignee = (request.form.get("assignee_id") or "").strip()
+        tester = (request.form.get("tester") or "").strip() or None
+        if not _db.assign_run(run_id, assignee, tester=tester):
+            flash("That run no longer exists.", "warning")
+            return redirect(url_for("manual_runs_page"))
+        flash("Run reassigned." if assignee else "Run unassigned.", "success")
+        return redirect(url_for("manual_runs_page", scope="all"))
+
     @app.route("/test-execution/manual/<int:run_id>/resume", methods=["GET"])
     def manual_run_resume(run_id):
         """Land on the first item without a verdict.
@@ -414,9 +493,14 @@ def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
         "comment": f"Filed from manual run #{run.get('id')} "
                    f"({item.external_id}).",
         "reporter": (run.get("env_payload") or {}).get("tester", "") or "",
-        "extra": {"manual_run_id": run.get("id"),
-                  "case_external_id": item.external_id,
-                  "verdict": verdict},
+        # Top level, not nested under an "extra" key: save_bug already
+        # collects everything it does not recognise into the `extra` column,
+        # so wrapping them produced extra.extra.manual_run_id — a shape
+        # nobody would guess and nothing was reading. The point of storing
+        # the link is that something can follow it.
+        "manual_run_id": run.get("id"),
+        "case_external_id": item.external_id,
+        "verdict": verdict,
     }
     try:
         return _db.save_bug(run.get("project_id"), body, source="execution")

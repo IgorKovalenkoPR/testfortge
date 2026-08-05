@@ -1,0 +1,210 @@
+name: playwright
+
+# Real browser runs for requirement 8, on the free plan (E5.2′).
+#
+# The original plan was to enable Playwright inside the web service. That
+# needs RAM the free tier does not have, and paying for it was ruled out —
+# so the browsers run here instead, where Actions minutes are free, and the
+# results are POSTed back to the existing token-authenticated ingest
+# endpoint. Nothing in the app changes: /automation/allure-results has
+# always accepted a zipped allure-results directory from a CI job.
+#
+# What the operator has to do once, and only once:
+#
+#   1. Download the generated suite from the app (Automation →
+#      "Download bundle") and commit it, or unzip it into this repo.
+#      `suite_path` below points at wherever it lands.
+#   2. Add two repository secrets:
+#        TFG_INGEST_URL    https://<your-app>/automation/allure-results
+#        TFG_INGEST_TOKEN  the value of AUTOMATION_INGEST_TOKEN on the service
+#   3. Run this workflow from the Actions tab, or dispatch it from a script.
+#
+# See docs/ci_playwright.md for the runbook, including how to check that a
+# run landed and what each failure mode looks like.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL under test (overrides the suite's own default)"
+        required: false
+        type: string
+      suite_path:
+        description: "Directory holding the generated Playwright suite"
+        required: false
+        default: automation
+        type: string
+      project_id:
+        description: "TestForTge project id to file the results under"
+        required: false
+        type: string
+      label:
+        description: "Label for this run, shown in the app's run history"
+        required: false
+        default: "CI run"
+        type: string
+      grep:
+        description: "Only run tests whose title matches this (Playwright --grep)"
+        required: false
+        type: string
+  # Lets the app trigger a run later without editing this file. The event
+  # type is part of the contract; the client payload uses the same keys as
+  # the dispatch inputs above.
+  repository_dispatch:
+    types: [tfg-playwright-run]
+
+# Two runs of the same branch would fight over the same ingest slot and
+# burn double the minutes for one useful answer.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: playwright → allure → ingest
+    runs-on: ubuntu-latest
+    # A suite that hangs would otherwise burn the whole monthly allowance on
+    # one run. Twenty minutes is well above a full generated suite and well
+    # below anything worth paying for.
+    timeout-minutes: 20
+
+    env:
+      SUITE_PATH: ${{ inputs.suite_path || github.event.client_payload.suite_path || 'automation' }}
+      BASE_URL: ${{ inputs.base_url || github.event.client_payload.base_url }}
+      PROJECT_ID: ${{ inputs.project_id || github.event.client_payload.project_id }}
+      RUN_LABEL: ${{ inputs.label || github.event.client_payload.label || 'CI run' }}
+      GREP: ${{ inputs.grep || github.event.client_payload.grep }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail before installing 300 MB of browsers if the results have
+      # nowhere to go. Getting a green suite and silently dropping it is the
+      # worst outcome available here: the app shows no run and nobody knows
+      # why.
+      - name: Check the ingest is configured
+        env:
+          TFG_INGEST_URL: ${{ secrets.TFG_INGEST_URL }}
+          TFG_INGEST_TOKEN: ${{ secrets.TFG_INGEST_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$TFG_INGEST_URL" ] || missing="$missing TFG_INGEST_URL"
+          [ -n "$TFG_INGEST_TOKEN" ] || missing="$missing TFG_INGEST_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "Set them under Settings → Secrets and variables → Actions."
+            echo "TFG_INGEST_URL is https://<your-app>/automation/allure-results"
+            echo "TFG_INGEST_TOKEN must equal AUTOMATION_INGEST_TOKEN on the service."
+            exit 1
+          fi
+
+      - name: Check the suite is present
+        run: |
+          if [ ! -f "$SUITE_PATH/package.json" ]; then
+            echo "::error::No package.json under '$SUITE_PATH'."
+            echo "Download the suite from the app (Automation → Download bundle)"
+            echo "and commit it, or set suite_path to where it lives."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ env.SUITE_PATH }}/package-lock.json
+
+      # `npm ci` needs a lockfile and the generated bundle ships without
+      # one, so fall back rather than failing on a bundle the app produced.
+      - name: Install dependencies
+        working-directory: ${{ env.SUITE_PATH }}
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+
+      # Chromium only. The other two engines triple the install time and the
+      # cache size, and a cross-browser matrix is a decision for whoever
+      # needs it rather than the default cost of every run.
+      - name: Install Chromium
+        working-directory: ${{ env.SUITE_PATH }}
+        run: npx playwright install --with-deps chromium
+
+      # continue-on-error is the point of this step, not an oversight. A
+      # failing suite is the normal reason to run one, and a non-zero exit
+      # here would skip the ingest — so the app would show nothing exactly
+      # when there is something to show.
+      - name: Run the suite
+        id: tests
+        continue-on-error: true
+        working-directory: ${{ env.SUITE_PATH }}
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ env.BASE_URL }}
+          BASE_URL: ${{ env.BASE_URL }}
+        run: |
+          args="--reporter=line,allure-playwright"
+          if [ -n "$GREP" ]; then args="$args --grep \"$GREP\""; fi
+          eval npx playwright test $args
+
+      - name: Check something was produced
+        working-directory: ${{ env.SUITE_PATH }}
+        run: |
+          if [ ! -d allure-results ] || [ -z "$(ls -A allure-results)" ]; then
+            echo "::error::The suite produced no allure-results."
+            echo "Either no test matched, or allure-playwright is not in the"
+            echo "reporter list of playwright.config.ts."
+            exit 1
+          fi
+          echo "files=$(ls -1 allure-results | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Zip the results
+        working-directory: ${{ env.SUITE_PATH }}
+        run: cd allure-results && zip -qr ../allure-results.zip .
+
+      # Uploaded before the POST on purpose: if the ingest fails, the run is
+      # still recoverable from here instead of having to be repeated.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: ${{ env.SUITE_PATH }}/allure-results.zip
+          retention-days: 7
+
+      - name: Send the results to TestForTge
+        working-directory: ${{ env.SUITE_PATH }}
+        env:
+          TFG_INGEST_URL: ${{ secrets.TFG_INGEST_URL }}
+          TFG_INGEST_TOKEN: ${{ secrets.TFG_INGEST_TOKEN }}
+        run: |
+          # --fail-with-body so a 401 or 422 shows the endpoint's own
+          # explanation instead of curl's generic "HTTP error".
+          code=$(curl --silent --show-error --fail-with-body \
+            --write-out '%{http_code}' --output response.json \
+            --max-time 120 --retry 2 --retry-connrefused \
+            -H "X-TFG-Token: $TFG_INGEST_TOKEN" \
+            -F "results=@allure-results.zip" \
+            -F "origin=ci" \
+            -F "label=$RUN_LABEL" \
+            -F "project_id=$PROJECT_ID" \
+            "$TFG_INGEST_URL") || true
+          echo "HTTP $code"
+          cat response.json || true
+          case "$code" in
+            201) ;;
+            401) echo "::error::Ingest rejected the token. TFG_INGEST_TOKEN must equal AUTOMATION_INGEST_TOKEN on the service."; exit 1 ;;
+            403) echo "::error::Ingestion is disabled — AUTOMATION_INGEST_TOKEN is not set on the service."; exit 1 ;;
+            422) echo "::error::The archive parsed to zero results. Check the allure-playwright reporter output."; exit 1 ;;
+            *)   echo "::error::Ingest failed with HTTP $code."; exit 1 ;;
+          esac
+          {
+            echo "### Results ingested"
+            python3 -c "import json;d=json.load(open('response.json'));print(f\"run #{d.get('run_id')} · {d.get('total',0)} tests · {d.get('passed',0)} passed · {d.get('failed',0)} failed\")" || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Last, so the ingest has already happened. The job's status should
+      # reflect what the suite found — a red suite is a red job — but only
+      # after the results are safely in the app.
+      - name: Reflect the suite's own verdict
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::warning::The suite reported failures. They are in the app; see the run above."
+          exit 1

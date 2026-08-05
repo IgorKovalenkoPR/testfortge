@@ -158,6 +158,11 @@ POLICY: dict[str, str] = {
     "manual_run_start": "user",
     "manual_run_page": "user",
     "manual_run_resume": "user",
+    "manual_runs_page": "user",
+    # manual_run_assign carries @require_role("admin") and is
+    # self-enforcing, but the fail-closed table still needs to know it
+    # exists — an unclassified endpoint is refused outright.
+    "manual_run_assign": "admin",
     "manual_run_verdict": "user",
     "manual_run_finish": "user",
 

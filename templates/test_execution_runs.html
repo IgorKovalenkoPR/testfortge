@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ t.get('runs_title', 'Runs') }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h1>{{ t.get('runs_title', 'Runs') }}</h1>
+    <p class="hint">
+        {% if not auth_on %}
+        {# Say why every run is listed. An empty "mine" with no explanation
+           reads as "my runs are gone", which is a worse answer than the
+           truth: there is no identity to scope by. #}
+        {{ t.get('runs_hint_no_auth',
+           'Every run in this project. Assignment needs authentication — with it off there is nobody to assign a run to, so there is nothing to filter by.') }}
+        {% elif scope == 'mine' %}
+        {{ t.get('runs_hint_mine', 'Runs assigned to you.') }}
+        {% else %}
+        {{ t.get('runs_hint_all', 'Every run in this project.') }}
+        {% endif %}
+    </p>
+</div>
+
+{% if can_switch_scope %}
+<div class="filter-row">
+    <a class="btn btn-sm {% if scope == 'mine' %}btn-primary{% endif %}"
+       href="{{ url_for('manual_runs_page', scope='mine') }}">
+        {{ t.get('runs_scope_mine', 'Assigned to me') }}
+    </a>
+    <a class="btn btn-sm {% if scope == 'all' %}btn-primary{% endif %}"
+       href="{{ url_for('manual_runs_page', scope='all') }}">
+        {{ t.get('runs_scope_all', 'All runs') }}
+    </a>
+</div>
+{% endif %}
+
+{% if runs %}
+<table class="data-table">
+    <thead><tr>
+        <th width="70">{{ t.get('run', 'Run') }}</th>
+        <th width="150">{{ t.get('started', 'Started') }}</th>
+        <th width="100">{{ t.get('mode', 'Mode') }}</th>
+        <th>{{ t.get('te_tester', 'Tester') }}</th>
+        <th width="110">{{ t.get('status', 'Status') }}</th>
+        <th width="120"></th>
+    </tr></thead>
+    <tbody>
+    {% for r in runs %}
+    <tr>
+        <td>#{{ r.id }}</td>
+        <td>{{ (r.started_at or '')[:16] | replace('T', ' ') }}</td>
+        <td>{{ r.mode_label }}</td>
+        <td>{{ r.tester_label or '—' }}</td>
+        <td>
+            {% if r.is_open %}
+            <span class="badge badge-in-progress">{{ t.get('runs_open', 'Open') }}</span>
+            {% else %}
+            <span class="badge">{{ r.status or t.get('runs_closed', 'Closed') }}</span>
+            {% endif %}
+        </td>
+        <td>
+            {# Only a manual run has a walk to resume. The live and
+               walkthrough modes share ExecutionRun and have no queue, so
+               linking them here would 404 — worse than no link. #}
+            {% if r.is_manual %}
+            <a class="btn btn-sm"
+               href="{{ url_for('manual_run_resume', run_id=r.id) }}">
+                {% if r.is_open %}{{ t.get('te_resume', 'Resume') }}
+                {% else %}{{ t.get('runs_review', 'Review') }}{% endif %}
+            </a>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="card">
+    <p>
+        {% if scope == 'mine' %}
+        {{ t.get('runs_empty_mine', 'Nothing is assigned to you in this project yet.') }}
+        {% else %}
+        {{ t.get('runs_empty', 'This project has no runs yet.') }}
+        {% endif %}
+    </p>
+    <a class="btn btn-primary" href="{{ url_for('test_execution_page') }}">
+        {{ t.get('runs_start', 'Start a run') }}
+    </a>
+</div>
+{% endif %}
+{% endblock %}
