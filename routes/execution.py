@@ -1742,7 +1742,25 @@ def register(app: Flask) -> None:
                     active_run = None
             except Exception:
                 pass
+        # Manual walks that were started and never closed. The state to
+        # resume one has been in the database since the walk was built, but
+        # nothing listed it — so an interrupted run was reachable only from
+        # browser history, and resumable-but-unfindable is not resumable.
+        # Scoped to the active project, which is also the isolation
+        # boundary the run pages enforce.
+        open_manual_runs = []
+        _pid = ensure_active_project()
+        if _pid:
+            # Deliberately not wrapped in a broad try/except. The first
+            # version was, and it turned a NameError in this very block into
+            # a logged warning and an empty list — the page rendered fine
+            # and the feature was simply absent. A best-effort catch around
+            # code that has never worked once hides the bug instead of
+            # surviving it.
+            open_manual_runs = _db.list_open_runs(_pid, mode="manual", limit=5)
+
         return render_template("test_execution.html",
+                               open_manual_runs=open_manual_runs,
                                has_tc_data=has_tc, has_cl_data=has_cl,
                                tc_count=len(tc_data), cl_count=len(cl_data),
                                tc_items=tc_data, cl_items=cl_data,

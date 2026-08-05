@@ -26,6 +26,7 @@ from flask import (Flask, abort, flash, redirect, render_template, request,
 from engine import bug_report as _bug_report
 from engine import db as _db
 from engine import manual_run as mr
+from engine import permissions as _perm
 from engine.log import get_logger
 
 from ._shared import (pack_checklist, pack_test_cases,
@@ -36,7 +37,11 @@ log = get_logger(__name__)
 
 
 def _pack(project_id: str | None) -> tuple[list, list]:
-    """The project's test cases and checklist, session first then DB."""
+    """The pack to start a run from: the active project's, session first.
+
+    Only for *starting* a run, where the active project is the subject by
+    definition. A run that already exists must use :func:`_run_pack`.
+    """
     tcs = reconstruct_test_cases(pack_test_cases())
     cls = reconstruct_checklist(pack_checklist())
     if project_id:
@@ -53,8 +58,102 @@ def _pack(project_id: str | None) -> tuple[list, list]:
     return tcs, cls
 
 
-def _load_run(run_id: int) -> tuple[dict, list, list, list]:
-    """``(run, queue, results, pack)`` for an open manual run, or 404."""
+def _run_pack(run: dict) -> tuple[list, list]:
+    """The pack belonging to *the run's* project, read from the database.
+
+    Never the session pack. The session holds whatever project the browser
+    currently has active, and this used to be consulted first — so a tester
+    who switched projects and came back to an open run walked the *other*
+    project's content under this run's item ids. Measured: a run in project
+    A rendered project B's summaries, and the verdicts recorded against
+    them went to A.
+
+    That is not an edge case. Item ids are per-project sequences, so
+    ``TC_001`` exists in every project and the ids collide by construction
+    rather than by accident — the mismatch is silent, and the walk looks
+    perfectly normal.
+    """
+    project_id = run.get("project_id")
+    if not project_id:
+        return [], []
+    tcs: list = []
+    cls: list = []
+    try:
+        tcs = reconstruct_test_cases(_db.load_test_cases(project_id))
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("manual run: TC load failed for %s: %s", project_id, exc)
+    try:
+        cls = reconstruct_checklist(_db.load_checklist(project_id))
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("manual run: CL load failed for %s: %s", project_id, exc)
+    if not tcs and not cls:
+        # A run started before the pack was persisted (the pre-E3 flow kept
+        # it in the session). Fall back only when the run's project is the
+        # active one, so the fallback can never introduce another project's
+        # content — the defect above.
+        if project_id == resolve_active_project(session, pin=False):
+            tcs = reconstruct_test_cases(pack_test_cases())
+            cls = reconstruct_checklist(pack_checklist())
+    return tcs, cls
+
+
+def _authorise(run: dict, *, adopt: bool = False) -> None:
+    """Abort unless this run is in scope for the caller.
+
+    Two properties are in tension here and both are load-bearing, so this
+    resolves them rather than picking one. The walk must survive a lost
+    session — that is why the cursor lives in the database, and a hand-off
+    to a colleague on another machine is a real workflow. But a run must
+    also belong to its project, because the measured defect was a tester
+    with project B active resuming project A's run and walking B's content
+    under A's ids.
+
+    The rule:
+
+    * **A different project active → 404.** Always, read or write. That is
+      the accidental case and the one that corrupts data.
+    * **No project active → adopt it on a read.** Following a run link
+      selects the run's project, which is exactly what the hand-off needs.
+      This grants nothing: with authentication off, the project picker is
+      already open to every session, so refusing here would be theatre
+      while breaking a documented workflow.
+    * **No project active → refuse a write.** A verdict is the thing that
+      damages data, and a tester who followed a link has loaded the page
+      first, which adopted the project. A POST that arrives without ever
+      having read the run is not that flow.
+    * **Auth on → the assignee or an admin.** This is the only real
+      per-person boundary; without authentication there is no identity to
+      enforce one against, and claiming otherwise would overstate what the
+      deployment can promise.
+
+    404 rather than 403 for the project mismatch: whether a run id exists
+    in a project the caller cannot see is not something to confirm.
+    """
+    run_pid = run.get("project_id")
+    if not run_pid:
+        abort(404)
+
+    if _perm.auth_active():
+        assignee = str((run.get("env_payload") or {}).get("assignee_id") or "")
+        me = _perm.current_user_id() or ""
+        if assignee and me and assignee != me and not _perm.is_admin():
+            abort(403)
+
+    active = resolve_active_project(session, pin=False)
+    if active and active != run_pid:
+        abort(404)
+    if not active:
+        if not adopt:
+            abort(404)
+        session["project_id"] = run_pid
+
+
+def _load_run(run_id: int, *, adopt: bool = False) -> tuple[dict, list, list, list]:
+    """``(run, queue, results, pack)`` for an open manual run, or 404.
+
+    ``adopt`` is passed on to :func:`_authorise`: reads may select the
+    run's project, writes may not.
+    """
     run = None
     try:
         run = _db.get_execution_run(run_id)
@@ -68,8 +167,9 @@ def _load_run(run_id: int) -> tuple[dict, list, list, list]:
         # Not a manual run — the walk would have nothing to show, and
         # silently rendering an empty page reads as data loss.
         abort(404)
+    _authorise(run, adopt=adopt)
 
-    tcs, cls = _pack(run.get("project_id"))
+    tcs, cls = _run_pack(run)
     queue = mr.restore_queue(payload, tcs, cls)
     try:
         results = _db.list_case_results(run_id)
@@ -106,11 +206,31 @@ def register(app: Flask) -> None:
             flash("Nothing to run — the selection is empty.", "warning")
             return redirect(url_for("test_execution_page"))
 
+        # Who the walk belongs to. The free-text `tester` was already here
+        # and is what the bug report quotes as reporter; `assignee_id` is
+        # the machine-readable half that ownership checks and the "my runs"
+        # filter need, and it defaults to whoever started the run because
+        # that is true in every case and needs no form field.
+        assignee_id = ""
+        assignee_name = ""
+        if _perm.auth_active():
+            requested = (request.form.get("assignee_id") or "").strip()
+            me = _perm.current_user_id() or ""
+            # Only an admin may hand a run to someone else; without that
+            # check, "assign" would be a way to write into another
+            # tester's queue.
+            assignee_id = requested if (requested and _perm.is_admin()) else me
+            user = _perm.current_user() or {}
+            if assignee_id == (user.get("id") or ""):
+                assignee_name = str(user.get("name") or user.get("email") or "")
+
         env_payload = {
             "mode": "manual",
             "manual_queue": mr.queue_to_payload(queue),
             "environment": (request.form.get("env_custom") or "").strip(),
-            "tester": (request.form.get("tester") or "").strip(),
+            "tester": ((request.form.get("tester") or "").strip()
+                       or assignee_name),
+            "assignee_id": assignee_id,
         }
         try:
             run_id = _db.start_execution_run(
@@ -125,7 +245,7 @@ def register(app: Flask) -> None:
 
     @app.route("/test-execution/manual/<int:run_id>", methods=["GET"])
     def manual_run_page(run_id):
-        run, queue, results, _pk = _load_run(run_id)
+        run, queue, results, _pk = _load_run(run_id, adopt=True)
         progress = mr.compute_progress(queue, results)
         verdicts = mr.verdicts_by_item(results)
 
@@ -143,12 +263,26 @@ def register(app: Flask) -> None:
             "test_execution_manual.html",
             run=run, run_id=run_id, queue=queue, current=current,
             index=index, progress=progress, verdicts=verdicts,
-            current_verdict=verdicts.get(
-                current.external_id, {}) if current else {},
+            current_verdict=verdicts.get(current.key, {}) if current else {},
             all_verdicts=mr.VERDICTS,
             defect_verdicts=mr.DEFECT_VERDICTS,
             finished=progress.finished,
         )
+
+    @app.route("/test-execution/manual/<int:run_id>/resume", methods=["GET"])
+    def manual_run_resume(run_id):
+        """Land on the first item without a verdict.
+
+        A separate URL from the page so the "Resume" link on the execution
+        page does not have to know where the walk got to — the cursor is
+        derived, and computing it in a template would duplicate the
+        derivation that ``compute_progress`` owns.
+        """
+        run, queue, results, _pk = _load_run(run_id, adopt=True)
+        progress = mr.compute_progress(queue, results)
+        return redirect(url_for("manual_run_page", run_id=run_id,
+                                i=min(progress.cursor,
+                                      max(0, len(queue) - 1))))
 
     @app.route("/test-execution/manual/<int:run_id>/verdict",
                methods=["POST"])
@@ -158,7 +292,17 @@ def register(app: Flask) -> None:
         verdict = mr.coerce_verdict(request.form.get("verdict"))
         notes = (request.form.get("notes") or "").strip()
 
-        item = next((q for q in queue if q.external_id == external_id), None)
+        # The kind comes from the form because the id alone does not
+        # identify the row: a test case and a checklist item may carry the
+        # same label. An older form that posts no kind still resolves, by
+        # falling back to the first item with that id — which is what the
+        # whole walk did before, so the fallback is no worse than the
+        # previous behaviour and the new form is better than both.
+        kind = (request.form.get("kind") or "").strip()
+        if kind:
+            item = next((q for q in queue if q.key == (kind, external_id)), None)
+        else:
+            item = next((q for q in queue if q.external_id == external_id), None)
         if item is None or not verdict:
             flash("That verdict could not be recorded — unknown item or "
                   "status.", "warning")
@@ -169,13 +313,14 @@ def register(app: Flask) -> None:
                 request.form.get("file_bug") == "1":
             bug_id = _file_bug(run, item, verdict, notes)
 
-        already = mr.verdicts_by_item(results).get(external_id)
+        already = mr.verdicts_by_item(results).get(item.key)
         try:
             if already:
                 # Overwrite rather than append: a tester correcting a
                 # mis-click must not leave the run counting the item twice.
                 _db.update_case_result(
-                    run_id, external_id, status=verdict, notes=notes,
+                    run_id, external_id, case_kind=item.kind,
+                    status=verdict, notes=notes,
                     **({"bug_report_id": bug_id} if bug_id else {}))
             else:
                 _db.save_case_result(

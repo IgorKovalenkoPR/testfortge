@@ -157,6 +157,7 @@ POLICY: dict[str, str] = {
     "test_execution_live_info": "user",
     "manual_run_start": "user",
     "manual_run_page": "user",
+    "manual_run_resume": "user",
     "manual_run_verdict": "user",
     "manual_run_finish": "user",
 

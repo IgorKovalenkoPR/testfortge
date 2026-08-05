@@ -4226,21 +4226,31 @@ def get_execution_run(run_id: int) -> dict | None:
         return _row_to_dict(row) if row is not None else None
 
 
-def update_case_result(run_id: int, case_external_id: str, **fields) -> bool:
+def update_case_result(run_id: int, case_external_id: str,
+                       case_kind: str | None = None, **fields) -> bool:
     """Overwrite an item's result. Returns ``False`` when it has none yet.
 
     A tester who mis-clicks Passed has to be able to correct it, and a
     second row for the same item would double-count in the run stats.
+
+    ``case_kind`` narrows the row when given, and it needs to be given
+    whenever a run can contain both kinds: the two id spaces are separate
+    sequences, so a test case and a checklist item may share a label, and
+    without the kind this would correct whichever of the two was written
+    last. It stays optional so the automation ingest, whose runs are
+    single-kind, is unaffected.
     """
     allowed = {"status", "evidence_path", "bug_report_id", "notes"}
     payload = {k: v for k, v in fields.items() if k in allowed}
     if not payload:
         return False
     with session_scope() as sess:
+        where = [ExecutionCaseResult.run_id == run_id,
+                 ExecutionCaseResult.case_external_id == case_external_id]
+        if case_kind:
+            where.append(ExecutionCaseResult.case_kind == case_kind)
         row = sess.execute(
-            select(ExecutionCaseResult)
-            .where(ExecutionCaseResult.run_id == run_id,
-                   ExecutionCaseResult.case_external_id == case_external_id)
+            select(ExecutionCaseResult).where(*where)
             .order_by(ExecutionCaseResult.id.desc())
         ).scalars().first()
         if row is None:
@@ -4248,6 +4258,35 @@ def update_case_result(run_id: int, case_external_id: str, **fields) -> bool:
         for key, value in payload.items():
             setattr(row, key, value)
         return True
+
+
+def list_open_runs(project_id: str, *, mode: str | None = None,
+                   limit: int = 20) -> list[dict]:
+    """Runs in this project that were started and never closed.
+
+    A manual walk over sixty checks spans laptop sleeps and hand-offs, and
+    the state to resume it was already in the database — but nothing listed
+    it, so an interrupted run was reachable only from browser history. That
+    is the whole reason this exists: resumable and findable are different
+    properties, and only the first one was built.
+
+    ``mode`` filters on ``env_payload['mode']`` in Python rather than SQL
+    because the column is JSON and SQLite and Postgres disagree about how
+    to index into it — the row counts here are small enough that the
+    difference does not matter, and a portable query is worth more.
+    """
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(ExecutionRun)
+            .where(ExecutionRun.project_id == project_id,
+                   ExecutionRun.finished_at.is_(None))
+            .order_by(ExecutionRun.started_at.desc()).limit(limit * 3)
+        ).scalars().all()
+    out = [_row_to_dict(r) for r in rows]
+    if mode:
+        out = [r for r in out
+               if str((r.get("env_payload") or {}).get("mode") or "") == mode]
+    return out[:limit]
 
 
 def list_execution_runs(project_id: str, limit: int = 50) -> list[dict]:

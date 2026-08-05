@@ -525,6 +525,51 @@
 {% endfor %}
 {% endif %}
 
+{# ── Unfinished manual walks ──────────────────────────────────────────
+   A walk over sixty checks spans laptop sleeps and hand-offs, and its
+   position was always derivable from the database — but with nothing
+   listing the open runs, getting back to one meant finding the URL in
+   browser history. This is above the run configuration on purpose:
+   resuming is almost always the intent when one is open, and offering to
+   start a second walk first is how a project ends up with six of them. #}
+{% if open_manual_runs %}
+<div class="card te-open-runs">
+    <h3 class="card-title">
+        <i data-lucide="play-circle" class="icon-sm"></i>
+        {{ t.get('te_open_runs_title', 'Unfinished manual runs') }}
+    </h3>
+    <p class="hint">{{ t.get('te_open_runs_hint',
+        'Started and not closed. Resuming lands on the first item without a verdict.') }}</p>
+    <table class="data-table">
+        <thead><tr>
+            <th width="70">{{ t.get('run', 'Run') }}</th>
+            <th>{{ t.get('started', 'Started') }}</th>
+            <th>{{ t.get('te_tester', 'Tester') }}</th>
+            <th width="120"></th>
+        </tr></thead>
+        <tbody>
+        {% for r in open_manual_runs %}
+        <tr>
+            <td>#{{ r.id }}</td>
+            {# Sliced, not formatted: index.html already renders run
+               timestamps as `started_at[:10]`, and a microsecond-precision
+               ISO string in a table cell is noise. Minutes are the useful
+               resolution for "which walk did I leave open". #}
+            <td>{{ (r.started_at or '')[:16] | replace('T', ' ') }}</td>
+            <td>{{ (r.env_payload or {}).get('tester') or '—' }}</td>
+            <td>
+                <a class="btn btn-sm"
+                   href="{{ url_for('manual_run_resume', run_id=r.id) }}">
+                    {{ t.get('te_resume', 'Resume') }}
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {# ── New Test Run Configuration ── #}
 <form method="POST" id="exec-config-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -63,9 +63,51 @@ class QueueItem:
     category: str = ""
     #: Hierarchical number, for a checklist item.
     item_num: str = ""
+    #: True when the item is in the run's queue but no longer in the pack.
+    #: A flag rather than a sentinel summary, because the page needs to
+    #: *explain* it: rendered as an ordinary item it is a blank card with
+    #: five verdict buttons, and the tester can neither judge it nor tell
+    #: why. Seen on a real walk, which is what browser-checking a change is
+    #: for — the placeholder was covered by a unit test and invisible on
+    #: screen.
+    missing: bool = False
 
     def to_dict(self) -> dict:
         return {"external_id": self.external_id, "kind": self.kind}
+
+    @property
+    def empty(self) -> bool:
+        """True when the item exists but carries nothing to judge.
+
+        A freshly created test case is exactly this — the editors' "add"
+        button writes a row with empty fields for the author to fill in,
+        and if a walk starts before anyone fills it, the tester gets a card
+        with an id, no steps, no expectation and five verdict buttons.
+        Found by looking at a real walk rather than by reading the code:
+        every field was rendering correctly, and the page was still
+        unusable.
+
+        Distinguished from :attr:`missing` because the actions differ. A
+        deleted item should be Skipped; an empty one should be written.
+        """
+        if self.missing:
+            return False
+        return not any((self.summary.strip(), self.expected_result.strip(),
+                        self.steps))
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """The identity of a row in the walk.
+
+        The kind is part of it because the two id spaces are separate
+        sequences: a test case ``X_001`` and a checklist item ``X_001`` are
+        different items that happen to share a label. Keyed on the id alone
+        — as this module did until measured — one verdict marked both of
+        them done, and a run of two items reported ``2 of 2, finished``
+        after a single click. The pass rate, the run stats and the
+        dashboard all inherit that number.
+        """
+        return (self.kind, self.external_id)
 
 
 @dataclass
@@ -200,7 +242,7 @@ def restore_queue(payload: Iterable[dict],
             # Keep a placeholder rather than silently shortening the walk —
             # the run's own totals would otherwise stop adding up.
             out.append(QueueItem(
-                external_id=key[1], kind=key[0],
+                external_id=key[1], kind=key[0], missing=True,
                 summary="(this item is no longer in the pack)"))
     return out
 
@@ -209,37 +251,40 @@ def compute_progress(queue: Iterable[QueueItem],
                      results: Iterable[dict]) -> Progress:
     """Where the walk is, derived from the results already recorded."""
     queue = list(queue)
-    # Last write wins: a corrected verdict replaces the first one.
-    verdicts: dict[str, str] = {}
-    for row in results or []:
-        ext = str((row or {}).get("case_external_id") or "")
-        status = str((row or {}).get("status") or "")
-        if ext and status:
-            verdicts[ext] = status
+    verdicts = {key: row["status"] for key, row in
+                verdicts_by_item(results).items() if row.get("status")}
 
     progress = Progress(total=len(queue))
     for item in queue:
-        verdict = verdicts.get(item.external_id)
+        verdict = verdicts.get(item.key)
         if verdict:
             progress.done += 1
             progress.counts[verdict] = progress.counts.get(verdict, 0) + 1
 
     progress.cursor = len(queue)
     for ix, item in enumerate(queue):
-        if item.external_id not in verdicts:
+        if item.key not in verdicts:
             progress.cursor = ix
             break
     return progress
 
 
-def verdicts_by_item(results: Iterable[dict]) -> dict[str, dict]:
-    """``{external_id: {status, notes, bug_report_id}}``, last write wins."""
-    out: dict[str, dict] = {}
+def verdicts_by_item(results: Iterable[dict]) -> dict[tuple[str, str], dict]:
+    """``{(kind, external_id): {status, notes, …}}``, last write wins.
+
+    Keyed by kind as well as id — see :attr:`QueueItem.key`. Rows written
+    before that distinction existed carry a kind too (``save_case_result``
+    has always stored one), so historic runs key correctly without a
+    migration; only a row with no kind at all falls back to ``test_case``,
+    which is the default those rows were written with.
+    """
+    out: dict[tuple[str, str], dict] = {}
     for row in results or []:
         ext = str((row or {}).get("case_external_id") or "")
         if not ext:
             continue
-        out[ext] = {
+        kind = str((row or {}).get("case_kind") or "test_case")
+        out[(kind, ext)] = {
             "status": (row or {}).get("status") or "",
             "notes": (row or {}).get("notes") or "",
             "bug_report_id": (row or {}).get("bug_report_id"),

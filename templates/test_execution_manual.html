@@ -60,7 +60,35 @@
         </span>
     </div>
 
-    {% if current.kind == 'test_case' %}
+    {% if current.missing %}
+    {# The item is in this run's queue and no longer in the pack — somebody
+       deleted or regenerated it mid-walk. Rendered as an ordinary item it
+       is a blank card with five verdict buttons: unjudgeable, and with no
+       hint as to why. Say it, and name the honest verdict. #}
+    <div class="alert alert-warning" style="margin-top:.75rem">
+        <strong>{{ t.get('manual_run_missing_title',
+            'This item is no longer in the pack.') }}</strong>
+        {{ t.get('manual_run_missing_body',
+           'It was part of the run when the walk started and has since been
+            deleted or regenerated, so there is nothing left to check. Record
+            it as Skipped — the run keeps its original total, so the coverage
+            number stays honest.') }}
+    </div>
+    {% elif current.empty %}
+    {# The item exists and has no content — almost always a row the editors'
+       "add" button created and nobody filled in yet. Blank card, five
+       verdict buttons, nothing to judge. Point at the fix rather than
+       inviting a guess. #}
+    <div class="alert alert-warning" style="margin-top:.75rem">
+        <strong>{{ t.get('manual_run_empty_title',
+            'This item has no steps and no expected result yet.') }}</strong>
+        {{ t.get('manual_run_empty_body',
+           'There is nothing here to judge. Write it in the Test Cases or
+            Checklist module first, then reload this page — the walk reads the
+            pack fresh on every render, so it will pick the content up without
+            restarting the run.') }}
+    </div>
+    {% elif current.kind == 'test_case' %}
     <table class="tc-detail-table" style="margin-top:.75rem">
         {% if current.preconditions %}
         <tr><th>{{ t.get('tc_preconditions', 'Preconditions') }}</th>
@@ -106,6 +134,11 @@
           class="manual-verdict-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="external_id" value="{{ current.external_id }}">
+        {# The kind travels with the id: the two id spaces are separate
+           sequences, so a test case and a checklist item can carry the same
+           label, and posting the id alone recorded the verdict against
+           whichever of the two came first in the walk. #}
+        <input type="hidden" name="kind" value="{{ current.kind }}">
 
         <div class="form-group">
             <label for="manual-notes">{{ t.get('manual_run_notes', 'What did you see?') }}</label>
@@ -169,7 +202,10 @@
         </tr></thead>
         <tbody>
         {% for item in queue %}
-        {% set v = verdicts.get(item.external_id, {}) %}
+        {# (kind, id), not id — see the hidden `kind` field above. Keyed on
+           the id alone, a checklist item sharing a label with a test case
+           showed the test case's verdict. #}
+        {% set v = verdicts.get((item.kind, item.external_id), {}) %}
         <tr {% if loop.index0 == index %}class="section-row"{% endif %}>
             <td><a href="{{ url_for('manual_run_page', run_id=run_id, i=loop.index0) }}">{{ loop.index }}</a></td>
             <td>{{ item.external_id }}</td>
