@@ -300,6 +300,7 @@ def _deny_forbidden(minimum: str):
 
 def template_context() -> dict:
     """Injected into every template so the UI can match the server."""
+    from engine import features
     user = current_user()
     return {
         "auth_active": auth_active(),
@@ -307,6 +308,11 @@ def template_context() -> dict:
         "current_user": user,
         "current_role": current_role(),
         "is_admin": is_admin(),
+        # Read with ``effective``, so a template cannot render an editor
+        # whose endpoint is switched off: EDITORS_ENABLED depends on
+        # WORKSPACE_DB_FIRST, and an editable-looking field that 404s on
+        # save is worse than a read-only one (ADR 0001).
+        "editors_enabled": features.effective("EDITORS_ENABLED"),
     }
 
 

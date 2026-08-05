@@ -1,0 +1,69 @@
+{#
+  Inline-edit macros (E4.2)
+
+  The markup half of the substrate. A page opts a field in with one call
+  and writes no JavaScript:
+
+      {% from "_inline_edit.html" import editable, editable_assets %}
+      {{ editable("test_case", tc.id, "summary", tc.summary,
+                  version=tc.row_version, kind="textarea") }}
+      …and once, in the page's scripts block:
+
+      {{ editable_assets(csp_nonce) }}
+
+  Kept as macros rather than copied attributes in four templates because
+  the attribute names are a contract with static/js/inline-edit.js, and
+  four copies of a contract is three chances to mistype one — the kind of
+  mistake that produces a field which silently is not editable.
+
+  `editable_assets(csp_nonce)` goes in the page's scripts block. It is a
+  no-op when editing is off, so a template can call it unconditionally.
+
+  Why the gate is a function call and the nonce an argument
+  --------------------------------------------------------
+  A macro imported without `with context` cannot see context variables — so
+  reading `editors_enabled` or `csp_nonce` from the request context inside
+  here silently evaluated to Undefined, and the first version of this file
+  rendered nothing at all with editing switched *on*. `editors_enabled()` is
+  registered as a Jinja global (visible inside macros); the nonce is passed
+  in, because a per-request secret arriving through a global is harder to
+  follow than one the call site hands over.
+#}
+
+{% macro editable(entity, item_id, field, value, version=None, kind="text",
+                  choices=None, label=None, readonly=false, placeholder="—") %}
+  {#- `readonly` renders the same element without the affordances, so a
+      page can show a field to a viewer and to an editor from one call
+      rather than branching around two blocks. -#}
+  <span class="ie"
+        data-ie-entity="{{ entity }}"
+        data-ie-id="{{ item_id }}"
+        data-ie-field="{{ field }}"
+        {% if version is not none %}data-ie-version="{{ version }}"{% endif %}
+        data-ie-kind="{{ kind }}"
+        {% if choices %}data-ie-choices="{{ choices | join('|') }}"{% endif %}
+        {% if label %}data-ie-label="{{ label }}"{% endif %}
+        {#- The original is carried in an attribute so the component can
+            tell "unchanged" from "changed" without re-reading rendered
+            text, which whitespace collapsing would have altered. -#}
+        data-ie-original="{{ value if value is not none else '' }}"
+        {% if readonly or not editors_enabled() %}data-ie-readonly{% endif %}
+        >{{ value if value else placeholder }}</span>
+{%- endmacro %}
+
+
+{% macro edited_marker(text="edited") %}
+  {#- Shown only inside an element carrying data-ie-edited. Visible before
+      a user clicks Generate, because that is when knowing which rows a
+      regeneration will skip (E4.7) actually helps. -#}
+  <span class="ie-edited-marker pill" title="Changed by a person — a
+        regeneration will not overwrite it">{{ text }}</span>
+{%- endmacro %}
+
+
+{% macro editable_assets(nonce="") %}
+  {%- if editors_enabled() %}
+  <script src="{{ url_for('static', filename='js/inline-edit.js') }}"
+          nonce="{{ nonce }}" defer></script>
+  {%- endif %}
+{%- endmacro %}

@@ -158,4 +158,28 @@ def register(app: Flask) -> None:
         return jsonify({"entity": entity, "item": item})
 
 
+    # ── Development harness ───────────────────────────────────────
+    #
+    # The smallest page that exercises the component against the real
+    # endpoint: three fields of two kinds, sharing one row version. Behind
+    # FLASK_DEBUG as well as EDITORS_ENABLED, so it cannot appear on a
+    # deployed instance even if somebody flips the editing flag.
+    if app.debug:
+        @app.route("/_dev/inline-edit", methods=["GET"])
+        @_perm.require_role("user")
+        def dev_inline_edit_harness():
+            from flask import render_template
+
+            from engine import workspace as _workspace
+            if not _editors_enabled():
+                return _disabled()
+            pid = resolve_active_project(pin=False)
+            items = []
+            for row in _workspace.test_cases(pid)[:5]:
+                item = _editable.get("test_case", pid, row.get("id"))
+                if item:
+                    items.append(dict(row, **item))
+            return render_template("_ie_harness.html", items=items)
+
+
 __all__ = ["register"]

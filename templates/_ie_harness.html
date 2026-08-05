@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_inline_edit.html" import editable, editable_assets, edited_marker %}
+{% block title %}Inline-edit harness{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Inline-edit harness</h1>
+  <p class="text-muted">E4.2 development harness — reachable only with
+     <code>EDITORS_ENABLED</code> on and <code>FLASK_DEBUG=1</code>.</p>
+  <table class="data-table">
+    <thead><tr><th>ID</th><th>Summary</th><th>Steps</th><th>Priority</th></tr></thead>
+    <tbody>
+      {% for tc in items %}
+      <tr data-ie-row>
+        <td>{{ tc.id }} {{ edited_marker() }}</td>
+        <td>{{ editable("test_case", tc.id, "summary", tc.summary,
+                        version=tc.row_version, kind="text") }}</td>
+        <td>{{ editable("test_case", tc.id, "test_steps", tc.test_steps,
+                        version=tc.row_version, kind="textarea") }}</td>
+        <td>{{ editable("test_case", tc.id, "priority", tc.priority,
+                        version=tc.row_version, kind="text") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}{{ editable_assets(csp_nonce) }}{% endblock %}

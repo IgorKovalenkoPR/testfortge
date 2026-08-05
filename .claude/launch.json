@@ -26,6 +26,26 @@
       }
     },
     {
+      "name": "qa-forge-editors",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5002,
+      "env": {
+        "FLASK_DEBUG": "1",
+        "TESTFORTGE_PORT": "5002",
+        "TESTFORTGE_DB": "storage/devpreview.db",
+        "SECRET_KEY": "dev-preview-only-not-a-secret",
+        "AUTH_ENABLED": "0",
+        "ORG_MODE": "0",
+        "WORKSPACE_DB_FIRST": "1",
+        "EDITORS_ENABLED": "1",
+        "SESSION_BACKEND": "db",
+        "TESTFORTGE_ENCRYPTION_KEY": "dev-preview-encryption-secret-not-real-32ch",
+        "TESTFORTGE_BASIC_USER": "",
+        "TESTFORTGE_BASIC_PASSWORD": ""
+      }
+    },
+    {
       "name": "marketing",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5173", "--directory", "marketing"],

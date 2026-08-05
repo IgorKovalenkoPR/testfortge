@@ -241,6 +241,14 @@ def _handle_csrf_error(e):
     )
 
 
+# Jinja global, not a context variable: macros imported without
+# ``with context`` cannot see context variables, and the inline-edit macros
+# (templates/_inline_edit.html) need this gate. Registered as a callable so
+# it is evaluated per render rather than captured at boot.
+app.jinja_env.globals["editors_enabled"] = lambda: (
+    features.effective("EDITORS_ENABLED"))
+
+
 @app.route("/api/csrf-token", methods=["GET"])
 def api_csrf_token():
     """Mint a CSRF token for the current session.
