@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from sqlalchemy import text
+
 from engine import db, editable, tc_author, workspace
 
 
@@ -194,18 +196,50 @@ class TestEditMetadata:
         assert workspace.edit_metadata(project) == {}
 
 
+@pytest.fixture
+def planted_duplicate(app, request):
+    """Two checklist rows sharing a public id, planted below ``save_*``.
+
+    E4.4a stopped the writers from producing this and added a unique index,
+    so a duplicate can no longer be created through the normal path — which
+    is the point. The guard below it stays anyway, and stays tested: the
+    index creation is best-effort (an instance whose historical data could
+    not be repaired runs without it), and any future writer that bypasses
+    ``save_checklist`` would reintroduce the state. A guard that is only
+    exercised by the bug it prevents is a guard nobody knows still works.
+    """
+    project = db.upsert_project(name=f"dupe {request.node.name}"[:180])
+    # The ORM's own bind — see the note in tests/test_public_ids.py.
+    with db.session_scope() as sess:
+        engine = sess.get_bind()
+    with engine.begin() as conn:
+        conn.execute(text(
+            "DROP INDEX IF EXISTS ux_checklist_item_project_external_id"))
+        for objective in ("First", "Second"):
+            conn.execute(text(
+                "INSERT INTO checklist_item (project_id, external_id, "
+                "objective, created_at, updated_at, row_version, "
+                "ai_generated) VALUES (:p, 'CNT_001', :o, '2026-01-01', "
+                "'2026-01-01', 1, 1)"), {"p": project, "o": objective})
+    yield project
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM checklist_item WHERE project_id = :p"),
+                     {"p": project})
+    db._ensure_public_id_unique_indexes(engine)
+
+
 class TestDuplicatePublicIds:
     """A measured constraint on this substrate, not a hypothetical.
 
-    Every entity here is addressed by its public id. The site-aware
-    checklist generator emits duplicates — measured on ``POST /checklist``
-    for https://example.com: an 82-item pack containing ``CNT_001`` twice —
-    so "edit item CNT_001" is undefined for that pack.
+    Every entity here is addressed by its public id, and the checklist
+    generators used to emit duplicates — measured on ``POST /checklist`` for
+    https://example.com: an 82-item pack containing ``CNT_001`` twice. So
+    "edit item CNT_001" was undefined for that pack, and a unique index over
+    the column made every checklist save roll back.
 
-    Two consequences, both pinned below: a unique index on
-    ``checklist_item`` cannot be added (it made every checklist save roll
-    back, and the page rendered empty), and the substrate has to refuse an
-    ambiguous id rather than pick one of the two rows.
+    E4.4a fixed the source (see tests/test_public_ids.py). What is pinned
+    here is the substrate's own behaviour: if a duplicate does exist, it is
+    refused rather than resolved by picking a row.
     """
 
     def test_test_case_ids_are_unique_per_project(self, project, editing_on):
@@ -220,7 +254,8 @@ class TestDuplicatePublicIds:
 
     def test_a_checklist_save_is_not_blocked_by_duplicate_ids(self, project,
                                                               editing_on):
-        """The generator's own output has to be storable."""
+        """The generator's own output has to be storable — E4.4a makes the
+        ids unique on the way in rather than rejecting the pack."""
         items = [
             {"id": "CNT_001", "section": "Content", "objective": "First",
              "item_num": "1.1"},
@@ -228,29 +263,24 @@ class TestDuplicatePublicIds:
              "item_num": "1.2"},
         ]
         db.save_checklist(project, items)
-        assert len(db.load_checklist(project)) == 2
+        stored = db.load_checklist(project)
+        assert len(stored) == 2
+        assert len({row["id"] for row in stored}) == 2
 
-    def test_an_ambiguous_id_is_refused_not_guessed(self, project,
+    def test_an_ambiguous_id_is_refused_not_guessed(self, planted_duplicate,
                                                     editing_on):
         """Picking either row would be a coin toss over somebody's docs."""
-        db.save_checklist(project, [
-            {"id": "CNT_001", "section": "C", "objective": "First"},
-            {"id": "CNT_001", "section": "C", "objective": "Second"},
-        ])
         with pytest.raises(editable.AmbiguousEntity):
-            editable.get("checklist_item", project, "CNT_001")
+            editable.get("checklist_item", planted_duplicate, "CNT_001")
         with pytest.raises(editable.AmbiguousEntity):
-            editable.patch("checklist_item", project, "CNT_001",
+            editable.patch("checklist_item", planted_duplicate, "CNT_001",
                            {"objective": "Third"})
 
-    def test_the_endpoint_says_which_problem_it_is(self, client, project,
+    def test_the_endpoint_says_which_problem_it_is(self, client,
+                                                   planted_duplicate,
                                                    editing_on):
-        db.save_checklist(project, [
-            {"id": "CNT_001", "section": "C", "objective": "First"},
-            {"id": "CNT_001", "section": "C", "objective": "Second"},
-        ])
         with client.session_transaction() as sess:
-            sess["project_id"] = project
+            sess["project_id"] = planted_duplicate
         resp = client.get("/api/edit/checklist_item/CNT_001")
         assert resp.status_code == 409
         assert resp.get_json()["error"] == "ambiguous_id"

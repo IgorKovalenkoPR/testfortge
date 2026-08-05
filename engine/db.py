@@ -42,6 +42,7 @@ from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, declared_attr,
                             mapped_column, relationship, sessionmaker)
 from sqlalchemy.types import JSON
 
+from engine import public_ids as _public_ids
 from engine.log import get_logger
 
 log = get_logger(__name__)
@@ -188,7 +189,9 @@ def init_db() -> None:
     _ensure_case_result_source_column(engine)
     _ensure_pack_version_columns(engine)
     _ensure_editable_columns(engine)
-    # After the editing columns: the index guards ids minted by the editor.
+    # Repair before constraining: the index cannot be created over rows that
+    # already collide (E4.4a).
+    _renumber_duplicate_public_ids(engine)
     _ensure_public_id_unique_indexes(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -470,6 +473,80 @@ def _ensure_pack_version_columns(engine: Engine) -> None:
         log.warning("concurrency migration ALTER failed: %s", exc)
 
 
+def _renumber_duplicate_public_ids(engine: Engine) -> None:
+    """Give already-stored duplicate ids a unique one — E4.4a.
+
+    ``save_*`` now enforces uniqueness on the way in, but rows written before
+    that carry duplicates, and the unique index cannot be created over them.
+    So the data is repaired first, then the index goes on to keep it that way.
+
+    Renumbering is done per (project, table) and only for ids that actually
+    collide: an id that is unique is left alone, because these ids appear in
+    exports, in bug reports that cite "failed at CNT_014", and in a client's
+    review comments. Within a collision the **first** row by primary key
+    keeps the id — it is the one most likely to be the one already cited.
+
+    Row identity is not affected, so a renumbered row keeps its own
+    ``row_version`` and ``ai_generated``: the metadata lives on the row, not
+    in a table keyed by the public id.
+    """
+    for table in ("test_case", "checklist_item"):
+        try:
+            with engine.begin() as conn:
+                groups = conn.execute(text(
+                    f"SELECT project_id, external_id FROM {table} "
+                    f"WHERE external_id IS NOT NULL AND external_id <> '' "
+                    f"GROUP BY project_id, external_id "
+                    f"HAVING COUNT(*) > 1"
+                )).all()
+                if not groups:
+                    continue
+                # Every id in the project, so a new number cannot land on one
+                # that is already in use by a row we are not touching.
+                by_project: dict[str, set[str]] = {}
+                for project_id, _ in groups:
+                    if project_id in by_project:
+                        continue
+                    by_project[project_id] = {
+                        row[0] for row in conn.execute(text(
+                            f"SELECT external_id FROM {table} "
+                            f"WHERE project_id = :p AND external_id IS NOT NULL"
+                        ), {"p": project_id}).all()}
+
+                renamed = 0
+                for project_id, external_id in groups:
+                    rows = conn.execute(text(
+                        f"SELECT id FROM {table} WHERE project_id = :p "
+                        f"AND external_id = :e ORDER BY id ASC"
+                    ), {"p": project_id, "e": external_id}).all()
+                    taken = by_project[project_id]
+                    for (row_id,) in rows[1:]:      # the first keeps the id
+                        prefix, number = _public_ids.split_id(external_id)
+                        if number is None:
+                            prefix, number = f"{external_id}_", 0
+                        candidate = number + 1
+                        new_id = _public_ids.format_id(prefix, candidate)
+                        while new_id in taken:
+                            candidate += 1
+                            new_id = _public_ids.format_id(prefix, candidate)
+                        conn.execute(text(
+                            f"UPDATE {table} SET external_id = :new "
+                            f"WHERE id = :i"), {"new": new_id, "i": row_id})
+                        taken.add(new_id)
+                        renamed += 1
+                        log.info("E4.4a: %s row %s renumbered %s → %s "
+                                 "(project %s)", table, row_id, external_id,
+                                 new_id, str(project_id)[:8])
+                if renamed:
+                    log.warning(
+                        "E4.4a: renumbered %d duplicate %s id(s). The ids "
+                        "themselves changed, so an export or bug report "
+                        "citing the old one now points at the row that kept "
+                        "it.", renamed, table)
+        except SQLAlchemyError as exc:   # pragma: no cover — best effort
+            log.warning("could not renumber duplicate %s ids: %s", table, exc)
+
+
 def _ensure_public_id_unique_indexes(engine: Engine) -> None:
     """Unique ``(project_id, external_id)`` on ``test_case`` — E4.3.
 
@@ -488,16 +565,21 @@ def _ensure_public_id_unique_indexes(engine: Engine) -> None:
     is logged, loudly and with the offending ids, and the app carries on
     without the guard rather than refusing to boot over historical data.
 
-    ``checklist_item`` is deliberately **not** covered, and that is a finding
-    rather than an oversight: the site-aware generator produces duplicate ids
-    today. Measured on ``POST /checklist`` for https://example.com — an
-    82-item pack containing ``CNT_001`` twice. Adding the index there made
-    every checklist save fail its INSERT and roll back, so the page rendered
-    empty; five tests caught it. The duplicate ids are the bug, and until
-    they are fixed the checklist editor (E4.4) cannot address an item by its
-    public id at all — see ``editable.AmbiguousEntity``.
+    ``checklist_item`` is covered too, as of E4.4a. It could not be at first:
+    the site-aware generator emitted duplicates — measured on
+    ``POST /checklist`` for https://example.com, an 82-item pack containing
+    ``CNT_001`` twice — so the index made every checklist save roll back and
+    the page rendered empty. Two builders each counted from 1 over their own
+    output and the route concatenated the lists.
+
+    That is fixed at the source now: ``save_test_cases`` and
+    ``save_checklist`` both run ``public_ids.ensure_unique`` over the pack,
+    and ``_renumber_duplicate_public_ids`` repairs rows written before that.
+    Both have to hold for this index to be creatable, which is exactly why it
+    is worth having — it is the thing that would fail loudly if either
+    regressed.
     """
-    for table in ("test_case",):
+    for table in ("test_case", "checklist_item"):
         index = f"ux_{table}_project_external_id"
         try:
             with engine.begin() as conn:
@@ -2911,6 +2993,11 @@ def save_test_cases(project_id: str, test_cases: list, *,
     """
     if not project_id:
         raise ValueError("project_id is required")
+    # Same guarantee as the checklist (E4.4a), and here it is load-bearing:
+    # the unique index on (project_id, external_id) turns a duplicate into a
+    # rolled-back INSERT, which stores *nothing*. Losing one id to
+    # renumbering is a small cost; losing the pack is not.
+    _public_ids.ensure_unique(test_cases, fallback_prefix="TC-")
     written = 0
     with session_scope() as sess:
         # Before the delete below, and in the same transaction: a conflict
@@ -3338,6 +3425,13 @@ def save_checklist(project_id: str, items: list, *,
     """
     if not project_id:
         raise ValueError("project_id is required")
+    # E4.4a. Two builders each counting from 1 over their own output, with a
+    # route that concatenates the lists, produced duplicate public ids —
+    # measured: an 82-item pack with CNT_001 twice. Every editor addresses a
+    # row by this id, so a duplicate makes the row unaddressable. Enforced
+    # here rather than in the builders because eight write paths reach this
+    # function, and more builders than that feed them.
+    _public_ids.ensure_unique(items, fallback_prefix="CL_")
     written = 0
     with session_scope() as sess:
         _claim_pack_write(sess, project_id, "checklist", expected_version)

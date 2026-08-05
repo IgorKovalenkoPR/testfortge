@@ -349,7 +349,16 @@ class TestPersistence:
         monkeypatch.setenv("FLASK_DEBUG", "1")
         monkeypatch.setenv("DATABASE_URL",
                            f"sqlite:///{tmp_path / 'tfg.db'}")
+        # Both globals. Resetting only ``_engine`` leaves the sessionmaker
+        # bound to whichever database ``init_db`` last built — so after this
+        # test the ORM writes to the temp file while ``get_engine()`` returns
+        # the restored real engine. tests/test_schema_migration.py documents
+        # the same hazard; this is where it actually bit: a fixture that
+        # wrote a project through the ORM and then inserted a child row on a
+        # raw connection got "FOREIGN KEY constraint failed", four files
+        # later, with nothing pointing back here.
         monkeypatch.setattr(db, "_engine", None, raising=False)
+        monkeypatch.setattr(db, "_Session", None, raising=False)
         db.init_db()
         pid = db.upsert_project("gherkin-round-trip")
 
@@ -371,7 +380,16 @@ class TestPersistence:
         monkeypatch.setenv("FLASK_DEBUG", "1")
         monkeypatch.setenv("DATABASE_URL",
                            f"sqlite:///{tmp_path / 'tfg2.db'}")
+        # Both globals. Resetting only ``_engine`` leaves the sessionmaker
+        # bound to whichever database ``init_db`` last built — so after this
+        # test the ORM writes to the temp file while ``get_engine()`` returns
+        # the restored real engine. tests/test_schema_migration.py documents
+        # the same hazard; this is where it actually bit: a fixture that
+        # wrote a project through the ORM and then inserted a child row on a
+        # raw connection got "FOREIGN KEY constraint failed", four files
+        # later, with nothing pointing back here.
         monkeypatch.setattr(db, "_engine", None, raising=False)
+        monkeypatch.setattr(db, "_Session", None, raising=False)
         db.init_db()
         pid = db.upsert_project("coerce")
         from routes._shared import tc_to_dict
