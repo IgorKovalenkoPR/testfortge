@@ -2668,6 +2668,42 @@ def pack_versions(project_id: str) -> dict[str, int]:
         return out
 
 
+#: The last merge each pack kind performed, for the route to report.
+#:
+#: A module-level slot rather than a return value because ``save_*`` returns a
+#: row count that a dozen callers already read, and changing that signature to
+#: carry a report would touch all of them to serve one. Read immediately after
+#: the call, in the same request — see ``take_merge_report``.
+_LAST_MERGE_REPORT: dict = {}
+
+
+def _protect_edits(project_id: str, incoming: list, kind: str, policy: str):
+    """Apply the regeneration policy. Returns ``(rows, report)``."""
+    from engine import regeneration
+
+    loader = load_test_cases if kind == "test_cases" else load_checklist
+    try:
+        existing = loader(project_id) or []
+        metadata = load_edit_metadata(project_id, kind) or {}
+    except SQLAlchemyError as exc:      # pragma: no cover — read failure
+        # Cannot see the existing pack, so cannot know what to protect.
+        # Writing the incoming pack would silently discard edits, so the safe
+        # answer is to refuse the write and say why.
+        raise RuntimeError(
+            f"cannot check {kind} for manual edits before regenerating: {exc}"
+        ) from exc
+    return regeneration.merge(existing, incoming, metadata, policy=policy)
+
+
+def take_merge_report(kind: str):
+    """The report from the most recent protected write of ``kind``, once.
+
+    Popped rather than read, so a later unprotected write cannot make the
+    route repeat a message about a merge that did not happen this time.
+    """
+    return _LAST_MERGE_REPORT.pop(kind, None)
+
+
 def bump_pack_version(project_id: str, kind: str) -> None:
     """Mark a pack as changed because a row was added or deleted (E4.3).
 
@@ -3016,7 +3052,9 @@ def _restore_edit_metadata(row, snapshot: dict[str, dict]) -> None:
 
 
 def save_test_cases(project_id: str, test_cases: list, *,
-                    expected_version: int | None = None) -> int:
+                    expected_version: int | None = None,
+                    protect_edits: bool = False,
+                    policy: str = "merge") -> int:
     """Replace all TC for a project with the new list. Returns rows written.
 
     Bumps ``project.updated_at`` so the picker dropdown shows
@@ -3029,6 +3067,12 @@ def save_test_cases(project_id: str, test_cases: list, *,
     """
     if not project_id:
         raise ValueError("project_id is required")
+    # E4.7. Opt-in, so every pre-existing caller behaves exactly as before:
+    # only the Generate paths ask for it. A reorder or an upload writes the
+    # rows it was given.
+    if protect_edits:
+        test_cases, _LAST_MERGE_REPORT["test_cases"] = _protect_edits(
+            project_id, test_cases, "test_cases", policy)
     # Same guarantee as the checklist (E4.4a), and here it is load-bearing:
     # the unique index on (project_id, external_id) turns a duplicate into a
     # rolled-back INSERT, which stores *nothing*. Losing one id to
@@ -3454,7 +3498,9 @@ def load_edit_metadata(project_id: str, kind: str = "test_cases") -> dict:
 # ── Checklist ──────────────────────────────────────────────────────
 
 def save_checklist(project_id: str, items: list, *,
-                   expected_version: int | None = None) -> int:
+                   expected_version: int | None = None,
+                   protect_edits: bool = False,
+                   policy: str = "merge") -> int:
     """Replace all checklist items for a project. Returns rows written.
 
     ``expected_version`` behaves exactly as in :func:`save_test_cases` —
@@ -3462,6 +3508,10 @@ def save_checklist(project_id: str, items: list, *,
     """
     if not project_id:
         raise ValueError("project_id is required")
+    # E4.7 — see save_test_cases.
+    if protect_edits:
+        items, _LAST_MERGE_REPORT["checklist"] = _protect_edits(
+            project_id, items, "checklist", policy)
     # E4.4a. Two builders each counting from 1 over their own output, with a
     # route that concatenates the lists, produced duplicate public ids —
     # measured: an 82-item pack with CNT_001 twice. Every editor addresses a

@@ -618,8 +618,11 @@ def _store_test_cases(tc_dicts: list[dict], *,
     pid = ensure_active_project()
     if pid:
         try:
+            # E4.7: a regeneration keeps what a person edited, and says so.
             _workspace.save_test_cases(pid, tc_dicts,
-                                       expected_version=expected_version)
+                                       expected_version=expected_version,
+                                       protect_edits=True)
+            _flash_merge_report("test_cases")
         except _db.WriteConflict:
             # Never swallowed. A conflict means somebody else's work is at
             # stake, and the caller has to tell the user rather than let the
@@ -630,6 +633,23 @@ def _store_test_cases(tc_dicts: list[dict], *,
     _mirror("test_cases_data", tc_dicts)
 
 
+def _flash_merge_report(kind: str) -> None:
+    """Tell the user what the regeneration kept (E4.7).
+
+    A merge nobody can see is as confusing as the overwrite it replaced: they
+    clicked Generate, some rows did not change, and nothing said why.
+    """
+    try:
+        report = _db.take_merge_report(kind)
+    except Exception:      # pragma: no cover — reporting only
+        return
+    if report is None:
+        return
+    message = report.message()
+    if message:
+        flash(message, "info")
+
+
 def _store_checklist(cl_dicts: list[dict], *,
                      expected_version: int | None = None) -> None:
     """Same contract as :func:`_store_test_cases`, for the checklist."""
@@ -637,7 +657,9 @@ def _store_checklist(cl_dicts: list[dict], *,
     if pid:
         try:
             _workspace.save_checklist(pid, cl_dicts,
-                                      expected_version=expected_version)
+                                      expected_version=expected_version,
+                                      protect_edits=True)
+            _flash_merge_report("checklist")
         except _db.WriteConflict:
             raise
         except Exception as exc:  # pragma: no cover

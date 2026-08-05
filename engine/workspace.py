@@ -493,7 +493,8 @@ def pack_versions(project_id: str | None) -> dict[str, int]:
 
 
 def save_test_cases(project_id: str, rows: list[dict], *,
-                    expected_version: int | None = None) -> int:
+                    expected_version: int | None = None,
+                    protect_edits: bool = False) -> int:
     """Write the pack. Raises ``engine.db.WriteConflict`` on a stale write.
 
     The cache is invalidated on success only. Dropping it after a conflict
@@ -502,17 +503,20 @@ def save_test_cases(project_id: str, rows: list[dict], *,
     """
     from engine import db as _db
     written = _db.save_test_cases(project_id, rows,
-                                  expected_version=expected_version)
+                                  expected_version=expected_version,
+                                  protect_edits=protect_edits)
     invalidate(project_id, "test_cases")
     return written
 
 
 def save_checklist(project_id: str, rows: list[dict], *,
-                   expected_version: int | None = None) -> int:
+                   expected_version: int | None = None,
+                   protect_edits: bool = False) -> int:
     """As :func:`save_test_cases`, for the checklist."""
     from engine import db as _db
     written = _db.save_checklist(project_id, rows,
-                                 expected_version=expected_version)
+                                 expected_version=expected_version,
+                                 protect_edits=protect_edits)
     invalidate(project_id, "checklist")
     return written
 
