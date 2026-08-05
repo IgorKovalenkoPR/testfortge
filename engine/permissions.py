@@ -308,11 +308,14 @@ def template_context() -> dict:
         "current_user": user,
         "current_role": current_role(),
         "is_admin": is_admin(),
-        # Read with ``effective``, so a template cannot render an editor
-        # whose endpoint is switched off: EDITORS_ENABLED depends on
-        # WORKSPACE_DB_FIRST, and an editable-looking field that 404s on
-        # save is worse than a read-only one (ADR 0001).
-        "editors_enabled": features.effective("EDITORS_ENABLED"),
+        # NB: deliberately *not* called ``editors_enabled``. That name is a
+        # Jinja global callable (registered in app.py) because macros cannot
+        # see context variables — and a context variable of the same name
+        # shadows the global inside a block, so a template that worked in a
+        # macro raised "'bool' object is not callable" in a block. One name,
+        # one type: templates call ``editors_enabled()``; this key exists for
+        # code that wants the value without a render.
+        "editors_on": features.effective("EDITORS_ENABLED"),
     }
 
 

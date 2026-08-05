@@ -37,6 +37,8 @@ from dataclasses import dataclass, field as _dc_field
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError as _IntegrityError
+
 from engine.log import get_logger
 
 log = get_logger(__name__)
@@ -69,6 +71,26 @@ class FieldNotEditable(EditError):
         self.names = sorted(names)
         super().__init__(
             f"{entity} has no editable field(s): {', '.join(self.names)}")
+
+
+class AmbiguousEntity(EditError):
+    """Two rows in this project share the public id being addressed.
+
+    Real, not hypothetical: the site-aware checklist generator emits
+    duplicate ids (measured — an 82-item pack with ``CNT_001`` twice), and
+    this substrate keys every entity on that id. Editing "the" item is then
+    undefined, and picking either row would be a silent coin toss over
+    somebody's test documentation. So it is refused and named, which is also
+    what makes the underlying duplicate visible instead of latent.
+    """
+
+
+class NotCreatable(EditError):
+    """This entity is edited in place only — nothing creates one here."""
+
+
+class NotDeletable(EditError):
+    """This entity is edited in place only — nothing deletes one here."""
 
 
 class ValidationFailed(EditError):
@@ -107,6 +129,22 @@ class Entity:
     id_column: str                           # column carrying the public id
     fields: dict[str, Field]
     audit_entity: str = ""
+    # ── Creating and deleting whole items (E4.3) ───────────────────
+    #
+    # Requirement 5 asks for new and deleted test cases and requirement 7
+    # for hand-written bugs, which is the same pair of operations over a
+    # different entity. Declaring them here means the second editor gets
+    # them by setting two flags instead of by writing them again.
+    creatable: bool = False
+    deletable: bool = False
+    # ``TC-`` → TC-001, TC-002 … Only ids matching the prefix are counted,
+    # so a project full of generator ids (SC1_004, REC_002) still starts a
+    # hand-written case at TC-001.
+    id_prefix: str = ""
+    # Columns a new row needs that are not editable fields. Kept explicit
+    # rather than relying on model defaults for anything a person would
+    # notice, so a new item is not subtly different from a generated one.
+    create_defaults: dict = _dc_field(default_factory=dict)
 
     def audit_name(self) -> str:
         return self.audit_entity or self.name
@@ -129,6 +167,13 @@ def _registry() -> dict[str, Entity]:
         # ── Requirement 5: edit generated test cases ──
         "test_case": Entity(
             name="test_case", model_name="TestCase", id_column="external_id",
+            creatable=True, deletable=True, id_prefix="TC-",
+            # ``status`` matches what the generators write, so a new case
+            # appears in the execution list in the same state as the rest.
+            create_defaults={"status": "Unchecked", "priority": "Medium",
+                             "testing_type": "Functional",
+                             "category": "Positive", "section": "Manual",
+                             "tc_format": "manual", "trigger": "manual"},
             fields={
                 "summary": _text(2000, required=True),
                 "section": _text(200),
@@ -304,18 +349,37 @@ def _row_to_public(config: Entity, row) -> dict:
     return out
 
 
+def _one(sess, config: Entity, project_id: str, entity_id: str):
+    """The single row with this public id, or None. Raises if there are two.
+
+    Every read and write goes through here so the duplicate-id guard cannot
+    be present in two paths and missing from the third.
+    """
+    from sqlalchemy.exc import MultipleResultsFound
+
+    model = _model(config)
+    query = sess.query(model).filter(
+        model.project_id == project_id,
+        getattr(model, config.id_column) == entity_id,
+    )
+    try:
+        return query.one_or_none()
+    except MultipleResultsFound:
+        raise AmbiguousEntity(
+            f"{entity_id!r} identifies more than one {config.name} in this "
+            f"project, so it cannot be edited. The duplicate ids have to be "
+            f"resolved first."
+        ) from None
+
+
 def get(entity_name: str, project_id: str, entity_id: str) -> dict | None:
     """One row, scoped to its project. ``None`` when there is no such row."""
     from engine import db as _db
     config = entity(entity_name)
     if not (project_id and entity_id):
         return None
-    model = _model(config)
     with _db.session_scope() as sess:
-        row = sess.query(model).filter(
-            model.project_id == project_id,
-            getattr(model, config.id_column) == entity_id,
-        ).one_or_none()
+        row = _one(sess, config, project_id, entity_id)
         return _row_to_public(config, row) if row is not None else None
 
 
@@ -336,12 +400,8 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
         raise EntityNotFound("no active project")
     values = validate(entity_name, changes)     # before touching the DB
 
-    model = _model(config)
     with _db.session_scope() as sess:
-        row = sess.query(model).filter(
-            model.project_id == project_id,
-            getattr(model, config.id_column) == entity_id,
-        ).one_or_none()
+        row = _one(sess, config, project_id, entity_id)
         if row is None:
             raise EntityNotFound(
                 f"no {entity_name} {entity_id!r} in this project")
@@ -379,9 +439,163 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
     return result
 
 
+def _next_public_id(sess, config: Entity, project_id: str) -> str:
+    """``TC-007`` — one past the highest number already using the prefix.
+
+    Only ids matching the prefix are counted, so a project whose generated
+    cases are called ``SC1_004`` still starts its first hand-written case at
+    ``TC-001``.
+    """
+    import re as _re
+
+    model = _model(config)
+    column = getattr(model, config.id_column)
+    pattern = _re.compile(
+        rf"^{_re.escape(config.id_prefix)}(\d+)$")
+    highest = 0
+    for (value,) in sess.query(column).filter(
+            model.project_id == project_id,
+            column.like(f"{config.id_prefix}%")).all():
+        match = pattern.match(str(value or ""))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{config.id_prefix}{highest + 1:03d}"
+
+
+def create(entity_name: str, project_id: str, values: dict | None = None,
+           *, actor: str | None = None) -> dict:
+    """Add one item by hand and return it as the client should see it.
+
+    The new row is ``ai_generated=False`` from birth: nobody generated it, and
+    E4.7's regeneration merge reads that flag to decide what it may overwrite.
+    A hand-written case surviving a Generate click is the point.
+    """
+    from engine import db as _db
+
+    config = entity(entity_name)
+    if not config.creatable:
+        raise NotCreatable(f"{entity_name} cannot be created by hand.")
+    if not project_id:
+        raise EntityNotFound("no active project")
+
+    supplied = validate(entity_name, values or {})
+    # Required fields that were not supplied become empty rather than
+    # rejected: the flow is "add a row, then fill it in", and a modal that
+    # refuses until every required field is typed is a worse version of the
+    # editor that follows.
+    row_values = dict(config.create_defaults)
+    row_values.update(supplied)
+
+    model = _model(config)
+    attempts = 3
+    while True:
+        try:
+            with _db.session_scope() as sess:
+                public_id = _next_public_id(sess, config, project_id)
+                row = model(project_id=project_id, **row_values)
+                setattr(row, config.id_column, public_id)
+                row.ai_generated = False
+                row.row_version = 1
+                row.edited_by = actor or None
+                row.edited_at = datetime.now(timezone.utc)
+                sess.add(row)
+                sess.flush()
+                result = _row_to_public(config, row)
+            break
+        except Exception as exc:                # noqa: BLE001 — see below
+            # Two people pressing "add" at once mint the same number. With
+            # the unique index in place that is an IntegrityError, and the
+            # fix is simply to look again — the second attempt sees the
+            # committed row and picks the next number. Bounded, so a
+            # genuinely broken insert does not spin.
+            attempts -= 1
+            if attempts <= 0 or not isinstance(exc, _IntegrityError):
+                raise
+            log.info("id collision creating %s, retrying: %s",
+                     entity_name, exc)
+
+    _db.append_audit(entity=config.audit_name(), action="create",
+                     entity_id=result["id"], project_id=project_id,
+                     user_id=actor,
+                     diff={k: [None, v] for k, v in row_values.items()})
+    _bump_pack_version(config, project_id)
+    return result
+
+
+def remove(entity_name: str, project_id: str, entity_id: str,
+           *, expected_version: int | None = None,
+           actor: str | None = None) -> dict:
+    """Delete one item. Returns what was deleted, for the audit and the UI.
+
+    The version check applies here too: deleting an item somebody else has
+    just edited destroys work that is newer than what the deleter was
+    looking at, which is exactly the case optimistic locking exists for.
+    """
+    from engine import db as _db
+
+    config = entity(entity_name)
+    if not config.deletable:
+        raise NotDeletable(f"{entity_name} cannot be deleted here.")
+    if not project_id:
+        raise EntityNotFound("no active project")
+
+    with _db.session_scope() as sess:
+        row = _one(sess, config, project_id, entity_id)
+        if row is None:
+            raise EntityNotFound(
+                f"no {entity_name} {entity_id!r} in this project")
+        current = int(row.row_version or 1)
+        if expected_version is not None and int(expected_version) != current:
+            raise _db.WriteConflict(entity_name, int(expected_version),
+                                    current)
+        removed = _row_to_public(config, row)
+        sess.delete(row)
+
+    _db.append_audit(entity=config.audit_name(), action="delete",
+                     entity_id=entity_id, project_id=project_id,
+                     user_id=actor,
+                     diff={k: [v, None] for k, v in removed.items()
+                           if k in config.fields and v})
+    _bump_pack_version(config, project_id)
+    return removed
+
+
+def _bump_pack_version(config: Entity, project_id: str) -> None:
+    """Tell pack-level writers that the pack changed underneath them.
+
+    E3.5 guards wipe-and-replace saves with ``project.tc_version`` /
+    ``cl_version``. Adding or deleting a row changes the pack, so a save
+    that started before this must be refused rather than silently reinstate
+    a deleted case or drop a new one. Editing a *field* deliberately does
+    not bump it — that is what the per-row version is for.
+    """
+    from engine import db as _db
+
+    kind = _PACK_COUNTERS.get(config.name)
+    if not kind:
+        return
+    try:
+        _db.bump_pack_version(project_id, kind)
+    except Exception as exc:                    # pragma: no cover
+        # A missed bump costs a conflict that should have been raised; it
+        # must not cost the create or delete that already committed.
+        log.warning("could not bump %s version for %s: %s",
+                    kind, project_id, exc)
+
+
+# Which pack counter each entity belongs to. Bugs have none: they are
+# appended, never wipe-and-replaced, so there is no pack write to conflict
+# with.
+_PACK_COUNTERS = {
+    "test_case": "test_cases",
+    "checklist_item": "checklist",
+}
+
+
 __all__ = [
     "Entity", "Field",
-    "EditError", "UnknownEntity", "EntityNotFound", "FieldNotEditable",
-    "ValidationFailed",
+    "AmbiguousEntity", "EditError", "UnknownEntity", "EntityNotFound",
+    "FieldNotEditable", "NotCreatable", "NotDeletable", "ValidationFailed",
     "entities", "entity", "editable_fields", "validate", "get", "patch",
+    "create", "remove",
 ]

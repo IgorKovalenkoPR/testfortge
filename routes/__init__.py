@@ -90,7 +90,7 @@ def register_all(app: Flask) -> None:
         except Exception:
             return {"auth_active": False, "org_active": False,
                     "current_user": None, "current_role": None,
-                    "is_admin": False, "editors_enabled": False}
+                    "is_admin": False, "editors_on": False}
 
 
 __all__ = ["register_all"]

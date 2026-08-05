@@ -2447,6 +2447,12 @@ input[type="text"]:focus, textarea:focus, select:focus {
     background: var(--primary-light);
 }
 .ie[data-ie-readonly] {
+    /* Indistinguishable from the text it replaces — including the box.
+       inline-block drags in a full line box, which measured 22px against
+       bare text's 18px: with editing off, six fields per card silently made
+       every card taller. A page that cannot be edited should render exactly
+       as it did before this component existed. */
+    display: inline;
     border-bottom: 0;
     cursor: default;
     margin: 0;
@@ -2454,6 +2460,23 @@ input[type="text"]:focus, textarea:focus, select:focus {
 }
 .ie[aria-busy="true"] { opacity: .6; }
 .ie[aria-invalid="true"] { border-bottom-color: var(--danger); }
+
+/* Multi-line values keep their line breaks (E4.3).
+
+   These fields used to be rendered through the `nl2br` filter, which turns
+   newlines into <br>. The component cannot use that: it writes with
+   textContent — deliberately, since the values are somebody's test data —
+   so markup handed to it would be shown as literal "<br>" the first time a
+   field was saved. pre-wrap gets the same result from CSS and survives the
+   round trip. Without it, three preconditions on three lines render as one
+   run-on line the moment a page becomes editable.
+
+   Only `white-space`, deliberately: adding `display: block` here — the first
+   version did — pushed the case summary onto its own line under the case id,
+   because that field sits inline inside the card's <h3>. pre-wrap keeps the
+   line breaks either way, and an inline-block still wraps inside a table
+   cell. Measured in the browser, not guessed. */
+.ie[data-ie-kind="textarea"] { white-space: pre-wrap; }
 
 /* A row carrying a human edit. The marker matters: E4.7's regeneration
    guard skips these, and a user should be able to see which rows it will
@@ -2520,4 +2543,138 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 
 @media (prefers-reduced-motion: reduce) {
     .ie, .ie-control { transition: none; }
+}
+
+/* ── Test Cases editor (E4.3) ──────────────────────────────────────
+   The fields themselves are styled by the .ie rules above; these are the
+   parts that only exist on this page: the steps list, its per-step
+   controls, and the create/delete bar. */
+
+.tc-editor-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin: 0 0 16px 0;
+}
+
+.tc-editor-hint {
+    font-size: 0.85em;
+    color: #64748b;
+}
+
+.tc-editor-status {
+    font-size: 0.85em;
+    font-weight: 600;
+    margin-left: auto;
+}
+.tc-editor-status-ok { color: #047857; }
+.tc-editor-status-error { color: #b91c1c; }
+.tc-editor-status-info { color: #475569; }
+
+.tc-steps {
+    margin: 0;
+    padding-left: 1.4em;
+}
+
+.tc-step {
+    /* The action buttons sit on the step's own line rather than in a
+       gutter: a gutter needs a fixed width, and a step is anything from
+       three words to three lines. */
+    position: relative;
+    padding: 2px 0;
+}
+
+.tc-step-text {
+    display: inline;
+    white-space: pre-wrap;
+}
+
+.tc-step-actions {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 8px;
+    /* Shown on hover or when something inside has focus — so the list reads
+       as a list, and a keyboard user still reaches every control. Never
+       display:none, which would take the buttons out of the tab order. */
+    opacity: 0;
+    transition: opacity 0.12s ease-in-out;
+    vertical-align: baseline;
+}
+
+.tc-step:hover .tc-step-actions,
+.tc-step:focus-within .tc-step-actions { opacity: 1; }
+
+.tc-step-btn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    color: #475569;
+    cursor: pointer;
+    font-size: 0.78em;
+    line-height: 1;
+    padding: 3px 6px;
+}
+
+.tc-step-btn:hover:not(:disabled) {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.tc-step-btn:disabled {
+    /* Kept visible rather than removed: a button that appears and vanishes
+       as steps move is harder to aim at than one that greys out. */
+    cursor: default;
+    opacity: 0.35;
+}
+
+.tc-step-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.tc-step-del:hover:not(:disabled) {
+    background: #fee2e2;
+    border-color: #fecaca;
+    color: #b91c1c;
+}
+
+.tc-step-input {
+    box-sizing: border-box;
+    font: inherit;
+    padding: 4px 6px;
+    width: 100%;
+    border: 1px solid #2563eb;
+    border-radius: 4px;
+}
+
+.tc-step-add {
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+
+.tc-step-warnings {
+    /* House-style advice, not errors: amber, below the steps, and never in
+       the way of saving. */
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    color: #78350f;
+    font-size: 0.82em;
+    list-style: disc;
+    margin: 8px 0 0 0;
+    padding: 6px 10px 6px 26px;
+}
+
+.tc-card-actions {
+    border-top: 1px solid #f1f5f9;
+    margin-top: 12px;
+    padding-top: 10px;
+    text-align: right;
+}
+
+.tc-delete { color: #b91c1c; font-size: 0.85em; }
+.tc-delete:hover { color: #7f1d1d; }
+
+@media (prefers-reduced-motion: reduce) {
+    .tc-step-actions { transition: none; }
 }

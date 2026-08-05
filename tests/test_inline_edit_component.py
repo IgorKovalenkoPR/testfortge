@@ -347,6 +347,20 @@ class TestAccessibility:
             "\n    }", 1)[0]
         assert "data-ie-readonly" in refresh
 
+    def test_a_readonly_field_occupies_no_more_room_than_plain_text(self):
+        """With editing off, the page must render exactly as it did before.
+
+        ``.ie`` is inline-block, which drags in a full line box: measured in
+        the browser, a read-only field was 22px tall where the bare text it
+        replaced was 18px. Six fields per test-case card, so every card grew
+        — on a page nobody can even edit.
+        """
+        css = CSS.read_text(encoding="utf-8")
+        block = css.split(".ie[data-ie-readonly] {", 1)[1].split("}", 1)[0]
+        assert "display: inline;" in block
+        for reset in ("border-bottom: 0", "margin: 0", "padding: 0"):
+            assert reset in block, reset
+
     def test_reduced_motion_is_respected(self):
         css = CSS.read_text(encoding="utf-8")
         assert "prefers-reduced-motion" in css
@@ -439,12 +453,12 @@ class TestMacroRendersTheContract:
 
 
 class TestTemplateContextExposesTheGate:
-    def test_editors_enabled_is_injected(self, client, monkeypatch):
+    def test_editors_on_is_injected(self, client, monkeypatch):
         from engine import permissions
         monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
         monkeypatch.setenv("EDITORS_ENABLED", "1")
         with client.application.test_request_context("/"):
-            assert permissions.template_context()["editors_enabled"] is True
+            assert permissions.template_context()["editors_on"] is True
 
     def test_it_honours_the_workspace_dependency(self, client, monkeypatch):
         """ADR 0001's gate reaches the template too.
@@ -457,7 +471,7 @@ class TestTemplateContextExposesTheGate:
         monkeypatch.setenv("EDITORS_ENABLED", "1")
         monkeypatch.delenv("WORKSPACE_DB_FIRST", raising=False)
         with client.application.test_request_context("/"):
-            assert permissions.template_context()["editors_enabled"] is False
+            assert permissions.template_context()["editors_on"] is False
 
 
 class TestFieldNamesMatchTheSubstrate:

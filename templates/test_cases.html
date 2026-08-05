@@ -1,5 +1,27 @@
 {% extends "base.html" %}
+{% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
 {% block title %}TestForTge — {{ t.tc_title }}{% endblock %}
+
+{#- E4.3: every field below is editable in place when EDITORS_ENABLED is on.
+
+    ``tc_edit`` maps public id -> {row_version, ai_generated, ...}. A case
+    missing from it has no external_id in the database, so the edit endpoint
+    (which is keyed on that id) could not find it — those render read-only
+    rather than offering an editor that would 404 on save.
+
+    ``editable()`` already renders read-only when the flag is off, so the
+    page needs no branching of its own for that. -#}
+{#- Resolved once per render, at the template's top level so the macro below
+    can see it (a set inside a block would not be visible from here). The
+    global is lazy and cached per request, so this costs one query. -#}
+{% set tc_edit = edit_metadata('test_cases') %}
+
+{% macro tc_field(tc, field, value, kind="text", label=None) %}
+  {%- set meta = tc_edit.get(tc.id) if tc_edit else None -%}
+  {{ editable("test_case", tc.id, field, value,
+              version=meta.row_version if meta else None,
+              kind=kind, label=label, readonly=(meta is none)) }}
+{%- endmacro %}
 
 {% block content %}
 <div class="page-header">
@@ -674,6 +696,24 @@
     </div>
     {% endif %}
 
+    {%- if editors_enabled() %}
+    {# Requirement 5's other half: a case somebody writes by hand, next to
+       the generated ones. It is created empty and edited in place — a modal
+       demanding every required field first would just be a worse copy of
+       the editor underneath. #}
+    <div class="tc-editor-bar">
+        <button type="button" class="btn btn-secondary" id="tc-create">
+            + {{ t.get('tc_create', 'New test case') }}
+        </button>
+        <span class="tc-editor-hint">
+            {{ t.get('tc_editor_hint',
+                     'Click any field to edit it. Changes are saved for the whole team.') }}
+        </span>
+        <span class="tc-editor-status" data-tc-editor-status
+              role="status" aria-live="polite"></span>
+    </div>
+    {%- endif %}
+
     {% set ns = namespace(current_section='') %}
     {% for tc in test_cases %}
     {% if tc.section != ns.current_section %}
@@ -681,17 +721,25 @@
     <h2 class="section-header">{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
     {% endif %}
 
+    {#- data-ie-row is what makes the "edited" pill work without a reload:
+        the component sets data-ie-edited on the row after a save, and the
+        CSS reveals any marker inside it. Rendered here as well for a case
+        already edited before this page load. -#}
     <div class="card tc-card" data-category="{{ tc.category }}"
-         data-suite="{{ tc.suite or '' }}" id="{{ tc.id }}">
+         data-suite="{{ tc.suite or '' }}" id="{{ tc.id }}" data-ie-row
+         {% if tc_edit.get(tc.id) and not tc_edit[tc.id].ai_generated %}data-ie-edited{% endif %}>
         <div class="card-header-row">
-            <h3>{{ tc.id }}: {{ tc.summary }}</h3>
+            <h3><span class="tc-id">{{ tc.id }}</span>:
+                {{ tc_field(tc, "summary", tc.summary, kind="textarea") }}
+                {{ edited_marker(t.get('tc_edited', 'edited')) }}
+            </h3>
             <div class="badge-group">
-                <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc.category }}</span>
-                <span class="badge badge-{{ tc.priority|lower }}">{{ tc.priority }}</span>
-                {% if tc.suite %}
+                <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc_field(tc, "category", tc.category) }}</span>
+                <span class="badge badge-{{ tc.priority|lower }}">{{ tc_field(tc, "priority", tc.priority) }}</span>
+                {% if tc.suite or editors_enabled() %}
                 <span class="badge badge-suite-{{ tc.suite|lower }}"
                       style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">
-                    {{ tc.suite }}
+                    {{ tc_field(tc, "suite", tc.suite, label="suite") }}
                 </span>
                 {% endif %}
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
@@ -705,13 +753,71 @@
         </div>
 
         <table class="tc-detail-table">
-            <tr><th>{{ t.tc_preconditions }}</th><td>{{ tc.preconditions }}</td></tr>
-            <tr><th>{{ t.tc_steps }}</th><td>{{ tc.test_steps|nl2br }}</td></tr>
-            <tr><th>{{ t.tc_test_data }}</th><td>{{ tc.test_data|nl2br }}</td></tr>
-            <tr><th>{{ t.tc_expected }}</th><td>{{ tc.expected_result|nl2br }}</td></tr>
-            <tr><th>{{ t.tc_issues }}</th><td>{{ tc.issues or '—' }}</td></tr>
-            <tr><th>{{ t.tc_comment }}</th><td>{{ tc.comment or '—' }}</td></tr>
+            <tr><th>{{ t.tc_preconditions }}</th>
+                <td>{{ tc_field(tc, "preconditions", tc.preconditions, kind="textarea") }}</td></tr>
+            <tr><th>{{ t.tc_steps }}</th>
+                <td>
+                {%- if tc_edit.get(tc.id) and editors_enabled() %}
+                    {#- A real list, because requirement 5 asks for steps to
+                        be added, removed and reordered — operations a text
+                        blob cannot express. Each control posts one operation
+                        and the server applies it to the row as it is now,
+                        under the same version check as any other edit. -#}
+                    <ol class="tc-steps" data-tc-steps="{{ tc.id }}"
+                        data-tc-version="{{ tc_edit[tc.id].row_version }}">
+                        {% for step in tc.test_steps | tc_step_list %}
+                        <li class="tc-step" data-step-index="{{ loop.index0 }}">
+                            <span class="tc-step-text">{{ step }}</span>
+                            <span class="tc-step-actions">
+                                <button type="button" class="tc-step-btn"
+                                        data-step-op="edit"
+                                        title="{{ t.get('tc_step_edit', 'Edit step') }}"
+                                        aria-label="{{ t.get('tc_step_edit', 'Edit step') }} {{ loop.index }}">✎</button>
+                                <button type="button" class="tc-step-btn"
+                                        data-step-op="move" data-step-delta="-1"
+                                        title="{{ t.get('tc_step_up', 'Move up') }}"
+                                        aria-label="{{ t.get('tc_step_up', 'Move up') }} {{ loop.index }}"
+                                        {% if loop.first %}disabled{% endif %}>↑</button>
+                                <button type="button" class="tc-step-btn"
+                                        data-step-op="move" data-step-delta="1"
+                                        title="{{ t.get('tc_step_down', 'Move down') }}"
+                                        aria-label="{{ t.get('tc_step_down', 'Move down') }} {{ loop.index }}"
+                                        {% if loop.last %}disabled{% endif %}>↓</button>
+                                <button type="button" class="tc-step-btn tc-step-del"
+                                        data-step-op="remove"
+                                        title="{{ t.get('tc_step_delete', 'Delete step') }}"
+                                        aria-label="{{ t.get('tc_step_delete', 'Delete step') }} {{ loop.index }}">✕</button>
+                            </span>
+                        </li>
+                        {% endfor %}
+                    </ol>
+                    <button type="button" class="btn-link tc-step-add"
+                            data-tc-steps-add="{{ tc.id }}">
+                        + {{ t.get('tc_step_add', 'Add step') }}
+                    </button>
+                {%- else %}
+                    {{ tc.test_steps|nl2br }}
+                {%- endif %}
+                </td></tr>
+            <tr><th>{{ t.tc_test_data }}</th>
+                <td>{{ tc_field(tc, "test_data", tc.test_data, kind="textarea") }}</td></tr>
+            <tr><th>{{ t.tc_expected }}</th>
+                <td>{{ tc_field(tc, "expected_result", tc.expected_result, kind="textarea") }}</td></tr>
+            <tr><th>{{ t.tc_issues }}</th>
+                <td>{{ tc_field(tc, "issues", tc.issues, kind="textarea") }}</td></tr>
+            <tr><th>{{ t.tc_comment }}</th>
+                <td>{{ tc_field(tc, "comment", tc.comment, kind="textarea") }}</td></tr>
         </table>
+
+        {%- if tc_edit.get(tc.id) and editors_enabled() %}
+        <div class="tc-card-actions">
+            <button type="button" class="btn-link tc-delete"
+                    data-tc-delete="{{ tc.id }}"
+                    data-tc-version="{{ tc_edit[tc.id].row_version }}">
+                {{ t.get('tc_delete', 'Delete this test case') }}
+            </button>
+        </div>
+        {%- endif %}
 
         {# BDD view. Shown only for automation-targeted cases, and derived
            from the columns above rather than stored beside them — so it
@@ -969,6 +1075,15 @@
 {% endblock %}
 
 {% block scripts %}
+{#- The shared inline-edit component (E4.2), then this page's own controls
+    for steps, create and delete (E4.3). Both are no-ops with editing off:
+    editable_assets emits nothing, and tc-editor.js finds no markup to act
+    on because the template did not render any. -#}
+{{ editable_assets(csp_nonce) }}
+{%- if editors_enabled() %}
+<script src="{{ url_for('static', filename='js/tc-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+{%- endif %}
 <script nonce="{{ csp_nonce }}">
 function showTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));

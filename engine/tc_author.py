@@ -888,6 +888,71 @@ def append_feedback_assertion(text: str) -> str:
               "reason. Nothing is persisted.")
 
 
+# Which glossary rule set applies to which editable field (E4.3). The
+# editor sends one field at a time, so it needs the per-field mapping that
+# ``_terminology_findings`` applies to a whole case.
+_FIELD_LINT_KIND = {
+    "summary": "title",
+    "objective": "title",          # the checklist's equivalent (E4.4)
+    "expected_result": "expected",
+    "preconditions": "prose",
+    "test_data": "prose",
+    "comment": "prose",
+    "issues": "prose",
+}
+
+
+def house_style_findings(field: str, value: str) -> list[str]:
+    """Advice on one hand-edited field. Never an error, always a list.
+
+    The editors (E4.3–E4.5) show these under the field after a save. They are
+    advisory on purpose: the house style came from measuring the team's own
+    4,808-case reference plan, and a measured convention is guidance for a
+    person writing a case, not a gate that refuses their work. A rule that
+    blocked saving would be wrong about some real case eventually, and the
+    cost of that is someone unable to record what they tested.
+    """
+    from engine import glossary
+
+    text = (value or "").strip()
+    if not text:
+        return []
+
+    if field == "test_steps":
+        # Steps are linted per line: a finding that says "step 3 is generic"
+        # is actionable, one that says "the steps are generic" is not.
+        from engine import tc_steps
+        out: list[str] = []
+        for position, step in enumerate(tc_steps.parse(text), start=1):
+            findings = list(glossary.lint_text(step, kind="step"))
+            if not findings and is_generic_step(step):
+                # The two rule sets overlap but neither contains the other:
+                # measured on the placeholder phrases, the glossary catches
+                # "Perform the action" and "Observe the result" but not
+                # "Open the relevant page". Only consulted when the glossary
+                # is silent, so an offending step is reported once.
+                findings = ['a placeholder step — name the real control and '
+                            'the action that operates it']
+            out.extend(f"step {position}: {finding}" for finding in findings)
+        return out
+
+    kind = _FIELD_LINT_KIND.get(field)
+    if kind is None:
+        return []
+
+    check_opener = None
+    if kind == "title":
+        # The corpus sanctions "<Surface>: <attempted action>" for
+        # error-message cases, which legitimately does not open with a verb.
+        check_opener = not _is_error_message_title(text)
+    # No extra modal check here: measured against the glossary, "must" in an
+    # expected result already produces '"must" reads as a requirement, not an
+    # observation', so adding ``has_weak_modal`` reported the same problem
+    # twice under two wordings.
+    return list(glossary.lint_text(text, kind=kind,
+                                   check_opener=check_opener))
+
+
 def lint_case(case: AuthoredCase) -> list[str]:
     """House-style findings for one case. Empty list == compliant."""
     out: list[str] = []

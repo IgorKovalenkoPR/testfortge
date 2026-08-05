@@ -188,6 +188,8 @@ def init_db() -> None:
     _ensure_case_result_source_column(engine)
     _ensure_pack_version_columns(engine)
     _ensure_editable_columns(engine)
+    # After the editing columns: the index guards ids minted by the editor.
+    _ensure_public_id_unique_indexes(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -466,6 +468,59 @@ def _ensure_pack_version_columns(engine: Engine) -> None:
                     f"INTEGER NOT NULL DEFAULT 0"))
     except SQLAlchemyError as exc:  # pragma: no cover — best-effort
         log.warning("concurrency migration ALTER failed: %s", exc)
+
+
+def _ensure_public_id_unique_indexes(engine: Engine) -> None:
+    """Unique ``(project_id, external_id)`` on ``test_case`` — E4.3.
+
+    Creating an item by hand mints its id as "one past the highest" (TC-007).
+    Two people pressing the button at the same moment mint the same number,
+    and a duplicate public id is not a cosmetic problem: every later edit of
+    that id matches two rows, and ``one_or_none()`` raises rather than
+    guessing. With this index the collision is an IntegrityError instead,
+    which ``engine.editable.create`` retries — the second attempt sees the
+    committed row and takes the next number.
+
+    NULL ``external_id`` rows are unaffected: SQLite and Postgres both allow
+    repeated NULLs in a unique index, and older generated rows may have one.
+
+    If an instance already holds duplicates the index cannot be created. That
+    is logged, loudly and with the offending ids, and the app carries on
+    without the guard rather than refusing to boot over historical data.
+
+    ``checklist_item`` is deliberately **not** covered, and that is a finding
+    rather than an oversight: the site-aware generator produces duplicate ids
+    today. Measured on ``POST /checklist`` for https://example.com — an
+    82-item pack containing ``CNT_001`` twice. Adding the index there made
+    every checklist save fail its INSERT and roll back, so the page rendered
+    empty; five tests caught it. The duplicate ids are the bug, and until
+    they are fixed the checklist editor (E4.4) cannot address an item by its
+    public id at all — see ``editable.AmbiguousEntity``.
+    """
+    for table in ("test_case",):
+        index = f"ux_{table}_project_external_id"
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {index} "
+                    f"ON {table} (project_id, external_id)"))
+        except SQLAlchemyError as exc:
+            log.warning(
+                "could not create %s: %s. Hand-created %s ids are not "
+                "protected against a same-instant collision until the "
+                "duplicates below are resolved.", index, exc, table)
+            try:
+                with engine.begin() as conn:
+                    dupes = conn.execute(text(
+                        f"SELECT project_id, external_id, COUNT(*) AS n "
+                        f"FROM {table} WHERE external_id IS NOT NULL "
+                        f"GROUP BY project_id, external_id HAVING n > 1"
+                    )).all()
+                for project_id, external_id, count in dupes:
+                    log.warning("duplicate %s id: project=%s id=%s (%d rows)",
+                                table, project_id, external_id, count)
+            except SQLAlchemyError:      # pragma: no cover — diagnostics only
+                pass
 
 
 def _ensure_case_result_source_column(engine: Engine) -> None:
@@ -2495,6 +2550,21 @@ def pack_versions(project_id: str) -> dict[str, int]:
         return out
 
 
+def bump_pack_version(project_id: str, kind: str) -> None:
+    """Mark a pack as changed because a row was added or deleted (E4.3).
+
+    Field edits deliberately do *not* touch this — that is what the per-row
+    version is for. Adding or removing an item is different: a
+    wipe-and-replace save that started before it would reinstate a deleted
+    case or drop a new one, and the pack version is what turns that into a
+    409 instead.
+    """
+    if not project_id or kind not in _PACK_VERSION_COLUMN:
+        return
+    with session_scope() as sess:
+        _claim_pack_write(sess, project_id, kind, None)
+
+
 def _claim_pack_write(sess, project_id: str, kind: str,
                       expected_version: int | None) -> None:
     """Bump a pack's version, refusing a stale write.
@@ -3220,6 +3290,41 @@ def load_test_cases(project_id: str) -> list[dict]:
             # Drop DB-only keys.
             out.append({k: d.get(k, "") for k in _TC_DATACLASS_FIELDS})
         return out
+
+
+def load_edit_metadata(project_id: str, kind: str = "test_cases") -> dict:
+    """``{"TC-004": {"row_version": 3, "ai_generated": False, …}}`` (E4.3).
+
+    ``load_test_cases`` strips everything the in-session dataclass does not
+    declare, which includes the edit metadata — so a page rendering editable
+    fields has no version to send and no way to show which rows a person has
+    touched. One query beside the pack rather than a per-row lookup: a
+    project with 200 cases would otherwise open 200 connections to render.
+    """
+    models = {"test_cases": TestCase, "checklist": ChecklistItem}
+    model = models.get(kind)
+    if not project_id or model is None:
+        return {}
+    out: dict[str, dict] = {}
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(model.external_id, model.row_version, model.ai_generated,
+                   model.edited_by, model.edited_at)
+            .where(model.project_id == project_id)
+        ).all()
+        for external_id, version, ai_generated, edited_by, edited_at in rows:
+            if not external_id:
+                # A row with no public id cannot be addressed by the edit
+                # endpoint anyway (it is keyed on external_id), so offering
+                # a version for it would invite a 404.
+                continue
+            out[str(external_id)] = {
+                "row_version": int(version or 1),
+                "ai_generated": bool(ai_generated),
+                "edited_by": edited_by,
+                "edited_at": edited_at.isoformat() if edited_at else None,
+            }
+    return out
 
 
 # ── Checklist ──────────────────────────────────────────────────────

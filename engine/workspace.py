@@ -302,6 +302,42 @@ def test_cases(project_id: str | None) -> list[dict]:
                  lambda: _db.load_test_cases(project_id) or [])
 
 
+def edit_metadata(project_id: str | None,
+                  kind: str = "test_cases") -> dict[str, dict]:
+    """Per-row version and provenance, keyed by public id (E4.3).
+
+    Separate from the pack because the pack is shaped for the in-session
+    dataclass, which has no version field — see ``db.load_edit_metadata``.
+    A template renders the two side by side: the pack for the content, this
+    for what the editor needs to send back.
+
+    Empty when the workspace is still session-first: without a row in the
+    database there is no version to hold, and an editor cannot be reached in
+    that configuration anyway (``EDITORS_ENABLED`` requires
+    ``WORKSPACE_DB_FIRST``).
+
+    Not routed through ``_read``: that function's job is to choose between
+    the session and the database, and it answers a failed read with the
+    session's copy or an empty *list*. There is no session copy of a row
+    version, and a list here would break the template that indexes this by
+    id. So the fallback is an empty mapping, which renders the fields
+    read-only — the honest outcome when the versions cannot be read.
+    """
+    from engine import db as _db
+    if not project_id or not db_first():
+        return {}
+
+    def _produce() -> dict[str, dict]:
+        try:
+            return _db.load_edit_metadata(project_id, kind) or {}
+        except Exception as exc:
+            log.warning("workspace: edit metadata read failed for %s: %s",
+                        project_id[:8], exc)
+            return {}
+
+    return _cached(project_id, f"edit_metadata:{kind}", _produce)
+
+
 def checklist(project_id: str | None) -> list[dict]:
     """The project's checklist items, shaped for ``ChecklistItem(**d)``."""
     from engine import db as _db

@@ -249,6 +249,30 @@ app.jinja_env.globals["editors_enabled"] = lambda: (
     features.effective("EDITORS_ENABLED"))
 
 
+def _template_edit_metadata(kind: str = "test_cases") -> dict:
+    """``{"TC-004": {"row_version": 3, …}}`` for the page being rendered.
+
+    A Jinja global rather than a value passed to ``render_template``: the
+    test-cases page alone renders from seven call sites, and a context key
+    missing from one of them is an editor that silently disappears on that
+    path. Called from the template, so it costs a query only on pages that
+    actually edit — and the repository's per-request cache makes the repeat
+    calls inside a loop free.
+    """
+    try:
+        from engine import workspace
+        from routes._shared import resolve_active_project
+        if not features.effective("EDITORS_ENABLED"):
+            return {}
+        return workspace.edit_metadata(resolve_active_project(pin=False), kind)
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("edit metadata unavailable for %s: %s", kind, exc)
+        return {}
+
+
+app.jinja_env.globals["edit_metadata"] = _template_edit_metadata
+
+
 @app.route("/api/csrf-token", methods=["GET"])
 def api_csrf_token():
     """Mint a CSRF token for the current session.
@@ -340,6 +364,23 @@ def nl2br_filter(s):
     if not s:
         return s
     return markupsafe.Markup(str(markupsafe.escape(s)).replace('\n', '<br>\n'))
+
+
+@app.template_filter('tc_step_list')
+def tc_step_list_filter(blob):
+    """A test case's steps as a list, for the steps editor (E4.3).
+
+    The column is one newline-joined blob; the editor needs positions it can
+    move and delete. Parsed through :mod:`engine.tc_steps` — the same module
+    the server applies the operations with — so "step 3" means the same
+    thing on both sides of the request.
+    """
+    try:
+        from engine import tc_steps
+        return tc_steps.parse(blob)
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("tc_step_list failed: %s", exc)
+        return []
 
 
 @app.template_filter('gherkin_view')
