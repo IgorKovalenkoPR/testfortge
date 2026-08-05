@@ -12,9 +12,22 @@ tests/test_checklist_order.py for the unit-level statement of them.
 """
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from engine import db, editable
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 def _item(item_id, section="Header", number="", **overrides):
@@ -32,7 +45,7 @@ def _item(item_id, section="Header", number="", **overrides):
 @pytest.fixture
 def project(app, request):
     """This test's own project — see the note in tests/test_tc_editor.py."""
-    pid = db.upsert_project(name=f"E4.4 {request.node.name}"[:180])
+    pid = db.upsert_project(name=f"E4.4 {request.node.name} {_RUN}"[:180])
     db.save_checklist(pid, [
         _item("HDR_001", "Header", "1.1"),
         _item("HDR_002", "Header", "1.2"),
@@ -250,6 +263,45 @@ class TestRelocate:
         resp = client.post("/api/edit/checklist_item/FTR_001/section",
                            json={"section": "   "}, headers=headers)
         assert resp.status_code == 400
+
+
+class TestBulkSectionChange:
+    """E4.9 must not break E4.4's invariant.
+
+    Found in the browser: a bulk section change moved three items into one
+    section and left the third numbered 2.1 inside section 1, because
+    ``patch_many`` writes the column and knows nothing about grouping.
+    """
+
+    def test_the_numbers_follow_a_bulk_move(self, client, project,
+                                           editing_on):
+        headers = _prepare(client, project)
+        resp = client.post("/api/edit/checklist_item/bulk", headers=headers,
+                           json={"ids": ["FTR_001"],
+                                 "changes": {"section": "Header"}})
+        assert resp.status_code == 200
+        stored = _stored(project)
+        assert [row[2] for row in stored] == ["Header"] * 3
+        assert [row[1] for row in stored] == ["1.1", "1.2", "1.3"], stored
+
+    def test_the_items_end_up_in_one_block(self, client, project, editing_on):
+        headers = _prepare(client, project)
+        client.post("/api/edit/checklist_item/bulk", headers=headers,
+                    json={"ids": ["HDR_001", "HDR_002"],
+                          "changes": {"section": "Footer"}})
+        blocks = []
+        for _, _, section in _stored(project):
+            if not blocks or blocks[-1] != section:
+                blocks.append(section)
+        assert len(blocks) == len(set(blocks)), blocks
+
+    def test_a_bulk_priority_change_leaves_the_numbers_alone(self, client,
+                                                            project,
+                                                            editing_on):
+        headers = _prepare(client, project)
+        client.post("/api/edit/checklist_item/bulk", headers=headers,
+                    json={"ids": ["HDR_001"], "changes": {"priority": "Low"}})
+        assert [row[1] for row in _stored(project)] == ["1.1", "1.2", "2.1"]
 
 
 class TestRenameSection:

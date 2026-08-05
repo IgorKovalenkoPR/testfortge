@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+{#- Imported *with context*: this macro reads the translations and the
+    session, and a macro imported without it sees neither — the same
+    trap E4.2 hit with `editors_enabled`. -#}
+{% from "_import_mapping.html" import import_mapping with context %}
+{% from "_bulk_bar.html" import bulk_bar, bulk_check, bulk_select_all with context %}
 
 {#- E4.4: every field below is editable in place when EDITORS_ENABLED is on.
     ``cl_edit`` maps public id -> {row_version, ai_generated, ...}; an item
@@ -360,6 +365,7 @@
             <input type="file" name="upload_file" required
                    accept=".xlsx,.csv,.md,.markdown,.json">
         </div>
+    {{ import_mapping("checklist", import_targets("checklist"), ('objective',)) }}
         <div class="form-group">
             <label>
                 <input type="radio" name="upload_mode" value="replace" checked>
@@ -400,10 +406,16 @@
         {{ t.get('cl_editor_hint',
                  'Click any field to edit it. Changes are saved for the whole team.') }}
     </span>
+    {{ bulk_select_all() }}
     <span class="cl-editor-status" data-cl-editor-status
           data-status-class="cl-editor-status"
           role="status" aria-live="polite"></span>
 </div>
+{{ bulk_bar("checklist_item", [
+    ("priority", t.priority, ["High", "Medium", "Low"]),
+    ("category", t.category, ["Positive", "Negative", "Edge Case", "Security"]),
+    ("section", t.get('cl_section', 'Section'), []),
+]) }}
 {%- endif %}
 
 <div class="filter-bar">
@@ -486,7 +498,11 @@
                     </select>
                 </td>
                 <td class="cl-num" data-cl-num>{{ cl.item_num or '' }}</td>
-                <td><strong>{{ cl.id }}</strong> {{ edited_marker(t.get('cl_edited', 'edited')) }}</td>
+                <td>
+                    {%- if editors_enabled() and cl_edit.get(cl.id) %}
+                    {{ bulk_check("checklist_item", cl.id) }}
+                    {%- endif %}
+                    <strong>{{ cl.id }}</strong> {{ edited_marker(t.get('cl_edited', 'edited')) }}</td>
                 <td>{{ cl_field(cl, "objective", cl.objective, kind="textarea") }}</td>
                 <td><span class="badge badge-cat-{{ cl.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cl_field(cl, "category", cl.category) }}</span></td>
                 <td><span class="badge badge-{{ cl.priority|lower }}">{{ cl_field(cl, "priority", cl.priority) }}</span></td>
@@ -552,6 +568,8 @@
 <script src="{{ url_for('static', filename='js/editor-shared.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 <script src="{{ url_for('static', filename='js/cl-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+<script src="{{ url_for('static', filename='js/bulk-editor.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
 <script nonce="{{ csp_nonce }}">

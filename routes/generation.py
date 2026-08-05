@@ -633,6 +633,50 @@ def _store_test_cases(tc_dicts: list[dict], *,
     _mirror("test_cases_data", tc_dicts)
 
 
+def _import_mapping(kind: str) -> dict:
+    """The column mapping the user chose, from ``map_<target>`` form fields.
+
+    Empty when they did not choose one, which is the normal case — the
+    automatic matcher handles a file whose headers use the usual words.
+    """
+    from engine import import_preview
+    out = {}
+    for target in import_preview.ALIASES[kind]:
+        value = (request.form.get(f"map_{target}") or "").strip()
+        if value:
+            out[target] = value
+    return out
+
+
+def _import_headers(path: str, filename: str) -> list:
+    """The uploaded file's column names, read before the file is removed."""
+    from engine import imports as _imports
+    try:
+        return _imports.read_headers(path, filename)
+    except Exception as exc:      # pragma: no cover — unreadable file
+        _log.info("could not read import headers: %s", exc)
+        return []
+
+
+def _flash_import_mapping(kind: str, headers: list, mapping: dict):
+    """Report what the headers were taken to mean, and offer the form.
+
+    Returns the ``Mapping`` so the caller can say why nothing imported: a file
+    whose columns match nothing produced "0 rows" before this, which told the
+    user their file was wrong when only its vocabulary was.
+    """
+    from engine import import_preview
+    analysis = import_preview.analyse(kind, headers, override=mapping)
+    session[_IMPORT_HEADERS_KEY] = {"kind": kind, "headers": analysis.headers}
+    return analysis
+
+
+#: Where the last upload's headers live, so the mapping form can offer the
+#: file's own column names. Just the header row — a few short strings, not
+#: the pack, so this does not reintroduce what E3 took out of the session.
+_IMPORT_HEADERS_KEY = "import_headers"
+
+
 def _flash_merge_report(kind: str) -> None:
     """Tell the user what the regeneration kept (E4.7).
 
@@ -1317,7 +1361,12 @@ def register(app: Flask) -> None:
             flash(filename, "error")
             return redirect(_back_to_caller(default="test_cases_page"))
         try:
-            cases = import_parse_test_cases(path, filename)
+            mapping = _import_mapping("test_cases")
+            # Read while the file still exists: the finally below unlinks it,
+            # and the mapping report needs the header row. Measured — without
+            # this the report said "no header row" for every file.
+            headers = _import_headers(path, filename)
+            cases = import_parse_test_cases(path, filename, mapping=mapping)
         except Exception as exc:
             flash(f"Import failed: {exc}", "error")
             return redirect(_back_to_caller(default="test_cases_page"))
@@ -1328,11 +1377,10 @@ def register(app: Flask) -> None:
                 pass
 
         if not cases:
-            flash(g.t.get(
-                "upload_no_rows",
-                "No test cases were recognised in the file. Check that it has a "
-                "header row and at least an ‘ID’ + ‘Summary’ + ‘Steps’ column."),
-                "error")
+            # E4.8: say *why*. A file whose columns are called "Scenario" and
+            # "Actions" is not a broken file, and "0 rows" is not a diagnosis.
+            analysis = _flash_import_mapping("test_cases", headers, mapping)
+            flash(analysis.message(), "error")
             return redirect(_back_to_caller(default="test_cases_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
@@ -1341,7 +1389,15 @@ def register(app: Flask) -> None:
         # asked to overwrite with.
         pack_v = pack_version("test_cases") if mode == "append" else None
         existing = _tc_rows() if mode == "append" else []
-        merged = existing + [tc_to_dict(tc) for tc in cases]
+        incoming = [tc_to_dict(tc) for tc in cases]
+        skipped: list[str] = []
+        if mode == "append":
+            # E4.8: uploading the same file twice used to double the pack, and
+            # E4.4a's uniqueness pass would renumber the copies — so the
+            # duplicates looked like new work.
+            from engine import import_preview
+            incoming, skipped = import_preview.dedup(existing, incoming)
+        merged = existing + incoming
         try:
             _store_test_cases(merged, expected_version=pack_v)
         except _db.WriteConflict as exc:
@@ -1354,8 +1410,10 @@ def register(app: Flask) -> None:
 
         flash(
             g.t.get("upload_tc_ok",
-                    f"Imported {len(cases)} test case(s) from {filename}.")
-            + (f" Total now: {len(merged)}." if mode == "append" else ""),
+                    f"Imported {len(incoming)} test case(s) from {filename}.")
+            + (f" Total now: {len(merged)}." if mode == "append" else "")
+            + (f" Skipped {len(skipped)} already in this project "
+               f"({', '.join(skipped[:5])})." if skipped else ""),
             "success",
         )
         # Stay on whatever page the form was POSTed from. The same
@@ -2189,7 +2247,12 @@ def register(app: Flask) -> None:
             flash(filename, "error")
             return redirect(_back_to_caller(default="checklist_page"))
         try:
-            items = import_parse_checklist(path, filename)
+            mapping = _import_mapping("checklist")
+            # Read while the file still exists: the finally below unlinks it,
+            # and the mapping report needs the header row. Measured — without
+            # this the report said "no header row" for every file.
+            headers = _import_headers(path, filename)
+            items = import_parse_checklist(path, filename, mapping=mapping)
         except Exception as exc:
             flash(f"Import failed: {exc}", "error")
             return redirect(_back_to_caller(default="checklist_page"))
@@ -2200,17 +2263,19 @@ def register(app: Flask) -> None:
                 pass
 
         if not items:
-            flash(g.t.get(
-                "upload_no_rows_cl",
-                "No checklist items were recognised in the file. Check that it "
-                "has a header row and at least an ‘Objective’ column."),
-                "error")
+            analysis = _flash_import_mapping("checklist", headers, mapping)
+            flash(analysis.message(), "error")
             return redirect(_back_to_caller(default="checklist_page"))
 
         mode = (request.form.get("upload_mode") or "replace").lower()
         pack_v = pack_version("checklist") if mode == "append" else None
         existing = _cl_rows() if mode == "append" else []
-        merged = existing + [cl_to_dict(it) for it in items]
+        incoming = [cl_to_dict(it) for it in items]
+        skipped: list[str] = []
+        if mode == "append":
+            from engine import import_preview
+            incoming, skipped = import_preview.dedup(existing, incoming)
+        merged = existing + incoming
         try:
             _store_checklist(merged, expected_version=pack_v)
         except _db.WriteConflict as exc:
@@ -2219,8 +2284,11 @@ def register(app: Flask) -> None:
 
         flash(
             g.t.get("upload_cl_ok",
-                    f"Imported {len(items)} checklist item(s) from {filename}.")
-            + (f" Total now: {len(merged)}." if mode == "append" else ""),
+                    f"Imported {len(incoming)} checklist item(s) from "
+                    f"{filename}.")
+            + (f" Total now: {len(merged)}." if mode == "append" else "")
+            + (f" Skipped {len(skipped)} already in this project "
+               f"({', '.join(skipped[:5])})." if skipped else ""),
             "success",
         )
         return redirect(_back_to_caller(default="checklist_page"))

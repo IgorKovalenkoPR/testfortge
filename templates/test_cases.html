@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+{#- Imported *with context*: this macro reads the translations and the
+    session, and a macro imported without it sees neither — the same
+    trap E4.2 hit with `editors_enabled`. -#}
+{% from "_import_mapping.html" import import_mapping with context %}
+{% from "_bulk_bar.html" import bulk_bar, bulk_check, bulk_select_all with context %}
 {% block title %}TestForTge — {{ t.tc_title }}{% endblock %}
 
 {#- E4.3: every field below is editable in place when EDITORS_ENABLED is on.
@@ -485,6 +490,7 @@
                 {{ t.get('tc_upload_append', 'Append to current pack') }}
             </label>
         </div>
+    {{ import_mapping("test_cases", import_targets("test_cases"), ('summary', 'test_steps')) }}
         <div class="form-group">
             <button type="submit" class="btn btn-secondary">
                 <i data-lucide="upload" class="icon-sm"></i>
@@ -709,10 +715,17 @@
             {{ t.get('tc_editor_hint',
                      'Click any field to edit it. Changes are saved for the whole team.') }}
         </span>
+        {{ bulk_select_all() }}
         <span class="tc-editor-status" data-tc-editor-status
               data-status-class="tc-editor-status"
               role="status" aria-live="polite"></span>
     </div>
+    {{ bulk_bar("test_case", [
+        ("priority", t.priority, ["High", "Medium", "Low"]),
+        ("category", t.category, ["Positive", "Negative", "Edge Case", "Security"]),
+        ("suite", t.get('tc_suite', 'Suite'), ["", "Smoke", "Regression", "E2E"]),
+        ("section", t.tc_section, []),
+    ]) }}
     {%- endif %}
 
     {% set ns = namespace(current_section='') %}
@@ -730,7 +743,11 @@
          data-suite="{{ tc.suite or '' }}" id="{{ tc.id }}" data-ie-row
          {% if tc_edit.get(tc.id) and not tc_edit[tc.id].ai_generated %}data-ie-edited{% endif %}>
         <div class="card-header-row">
-            <h3><span class="tc-id">{{ tc.id }}</span>:
+            <h3>
+                {%- if editors_enabled() and tc_edit.get(tc.id) %}
+                {{ bulk_check("test_case", tc.id) }}
+                {%- endif %}
+                <span class="tc-id">{{ tc.id }}</span>:
                 {{ tc_field(tc, "summary", tc.summary, kind="textarea") }}
                 {{ edited_marker(t.get('tc_edited', 'edited')) }}
             </h3>
@@ -1087,6 +1104,8 @@
 <script src="{{ url_for('static', filename='js/editor-shared.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 <script src="{{ url_for('static', filename='js/tc-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+<script src="{{ url_for('static', filename='js/bulk-editor.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
 <script nonce="{{ csp_nonce }}">

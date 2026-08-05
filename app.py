@@ -326,6 +326,19 @@ app.jinja_env.globals["estimation_edit_state"] = (
 app.jinja_env.globals["estimation_inputs"] = _template_estimation_inputs
 
 
+def _template_import_targets(kind: str) -> list:
+    """Fields a user may map a column onto (E4.8), mapped ones first."""
+    try:
+        from engine import import_preview
+        return import_preview.analyse(kind, []).targets()
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("import targets unavailable for %s: %s", kind, exc)
+        return []
+
+
+app.jinja_env.globals["import_targets"] = _template_import_targets
+
+
 @app.route("/api/csrf-token", methods=["GET"])
 def api_csrf_token():
     """Mint a CSRF token for the current session.

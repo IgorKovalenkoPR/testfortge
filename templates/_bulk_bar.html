@@ -1,0 +1,72 @@
+{#
+  E4.9 — the bulk toolbar for test cases and checklists.
+
+  Hidden until something is selected: a toolbar that is always there implies
+  the page is mostly about bulk editing, and it is mostly about reading.
+
+  ``fields`` is a list of (field, label, choices) — choices empty means free
+  text. Everything the toolbar can set has to be in the entity's allowlist in
+  engine/editable.py; the server refuses anything else, so a mistake here is a
+  400 rather than a surprise write.
+#}
+{% macro bulk_bar(entity, fields) %}
+<div class="bulk-bar" data-bulk-bar="{{ entity }}" hidden>
+  <span class="bulk-bar-count">
+    <strong data-bulk-count>0</strong>
+    {{ t.get('bulk_selected', 'selected') }}
+  </span>
+
+  <label class="bulk-bar-field">
+    <span class="sr-only">{{ t.get('bulk_what', 'What to change') }}</span>
+    <select data-bulk-field aria-label="{{ t.get('bulk_what', 'What to change') }}">
+      {%- for field, label, choices in fields %}
+      <option value="{{ field }}">{{ label }}</option>
+      {%- endfor %}
+    </select>
+  </label>
+
+  {%- for field, label, choices in fields %}
+  {%- if choices %}
+  <select data-bulk-value-for="{{ field }}" {% if not loop.first %}hidden{% endif %}
+          aria-label="{{ label }}">
+    {%- for choice in choices %}
+    <option value="{{ choice }}">{{ choice }}</option>
+    {%- endfor %}
+  </select>
+  {%- else %}
+  <input type="text" data-bulk-value-for="{{ field }}"
+         {% if not loop.first %}hidden{% endif %}
+         placeholder="{{ label }}" aria-label="{{ label }}">
+  {%- endif %}
+  {%- endfor %}
+
+  <button type="button" class="btn btn-primary btn-sm" data-bulk-apply>
+    {{ t.get('bulk_apply', 'Apply') }}
+  </button>
+  <button type="button" class="btn btn-secondary btn-sm" data-bulk-clear>
+    {{ t.get('bulk_clear', 'Clear') }}
+  </button>
+  <button type="button" class="btn btn-danger btn-sm" data-bulk-delete>
+    {{ t.get('bulk_delete', 'Delete') }}
+  </button>
+  <span class="bulk-bar-status" data-bulk-status
+        data-status-class="bulk-bar-status" role="status" aria-live="polite"></span>
+</div>
+{%- endmacro %}
+
+
+{% macro bulk_check(entity, item_id) %}
+  {#- One checkbox carrying its own entity and id, so the same script serves a
+      card grid and a table. -#}
+  <input type="checkbox" class="bulk-check" data-bulk-entity="{{ entity }}"
+         data-bulk-id="{{ item_id }}"
+         aria-label="{{ t.get('bulk_select_one', 'Select') }} {{ item_id }}">
+{%- endmacro %}
+
+
+{% macro bulk_select_all() %}
+  <label class="bulk-select-all">
+    <input type="checkbox" data-bulk-select-all>
+    {{ t.get('bulk_select_all', 'Select all') }}
+  </label>
+{%- endmacro %}

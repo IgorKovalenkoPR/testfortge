@@ -15,10 +15,23 @@ appearing in the browser.
 """
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from engine import db
 from engine import estimation_edit as ee
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 def _inputs(**overrides):
@@ -38,7 +51,7 @@ def _inputs(**overrides):
 @pytest.fixture
 def project(app, request):
     """A project with one generated estimation of its own."""
-    pid = db.upsert_project(name=f"E4.6 {request.node.name}"[:180])
+    pid = db.upsert_project(name=f"E4.6 {request.node.name} {_RUN}"[:180])
     payload = _inputs()
     result = ee.recompute(payload)
     db.save_estimation(pid, payload, result,
@@ -242,7 +255,7 @@ class TestApply:
 
     def test_editing_a_project_with_no_estimation_says_so(self, app,
                                                           editing_on):
-        empty = db.upsert_project(name="E4.6 nothing to edit")
+        empty = db.upsert_project(name=f"E4.6 nothing to edit {_RUN}")
         with pytest.raises(ee.EstimationEditError) as exc:
             ee.apply(empty, {"minutes_per_tc": 10})
         assert "no estimation" in str(exc.value).lower()
@@ -417,7 +430,7 @@ class TestPage:
 
     def test_a_project_with_no_estimation_renders_without_the_panel(
             self, client, app, editing_on):
-        empty = db.upsert_project(name="E4.6 page with nothing")
+        empty = db.upsert_project(name=f"E4.6 page with nothing {_RUN}")
         body = _render(client, empty)
         assert 'id="est-editor"' not in body
 

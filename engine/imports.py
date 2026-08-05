@@ -28,7 +28,10 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
+from .log import get_logger
 from .testcase_generator import TestCase, ChecklistItem
+
+log = get_logger(__name__)
 
 
 # ── Header alias maps ──────────────────────────────────────────────
@@ -367,14 +370,45 @@ def _read_md_checklist(file_path: str) -> list[ChecklistItem]:
 
 # ── Public API ─────────────────────────────────────────────────────
 
-def parse_test_cases(file_path: str, filename: str = "") -> list[TestCase]:
+def read_headers(file_path: str, filename: str = "") -> list[str]:
+    """The file's own column names, for the mapping form (E4.8).
+
+    Empty for the formats that have no header row (Markdown, JSON) — those
+    carry their field names inside each record, so there is nothing to map.
+    """
+    ext = (filename or os.path.basename(file_path)).rsplit(".", 1)[-1].lower()
+    try:
+        if ext == "xlsx":
+            return list(_read_xlsx(file_path)[0] or [])
+        if ext == "csv":
+            return list(_read_csv(file_path)[0] or [])
+        if ext == "json":
+            records = _read_json(file_path)
+            return list(records[0].keys()) if records else []
+    except Exception as exc:      # pragma: no cover — unreadable file
+        log.warning("could not read headers from %s: %s", filename, exc)
+    return []
+
+
+def _column_map(headers, aliases, mapping=None):
+    """The automatic match, with an explicit user mapping laid over it."""
+    from engine import import_preview
+    base = _build_header_map(headers, aliases)
+    if not mapping:
+        return base
+    kind = "test_cases" if aliases is TC_ALIASES else "checklist"
+    return import_preview.resolve(kind, headers, mapping, base=base)
+
+
+def parse_test_cases(file_path: str, filename: str = "",
+                     mapping: dict | None = None) -> list[TestCase]:
     """Parse uploaded file → list[TestCase]. Format inferred from extension."""
     ext = (filename or os.path.basename(file_path)).rsplit(".", 1)[-1].lower()
     if ext == "xlsx":
         header, rows = _read_xlsx(file_path)
         if not header:
             return []
-        col_map = _build_header_map(header, TC_ALIASES)
+        col_map = _column_map(header, TC_ALIASES, mapping)
         out = []
         for i, row in enumerate(rows, start=1):
             tc = _row_to_test_case(row, col_map, i)
@@ -385,7 +419,7 @@ def parse_test_cases(file_path: str, filename: str = "") -> list[TestCase]:
         header, rows = _read_csv(file_path)
         if not header:
             return []
-        col_map = _build_header_map(header, TC_ALIASES)
+        col_map = _column_map(header, TC_ALIASES, mapping)
         out = []
         for i, row in enumerate(rows, start=1):
             tc = _row_to_test_case(row, col_map, i)
@@ -400,7 +434,7 @@ def parse_test_cases(file_path: str, filename: str = "") -> list[TestCase]:
         for i, rec in enumerate(records, start=1):
             # Reuse row-level conversion by faking a single-row table.
             keys = list(rec.keys())
-            col_map = _build_header_map(keys, TC_ALIASES)
+            col_map = _column_map(keys, TC_ALIASES, mapping)
             row = [rec.get(k) for k in keys]
             tc = _row_to_test_case(row, col_map, i)
             if tc:
@@ -410,14 +444,15 @@ def parse_test_cases(file_path: str, filename: str = "") -> list[TestCase]:
                      "Supported: xlsx, csv, md, json.")
 
 
-def parse_checklist(file_path: str, filename: str = "") -> list[ChecklistItem]:
+def parse_checklist(file_path: str, filename: str = "",
+                    mapping: dict | None = None) -> list[ChecklistItem]:
     """Parse uploaded file → list[ChecklistItem]."""
     ext = (filename or os.path.basename(file_path)).rsplit(".", 1)[-1].lower()
     if ext == "xlsx":
         header, rows = _read_xlsx(file_path)
         if not header:
             return []
-        col_map = _build_header_map(header, CL_ALIASES)
+        col_map = _column_map(header, CL_ALIASES, mapping)
         out = []
         for i, row in enumerate(rows, start=1):
             cl = _row_to_checklist_item(row, col_map, i)
@@ -428,7 +463,7 @@ def parse_checklist(file_path: str, filename: str = "") -> list[ChecklistItem]:
         header, rows = _read_csv(file_path)
         if not header:
             return []
-        col_map = _build_header_map(header, CL_ALIASES)
+        col_map = _column_map(header, CL_ALIASES, mapping)
         out = []
         for i, row in enumerate(rows, start=1):
             cl = _row_to_checklist_item(row, col_map, i)
@@ -442,7 +477,7 @@ def parse_checklist(file_path: str, filename: str = "") -> list[ChecklistItem]:
         out = []
         for i, rec in enumerate(records, start=1):
             keys = list(rec.keys())
-            col_map = _build_header_map(keys, CL_ALIASES)
+            col_map = _column_map(keys, CL_ALIASES, mapping)
             row = [rec.get(k) for k in keys]
             cl = _row_to_checklist_item(row, col_map, i)
             if cl:

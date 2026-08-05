@@ -2861,3 +2861,92 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
    noticing, either way. Both colours are informational, not a verdict. */
 .est-delta-up { color: #b45309; font-weight: 600; }
 .est-delta-down { color: #047857; font-weight: 600; }
+
+/* ── Import column mapping (E4.8) ──────────────────────────────────
+   Collapsed until an upload needs it, because a mapping form on every
+   visit implies the automatic matcher usually fails, and it usually
+   does not. */
+.import-mapping {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin: 12px 0;
+    padding: 10px 14px;
+}
+
+.import-mapping > summary { cursor: pointer; font-weight: 600; }
+
+.import-mapping-grid {
+    display: grid;
+    gap: 8px 16px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    margin: 10px 0;
+}
+
+.import-mapping-field { display: flex; flex-direction: column; gap: 3px; }
+.import-mapping-field > span { font-size: 0.82em; color: #334155; }
+.import-mapping-field em { color: #b45309; font-style: normal; }
+
+.import-mapping-field select {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font: inherit;
+    padding: 5px 7px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* ── Bulk toolbar (E4.9) ───────────────────────────────────────────
+   Sticky at the bottom while a selection exists. Hidden with the
+   `hidden` attribute plus this rule, never inline display: an inline
+   style beats the UA sheet and the bar could then never be hidden
+   again — the trap that bit PR-A, PR-E and PR-H. */
+.bulk-bar[hidden] { display: none !important; }
+
+.bulk-bar:not([hidden]) {
+    align-items: center;
+    background: #0f172a;
+    border-radius: 10px;
+    bottom: 18px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+    color: #f8fafc;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    left: 50%;
+    padding: 10px 16px;
+    position: fixed;
+    transform: translateX(-50%);
+    z-index: 60;
+}
+
+.bulk-bar-count { font-size: 0.88em; margin-right: 4px; }
+
+.bulk-bar select,
+.bulk-bar input[type="text"] {
+    border: 1px solid #334155;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 0.85em;
+    padding: 4px 7px;
+}
+
+.bulk-bar .btn-sm { font-size: 0.82em; padding: 5px 12px; }
+
+.bulk-bar-status { font-size: 0.82em; font-weight: 600; }
+.bulk-bar-status-ok { color: #6ee7b7; }
+.bulk-bar-status-error { color: #fca5a5; }
+.bulk-bar-status-info { color: #cbd5e1; }
+
+.bulk-check { cursor: pointer; margin-right: 6px; vertical-align: middle; }
+
+.bulk-select-all { font-size: 0.85em; color: #475569; cursor: pointer; }
+
+.sr-only {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px; width: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+}

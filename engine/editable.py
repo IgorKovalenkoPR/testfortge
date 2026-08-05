@@ -507,6 +507,160 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
     return result
 
 
+@dataclass
+class BulkResult:
+    """What a bulk operation did. Counts, not a guess."""
+    entity: str
+    #: What happened to the ``changed`` rows, for the message — a delete
+    #: reporting "1 updated" is a small lie that reads as a bug.
+    verb: str = "updated"
+    changed: list[str] = _dc_field(default_factory=list)
+    unchanged: list[str] = _dc_field(default_factory=list)
+    missing: list[str] = _dc_field(default_factory=list)
+    refused: dict = _dc_field(default_factory=dict)
+
+    @property
+    def total(self) -> int:
+        return len(self.changed) + len(self.unchanged) + len(self.missing) \
+            + len(self.refused)
+
+    def message(self) -> str:
+        parts = [f"{len(self.changed)} {self.verb}"]
+        if self.unchanged:
+            parts.append(f"{len(self.unchanged)} already had that value")
+        if self.missing:
+            parts.append(f"{len(self.missing)} not found")
+        if self.refused:
+            parts.append(f"{len(self.refused)} refused")
+        return ", ".join(parts) + "."
+
+
+def patch_many(entity_name: str, project_id: str, entity_ids, changes: dict,
+               *, actor: str | None = None, has_role=None) -> BulkResult:
+    """Apply the same change to several rows — E4.9.
+
+    Bug reports have had a bulk toolbar since Sprint 4; test cases and
+    checklist items did not, and writing a second and third copy of it would
+    be three field allowlists, three validators and three audit shapes. This
+    is the substrate's version, so a bulk change goes through exactly what a
+    single edit goes through:
+
+    * the same allowlist and validation, run **once** — a bulk edit with a bad
+      value is refused whole, before any row is touched;
+    * the same per-field guards (E4.5), per row, because the answer can differ
+      per row: closing five bugs is allowed for three of them and not for the
+      two already closed;
+    * the same provenance — every changed row becomes ``ai_generated=False``,
+      so a later regeneration keeps it (E4.7).
+
+    **One audit row for the operation**, not one per item: the person performed
+    one action, and N rows would bury the individual edits that matter.
+
+    No ``expected_version``. A bulk action is chosen from a list the user is
+    looking at, not from one row's rendered value, so there is no single
+    version to check — and refusing all twenty because one moved would be
+    worse than the per-row report this returns.
+    """
+    from engine import db as _db
+
+    config = entity(entity_name)
+    if not project_id:
+        raise EntityNotFound("no active project")
+    ids = [str(i) for i in (entity_ids or []) if str(i or "").strip()]
+    if not ids:
+        raise ValidationFailed("ids", "Select at least one item.")
+    values = validate(entity_name, changes)      # once, before any write
+    role_oracle = has_role or _default_has_role
+
+    result = BulkResult(entity=entity_name)
+    model = _model(config)
+    column = getattr(model, config.id_column)
+    now = datetime.now(timezone.utc)
+
+    with _db.session_scope() as sess:
+        rows = {str(getattr(row, config.id_column)): row
+                for row in sess.query(model).filter(
+                    model.project_id == project_id, column.in_(ids)).all()}
+        result.missing = [i for i in ids if i not in rows]
+
+        for entity_id in ids:
+            row = rows.get(entity_id)
+            if row is None:
+                continue
+            changed_fields = {
+                name: (getattr(row, name, None), value)
+                for name, value in values.items()
+                if getattr(row, name, None) != value
+            }
+            if not changed_fields:
+                result.unchanged.append(entity_id)
+                continue
+            try:
+                for name, (old_value, new_value) in changed_fields.items():
+                    guard = config.field_guards.get(name)
+                    if guard is not None:
+                        guard(old_value, new_value, role_oracle)
+            except Exception as exc:
+                # Named and skipped, not fatal: a toolbar spanning rows in
+                # different states is the normal case, and refusing the whole
+                # operation because one row cannot move is not what the user
+                # asked for.
+                result.refused[entity_id] = str(exc)
+                continue
+            for name, (_, new_value) in changed_fields.items():
+                setattr(row, name, new_value)
+            row.row_version = int(row.row_version or 1) + 1
+            row.ai_generated = False
+            row.edited_by = actor or None
+            row.edited_at = now
+            result.changed.append(entity_id)
+
+    if result.changed:
+        _db.append_audit(
+            entity=config.audit_name(), action="bulk_update",
+            entity_id=f"{len(result.changed)} items", project_id=project_id,
+            user_id=actor,
+            diff={name: ["(various)", value] for name, value in values.items()}
+            | {"items": [None, ", ".join(result.changed[:20])]})
+    return result
+
+
+def remove_many(entity_name: str, project_id: str, entity_ids,
+                *, actor: str | None = None) -> BulkResult:
+    """Delete several rows. Honours ``deletable`` — see :func:`remove`."""
+    from engine import db as _db
+
+    config = entity(entity_name)
+    if not config.deletable:
+        raise NotDeletable(f"{entity_name} cannot be deleted here.")
+    if not project_id:
+        raise EntityNotFound("no active project")
+    ids = [str(i) for i in (entity_ids or []) if str(i or "").strip()]
+    if not ids:
+        raise ValidationFailed("ids", "Select at least one item.")
+
+    result = BulkResult(entity=entity_name, verb="deleted")
+    model = _model(config)
+    column = getattr(model, config.id_column)
+    with _db.session_scope() as sess:
+        rows = sess.query(model).filter(
+            model.project_id == project_id, column.in_(ids)).all()
+        found = {str(getattr(row, config.id_column)) for row in rows}
+        result.missing = [i for i in ids if i not in found]
+        for row in rows:
+            sess.delete(row)
+        result.changed = sorted(found)
+
+    if result.changed:
+        _db.append_audit(
+            entity=config.audit_name(), action="bulk_delete",
+            entity_id=f"{len(result.changed)} items", project_id=project_id,
+            user_id=actor,
+            diff={"items": [", ".join(result.changed[:20]), None]})
+        _bump_pack_version(config, project_id)
+    return result
+
+
 def _next_public_id(sess, config: Entity, project_id: str) -> str:
     """``TC-007`` — one past the highest number already using the prefix.
 
@@ -664,6 +818,7 @@ __all__ = [
     "Entity", "Field",
     "AmbiguousEntity", "EditError", "UnknownEntity", "EntityNotFound",
     "FieldNotEditable", "NotCreatable", "NotDeletable", "ValidationFailed",
+    "BulkResult",
     "entities", "entity", "editable_fields", "validate", "get", "patch",
-    "create", "remove",
+    "create", "remove", "patch_many", "remove_many",
 ]

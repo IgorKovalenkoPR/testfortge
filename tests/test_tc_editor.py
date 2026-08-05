@@ -10,11 +10,24 @@ so a new POST/DELETE that nobody sends a token to passes a test suite with
 """
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from sqlalchemy import text
 
 from engine import db, editable, tc_author, workspace
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 # ── Fixtures ──────────────────────────────────────────────────────
@@ -45,7 +58,7 @@ def project(app, request):
     a version bumped by an earlier test survived into the next one's fixture.
     The assertions that read a version then passed or failed by test order.
     """
-    pid = db.upsert_project(name=f"E4.3 {request.node.name}"[:180])
+    pid = db.upsert_project(name=f"E4.3 {request.node.name} {_RUN}"[:180])
     db.save_test_cases(pid, [_case()])
     return pid
 
@@ -158,7 +171,7 @@ class TestRemove:
         assert not db.load_test_cases(project)
 
     def test_another_projects_case_is_not_found(self, project, editing_on):
-        other = db.upsert_project(name="somebody else")
+        other = db.upsert_project(name=f"somebody else {_RUN}")
         db.save_test_cases(other, [_case("TC-500")])
         with pytest.raises(editable.EntityNotFound):
             editable.remove("test_case", project, "TC-500")
@@ -231,7 +244,7 @@ def planted_duplicate(app, request):
     ``save_checklist`` would reintroduce the state. A guard that is only
     exercised by the bug it prevents is a guard nobody knows still works.
     """
-    project = db.upsert_project(name=f"dupe {request.node.name}"[:180])
+    project = db.upsert_project(name=f"dupe {request.node.name} {_RUN}"[:180])
     # The ORM's own bind — see the note in tests/test_public_ids.py.
     with db.session_scope() as sess:
         engine = sess.get_bind()

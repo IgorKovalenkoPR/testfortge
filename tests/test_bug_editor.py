@@ -9,10 +9,23 @@ Attachments are **not** part of this: see the note at the end of the module.
 """
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from engine import bug_workflow as wf
 from engine import db, editable
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 def _bug(external_id="BUG-001", **overrides):
@@ -35,7 +48,7 @@ def _bug(external_id="BUG-001", **overrides):
 @pytest.fixture
 def project(app, request):
     """This test's own project — see the note in tests/test_tc_editor.py."""
-    pid = db.upsert_project(name=f"E4.5 {request.node.name}"[:180])
+    pid = db.upsert_project(name=f"E4.5 {request.node.name} {_RUN}"[:180])
     db.save_bug(pid, _bug(), source="manual")
     return pid
 

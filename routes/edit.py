@@ -141,6 +141,23 @@ def _regroup_after_section_change(project_id: str, entity_id: str) -> None:
                     entity_id, exc)
 
 
+def _regroup_after_bulk_section_change(project_id: str, entity_ids) -> None:
+    """Put every relocated item in its block, and renumber, in one write."""
+    from engine import checklist_order as _order
+    if not entity_ids:
+        return
+    try:
+        items, version = _checklist_pack(project_id)
+        present = {str(row.get("id")) for row in items}
+        for entity_id in entity_ids:
+            if str(entity_id) in present:
+                items = _order.regroup_item(items, str(entity_id))
+        _write_checklist_pack(project_id, items, version)
+    except Exception as exc:      # pragma: no cover
+        log.warning("could not regroup checklist after a bulk section "
+                    "change: %s", exc)
+
+
 def _house_style(entity: str, changes: dict) -> dict:
     """Advisory wording notes for the fields that just changed (E4.3).
 
@@ -501,6 +518,109 @@ def register(app: Flask) -> None:
             "warnings": _house_style("test_case",
                                      {"test_steps": item.get("test_steps")}),
         })
+
+    # ── Bulk operations (E4.9) ────────────────────────────────────
+    #
+    # Bug reports have had a toolbar since Sprint 4; test cases and checklist
+    # items did not. One endpoint for every entity rather than a third and
+    # fourth copy of it — the substrate already owns the allowlist, the
+    # guards, the provenance and the audit shape.
+
+    def _bulk_payload():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return None, jsonify({"error": "bad_request",
+                                  "message": "Send a JSON object."}), 400
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or not ids:
+            return None, jsonify({
+                "error": "bad_request",
+                "message": "Select at least one item.",
+            }), 400
+        return payload, None, None
+
+    @app.route("/api/edit/<entity>/bulk", methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_bulk(entity: str):
+        if not _editors_enabled():
+            return _disabled()
+        payload, error, code = _bulk_payload()
+        if error is not None:
+            return error, code
+        changes = payload.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return jsonify({"error": "bad_request",
+                            "message": "Nothing to change."}), 400
+
+        project_id = resolve_active_project(pin=False)
+        actor = _perm.current_user_id()
+        try:
+            result = _editable.patch_many(entity, project_id, payload["ids"],
+                                          changes, actor=actor)
+        except _editable.UnknownEntity as exc:
+            return jsonify({"error": "unknown_entity",
+                            "message": str(exc)}), 404
+        except _editable.FieldNotEditable as exc:
+            return jsonify({"error": "field_not_editable",
+                            "message": str(exc), "fields": exc.names}), 400
+        except _editable.ValidationFailed as exc:
+            return jsonify({"error": "validation_failed",
+                            "message": str(exc),
+                            "field": exc.field_name}), 400
+        except _editable.EntityNotFound as exc:
+            return jsonify({"error": "no_project",
+                            "message": str(exc)}), 400
+
+        if entity == "checklist_item" and "section" in changes:
+            # Same invariant the single-row PATCH restores, and the bulk path
+            # broke it: measured in the browser, moving three items into one
+            # section left the third numbered 2.1 inside section 1. Done once
+            # over the pack rather than per row — twenty rewrites for one
+            # action is a lot of writes to reach the same answer.
+            _regroup_after_bulk_section_change(project_id, result.changed)
+
+        _invalidate(project_id)
+        return jsonify({
+            "entity": entity,
+            "changed": result.changed, "unchanged": result.unchanged,
+            "missing": result.missing, "refused": result.refused,
+            "message": result.message(),
+        })
+
+    @app.route("/api/edit/<entity>/bulk-delete", methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_bulk_delete(entity: str):
+        """A separate endpoint, not an ``action`` on the one above.
+
+        Deleting is the operation nobody should reach by mis-typing a field
+        name, and keeping it on its own URL means a future role gate has
+        something to attach to — which is how ``routes/bugs.py`` ended up
+        gating its bulk delete to admins.
+        """
+        if not _editors_enabled():
+            return _disabled()
+        payload, error, code = _bulk_payload()
+        if error is not None:
+            return error, code
+
+        project_id = resolve_active_project(pin=False)
+        try:
+            result = _editable.remove_many(entity, project_id, payload["ids"],
+                                           actor=_perm.current_user_id())
+        except _editable.UnknownEntity as exc:
+            return jsonify({"error": "unknown_entity",
+                            "message": str(exc)}), 404
+        except _editable.NotDeletable as exc:
+            return jsonify({"error": "not_deletable",
+                            "message": str(exc)}), 405
+        except _editable.ValidationFailed as exc:
+            return jsonify({"error": "validation_failed",
+                            "message": str(exc)}), 400
+
+        _invalidate(project_id)
+        return jsonify({"entity": entity, "deleted": result.changed,
+                        "missing": result.missing,
+                        "message": result.message()})
 
     # ── Checklist order and sections (E4.4) ───────────────────────
     #

@@ -12,9 +12,22 @@ trusted a row that no longer held the edit.
 """
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from engine import db, editable, regeneration
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 def _tc(index, summary="Generated", **overrides):
@@ -45,7 +58,7 @@ def editing_on(monkeypatch):
 
 @pytest.fixture
 def project(app, request):
-    return db.upsert_project(name=f"E4.7 {request.node.name}"[:180])
+    return db.upsert_project(name=f"E4.7 {request.node.name} {_RUN}"[:180])
 
 
 # ── The pure policy ───────────────────────────────────────────────

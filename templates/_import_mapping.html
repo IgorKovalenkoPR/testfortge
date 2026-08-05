@@ -1,0 +1,47 @@
+{#
+  E4.8 — the column-mapping form.
+
+  Shown only after an upload whose headers matched nothing: the previous
+  behaviour reported "0 rows", which tells the user their file is wrong when in
+  fact only its vocabulary is. The selects offer the file's *own* column names,
+  so the user recognises what they are choosing from.
+
+  Rendered inside the existing upload form, so mapping and re-selecting the
+  file are one submit. That is the whole reason there is no stashed-file
+  two-step: parking the upload server-side under a token would need a store, a
+  TTL, a cleaner and an authorisation check to save one click.
+#}
+{% macro import_mapping(kind, targets, required=()) %}
+  {%- set stash = session.get('import_headers') or {} %}
+  {%- if stash.get('kind') == kind and stash.get('headers') %}
+  <details class="import-mapping" open>
+    <summary>
+      {{ t.get('import_map_title', 'Match the columns in your file') }}
+    </summary>
+    <p class="hint">
+      {{ t.get('import_map_hint',
+               'These are the column names found in the last file you chose. Point the ones you need at the right field, then choose the file again and upload.') }}
+    </p>
+    <div class="import-mapping-grid">
+      {%- for target in targets %}
+      <label class="import-mapping-field">
+        <span>
+          {{ target.replace('_', ' ') }}
+          {%- if target in required %} <em>*</em>{% endif %}
+        </span>
+        <select name="map_{{ target }}">
+          <option value="">— {{ t.get('import_map_skip', 'not in this file') }} —</option>
+          {%- for header in stash.headers %}
+          <option value="{{ header }}">{{ header }}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      {%- endfor %}
+    </div>
+    <p class="hint">
+      <em>*</em>
+      {{ t.get('import_map_required', 'At least one of these is needed for a row to be a row.') }}
+    </p>
+  </details>
+  {%- endif %}
+{%- endmacro %}

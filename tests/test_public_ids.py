@@ -23,10 +23,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import secrets
+
 import pytest
 from sqlalchemy import text
 
 from engine import db, editable, public_ids
+
+#: A token per run, not just per test.
+#:
+#: ``conftest`` cannot always delete the scratch database on Windows — the file
+#: may still be held open — so a stable project name silently reuses the
+#: previous run's rows. E4.1 preserves ``row_version`` across a pack save, so a
+#: version assertion then depends on how many times the suite has been run.
+#: Measured: three of these tests failed on the second invocation and passed on
+#: the first.
+_RUN = secrets.token_hex(4)
+
 
 
 class TestSplitAndFormat:
@@ -141,7 +154,7 @@ class TestPackWrites:
 
     @pytest.fixture
     def project(self, app, request):
-        return db.upsert_project(name=f"E4.4a {request.node.name}"[:180])
+        return db.upsert_project(name=f"E4.4a {request.node.name} {_RUN}"[:180])
 
     def test_a_checklist_with_duplicates_stores_every_row(self, project):
         """The regression that started this: the unique index turned the
@@ -178,12 +191,21 @@ class TestPackWrites:
         assert len(stored) == 2
         assert len({row["id"] for row in stored}) == 2
 
-    def test_an_append_does_not_collide_with_what_is_already_there(
-            self, client, project):
-        """The most user-visible case: uploading a pack whose ids overlap the
-        stored ones. The rows already in the project keep their ids — someone
-        may have cited them — and the incoming rows take the next free
-        numbers instead of duplicating or being lost.
+    def test_an_append_skips_ids_that_are_already_there(self, client,
+                                                        project):
+        """Where E4.4a and E4.8 met, and which one won.
+
+        E4.4a renumbers duplicate ids *within* a pack, so nothing a generator
+        produced is lost. E4.8 then specified dedup on append, so uploading the
+        same file twice does not double the pack.
+
+        For an append these two want opposite things and the input cannot tell
+        them apart: a file re-uploaded by accident and a second team's file
+        that happens to start numbering at 1 look identical. Dedup wins because
+        the plan asks for it and because the cost is *reported* — the flash
+        names the skipped ids, so a user whose second file was genuinely
+        different can see it and renumber. Silently renumbering someone's
+        re-upload into a duplicate set would not be visible at all.
         """
         import io
 
@@ -203,11 +225,11 @@ class TestPackWrites:
         assert resp.status_code == 200
 
         rows = db.load_checklist(project)
-        assert len(rows) == 4, "nothing may be dropped or merged away"
-        assert len({row["id"] for row in rows}) == 4
+        assert len(rows) == 2, "the repeated ids are skipped, not renumbered"
         by_id = {row["id"]: row["objective"] for row in rows}
-        assert by_id["CNT_001"] == "Existing one"
+        assert by_id["CNT_001"] == "Existing one", "the stored row wins"
         assert by_id["CNT_002"] == "Existing two"
+        assert "Skipped 2" in resp.get_data(as_text=True),             "and the user is told which ids were skipped"
 
     def test_a_checklist_item_is_addressable_afterwards(self, project):
         """The point of the whole task: E4.4 needs this to be true."""
@@ -223,7 +245,7 @@ class TestTheIndex:
 
     @pytest.fixture
     def project(self, app, request):
-        return db.upsert_project(name=f"E4.4a idx {request.node.name}"[:180])
+        return db.upsert_project(name=f"E4.4a idx {request.node.name} {_RUN}"[:180])
 
     def test_both_editable_packs_are_constrained(self, app):
         """The index is the thing that fails loudly if either the write-time
@@ -249,7 +271,7 @@ class TestTheIndex:
 
     def test_two_projects_may_use_the_same_id(self, project, app):
         """It is scoped per project, not global — every project starts at 1."""
-        other = db.upsert_project(name="E4.4a idx neighbour")
+        other = db.upsert_project(name=f"E4.4a idx neighbour {_RUN}")
         db.save_checklist(project, [{"id": "CNT_001", "objective": "mine"}])
         db.save_checklist(other, [{"id": "CNT_001", "objective": "theirs"}])
         assert db.load_checklist(project)[0]["id"] == "CNT_001"
@@ -262,7 +284,7 @@ class TestBackfill:
 
     @pytest.fixture
     def legacy(self, app, request):
-        project = db.upsert_project(name=f"E4.4a legacy {request.node.name}"[:180])
+        project = db.upsert_project(name=f"E4.4a legacy {request.node.name} {_RUN}"[:180])
         # The engine the ORM is bound to, not ``get_engine()``. They can
         # differ: a test elsewhere that swaps ``_engine`` without ``_Session``
         # leaves the sessionmaker pointing at another database, and then the
