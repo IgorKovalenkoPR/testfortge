@@ -11,7 +11,7 @@ from __future__ import annotations
 from flask import Flask
 
 from . import (auth, members, settings, dashboard, projects, generation,
-               execution,
+               edit, execution,
                execution_live, execution_manual, bugs, automation,
                estimation, chat, ops, guide, debug)
 
@@ -26,6 +26,10 @@ def register_all(app: Flask) -> None:
     # routes are decorated with the same permission layer.
     members.register(app)
     settings.register(app)
+    # The shared edit endpoint (E4.1). Registered before the module
+    # routes so a future /api/edit prefix collision is a startup
+    # error rather than a silently shadowed rule.
+    edit.register(app)
     dashboard.register(app)
     projects.register(app)
     generation.register(app)

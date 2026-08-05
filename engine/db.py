@@ -187,6 +187,7 @@ def init_db() -> None:
     _ensure_project_org_column(engine)
     _ensure_case_result_source_column(engine)
     _ensure_pack_version_columns(engine)
+    _ensure_editable_columns(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -363,6 +364,74 @@ def _ensure_walkthrough_columns(engine: Engine) -> None:
         # the worker process keeps running; reads via the ORM will then
         # surface a clear OperationalError the operator can act on.
         log.warning("walkthrough migration ALTER failed: %s", exc)
+
+
+#: Editing metadata migrations, as literal statements.
+#:
+#: Spelled out rather than built with an f-string over a table list, for two
+#: reasons. An operator debugging "no such column: row_version" greps for the
+#: column name and has to land here. And ``tests/test_schema_migration.py``
+#: verifies that every column declared with a ``server_default`` is actually
+#: added to an existing database — it does that by reading these statements,
+#: which it cannot do if the identifiers only exist at runtime.
+_EDITABLE_COLUMN_MIGRATIONS = (
+    ("test_case", "row_version",
+     "ALTER TABLE test_case ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
+    ("test_case", "ai_generated",
+     "ALTER TABLE test_case ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+    ("test_case", "edited_by",
+     "ALTER TABLE test_case ADD COLUMN edited_by VARCHAR(32)"),
+    ("test_case", "edited_at",
+     "ALTER TABLE test_case ADD COLUMN edited_at TIMESTAMP"),
+    ("checklist_item", "row_version",
+     "ALTER TABLE checklist_item ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
+    ("checklist_item", "ai_generated",
+     "ALTER TABLE checklist_item ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+    ("checklist_item", "edited_by",
+     "ALTER TABLE checklist_item ADD COLUMN edited_by VARCHAR(32)"),
+    ("checklist_item", "edited_at",
+     "ALTER TABLE checklist_item ADD COLUMN edited_at TIMESTAMP"),
+    ("bug_report", "row_version",
+     "ALTER TABLE bug_report ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
+    ("bug_report", "ai_generated",
+     "ALTER TABLE bug_report ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+    ("bug_report", "edited_by",
+     "ALTER TABLE bug_report ADD COLUMN edited_by VARCHAR(32)"),
+    ("bug_report", "edited_at",
+     "ALTER TABLE bug_report ADD COLUMN edited_at TIMESTAMP"),
+)
+
+
+def _ensure_editable_columns(engine: Engine) -> None:
+    """Idempotent ALTERs for the editing metadata — E4.1.
+
+    ``row_version`` starts at 1 and ``ai_generated`` at true for every
+    existing row, and both are the honest reading of the data: nothing has
+    been edited yet, because until E4 there was no way to edit it, so every
+    row present is generator output a regeneration may legitimately replace.
+    """
+    from sqlalchemy import inspect as _inspect
+
+    present: dict[str, set[str]] = {}
+    for table, column, statement in _EDITABLE_COLUMN_MIGRATIONS:
+        if table not in present:
+            try:
+                present[table] = {
+                    c["name"] for c in _inspect(engine).get_columns(table)}
+            except SQLAlchemyError as exc:
+                log.debug("editable-column probe skipped for %s: %s",
+                          table, exc)
+                present[table] = set()
+                continue
+        if not present[table] or column in present[table]:
+            continue
+        try:
+            with engine.begin() as conn:
+                log.info("editing migration: adding %s.%s", table, column)
+                conn.execute(text(statement))
+        except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+            log.warning("editing migration failed on %s.%s: %s",
+                        table, column, exc)
 
 
 def _ensure_pack_version_columns(engine: Engine) -> None:
@@ -650,6 +719,28 @@ class TestCase(Base):
                                             server_default="manual")
     gherkin: Mapped[str] = mapped_column(Text, nullable=False,
                                           default="", server_default="")
+    # ── Editing metadata (E4.1) ───────────────────────────────────
+    #
+    # ``row_version`` is the per-row half of the optimistic locking E3.5
+    # built at pack level. Pack versions are the right unit for a
+    # wipe-and-replace save; they are the wrong one for field editing,
+    # where two people changing two different items would collide for no
+    # reason.
+    #
+    # ``ai_generated`` is what stops a regeneration silently overwriting
+    # someone's work. It starts True because generators are what produce
+    # these rows, and a human edit flips it False — see
+    # ``engine.editable.patch``. Without it, requirements 4-7 (edit the
+    # generated output) turn into a way to lose the edit on the next
+    # Generate click.
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=1, server_default="1")
+    ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                default=True,
+                                                server_default="1")
+    edited_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -682,6 +773,28 @@ class ChecklistItem(Base):
     priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     testing_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # ── Editing metadata (E4.1) ───────────────────────────────────
+    #
+    # ``row_version`` is the per-row half of the optimistic locking E3.5
+    # built at pack level. Pack versions are the right unit for a
+    # wipe-and-replace save; they are the wrong one for field editing,
+    # where two people changing two different items would collide for no
+    # reason.
+    #
+    # ``ai_generated`` is what stops a regeneration silently overwriting
+    # someone's work. It starts True because generators are what produce
+    # these rows, and a human edit flips it False — see
+    # ``engine.editable.patch``. Without it, requirements 4-7 (edit the
+    # generated output) turn into a way to lose the edit on the next
+    # Generate click.
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=1, server_default="1")
+    ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                default=True,
+                                                server_default="1")
+    edited_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -731,6 +844,28 @@ class BugReport(Base):
         Integer, ForeignKey("execution_run.id", ondelete="SET NULL"),
         nullable=True, index=True)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # ── Editing metadata (E4.1) ───────────────────────────────────
+    #
+    # ``row_version`` is the per-row half of the optimistic locking E3.5
+    # built at pack level. Pack versions are the right unit for a
+    # wipe-and-replace save; they are the wrong one for field editing,
+    # where two people changing two different items would collide for no
+    # reason.
+    #
+    # ``ai_generated`` is what stops a regeneration silently overwriting
+    # someone's work. It starts True because generators are what produce
+    # these rows, and a human edit flips it False — see
+    # ``engine.editable.patch``. Without it, requirements 4-7 (edit the
+    # generated output) turn into a way to lose the edit on the next
+    # Generate click.
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=1, server_default="1")
+    ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                default=True,
+                                                server_default="1")
+    edited_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -2646,6 +2781,52 @@ def delete_project(project_id: str) -> None:
 
 # ── Test cases ─────────────────────────────────────────────────────
 
+#: Columns a wipe-and-replace pack write must carry across, keyed by the
+#: row's public id.
+#:
+#: ``save_test_cases`` and ``save_checklist`` delete and re-insert, which
+#: resets every column not present in the incoming dicts — and the incoming
+#: dicts come from ``load_*``, which strips to the dataclass fields. So a
+#: pack write silently reverted ``ai_generated`` to True and ``row_version``
+#: to 1 for rows a human had just edited. That is not a cosmetic loss: it is
+#: the flag E4.7's regeneration guard reads, so losing it means the next
+#: Generate click quietly discards the edit.
+#:
+#: Both inline editors and every upload go through a pack write, so without
+#: this the provenance E4.1 records would survive until roughly the next
+#: click.
+_EDIT_METADATA_COLUMNS = ("row_version", "ai_generated", "edited_by",
+                          "edited_at")
+
+
+def _capture_edit_metadata(sess, model, project_id: str) -> dict[str, dict]:
+    """Snapshot the edit metadata of a project's rows, by public id."""
+    rows = sess.query(model).filter(model.project_id == project_id).all()
+    out: dict[str, dict] = {}
+    for row in rows:
+        key = getattr(row, "external_id", None)
+        if not key:
+            continue
+        out[key] = {c: getattr(row, c, None) for c in _EDIT_METADATA_COLUMNS}
+    return out
+
+
+def _restore_edit_metadata(row, snapshot: dict[str, dict]) -> None:
+    """Put a row's previous edit metadata back, if it had any.
+
+    Matched on the public id. What a *regeneration* should do with a
+    preserved ``ai_generated=False`` is E4.7's decision, not this
+    function's — its job is only to stop the metadata evaporating on an
+    ordinary read-modify-write.
+    """
+    previous = snapshot.get(getattr(row, "external_id", None) or "")
+    if not previous:
+        return
+    for column, value in previous.items():
+        if value is not None:
+            setattr(row, column, value)
+
+
 def save_test_cases(project_id: str, test_cases: list, *,
                     expected_version: int | None = None) -> int:
     """Replace all TC for a project with the new list. Returns rows written.
@@ -2671,11 +2852,14 @@ def save_test_cases(project_id: str, test_cases: list, *,
         if proj is not None:
             proj.updated_at = _utcnow()
         # Wipe-and-replace keeps semantics simple — caller treats DB as
-        # the single source of truth for the *current* TC set.
+        # the single source of truth for the *current* TC set. The edit
+        # metadata is carried across explicitly, because a delete would
+        # otherwise revert it to the column defaults.
+        edits = _capture_edit_metadata(sess, TestCase, project_id)
         sess.query(TestCase).filter(TestCase.project_id == project_id).delete()
         for tc in test_cases or []:
             d = tc if isinstance(tc, dict) else getattr(tc, "__dict__", {})
-            sess.add(TestCase(
+            row = TestCase(
                 project_id=project_id,
                 external_id=d.get("id"),
                 section=d.get("section"),
@@ -2714,7 +2898,9 @@ def save_test_cases(project_id: str, test_cases: list, *,
                 # ambiguous, and the coercion is one function call.
                 tc_format=_coerce_tc_format(d.get("tc_format")),
                 gherkin=d.get("gherkin") or "",
-            ))
+            )
+            _restore_edit_metadata(row, edits)
+            sess.add(row)
             written += 1
     return written
 
@@ -3054,10 +3240,12 @@ def save_checklist(project_id: str, items: list, *,
         proj = sess.get(Project, project_id)
         if proj is not None:
             proj.updated_at = _utcnow()
-        sess.query(ChecklistItem).filter(ChecklistItem.project_id == project_id).delete()
+        edits = _capture_edit_metadata(sess, ChecklistItem, project_id)
+        sess.query(ChecklistItem).filter(
+            ChecklistItem.project_id == project_id).delete()
         for cl in items or []:
             d = cl if isinstance(cl, dict) else getattr(cl, "__dict__", {})
-            sess.add(ChecklistItem(
+            row = ChecklistItem(
                 project_id=project_id,
                 external_id=d.get("id"),
                 section=d.get("section"),
@@ -3070,7 +3258,9 @@ def save_checklist(project_id: str, items: list, *,
                 testing_type=d.get("testing_type", "Functional"),
                 item_num=d.get("item_num") or "",
                 depth=int(d.get("depth") or 2),
-            ))
+            )
+            _restore_edit_metadata(row, edits)
+            sess.add(row)
             written += 1
     return written
 

@@ -265,7 +265,25 @@ class TestMigrationCoversTheModel:
 
     def _migrated_columns(self) -> dict[str, set[str]]:
         import inspect as _inspect
-        src = _inspect.getsource(_db._ensure_walkthrough_columns)
+        # Every migration helper, not just the walkthrough one. The matcher
+        # read a single function for as long as there was a single function;
+        # by E4.1 there were five, and a column added by any of the others
+        # would have been reported as un-migrated (or, worse, a genuinely
+        # missing migration would have been reported as present because the
+        # column lived in a table this test does not check).
+        src = chr(10).join(
+            _inspect.getsource(getattr(_db, name))
+            for name in dir(_db)
+            if name.startswith("_ensure_") and callable(getattr(_db, name))
+        )
+        # …plus the module-level statement tables the helpers execute, which
+        # are deliberately literal so both an operator's grep and this
+        # matcher can find them.
+        src += chr(10) + chr(10).join(
+            str(item) for name in dir(_db)
+            if name.endswith("_MIGRATIONS")
+            for item in (getattr(_db, name) or ())
+        )
         out: dict[str, set[str]] = {}
         # The quoted form matters: ``trigger`` is a reserved word in
         # Postgres and is added as ADD COLUMN "trigger". A matcher that
