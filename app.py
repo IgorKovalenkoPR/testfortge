@@ -295,6 +295,37 @@ def _template_bug_status_options(current: str) -> list:
 app.jinja_env.globals["bug_status_options"] = _template_bug_status_options
 
 
+def _template_estimation_edit_state():
+    """The editable state of this project's latest estimation (E4.6).
+
+    Falsy when there is nothing to edit — no project, no estimation, or
+    editing switched off — so the template can gate the whole panel on it.
+    """
+    try:
+        if not features.effective("EDITORS_ENABLED"):
+            return None
+        from engine import estimation_edit
+        from routes._shared import resolve_active_project
+        return estimation_edit.get(resolve_active_project(pin=False))
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("estimation edit state unavailable: %s", exc)
+        return None
+
+
+def _template_estimation_inputs():
+    """The editable drivers, with their labels and guard rails."""
+    try:
+        from engine import estimation_edit
+        return estimation_edit.INPUTS
+    except Exception:  # pragma: no cover
+        return {}
+
+
+app.jinja_env.globals["estimation_edit_state"] = (
+    _template_estimation_edit_state)
+app.jinja_env.globals["estimation_inputs"] = _template_estimation_inputs
+
+
 @app.route("/api/csrf-token", methods=["GET"])
 def api_csrf_token():
     """Mint a CSRF token for the current session.

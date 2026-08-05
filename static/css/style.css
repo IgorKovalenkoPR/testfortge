@@ -2786,3 +2786,78 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
        nothing: it still says what the status is. */
     opacity: 0.65;
 }
+
+/* ── Estimation editor (E4.6) ──────────────────────────────────────
+   The drivers are a form, not prose, so they get real inputs rather than
+   the inline-edit component. Everything else on that page is derived and
+   read-only by construction. */
+
+.est-edit-grid {
+    display: grid;
+    gap: 12px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    margin: 14px 0 18px 0;
+}
+
+.est-edit-field { display: flex; flex-direction: column; gap: 4px; }
+
+.est-edit-label { font-size: 0.85em; font-weight: 600; color: #334155; }
+
+.est-edit-field input {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font: inherit;
+    padding: 6px 8px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.est-edit-field input:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.est-edit-field input[aria-invalid="true"] { border-color: #dc2626; }
+
+.est-edit-help { color: #64748b; font-size: 0.78em; }
+
+.est-edit-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.est-edit-status { font-size: 0.85em; font-weight: 600; }
+.est-edit-status-ok { color: #047857; }
+.est-edit-status-error { color: #b91c1c; }
+.est-edit-status-info { color: #475569; }
+
+.est-input {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font: inherit;
+    padding: 3px 5px;
+    width: 100%;
+    box-sizing: border-box;
+    background: transparent;
+}
+
+.est-input:hover { border-color: #e2e8f0; background: #f8fafc; }
+.est-input:focus-visible {
+    background: #fff;
+    border-color: #2563eb;
+    outline: 2px solid #2563eb;
+    outline-offset: 0;
+}
+
+.est-input-tc { text-align: right; max-width: 5.5rem; }
+
+.est-diff { margin-top: 20px; }
+
+.est-diff-table td:last-child { font-variant-numeric: tabular-nums; }
+
+/* Up is not "good" here — more hours than the model said is the thing worth
+   noticing, either way. Both colours are informational, not a verdict. */
+.est-delta-up { color: #b45309; font-weight: 600; }
+.est-delta-down { color: #047857; font-weight: 600; }

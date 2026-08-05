@@ -404,6 +404,26 @@ _EDITABLE_COLUMN_MIGRATIONS = (
      "ALTER TABLE bug_report ADD COLUMN edited_by VARCHAR(32)"),
     ("bug_report", "edited_at",
      "ALTER TABLE bug_report ADD COLUMN edited_at TIMESTAMP"),
+    # ── Estimation (E4.6) ─────────────────────────────────────────
+    #
+    # The same four, plus one the other entities do not need.
+    # ``original_payload`` keeps the result the generator produced, because
+    # an estimate is the one artefact whose *previous* value is the
+    # interesting one: "the model said 120 h, the lead says 148 h" is a
+    # conversation with a client, and E4.6's diff is what makes it possible.
+    # The other editors can show a before/after from the audit row; here the
+    # before is a whole computed structure, and reconstructing it from a
+    # diff would be a second implementation of the estimator.
+    ("estimation", "row_version",
+     "ALTER TABLE estimation ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
+    ("estimation", "ai_generated",
+     "ALTER TABLE estimation ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+    ("estimation", "edited_by",
+     "ALTER TABLE estimation ADD COLUMN edited_by VARCHAR(32)"),
+    ("estimation", "edited_at",
+     "ALTER TABLE estimation ADD COLUMN edited_at TIMESTAMP"),
+    ("estimation", "original_payload",
+     "ALTER TABLE estimation ADD COLUMN original_payload TEXT"),
 )
 
 
@@ -1018,6 +1038,22 @@ class Estimation(Base):
     input_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     result_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     total_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ── Editing metadata (E4.6) ───────────────────────────────────
+    #
+    # The same contract the other three editable entities carry — see
+    # TestCase — plus ``original_payload``: the result as the generator
+    # computed it, kept so the editor can show "the model said 120 h, you say
+    # 148 h". Stored as JSON text rather than a JSON column because it is
+    # only ever read and written whole.
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False,
+                                              default=1, server_default="1")
+    ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                default=True,
+                                                server_default="1")
+    edited_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    original_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True)
 

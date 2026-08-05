@@ -605,6 +605,123 @@ def register(app: Flask) -> None:
             success=lambda payload: {"section": [payload.get("from"),
                                                  payload.get("to")]})
 
+    # ── Estimation (E4.6) ─────────────────────────────────────────
+    #
+    # Not part of the generic ``/api/edit/<entity>`` surface, because the
+    # thing being edited is not a row of columns: it is one JSON payload
+    # holding a computed structure. What it shares is the contract — an
+    # allowlist, a whole-or-nothing edit, ``row_version`` → 409, provenance,
+    # one audit row. See engine/estimation_edit.py for why the phase hours
+    # are recomputed rather than typed.
+
+    def _estimation_state(payload):
+        raw_version = (payload or {}).get("row_version")
+        if raw_version is None:
+            return None, None
+        try:
+            return int(raw_version), None
+        except (TypeError, ValueError):
+            return None, jsonify({
+                "error": "bad_request",
+                "message": "row_version must be a whole number.",
+            })
+
+    @app.route("/api/edit/estimation", methods=["GET"])
+    @_perm.require_role("user")
+    def api_edit_estimation_get():
+        if not _editors_enabled():
+            return _disabled()
+        from engine import estimation_edit as _est
+        state = _est.get(resolve_active_project(pin=False))
+        if state is None:
+            return jsonify({"error": "not_found",
+                            "message": "No estimation for this project "
+                                       "yet."}), 404
+        return jsonify({"entity": "estimation", "item": state,
+                        "inputs": {name: spec.label
+                                   for name, spec in _est.INPUTS.items()}})
+
+    @app.route("/api/edit/estimation", methods=["PATCH"])
+    @_perm.require_role("user")
+    def api_edit_estimation_patch():
+        """Change inputs; every total is recomputed here.
+
+        The client sends drivers only. A derived value in the payload is a
+        400 naming it — not a silent drop, because a caller that believes it
+        set the total is worse off than one told it cannot.
+        """
+        if not _editors_enabled():
+            return _disabled()
+        from engine import estimation_edit as _est
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "bad_request",
+                            "message": "Send a JSON object."}), 400
+        changes = payload.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return jsonify({
+                "error": "bad_request",
+                "message": "Nothing to change: 'changes' must be a "
+                           "non-empty object.",
+            }), 400
+        version, error = _estimation_state(payload)
+        if error is not None:
+            return error, 400
+
+        project_id = resolve_active_project(pin=False)
+        try:
+            state = _est.apply(project_id, changes, expected_version=version,
+                               actor=_perm.current_user_id())
+        except _est.EstimationEditError as exc:
+            return jsonify({"error": "bad_input", "field": exc.field_name,
+                            "message": str(exc)}), 400
+        except _db.WriteConflict as exc:
+            log.info("estimation conflict: %s", exc)
+            return jsonify({
+                "error": "conflict",
+                "message": ("Someone else changed this estimation while you "
+                            "were editing. Reload to see their version, then "
+                            "make your change again."),
+                "expected_version": exc.expected,
+                "current_version": exc.actual,
+            }), 409
+
+        _invalidate(project_id)
+        return jsonify({"entity": "estimation", "item": state})
+
+    @app.route("/api/edit/estimation/revert", methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_estimation_revert():
+        """Put the generator's numbers back."""
+        if not _editors_enabled():
+            return _disabled()
+        from engine import estimation_edit as _est
+
+        payload = request.get_json(silent=True) or {}
+        version, error = _estimation_state(payload)
+        if error is not None:
+            return error, 400
+
+        project_id = resolve_active_project(pin=False)
+        try:
+            state = _est.revert(project_id, expected_version=version,
+                                actor=_perm.current_user_id())
+        except _est.EstimationEditError as exc:
+            return jsonify({"error": "bad_input",
+                            "message": str(exc)}), 400
+        except _db.WriteConflict as exc:
+            return jsonify({
+                "error": "conflict",
+                "message": ("Someone else changed this estimation. Reload "
+                            "before reverting it."),
+                "expected_version": exc.expected,
+                "current_version": exc.actual,
+            }), 409
+
+        _invalidate(project_id)
+        return jsonify({"entity": "estimation", "item": state})
+
     # ── Development harness ───────────────────────────────────────
     #
     # The smallest page that exercises the component against the real

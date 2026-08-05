@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.est_title }}{% endblock %}
 
+{#- E4.6: the estimation is editable when EDITORS_ENABLED is on. Resolved at
+    the template's top level through lazy globals, like the other three
+    editors — the alternative is threading two more keys through every
+    render_template call and having the editor vanish on the path that
+    forgets one. ``est_edit`` is falsy when there is nothing to edit. -#}
+{% set est_edit = estimation_edit_state() %}
+{% set est_inputs = estimation_inputs() %}
+
 {% block content %}
 <div class="page-header">
   <h1>{{ t.est_title }}</h1>
@@ -755,10 +763,25 @@
     <tbody>
       {% if result %}
         {% for f in result.features %}
-        <tr class="{% if f.is_section %}est-section-row{% endif %}">
+        <tr class="{% if f.is_section %}est-section-row{% endif %}"
+            {% if est_edit %}data-est-feature="{{ loop.index0 }}"
+            data-est-section="{{ 1 if f.is_section else 0 }}"{% endif %}>
+          {%- if est_edit %}
+          <td><input type="text" class="est-input est-input-name"
+                     data-est-field="name" value="{{ f.name }}"
+                     aria-label="{{ t.est_feature }} {{ loop.index }}"></td>
+          <td>{% if not f.is_section %}<input type="number" min="0" step="1"
+                     class="est-input est-input-tc" data-est-field="test_cases"
+                     value="{{ f.test_cases }}"
+                     aria-label="{{ t.est_tc }} — {{ f.name }}">{% endif %}</td>
+          <td><input type="text" class="est-input"
+                     data-est-field="comment" value="{{ f.comment }}"
+                     aria-label="{{ t.est_comment }} — {{ f.name }}"></td>
+          {%- else %}
           <td>{{ f.name }}</td>
           <td>{% if not f.is_section %}{{ f.test_cases }}{% endif %}</td>
           <td>{{ f.comment }}</td>
+          {%- endif %}
         </tr>
         {% endfor %}
       {% else %}
@@ -784,4 +807,94 @@
   </table>
 </div>
 
+{%- if est_edit %}
+{# ── E4.6: adjust the estimate ──────────────────────────────────────
+   Every number on this page is derived, so the editable things are the
+   drivers. One explicit Recalculate rather than per-field autosave: an
+   estimate is changed in threes ("more cases here, longer per case, bigger
+   team") and looked at once, and a page that re-derives sixty numbers on
+   every keystroke is a page nobody can read while typing. #}
+<div class="card" id="est-editor">
+  <h2>{{ t.get('est_edit_title', 'Adjust the estimate') }}</h2>
+  <p class="hint">
+    {{ t.get('est_edit_hint',
+             'Change what drives the numbers — the hours and costs are recomputed on the server, so what you see here is what is stored.') }}
+  </p>
+
+  <div class="est-edit-grid">
+    {%- for name, spec in est_inputs.items() %}
+    <label class="est-edit-field">
+      <span class="est-edit-label">{{ spec.label }}</span>
+      {%- if spec.kind == 'text' %}
+      <input type="text" data-est-input="{{ name }}"
+             value="{{ est_edit.inputs.get(name, '') }}">
+      {%- else %}
+      <input type="number" data-est-input="{{ name }}"
+             {% if spec.low is not none %}min="{{ spec.low }}"{% endif %}
+             {% if spec.high is not none %}max="{{ spec.high }}"{% endif %}
+             step="{{ '1' if spec.kind == 'int' else 'any' }}"
+             value="{{ est_edit.inputs.get(name, '') }}">
+      {%- endif %}
+      {%- if spec.help %}<small class="est-edit-help">{{ spec.help }}</small>{%- endif %}
+    </label>
+    {%- endfor %}
+  </div>
+
+  <div class="est-edit-actions">
+    <button type="button" class="btn btn-primary" id="est-recalculate"
+            data-est-version="{{ est_edit.row_version }}">
+      {{ t.get('est_recalculate', 'Recalculate') }}
+    </button>
+    {%- if est_edit.original %}
+    <button type="button" class="btn btn-secondary" id="est-revert"
+            data-est-version="{{ est_edit.row_version }}">
+      {{ t.get('est_revert', "Back to the model's numbers") }}
+    </button>
+    {%- endif %}
+    <span class="est-edit-status" data-est-editor-status
+          data-status-class="est-edit-status"
+          role="status" aria-live="polite"></span>
+  </div>
+
+  {%- if est_edit.diff %}
+  {# The comparison a client conversation is actually about: not sixty
+     computed fields, just the headline numbers that moved. #}
+  <div class="est-diff">
+    <h3>{{ t.get('est_diff_title', 'Edited — the model computed this') }}</h3>
+    <table class="est-table est-diff-table">
+      <thead>
+        <tr>
+          <th>{{ t.get('est_diff_what', 'Number') }}</th>
+          <th>{{ t.get('est_diff_model', 'Model') }}</th>
+          <th>{{ t.get('est_diff_now', 'Now') }}</th>
+          <th>{{ t.get('est_diff_delta', 'Change') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {%- for row in est_edit.diff %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.before | round(2) if row.before is number else row.before }}</td>
+          <td>{{ row.after | round(2) if row.after is number else row.after }}</td>
+          <td class="{{ 'est-delta-up' if (row.delta or 0) > 0 else 'est-delta-down' }}">
+            {%- if row.delta is not none %}{{ '%+.2f' % row.delta }}{% endif %}
+          </td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {%- endif %}
+</div>
+{%- endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{%- if est_edit %}
+<script src="{{ url_for('static', filename='js/editor-shared.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+<script src="{{ url_for('static', filename='js/est-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+{%- endif %}
 {% endblock %}
