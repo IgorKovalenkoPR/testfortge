@@ -1,206 +1,151 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" width="240" height="300" role="img" aria-label="Tedgie — TestForTge armadillo mascot">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" width="240" height="300"
+     role="img" aria-label="Tedgie — the TestForTge armadillo, inspecting a bug through a magnifying glass">
+  <!--
+    Tedgie, redrawn from the TestFort brand sheet — the magnifying-glass pose.
+
+    Three things about the reference took two attempts each to get right, and
+    they are the difference between "an armadillo" and "this armadillo":
+
+      1. The shell is the *largest* mass — a broad segmented dome over the
+         back — and the cream belly is a smaller shape in front of it. Drawn
+         the other way round, the shell shows only as a crescent and reads as
+         a red sash.
+      2. The red on the head covers the **crown and the back of the skull
+         only**. The face is cream: snout, cheeks, and the area the eyes sit
+         in, with the plate's lower edge curving across just above them. A
+         red disc with eyes on it reads as a helmet, not as this character.
+      3. Flat fills throughout. The previous version used vertical gradients
+         on armour, belly and ears; the sheet is hard-edged flat vector, and a
+         gradient reads as a different illustration style even at the same hue.
+
+    Palette sampled from the sheet:
+      shell #E1362B · plate gap #A81F17 · shell shade #8E1C14
+      cream #F3DFC0 · cream shade #E0C39A · ear + nose #6E241C
+      lens rim #3A3A3A · lens #EDF3F8 · bug #E1362B / #17171A
+
+    viewBox stays 240×300: base.html renders this at 66×84 and again at 40×40,
+    so changing the aspect would silently squash one of them.
+  -->
   <defs>
-    <!-- Bright red armour (shell plates, cap, ears) -->
-    <linearGradient id="armor" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#EC4B3D"/>
-      <stop offset="100%" stop-color="#C42B22"/>
-    </linearGradient>
-    <!-- Deep maroon (band shadows, inner segments) -->
-    <linearGradient id="armorDark" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#8A211C"/>
-      <stop offset="100%" stop-color="#5E1310"/>
-    </linearGradient>
-    <!-- Cream / beige body, limbs, face -->
-    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#F4DCB8"/>
-      <stop offset="100%" stop-color="#E3BE89"/>
-    </linearGradient>
-    <!-- Black t-shirt -->
-    <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#2B2B2B"/>
-      <stop offset="100%" stop-color="#0E0E0E"/>
-    </linearGradient>
-    <!-- Maroon-purple inner ear -->
-    <linearGradient id="earIn" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#6E2338"/>
-      <stop offset="100%" stop-color="#491627"/>
-    </linearGradient>
+    <clipPath id="tedgieLens"><circle cx="186" cy="182" r="23"/></clipPath>
+    <clipPath id="tedgieSkull">
+      <ellipse cx="139" cy="108" rx="37" ry="34"/>
+    </clipPath>
   </defs>
 
-  <!-- ░░ GROUND SHADOW ░░ -->
-  <ellipse cx="118" cy="285" rx="80" ry="12" fill="#000000" opacity="0.10"/>
+  <ellipse cx="122" cy="286" rx="60" ry="9" fill="#000" opacity="0.07"/>
 
-  <!-- ══════════ TAIL (behind body, curling to lower-right) ══════════ -->
-  <path d="M150 232 q46 12 60 40 q4 8 -4 10 q-10 3 -18 -6 q-22 -22 -46 -30 z"
-        fill="url(#belly)"/>
-  <!-- tail red banded top -->
-  <path d="M150 230 q40 8 56 30 q-6 -3 -14 -1 q-18 -16 -44 -20 z" fill="url(#armor)"/>
-  <g fill="url(#armorDark)">
-    <ellipse cx="176" cy="248" rx="9" ry="6" transform="rotate(28 176 248)"/>
-    <ellipse cx="196" cy="262" rx="7" ry="5" transform="rotate(35 196 262)"/>
-  </g>
-  <g fill="#5E1310" opacity="0.7">
-    <circle cx="164" cy="244" r="2"/>
-    <circle cx="186" cy="256" r="1.8"/>
-    <circle cx="204" cy="268" r="1.5"/>
+  <!-- ── Tail: banded, exits behind the shell to the lower left ────── -->
+  <path d="M72 240 C52 252 34 266 24 282 C33 287 45 286 53 279
+           C63 267 78 256 92 251 Z" fill="#8E1C14"/>
+  <g fill="#A81F17">
+    <ellipse cx="66" cy="255" rx="3.8" ry="8" transform="rotate(-38 66 255)"/>
+    <ellipse cx="52" cy="266" rx="3.4" ry="7" transform="rotate(-42 52 266)"/>
+    <ellipse cx="38" cy="276" rx="3" ry="6" transform="rotate(-46 38 276)"/>
   </g>
 
-  <!-- ══════════ BACK SHELL — stacked banded plates ══════════ -->
-  <!-- filler crescent so no gaps show the body through -->
-  <path d="M116 82 q72 4 74 82 q2 40 -22 74 q-6 -76 -64 -124 z" fill="url(#armorDark)"/>
-  <g stroke="#4C0F0D" stroke-width="1" stroke-linejoin="round">
-    <!-- plate 7 (lowest, into tail) -->
-    <g transform="translate(150 234) rotate(122)">
-      <path d="M-26 0 Q-26 -18 0 -20 Q26 -18 26 0 Z" fill="url(#armorDark)"/>
+  <!-- ── Legs ──────────────────────────────────────────────────────── -->
+  <g fill="#E0C39A">
+    <path d="M110 252 q-5 14 -2 26 q1 6 9 6 q9 0 9 -8 l1 -22 Z"/>
+    <path d="M109 279 q-6 8 2 10 q11 3 17 -1 q4 -4 -2 -8 Z"/>
+  </g>
+  <g fill="#F3DFC0">
+    <path d="M144 254 q-4 14 -1 26 q2 6 10 6 q9 0 9 -8 l1 -22 Z"/>
+    <path d="M143 281 q-6 8 2 10 q11 3 17 -1 q4 -4 -2 -8 Z"/>
+  </g>
+
+  <!-- ── Shell: the broad segmented dome, the biggest mass ─────────── -->
+  <path d="M136 96 C100 96 68 130 62 178 C56 224 72 262 102 272
+           C126 280 148 266 154 240 C164 196 156 138 144 112
+           C141 102 139 96 136 96 Z" fill="#E1362B"/>
+  <g stroke="#A81F17" stroke-width="4.2" fill="none" stroke-linecap="round">
+    <path d="M118 100 C96 116 80 148 76 182"/>
+    <path d="M102 110 C84 130 70 160 68 192"/>
+    <path d="M88 126 C74 148 65 176 64 204"/>
+    <path d="M80 150 C70 172 64 196 66 218"/>
+    <path d="M77 178 C71 200 71 220 77 240"/>
+    <path d="M80 208 C78 228 85 250 97 264"/>
+    <path d="M90 236 C91 252 100 266 113 274"/>
+  </g>
+  <path d="M136 96 C139 96 141 102 144 112 C156 138 164 196 154 240
+           C148 266 126 280 102 272 l5 -11 C129 269 143 256 147 234
+           C155 196 150 142 139 116 Z" fill="#8E1C14" opacity="0.32"/>
+
+  <!-- ── Belly: cream front, smaller than the dome ─────────────────── -->
+  <path d="M142 124 C124 130 114 154 114 186 C114 220 128 252 150 258
+           C170 263 186 250 190 228 C196 196 188 158 174 138
+           C166 127 154 121 142 124 Z" fill="#F3DFC0"/>
+
+  <!-- ── Far arm, behind the belly ─────────────────────────────────── -->
+  <path d="M118 186 q-13 12 -16 28 q-1 8 6 9 q7 1 10 -6 q3 -14 11 -22 Z"
+        fill="#E0C39A"/>
+
+  <!-- ── Head ──────────────────────────────────────────────────────── -->
+  <!-- ears, behind everything on the head -->
+  <path d="M134 76 C129 60 131 45 137 37 C144 45 148 61 145 80 Z"
+        fill="#6E241C"/>
+  <path d="M162 74 C162 57 167 44 175 38 C179 48 178 65 171 80 Z"
+        fill="#6E241C"/>
+  <!-- cream skull and long slim snout -->
+  <ellipse cx="139" cy="108" rx="37" ry="34" fill="#F3DFC0"/>
+  <path d="M126 104 C104 104 86 114 76 126 C70 133 73 141 82 142
+           C96 144 116 138 128 130 C138 124 137 110 126 104 Z"
+        fill="#F3DFC0"/>
+  <ellipse cx="77" cy="130" rx="9.4" ry="7.4" fill="#6E241C"/>
+  <!-- the plate: crown and back of the skull only, clipped to it -->
+  <g clip-path="url(#tedgieSkull)">
+    <path d="M98 92 C114 70 152 66 170 80 C184 91 186 110 180 124
+             C172 134 150 130 132 120 C114 111 100 104 98 92 Z"
+          fill="#E1362B"/>
+    <g stroke="#A81F17" stroke-width="3.2" fill="none" stroke-linecap="round">
+      <path d="M136 70 C130 82 128 94 131 104"/>
+      <path d="M160 72 C165 84 166 96 161 108"/>
     </g>
-    <!-- plate 6 -->
-    <g transform="translate(166 214) rotate(106)">
-      <path d="M-27 0 Q-27 -19 0 -21 Q27 -19 27 0 Z" fill="url(#armor)"/>
-      <path d="M-27 0 Q0 7 27 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
+  </g>
+  <g fill="#8E1C14">
+    <circle cx="143" cy="86" r="1.9"/><circle cx="152" cy="81" r="1.7"/>
+    <circle cx="160" cy="88" r="1.9"/><circle cx="148" cy="94" r="1.6"/>
+    <circle cx="158" cy="96" r="1.8"/><circle cx="166" cy="93" r="1.6"/>
+    <circle cx="137" cy="93" r="1.5"/>
+  </g>
+  <!-- eyes: on the cream face, just below the plate's lower edge -->
+  <ellipse cx="122" cy="117" rx="7.2" ry="8.2" fill="#fff"/>
+  <ellipse cx="139" cy="116" rx="7.2" ry="8.2" fill="#fff"/>
+  <circle cx="120.4" cy="118" r="3.7" fill="#17171A"/>
+  <circle cx="137.4" cy="117" r="3.7" fill="#17171A"/>
+  <circle cx="121.6" cy="116" r="1.3" fill="#fff"/>
+  <circle cx="138.6" cy="115" r="1.3" fill="#fff"/>
+  <!-- the small open "o" this pose has in the reference -->
+  <ellipse cx="99" cy="134" rx="4.4" ry="3.4" fill="#6E241C"/>
+
+  <!-- ── Near arm, reaching to the handle ──────────────────────────── -->
+  <path d="M166 178 C178 176 188 184 193 196 q3 7 -4 10 q-8 3 -12 -4
+           C174 194 170 190 162 190 Z" fill="#F3DFC0"/>
+  <ellipse cx="181" cy="203" rx="9" ry="8" fill="#F3DFC0"/>
+
+  <!-- ── Magnifying glass ──────────────────────────────────────────── -->
+  <rect x="167" y="198" width="11" height="32" rx="5.5"
+        transform="rotate(36 172 214)" fill="#3A3A3A"/>
+  <circle cx="186" cy="182" r="23" fill="#EDF3F8"/>
+  <g clip-path="url(#tedgieLens)">
+    <path d="M168 172 q12 -11 25 -5 q-14 6 -19 18 Z" fill="#fff" opacity="0.9"/>
+  </g>
+  <circle cx="186" cy="182" r="23" fill="none" stroke="#3A3A3A" stroke-width="6.5"/>
+
+  <!-- ── The bug under inspection ──────────────────────────────────── -->
+  <g transform="translate(215 210)">
+    <g stroke="#17171A" stroke-width="1.5" stroke-linecap="round">
+      <path d="M-6 -6 l-6 -5"/><path d="M-7 0 l-8 0"/><path d="M-6 6 l-6 5"/>
+      <path d="M6 -6 l6 -5"/><path d="M7 0 l8 0"/><path d="M6 6 l6 5"/>
     </g>
-    <!-- plate 5 -->
-    <g transform="translate(173 189) rotate(92)">
-      <path d="M-28 0 Q-28 -20 0 -22 Q28 -20 28 0 Z" fill="url(#armorDark)"/>
-    </g>
-    <!-- plate 4 -->
-    <g transform="translate(172 162) rotate(78)">
-      <path d="M-28 0 Q-28 -20 0 -22 Q28 -20 28 0 Z" fill="url(#armor)"/>
-      <path d="M-28 0 Q0 7 28 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
-    </g>
-    <!-- plate 3 -->
-    <g transform="translate(162 131) rotate(60)">
-      <path d="M-27 0 Q-27 -19 0 -21 Q27 -19 27 0 Z" fill="url(#armorDark)"/>
-    </g>
-    <!-- plate 2 -->
-    <g transform="translate(147 108) rotate(44)">
-      <path d="M-26 0 Q-26 -18 0 -20 Q26 -18 26 0 Z" fill="url(#armor)"/>
-      <path d="M-26 0 Q0 7 26 0" fill="none" stroke="#7A150E" stroke-width="1.6"/>
-    </g>
-    <!-- plate 1 (top, tucked behind head/neck) -->
-    <g transform="translate(129 89) rotate(26)">
-      <path d="M-23 0 Q-23 -16 0 -18 Q23 -16 23 0 Z" fill="url(#armor)"/>
-      <path d="M-23 0 Q0 6 23 0" fill="none" stroke="#7A150E" stroke-width="1.5"/>
-    </g>
+    <ellipse cx="0" cy="0" rx="9.2" ry="7.8" fill="#E1362B"/>
+    <path d="M0 -7.8 L0 7.8" stroke="#17171A" stroke-width="1.5"/>
+    <circle cx="-4.1" cy="-2.7" r="1.75" fill="#17171A"/>
+    <circle cx="4.1" cy="-2.7" r="1.75" fill="#17171A"/>
+    <circle cx="-3.7" cy="3.1" r="1.55" fill="#17171A"/>
+    <circle cx="3.7" cy="3.1" r="1.55" fill="#17171A"/>
+    <ellipse cx="0" cy="-7.8" rx="4.5" ry="3.8" fill="#17171A"/>
+    <circle cx="-1.7" cy="-9.2" r="0.85" fill="#fff"/>
+    <circle cx="1.7" cy="-9.2" r="0.85" fill="#fff"/>
   </g>
-  <!-- speckles on the shell -->
-  <g fill="#5E1310" opacity="0.6">
-    <circle cx="140" cy="108" r="2"/>
-    <circle cx="158" cy="126" r="1.8"/>
-    <circle cx="178" cy="172" r="2"/>
-    <circle cx="180" cy="200" r="1.8"/>
-    <circle cx="166" cy="150" r="1.6"/>
-  </g>
-
-  <!-- ══════════ HIND LEGS ══════════ -->
-  <g fill="url(#belly)">
-    <path d="M84 236 q-6 26 -2 42 q1 6 8 6 q7 0 8 -6 q3 -22 -2 -42 z"/>
-    <path d="M132 236 q-4 26 0 42 q1 6 8 6 q7 0 8 -6 q4 -20 -2 -42 z"/>
-    <ellipse cx="90" cy="282" rx="12" ry="6"/>
-    <ellipse cx="146" cy="282" rx="12" ry="6"/>
-  </g>
-  <g stroke="#B98A4E" stroke-width="1.3" stroke-linecap="round" fill="none">
-    <path d="M83 284 l-1 3 M90 285 l0 3 M97 284 l1 3"/>
-    <path d="M139 284 l-1 3 M146 285 l0 3 M153 284 l1 3"/>
-  </g>
-
-  <!-- ══════════ BODY (beige, under shirt) ══════════ -->
-  <ellipse cx="108" cy="188" rx="60" ry="72" fill="url(#belly)"/>
-
-  <!-- right arm (down at side) -->
-  <path d="M158 158 q22 12 20 44 q-1 12 -12 12 q-9 0 -11 -10 q-4 -26 -14 -38 z"
-        fill="url(#belly)"/>
-
-  <!-- ══════════ T-SHIRT ══════════ -->
-  <path d="M60 150
-           q-2 -14 14 -20
-           q-6 14 4 22
-           q14 -12 30 -12
-           q16 0 30 12
-           q10 -8 4 -22
-           q16 6 14 20
-           l-6 20
-           q-2 2 -8 -2
-           l-2 60
-           q-32 12 -64 0
-           l-2 -60
-           q-6 4 -8 2 z"
-        fill="url(#shirt)"/>
-  <!-- collar showing beige -->
-  <path d="M92 132 q16 12 32 0 q-3 10 -16 10 q-13 0 -16 -10 z" fill="url(#belly)"/>
-
-  <!-- ══════════ TESTFORT SHIELD on the shirt ══════════ -->
-  <g transform="translate(108 188) scale(1.9)">
-    <path d="M-11 -10 l11 -4 l11 4 v7 c0 9 -5 14 -11 16 c-6 -2 -11 -7 -11 -16 z"
-          fill="#111" stroke="#E23A2B" stroke-width="1.5"/>
-    <text x="0" y="-1" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
-          font-size="5" font-weight="800" fill="#FFFFFF" letter-spacing="0.2">TEST</text>
-    <text x="0" y="6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
-          font-size="5" font-weight="800" fill="#E23A2B" letter-spacing="0.2">FORT</text>
-  </g>
-
-  <!-- ══════════ LEFT ARM (waving, palm out) ══════════ -->
-  <path d="M58 152 q-18 -6 -26 -30 q-4 -12 4 -16 q9 -4 14 6 q8 18 22 26 z"
-        fill="url(#belly)"/>
-  <ellipse cx="34" cy="112" rx="12" ry="13" fill="url(#belly)"/>
-  <ellipse cx="34" cy="114" rx="6.5" ry="8" fill="#F5A794" opacity="0.55"/>
-  <g stroke="#B98A4E" stroke-width="1.3" stroke-linecap="round" fill="none">
-    <path d="M28 101 l-2 -4 M34 99 l0 -5 M40 101 l2 -4"/>
-  </g>
-
-  <!-- ══════════ HEAD ══════════ -->
-  <ellipse cx="92" cy="82" rx="50" ry="46" fill="url(#belly)"/>
-
-  <!-- ░░ EARS ░░ (tall, rabbit-like, leaning back-right) -->
-  <!-- front ear -->
-  <path d="M84 50 Q90 6 110 0 Q113 26 104 50 Z" fill="url(#armor)"/>
-  <path d="M91 48 Q97 16 108 9 Q108 28 100 47 Z" fill="url(#earIn)"/>
-  <!-- back ear -->
-  <path d="M110 52 Q132 10 156 10 Q144 37 126 52 Z" fill="url(#armor)"/>
-  <path d="M117 50 Q134 20 148 18 Q139 37 124 49 Z" fill="url(#earIn)"/>
-
-  <!-- ░░ RED CAP over the head ░░ -->
-  <path d="M50 76
-           q6 -42 52 -46
-           q52 -2 60 42
-           q3 18 -8 34
-           q-14 -20 -40 -18
-           q-4 -14 -18 -14
-           q-16 0 -22 12
-           q-16 -2 -24 6
-           q-4 -8 0 -16 z"
-        fill="url(#armor)"/>
-  <!-- red muzzle bridge dipping toward the nose -->
-  <path d="M52 78 q-8 10 -6 22 q10 4 18 -2 q0 -12 -12 -20 z" fill="url(#armor)"/>
-  <!-- cap freckles -->
-  <g fill="#7A150E" opacity="0.6">
-    <circle cx="70" cy="52" r="2"/>
-    <circle cx="84" cy="44" r="2"/>
-    <circle cx="100" cy="42" r="2"/>
-    <circle cx="62" cy="64" r="1.8"/>
-    <circle cx="78" cy="60" r="1.8"/>
-    <circle cx="116" cy="52" r="1.8"/>
-    <circle cx="128" cy="66" r="1.8"/>
-  </g>
-
-  <!-- ░░ SNOUT + NOSE ░░ -->
-  <ellipse cx="46" cy="98" rx="16" ry="12" fill="url(#belly)"/>
-  <ellipse cx="38" cy="99" rx="7" ry="6" fill="#6E1A16"/>
-  <ellipse cx="36" cy="96.5" rx="2.4" ry="1.6" fill="#FFFFFF" opacity="0.55"/>
-
-  <!-- ░░ EYE ░░ -->
-  <g>
-    <ellipse cx="86" cy="86" rx="15" ry="16" fill="#FFFFFF"/>
-    <ellipse cx="86" cy="87" rx="11.5" ry="13" fill="#24384B"/>
-    <circle cx="86" cy="88" r="6" fill="#0E1A26"/>
-    <circle cx="90" cy="83" r="3.2" fill="#FFFFFF"/>
-    <circle cx="82" cy="92" r="1.6" fill="#FFFFFF" opacity="0.7"/>
-  </g>
-  <!-- eyebrow -->
-  <path d="M74 66 q10 -5 22 1" stroke="#6E1512" stroke-width="3.4" stroke-linecap="round" fill="none"/>
-
-  <!-- ░░ CHEEK BLUSH ░░ -->
-  <ellipse cx="64" cy="104" rx="7" ry="4.2" fill="#F0876A" opacity="0.65"/>
-
-  <!-- ░░ SMILE ░░ -->
-  <path d="M52 106 q9 8 20 3" stroke="#3A100C" stroke-width="2.2" stroke-linecap="round" fill="none"/>
 </svg>
