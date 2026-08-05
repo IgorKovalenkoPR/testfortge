@@ -1,0 +1,1127 @@
+version: 1
+name: Tedgie mentoring golden set
+locale: en+uk
+
+# ── Why this file exists ─────────────────────────────────────────────
+#
+# This is the measure of quality for Tedgie's mentoring answers, written
+# BEFORE the knowledge packs it grades, so the packs cannot be graded
+# against themselves. Every item was written from a question a junior
+# tester actually asks — "what severity is a footer typo", "is this
+# backend or frontend", "click or press" — not from a syllabus heading.
+#
+# ── The gap this set was written against, measured not assumed ────────
+#
+# Probing the live rule layer with thirteen mentee questions found three
+# distinct failures, and they need different fixes:
+#
+#   1. ROUTING, not knowledge. `chatbot` already contains a severity
+#      *recommender* that answers "footer typo" with "Recommended
+#      severity: Minor" and a reason. But `istqb_knowledge.detect_topic`
+#      matches the word "severity" first, so almost every concrete
+#      triage question is answered with the definition of severity
+#      instead of a recommendation. The knowledge is there and
+#      unreachable.
+#   2. NO PATH AT ALL. Backend-vs-frontend, UI naming and "what do I cut
+#      when there's no time" return nothing from the rule layer.
+#   3. RETRIEVAL FALSE POSITIVES, the worst of the three. Asked "click or
+#      press in a test step", the BM25 index over the ISTQB corpus
+#      returns a Java Selenium snippet at score 10.6 against a
+#      MIN_RELEVANCE of 4.0 — so it is injected as authoritative
+#      context. Meanwhile `style/wording_rules.yaml`, which holds the
+#      measured house rule, is not reachable from chat at all. A
+#      confident wrong source beats a missing one for harm.
+#
+# ── Scoring contract ─────────────────────────────────────────────────
+#
+# `require` is a list of REQUIREMENTS. Each requirement is a list of
+# alternatives and is satisfied when any one alternative appears in the
+# answer, case-insensitively. This is deliberate: grading on exact
+# phrasing would fail an answer for being worded differently, and would
+# quietly turn the eval into a prompt-regression test instead of a
+# knowledge test.
+#
+# `avoid` is a hallucination and wrong-advice guard: if any string
+# appears, the item fails outright however many requirements it met.
+# Guards are only listed where the wrong answer is a *plausible* one —
+# a guard nobody would trip measures nothing.
+#
+# `route` is the path that SHOULD answer. Scored separately from
+# content, because an item can be right by luck through the LLM while
+# the pack that owns it is still unreachable — which is failure 1 above
+# wearing a passing grade.
+#
+# ── Editing rules ────────────────────────────────────────────────────
+#
+# * Add items when a real question is answered badly. Do not add items
+#   to raise the score.
+# * Never edit an item to match an answer the model produced. If an
+#   answer is defensible and the item disagrees, the item was wrong
+#   about the *question*, so rewrite the question.
+# * UA items are not translations of the EN wording, they are the way
+#   the question is actually asked in Ukrainian. Two of them (NAM-U2,
+#   PRC-U3) deliberately use the mixed Ukrainian-English register the
+#   team really speaks.
+
+items:
+
+# ══ Severity vs priority ═════════════════════════════════════════════
+- id: SEV-001
+  pack: severity_priority
+  lang: en
+  q: "Typo in the footer copyright year — what severity and priority?"
+  route: pack:severity_priority
+  require:
+    - [minor, trivial, cosmetic, low]
+    - [priority, urgency]
+  avoid: [critical, blocker]
+
+- id: SEV-002
+  pack: severity_priority
+  lang: en
+  q: "Checkout crashes, but only for users with a Ukrainian delivery address. What severity?"
+  route: pack:severity_priority
+  require:
+    - [critical, high, major]
+    - [workaround, "no way", blocked, cannot complete]
+  why: >
+    Narrow audience tempts a junior to lower severity. Severity is
+    impact-when-hit, not how many are hit — that is priority's job.
+  avoid: [minor, trivial]
+
+- id: SEV-003
+  pack: severity_priority
+  lang: en
+  q: "My lead says severity is low but priority is high. Can that even happen?"
+  route: pack:severity_priority
+  require:
+    - ["yes", "it can", common, normal, perfectly]
+    - [logo, brand, typo, cosmetic, homepage, demo]
+  why: >
+    The answer has to be an unhesitating yes plus a concrete example.
+    A misspelt company name on the homepage is trivial to the system and
+    urgent to the business — that pair is the whole lesson.
+
+- id: SEV-004
+  pack: severity_priority
+  lang: en
+  q: "Who decides priority — me or the product manager?"
+  route: pack:severity_priority
+  require:
+    - [business, product owner, stakeholder, manager]
+    - [severity, technical, impact]
+  why: >
+    Tester proposes severity from evidence, business decides priority.
+    A tester who thinks priority is theirs argues the wrong fight.
+
+- id: SEV-005
+  pack: severity_priority
+  lang: en
+  q: "A rare crash that loses the user's unsaved form. Severity?"
+  route: pack:severity_priority
+  require:
+    - [critical, high, major]
+    - [data loss, loses data, unsaved, data]
+  avoid: [minor, trivial]
+
+- id: SEV-006
+  pack: severity_priority
+  lang: en
+  q: "The password field shows the password in plain text. What severity?"
+  route: pack:severity_priority
+  require:
+    - [critical, high, major]
+    - [security, exposure, exposed]
+  avoid: [minor, cosmetic]
+
+- id: SEV-007
+  pack: severity_priority
+  lang: en
+  q: "Button is 3px off centre on one screen size. Is that even a bug?"
+  route: pack:severity_priority
+  require:
+    - [trivial, minor, cosmetic]
+    - [report, log, raise, worth]
+  why: >
+    Answer must be "yes, log it, at trivial" — juniors are told both
+    "don't report noise" and "report everything", and need the rule that
+    reporting cost is low and the severity field carries the judgement.
+  avoid: ["not a bug", "don't report", "do not report", ignore]
+
+- id: SEV-008
+  pack: severity_priority
+  lang: en
+  q: "What is the difference between severity and priority?"
+  route: istqb:severity
+  require:
+    - [impact, degree, technical]
+    - [urgency, business, how soon]
+
+- id: SEV-009
+  pack: severity_priority
+  lang: en
+  q: "Feature works but is 8 seconds slower than the requirement says. Severity?"
+  route: pack:severity_priority
+  require:
+    - [major, high, medium]
+    - [requirement, spec, sla, acceptance]
+  why: >
+    A measurable requirement was violated, so this is not cosmetic even
+    though nothing is visibly broken. The evidence to attach is the
+    requirement, not a screenshot.
+
+- id: SEV-010
+  pack: severity_priority
+  lang: en
+  q: "Dev says 'won't fix, it's minor'. What do I do?"
+  route: pack:severity_priority
+  require:
+    - [evidence, impact, data, measure]
+    - [priority, business, product owner, escalate]
+  avoid: [accept it, close the bug, "just close"]
+
+- id: SEV-011
+  pack: severity_priority
+  lang: en
+  q: "Should I set severity Critical to make them fix it faster?"
+  route: pack:severity_priority
+  require:
+    - [never, "don't", do not, not a good]
+    - [priority, trust, credibility, inflat]
+  why: >
+    Severity inflation is the single most common junior failure mode and
+    it costs the tester their credibility. The fix is to argue priority.
+
+- id: SEV-012
+  pack: severity_priority
+  lang: en
+  q: "Login is completely broken on the staging environment only. Severity?"
+  route: pack:severity_priority
+  require:
+    - [environment, staging, production]
+    - [blocker, blocked, critical, high]
+  why: >
+    Severity stays high — it blocks testing — but the answer must
+    separate "blocks the team" from "affects users", because that
+    distinction is what sets priority here.
+
+- id: SEV-013
+  pack: severity_priority
+  lang: en
+  q: "How many severity levels should we have?"
+  route: pack:severity_priority
+  require:
+    - [four, "4 levels", three, "3 levels", scale]
+    - [agree, team, definition, consistent]
+  avoid: ["10 levels", ten levels, twenty]
+
+- id: SEV-014
+  pack: severity_priority
+  lang: en
+  q: "Error message is in English on the Ukrainian version of the site. Severity?"
+  route: pack:severity_priority
+  require:
+    - [minor, medium, major]
+    - [localis, localiz, translat, language]
+  why: >
+    Deliberately mid-scale: the answer must show reasoning about whether
+    the user can still proceed, not reach for a level by reflex.
+
+# ══ Backend vs frontend ══════════════════════════════════════════════
+- id: LYR-001
+  pack: layer
+  lang: en
+  q: "The total on the cart page is wrong. Is that backend or frontend?"
+  route: pack:layer
+  require:
+    - [network, devtools, response, api, payload]
+    - ["don't guess", cannot tell, depends, check, compare]
+  why: >
+    The only correct first move is to compare the API response with what
+    is rendered. An answer that picks a layer without that comparison is
+    guessing, however plausible the guess.
+  avoid: [definitely backend, definitely frontend, "it's frontend", "it's backend"]
+
+- id: LYR-002
+  pack: layer
+  lang: en
+  q: "How do I know if a bug is on the server side?"
+  route: pack:layer
+  require:
+    - [network, response, api, request]
+    - [console, "500", 5xx, status code, error]
+
+- id: LYR-003
+  pack: layer
+  lang: en
+  q: "What evidence should I attach so the dev doesn't send the bug back?"
+  route: pack:layer
+  require:
+    - [request, response, network, har]
+    - [console, log]
+    - [steps, reproduce, environment, build]
+
+- id: LYR-004
+  pack: layer
+  lang: en
+  q: "Page shows a spinner forever after I click Save."
+  route: pack:layer
+  require:
+    - [network, request, pending, response]
+    - [console, error]
+  why: >
+    Three different bugs look identical here — request never sent,
+    request never answered, answer never handled — and the network tab
+    separates them in one look.
+
+- id: LYR-005
+  pack: layer
+  lang: en
+  q: "I get a 500 error. Is that my fault or the developer's?"
+  route: pack:layer
+  require:
+    - [server, backend, "500"]
+    - [report, log it, valid, always]
+  avoid: ["your fault", user error, not a bug]
+
+- id: LYR-006
+  pack: layer
+  lang: en
+  q: "The data saves but the list doesn't refresh until I reload."
+  route: pack:layer
+  require:
+    - [frontend, client, front end, interface]
+    - [saved, persisted, database, backend, correct]
+  why: >
+    Correct backend plus stale UI is the classic frontend state bug, and
+    the answer must say the data IS saved so the dev is not sent hunting
+    in the wrong layer.
+
+- id: LYR-007
+  pack: layer
+  lang: en
+  q: "Validation lets me submit an empty email. Which layer do I report?"
+  route: pack:layer
+  require:
+    - [both, client, server]
+    - [api, direct, bypass, curl, postman]
+  why: >
+    The real answer is to test the API directly: front-end-only
+    validation is a security finding, not a cosmetic one.
+
+- id: LYR-008
+  pack: layer
+  lang: en
+  q: "It works in Chrome but not in Safari."
+  route: pack:layer
+  require:
+    - [frontend, client, browser]
+    - [console, version, compatib]
+  avoid: [backend, server]
+
+- id: LYR-009
+  pack: layer
+  lang: en
+  q: "Should I look at the console for every bug?"
+  route: pack:layer
+  require:
+    - ["yes", habit, always, cheap, free]
+    - [console, network]
+
+- id: LYR-010
+  pack: layer
+  lang: en
+  q: "The response is correct in the network tab but the screen shows nothing."
+  route: pack:layer
+  require:
+    - [frontend, client, rendering, render]
+    - [console]
+  avoid: [backend bug, server bug]
+
+- id: LYR-011
+  pack: layer
+  lang: en
+  q: "How do I capture a HAR file?"
+  route: pack:layer
+  require:
+    - [network, devtools, export]
+    - [har, save]
+  avoid: [console tab only]
+
+- id: LYR-012
+  pack: layer
+  lang: en
+  q: "Do I need to know SQL to test backend?"
+  route: pack:layer
+  require:
+    - [helps, useful, basic, select]
+    - [api, response, not required, without]
+  why: >
+    A mentoring question, not a technical one. The answer must not
+    gatekeep, and must name the smallest useful thing to learn.
+
+# ══ UI naming and the verb dictionary ════════════════════════════════
+# These grade against style/wording_rules.yaml and glossary/ui_terms.en.yaml,
+# which are already measured from the 4,808-case corpus. Any item here
+# that disagrees with those files is a bug in this file.
+- id: NAM-001
+  pack: naming
+  lang: en
+  q: "Should I write 'click' or 'press' in a test step?"
+  route: pack:naming
+  require:
+    - ["click on"]
+    - [tap, mobile]
+  why: >
+    The approved list in wording_rules.yaml says "Click on" for pointer
+    and "Tap" for touch. This is the item that failed hardest before the
+    pack existed: retrieval answered it with a Java Selenium snippet.
+  avoid: [press the button, either is fine, "doesn't matter", does not matter]
+
+- id: NAM-002
+  pack: naming
+  lang: en
+  q: "What do I call the thing that opens when you press the profile picture?"
+  route: pack:naming
+  require:
+    - [drop-down, menu]
+    - [label, quote, name]
+  avoid: [dropdown, combobox, select, popup thing]
+
+- id: NAM-003
+  pack: naming
+  lang: en
+  q: "Is it 'dropdown' or 'drop-down'?"
+  route: pack:naming
+  require:
+    - [drop-down]
+  avoid: [either, both fine, combobox]
+
+- id: NAM-004
+  pack: naming
+  lang: en
+  q: "How do I name a search field that has only a magnifier icon and no label?"
+  route: pack:naming
+  require:
+    - [entry field, field, search]
+    - [placeholder, icon, aria, position]
+  why: >
+    wording_rules.yaml forbids naming an element by position alone, so
+    the answer must reach for placeholder / accessible name first and use
+    position only as a qualifier.
+  avoid: [textbox, "the icon on the right", second field]
+
+- id: NAM-005
+  pack: naming
+  lang: en
+  q: "Do I capitalise header and footer in a test case?"
+  route: pack:naming
+  require:
+    - ["yes", capital, proper noun]
+    - [header, footer]
+  why: Three separate reviewer comments in the corpus are exactly this.
+
+- id: NAM-006
+  pack: naming
+  lang: en
+  q: "Can I write 'the second card in the list'?"
+  route: pack:naming
+  require:
+    - [avoid, "don't", do not, never, rename]
+    - [name, label, identify]
+  avoid: ["yes, that's fine", acceptable]
+
+- id: NAM-007
+  pack: naming
+  lang: en
+  q: "How should a test case title start?"
+  route: pack:naming
+  require:
+    - ["verify that"]
+    - [can, cannot, actor, user]
+  avoid: [verify the ability, is able to, "check that", "test that"]
+
+- id: NAM-008
+  pack: naming
+  lang: en
+  q: "Is 'the system should display an error' a good expected result?"
+  route: pack:naming
+  require:
+    - [avoid, "don't", do not, instead, rewrite, never]
+    - [displays, "is displayed", present tense, shown]
+  why: >
+    The corpus never uses "should" in an expected result. This is the
+    house rule that contradicted a team-lead instruction and was settled
+    by measurement, so it must stay graded.
+  avoid: [that is correct, perfectly fine, acceptable]
+
+- id: NAM-009
+  pack: naming
+  lang: en
+  q: "What's the right word for the three-line menu icon?"
+  route: pack:naming
+  require:
+    - [hamburger button]
+  avoid: [burger menu, hamburger menu icon thing]
+
+- id: NAM-010
+  pack: naming
+  lang: en
+  q: "What do you call the box that appears over the page and blocks it?"
+  route: pack:naming
+  require:
+    - [modal]
+  avoid: [lightbox, popup window, overlay thing]
+
+- id: NAM-011
+  pack: naming
+  lang: en
+  q: "One step or several: 'Open the form, fill the email and click Submit'?"
+  route: pack:naming
+  require:
+    - [separate, split, one action, three]
+  avoid: ["one step is fine", keep it together]
+
+- id: NAM-012
+  pack: naming
+  lang: en
+  q: "How do I write the step for scrolling?"
+  route: pack:naming
+  require:
+    - [scroll]
+    - [what, object, explicit, target, "scroll to"]
+  why: >
+    The reviewer comment preserved in wording_rules.yaml is literally
+    "1. What do you scroll?" — a scroll step without an object is the
+    canonical unexecutable step.
+
+- id: NAM-013
+  pack: naming
+  lang: en
+  q: "Should I quote the button label exactly as on screen?"
+  route: pack:naming
+  require:
+    - ["yes", exact, exactly]
+    - [label, quote]
+
+- id: NAM-014
+  pack: naming
+  lang: en
+  q: "What's the term for the expandable section that shows more text?"
+  route: pack:naming
+  require:
+    - [accordion]
+  avoid: [spoiler, expander, collapsible thing]
+
+- id: NAM-015
+  pack: naming
+  lang: en
+  q: "Can I say 'textbox' for an input?"
+  route: pack:naming
+  require:
+    - [entry field, field, label]
+  avoid: ["textbox is fine", "yes"]
+
+- id: NAM-016
+  pack: naming
+  lang: en
+  q: "My title is 240 characters. Too long?"
+  route: pack:naming
+  require:
+    - ["yes", too long, shorten, split]
+    - ["160", "220", one assertion]
+
+# ══ Process ══════════════════════════════════════════════════════════
+- id: PRC-001
+  pack: process
+  lang: en
+  q: "We have no time for full regression. What do I cut first?"
+  route: pack:process
+  require:
+    - [risk, changed, impact, critical path]
+    - [smoke, priorit, core]
+  why: >
+    The mentoring answer is risk-based selection, and it must name what
+    to KEEP (changed areas plus money paths), because "cut the low
+    priority ones" is advice the asker already has.
+  avoid: [cut randomly, test everything, "just skip"]
+
+- id: PRC-002
+  pack: process
+  lang: en
+  q: "When can I say testing is done?"
+  route: pack:process
+  require:
+    - [exit criteria, criteria, definition of done]
+    - [agreed, plan, coverage, risk]
+  avoid: [no bugs left, "all bugs fixed", zero defects]
+
+- id: PRC-003
+  pack: process
+  lang: en
+  q: "How many test cases should I write for a login form?"
+  route: pack:process
+  require:
+    - [equivalence, boundary, technique, negative]
+    - [depends, risk]
+  why: >
+    A number alone is the wrong answer; the useful answer converts the
+    question into a technique and shows how the count falls out of it.
+  avoid: ["exactly 10", "you need 20 cases"]
+
+- id: PRC-004
+  pack: process
+  lang: en
+  q: "What are entry and exit criteria for?"
+  route: istqb:entry_exit
+  require:
+    - [start, begin, ready]
+    - [finish, complete, stop, done]
+
+- id: PRC-005
+  pack: process
+  lang: en
+  q: "The build arrived with no requirements documented. What do I test?"
+  route: pack:process
+  require:
+    - [exploratory, charter, session]
+    - [risk, ask, analog, similar]
+  avoid: ["refuse to test", wait for requirements, "can't test"]
+
+- id: PRC-006
+  pack: process
+  lang: en
+  q: "What's the difference between smoke and regression?"
+  route: istqb:smoke
+  require:
+    - [smoke, shallow, breadth, build, quick]
+    - [regression, existing, unchanged, side effect]
+
+- id: PRC-007
+  pack: process
+  lang: en
+  q: "My estimate was 3 days and it took 6. What did I do wrong?"
+  route: pack:process
+  require:
+    - [environment, blocked, rework, retest, waiting]
+    - [track, record, next time, actual]
+  why: >
+    The usual cause is unbudgeted retest and environment downtime, not
+    slow test design. The answer must be about what to measure, not
+    about padding.
+  avoid: [double your estimates, "you're too slow"]
+
+- id: PRC-008
+  pack: process
+  lang: en
+  q: "How long should a bug stay in Reopened?"
+  route: pack:process
+  require:
+    - [reopen, retest, confirmation]
+    - [why, root cause, evidence, incomplete]
+
+- id: PRC-009
+  pack: process
+  lang: en
+  q: "Do I retest only the fixed bug, or around it too?"
+  route: pack:process
+  require:
+    - [confirmation, retest, fixed]
+    - [regression, around, related, impact]
+
+- id: PRC-010
+  pack: process
+  lang: en
+  q: "What is shift-left testing in plain words?"
+  route: istqb:shift_left
+  require:
+    - [early, earlier, sooner]
+    - [cheaper, cost, requirement, review]
+
+- id: PRC-011
+  pack: process
+  lang: en
+  q: "Should I automate this test?"
+  route: pack:process
+  require:
+    - [repeat, stable, frequency, how often]
+    - [maintain, cost, value]
+  avoid: [automate everything, "yes, always", "no, never"]
+
+- id: PRC-012
+  pack: process
+  lang: en
+  q: "The developer closed my bug as 'cannot reproduce'. Now what?"
+  route: pack:process
+  require:
+    - [environment, build, version, data]
+    - [steps, video, evidence, precondition]
+  avoid: [give up, close it, "accept it"]
+
+- id: PRC-013
+  pack: process
+  lang: en
+  q: "What test design techniques should I actually know first?"
+  route: istqb:techniques
+  require:
+    - [equivalence]
+    - [boundary]
+
+- id: PRC-014
+  pack: process
+  lang: en
+  q: "Is a checklist worse than test cases?"
+  route: pack:process
+  require:
+    - [different, depends, both, not worse]
+    - [speed, coverage, detail, exploratory]
+  avoid: ["yes, always write test cases", checklists are bad]
+
+- id: PRC-015
+  pack: process
+  lang: en
+  q: "How do I test something I don't understand?"
+  route: pack:process
+  require:
+    - [ask, question, clarif]
+    - [explore, tour, learn, analog]
+  avoid: ["you can't", refuse]
+
+- id: PRC-016
+  pack: process
+  lang: en
+  q: "What goes in a test plan?"
+  route: istqb:test_plan
+  require:
+    - [scope, objective]
+    - [risk, resource, schedule, criteria]
+
+- id: PRC-017
+  pack: process
+  lang: en
+  q: "What are the stages of STLC?"
+  route: pack:process
+  require:
+    - [analysis, requirement]
+    - [design]
+    - [execution]
+    - [closure, report]
+
+- id: PRC-018
+  pack: process
+  lang: en
+  q: "Two testers found the same bug. Whose is it?"
+  route: pack:process
+  require:
+    - [duplicate, link, merge]
+    - [first, original]
+  avoid: [delete one, "doesn't matter", does not matter]
+
+- id: PRC-019
+  pack: process
+  lang: en
+  q: "My exploratory session found nothing. Was it wasted?"
+  route: pack:process
+  require:
+    - [information, confidence, coverage, not wasted, value]
+    - [note, record, charter, learned]
+  avoid: ["yes, wasted", you failed]
+
+- id: PRC-020
+  pack: process
+  lang: en
+  q: "How do I estimate testing for a feature I've never seen?"
+  route: pack:process
+  require:
+    - [analog, similar, past, historic]
+    - [range, assumption, unknown, risk]
+  avoid: ["give one number", "just guess"]
+
+# ══ Theory — regression guard on coverage that already works ═════════
+# These must keep passing. They exist so a routing change made for the
+# new packs cannot silently break the ISTQB answers that already work.
+- id: THY-001
+  pack: theory
+  lang: en
+  q: "What is the difference between error, defect and failure?"
+  route: istqb:errors_defects
+  require:
+    - [human, mistake, action]
+    - [flaw, work product]
+    - [visible, external, behaviour, behavior]
+
+- id: THY-002
+  pack: theory
+  lang: en
+  q: "What are the seven testing principles?"
+  route: istqb:principles
+  require:
+    - [presence of defects, shows the presence, reveal]
+    - [exhaustive]
+    - [early]
+    - [cluster]
+
+- id: THY-003
+  pack: theory
+  lang: en
+  q: "What is verification vs validation?"
+  route: istqb:verification_validation
+  require:
+    - [right, specification, requirement, correctly]
+    - [needs, user, fit for, intended]
+
+- id: THY-004
+  pack: theory
+  lang: en
+  q: "What is a test condition?"
+  route: istqb:glossary
+  require:
+    - [test basis, aspect]
+    - [what to test, objective]
+
+- id: THY-005
+  pack: theory
+  lang: en
+  q: "What is boundary value analysis?"
+  route: istqb:boundary
+  require:
+    - [boundary, edge, limit]
+    - [partition, valid, invalid, minimum, maximum]
+
+- id: THY-006
+  pack: theory
+  lang: en
+  q: "What is the defect lifecycle?"
+  route: istqb:defect_lifecycle
+  require:
+    - [new, open]
+    - [assigned, in progress, fixed]
+    - [closed]
+
+- id: THY-007
+  pack: theory
+  lang: en
+  q: "What is QA vs testing?"
+  route: istqb:qa_vs_testing
+  require:
+    - [process, prevent, quality management]
+    - [product, find, detect, execution]
+
+- id: THY-008
+  pack: theory
+  lang: en
+  q: "What are the test levels?"
+  route: istqb:levels
+  require:
+    - [component, unit]
+    - [integration]
+    - [system]
+    - [acceptance]
+
+- id: THY-009
+  pack: theory
+  lang: en
+  q: "Why is exhaustive testing impossible?"
+  route: istqb:principles
+  require:
+    - [combination, input, infinite, too many]
+    - [risk, priorit, focus]
+
+- id: THY-010
+  pack: theory
+  lang: en
+  q: "What is static testing?"
+  route: istqb:static
+  require:
+    - [without executing, no execution, review]
+    - [early, requirement, document, code]
+
+- id: THY-011
+  pack: theory
+  lang: en
+  q: "What is risk-based testing?"
+  route: istqb:risk_based
+  require:
+    - [likelihood, probability]
+    - [impact, consequence]
+    - [priorit, effort, focus]
+
+- id: THY-012
+  pack: theory
+  lang: en
+  q: "What is traceability and why do I care?"
+  route: istqb:glossary
+  require:
+    - [requirement, test basis, link]
+    - [coverage, impact, change]
+
+# ══ Product help — regression guard on the module answers ════════════
+- id: PRD-001
+  pack: product
+  lang: en
+  q: "How do I generate test cases in TestForTge?"
+  route: fast_path:module_help
+  require:
+    - [test case]
+    - [generate, module, url, requirement]
+
+- id: PRD-002
+  pack: product
+  lang: en
+  q: "Where do I see the bug reports?"
+  route: fast_path:module_help
+  require:
+    - [bug report]
+
+- id: PRD-003
+  pack: product
+  lang: en
+  q: "What can you do?"
+  route: fast_path:default_help
+  require:
+    - [test case, checklist, bug]
+
+- id: PRD-004
+  pack: product
+  lang: en
+  q: "Hi Tedgie!"
+  route: fast_path:greeting
+  require:
+    - [hello, "hi!", "hi,", hey, tedgie]
+
+- id: PRD-005
+  pack: product
+  lang: en
+  q: "How does the estimation module work?"
+  route: fast_path:module_help
+  require:
+    - [estimat]
+    - [hour, effort, driver, team]
+
+- id: PRD-006
+  pack: product
+  lang: en
+  q: "The generation failed with an error."
+  route: fast_path:troubleshoot
+  require:
+    - [url, key, retry, again, check]
+
+- id: PRD-007
+  pack: product
+  lang: en
+  q: "How do I export to Excel?"
+  route: fast_path:module_help
+  require:
+    - [export]
+    - [excel, xlsx, csv]
+
+- id: PRD-008
+  pack: product
+  lang: en
+  q: "What is the checklist module for?"
+  route: fast_path:module_help
+  require:
+    - [checklist]
+    - [coverage, section, item]
+
+- id: PRD-009
+  pack: product
+  lang: en
+  q: "Thanks!"
+  route: fast_path:gratitude
+  require:
+    - [welcome, glad, pleasure, happy]
+
+- id: PRD-010
+  pack: product
+  lang: en
+  q: "How do I run the automation?"
+  route: fast_path:module_help
+  require:
+    - [automation]
+    - [run, execut, playwright, script]
+
+# ══ Ukrainian ════════════════════════════════════════════════════════
+# Not translations — the way the questions are actually asked. UA answers
+# are graded on the same requirements, so a UA answer that skips the
+# reasoning fails even if it is fluent.
+- id: SEV-U1
+  pack: severity_priority
+  lang: uk
+  q: "Опечатка в футері. Яка серйозність?"
+  route: pack:severity_priority
+  require:
+    - [minor, тривіальн, незначн, косметичн, низьк]
+  avoid: [критичн, блокер]
+
+- id: SEV-U2
+  pack: severity_priority
+  lang: uk
+  q: "Чи може бути низька серйозність і високий пріоритет?"
+  route: pack:severity_priority
+  require:
+    - ["так", може, буває, звичайн]
+    - [логотип, назв, бренд, головн, опечатк]
+
+- id: SEV-U3
+  pack: severity_priority
+  lang: uk
+  q: "Хто визначає пріоритет — я чи менеджер?"
+  route: pack:severity_priority
+  require:
+    - [бізнес, власник, менеджер, замовник]
+    - [серйозн, технічн, вплив]
+
+- id: SEV-U4
+  pack: severity_priority
+  lang: uk
+  q: "Пароль видно відкритим текстом у полі. Яка серйозність?"
+  route: pack:severity_priority
+  require:
+    - [критичн, висок]
+    - [безпек, вразлив]
+  avoid: [незначн, косметичн]
+
+- id: LYR-U1
+  pack: layer
+  lang: uk
+  q: "Сума в кошику неправильна. Це бек чи фронт?"
+  route: pack:layer
+  require:
+    - [network, мереж, запит, відповід, api]
+    - [не вгадув, порівня, перевір, залежить]
+  avoid: [точно бек, точно фронт]
+
+- id: LYR-U2
+  pack: layer
+  lang: uk
+  q: "Що прикріпити до бага, щоб його не повернули?"
+  route: pack:layer
+  require:
+    - [запит, відповід, network, har]
+    - [консол, лог]
+    - [крок, відтвор, середовищ, білд]
+
+- id: LYR-U3
+  pack: layer
+  lang: uk
+  q: "Отримав 500. Це моя помилка чи розробника?"
+  route: pack:layer
+  require:
+    - [сервер, бек, "500"]
+    - [репорт, заводь, валідн, завжди]
+  avoid: [твоя помилка, не баг]
+
+- id: NAM-U1
+  pack: naming
+  lang: uk
+  q: "Писати «натиснути» чи «клікнути» в кроці?"
+  route: pack:naming
+  require:
+    - [click on, натисніть на, клікніт]
+    - [tap, тап, мобіл]
+  avoid: ["без різниці", "не має значення"]
+
+- id: NAM-U2
+  pack: naming
+  lang: uk
+  q: "Як назвати дропдаун, який відкривається по аватарці?"
+  route: pack:naming
+  require:
+    - [drop-down, спадн, меню]
+    - [лейбл, підпис, назв, цитуй]
+  why: The mixed register ("дропдаун") is how the team really asks this.
+
+- id: NAM-U3
+  pack: naming
+  lang: uk
+  q: "З чого має починатися назва тест-кейсу?"
+  route: pack:naming
+  require:
+    - ["verify that"]
+  avoid: [is able to, "перевірити що", "переконатися що"]
+
+- id: NAM-U4
+  pack: naming
+  lang: uk
+  q: "Чи писати «система повинна показати помилку» в очікуваному результаті?"
+  route: pack:naming
+  require:
+    - [не варто, уникай, натоміст, неправильн, некорект]
+    - [теперішн, показує, відображається, displays]
+  avoid: [так, правильно, добре]
+
+- id: PRC-U1
+  pack: process
+  lang: uk
+  q: "Немає часу на повну регресію. Що різати першим?"
+  route: pack:process
+  require:
+    - [ризик, змін, вплив, критичн]
+    - [смоук, smoke, пріоритет, основн]
+  avoid: [тестуй усе, ріж навмання]
+
+- id: PRC-U2
+  pack: process
+  lang: uk
+  q: "Коли можна сказати, що тестування завершене?"
+  route: pack:process
+  require:
+    - [критері, exit, завершен, готовн]
+    - [узгодж, план, покритт, ризик]
+  avoid: [коли немає багів, нуль дефектів]
+
+- id: PRC-U3
+  pack: process
+  lang: uk
+  q: "Скільки кейсів писати на форму логіну?"
+  route: pack:process
+  require:
+    - [еквівалент, границ, технік, негативн]
+    - [залежить, ризик]
+  avoid: ["рівно 10", "потрібно 20"]
+
+- id: PRC-U4
+  pack: process
+  lang: uk
+  q: "Розробник закрив баг як «не відтворюється». Що робити?"
+  route: pack:process
+  require:
+    - [середовищ, білд, версі, дан]
+    - [крок, відео, доказ, передумов]
+  avoid: [закрити, здатися]
+
+- id: THY-U1
+  pack: theory
+  lang: uk
+  q: "Яка різниця між error, defect і failure?"
+  route: istqb:errors_defects
+  require:
+    - [людин, помилка дії, дія]
+    - [дефект, артефакт, продукт]
+    - [видим, зовнішн, прояв, поведінк]
+
+- id: THY-U2
+  pack: theory
+  lang: uk
+  q: "Що таке аналіз граничних значень?"
+  route: istqb:boundary
+  require:
+    - [границ, межов, край]
+    - [клас, валідн, невалідн, мінімум, максимум]
+
+- id: PRD-U1
+  pack: product
+  lang: uk
+  q: "Як згенерувати чекліст?"
+  route: fast_path:module_help
+  require:
+    - [чекліст, checklist]
+
+- id: PRD-U2
+  pack: product
+  lang: uk
+  q: "Привіт, Tedgie!"
+  route: fast_path:greeting
+  require:
+    - [привіт, вітаю, добр]
