@@ -2678,3 +2678,76 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) {
     .tc-step-actions { transition: none; }
 }
+
+/* ── Checklist editor (E4.4) ───────────────────────────────────────
+   The fields use the .ie rules above. These are the checklist's own
+   controls: the section header's rename/add pair, and the per-row move /
+   relocate / delete group. */
+
+.cl-editor-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin: 0 0 16px 0;
+}
+
+.cl-editor-hint { font-size: 0.85em; color: #64748b; }
+
+.cl-editor-status {
+    font-size: 0.85em;
+    font-weight: 600;
+    margin-left: auto;
+}
+.cl-editor-status-ok { color: #047857; }
+.cl-editor-status-error { color: #b91c1c; }
+.cl-editor-status-info { color: #475569; }
+
+.cl-section-btn,
+.cl-row-btn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    color: #475569;
+    cursor: pointer;
+    font-size: 0.78em;
+    line-height: 1;
+    margin-left: 3px;
+    padding: 3px 6px;
+}
+
+.cl-section-btn:hover,
+.cl-row-btn:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
+
+.cl-row-btn:disabled { cursor: default; opacity: 0.35; }
+
+.cl-section-btn:focus-visible,
+.cl-row-btn:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.cl-row-del:hover:not(:disabled) {
+    background: #fee2e2;
+    border-color: #fecaca;
+    color: #b91c1c;
+}
+
+.cl-row-actions {
+    /* Revealed on hover or focus-within, like the step controls: the table
+       reads as a table until somebody reaches for a control. Never
+       display:none, which would drop them out of the tab order. */
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 6px;
+    opacity: 0;
+    transition: opacity 0.12s ease-in-out;
+    white-space: nowrap;
+}
+
+.cl-row:hover .cl-row-actions,
+.cl-row:focus-within .cl-row-actions { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+    .cl-row-actions { transition: none; }
+}

@@ -25,23 +25,14 @@
     'use strict';
 
     const STEPS_LIST = '[data-tc-steps]';
-
-    function csrfToken() {
-        const meta = document.querySelector('meta[name="csrf-token"]');
-        return meta ? meta.getAttribute('content') : '';
-    }
+    // CSRF, the JSON fetch and the status line are the same in every editor,
+    // so they live in editor-shared.js — four copies would be four chances to
+    // forget the CSRF header, which passes a suite that disables CSRF and
+    // 400s in production.
+    const shared = window.TestFortgeEditor;
 
     function status(message, kind) {
-        const box = document.querySelector('[data-tc-editor-status]');
-        if (!box) return;
-        box.textContent = message || '';
-        box.className = 'tc-editor-status'
-            + (kind ? ' tc-editor-status-' + kind : '');
-        if (kind === 'ok') {
-            window.setTimeout(() => {
-                if (box.textContent === message) box.textContent = '';
-            }, 2500);
-        }
+        shared.status('[data-tc-editor-status]', message, kind);
     }
 
     /** Steps and fields of one case share a row version; keep them in step. */
@@ -54,23 +45,6 @@
         document.querySelectorAll(
             `[data-ie-entity="test_case"][data-ie-id="${caseId}"]`
         ).forEach((el) => { el.setAttribute('data-ie-version', value); });
-    }
-
-    async function send(url, options) {
-        const resp = await fetch(url, Object.assign({
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfToken(),
-                'Accept': 'application/json',
-            },
-        }, options));
-        let payload = null;
-        try {
-            payload = await resp.json();
-        } catch (err) {
-            payload = null;
-        }
-        return { resp: resp, payload: payload };
     }
 
     // ── The steps list ────────────────────────────────────────────
@@ -128,7 +102,7 @@
         if (version !== null && version !== '') {
             body.row_version = Number(version);
         }
-        const { resp, payload } = await send(
+        const { resp, payload } = await shared.send(
             `/api/edit/test_case/${encodeURIComponent(caseId)}/steps`,
             { method: 'POST', body: JSON.stringify(body) });
 
@@ -284,7 +258,7 @@
                     `Delete ${caseId}? This cannot be undone.`)) return;
             const query = (version !== null && version !== '')
                 ? `?row_version=${encodeURIComponent(version)}` : '';
-            send(`/api/edit/test_case/${encodeURIComponent(caseId)}${query}`,
+            shared.send(`/api/edit/test_case/${encodeURIComponent(caseId)}${query}`,
                 { method: 'DELETE' }).then(({ resp, payload }) => {
                     if (resp.ok) {
                         const card = document.getElementById(caseId);
@@ -301,7 +275,7 @@
         // Create a case.
         if (target.closest('#tc-create')) {
             status('Creating…', 'info');
-            send('/api/edit/test_case', {
+            shared.send('/api/edit/test_case', {
                 method: 'POST',
                 body: JSON.stringify({ values: {} }),
             }).then(({ resp, payload }) => {

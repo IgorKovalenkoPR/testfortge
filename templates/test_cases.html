@@ -710,6 +710,7 @@
                      'Click any field to edit it. Changes are saved for the whole team.') }}
         </span>
         <span class="tc-editor-status" data-tc-editor-status
+              data-status-class="tc-editor-status"
               role="status" aria-live="polite"></span>
     </div>
     {%- endif %}
@@ -1081,6 +1082,10 @@
     on because the template did not render any. -#}
 {{ editable_assets(csp_nonce) }}
 {%- if editors_enabled() %}
+{#- Shared plumbing first: tc-editor.js reads window.TestFortgeEditor as it
+    loads, and deferred scripts run in document order. -#}
+<script src="{{ url_for('static', filename='js/editor-shared.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
 <script src="{{ url_for('static', filename='js/tc-editor.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}

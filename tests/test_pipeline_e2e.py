@@ -321,7 +321,12 @@ class TestThroughTheApp:
 
     def test_checklist_page_renders_the_hierarchy(self, client, seeded):
         body = client.get("/checklist").get_data(as_text=True)
-        assert 'class="cl-num">1.1<' in body
+        # Matched on the cell's class and its content rather than on one exact
+        # attribute string: E4.4 added ``data-cl-num`` to the same <td> (the
+        # editor writes the server's numbers back into it), which broke a
+        # test whose intent — "the hierarchy number renders" — was untouched.
+        import re
+        assert re.search(r'class="cl-num"[^>]*>\s*1\.1\s*<', body)
         assert "cl-row-sub" in body
 
     def test_test_cases_page_shows_the_bdd_view(self, client, seeded):

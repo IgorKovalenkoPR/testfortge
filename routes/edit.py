@@ -64,6 +64,82 @@ def _invalidate(project_id: str) -> None:
         log.debug("workspace invalidate after edit skipped: %s", exc)
 
 
+def _checklist_pack(project_id: str):
+    """The stored pack and its version, for a read-modify-write.
+
+    The version is read here and handed to the write, so a concurrent change
+    between the two is refused (E3.5) instead of silently overwritten.
+    """
+    from engine import db as _db
+    from engine import workspace as _workspace
+    items = list(_workspace.checklist(project_id) or [])
+    version = _db.pack_versions(project_id).get("checklist")
+    return items, version
+
+
+def _write_checklist_pack(project_id: str, items, expected_version):
+    """Store a reordered pack. Provenance survives; the pack version bumps.
+
+    ``save_checklist`` deletes and re-inserts, which is what makes
+    ``ORDER BY id`` agree with the new order, and it carries each row's
+    ``row_version``/``ai_generated`` across on the public id.
+    """
+    from engine import workspace as _workspace
+    _workspace.save_checklist(project_id, items,
+                              expected_version=expected_version)
+    _invalidate(project_id)
+
+
+def _number_new_checklist_item(project_id: str, item: dict,
+                               actor: str | None) -> dict:
+    """Give a hand-added item the next free number in its section (E4.4).
+
+    ``editable.create`` inserts at the end of the pack, which is where an
+    appended item belongs — but it knows nothing about ``item_num``. The
+    number is assigned here, by the append rule the house style requires:
+    one past the highest sibling, siblings untouched.
+    """
+    from engine import checklist_order as _order
+    try:
+        items, version = _checklist_pack(project_id)
+        others = [row for row in items if row.get("id") != item.get("id")]
+        number = _order.next_number(others, item.get("section") or "")
+        numbered = _editable.patch("checklist_item", project_id, item["id"],
+                                   {"item_num": number}, actor=actor)
+        # And into its section's block. ``editable.create`` appends to the end
+        # of the *pack*, which is the end of whichever section happens to be
+        # last — so adding an item to "Header" while "Page footer" was last
+        # rendered a second "Header" heading at the bottom of the table.
+        # Measured in the browser; the number alone was not enough.
+        items, version = _checklist_pack(project_id)
+        _write_checklist_pack(project_id,
+                              _order.regroup_item(items, item["id"]), version)
+        return numbered
+    except Exception as exc:      # pragma: no cover — cosmetic if it fails
+        log.warning("could not number new checklist item %s: %s",
+                    item.get("id"), exc)
+        return item
+
+
+def _regroup_after_section_change(project_id: str, entity_id: str) -> None:
+    """Move a relocated item into its new section's block, and renumber it.
+
+    The editor uses the dedicated endpoint, but the generic PATCH accepts
+    ``section`` too — and an item left where it was in the pack makes the page
+    render a second heading for the same section further down.
+    """
+    from engine import checklist_order as _order
+    try:
+        items, version = _checklist_pack(project_id)
+        if not any(row.get("id") == entity_id for row in items):
+            return
+        _write_checklist_pack(project_id,
+                              _order.regroup_item(items, entity_id), version)
+    except Exception as exc:      # pragma: no cover
+        log.warning("could not regroup checklist after %s changed section: %s",
+                    entity_id, exc)
+
+
 def _house_style(entity: str, changes: dict) -> dict:
     """Advisory wording notes for the fields that just changed (E4.3).
 
@@ -200,6 +276,8 @@ def register(app: Flask) -> None:
             }), 409
 
         _invalidate(project_id)
+        if entity == "checklist_item" and "section" in changes:
+            _regroup_after_section_change(project_id, entity_id)
         return jsonify({"entity": entity, "item": item,
                         "warnings": _house_style(entity, changes)})
 
@@ -250,6 +328,8 @@ def register(app: Flask) -> None:
                             "message": str(exc)}), 400
 
         _invalidate(project_id)
+        if entity == "checklist_item":
+            item = _number_new_checklist_item(project_id, item, actor)
         return jsonify({"entity": entity, "item": item}), 201
 
     @app.route("/api/edit/<entity>/<entity_id>", methods=["DELETE"])
@@ -406,6 +486,109 @@ def register(app: Flask) -> None:
             "warnings": _house_style("test_case",
                                      {"test_steps": item.get("test_steps")}),
         })
+
+    # ── Checklist order and sections (E4.4) ───────────────────────
+    #
+    # Three operations that a field patch cannot express, because order is
+    # row order and ``item_num`` describes a position. All three are pack
+    # read-modify-writes under the pack version, so a colleague's concurrent
+    # change is a 409 rather than a silent overwrite. What renumbers and what
+    # deliberately does not is set by the measured house style — see
+    # engine/checklist_order.py.
+
+    def _checklist_op(entity_id: str, mutate, *, success):
+        """Shared shell: load the pack, apply ``mutate``, store it."""
+        from engine import checklist_order as _order
+        from engine import db as _db
+
+        if not _editors_enabled():
+            return _disabled()
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "bad_request",
+                            "message": "Send a JSON object."}), 400
+
+        project_id = resolve_active_project(pin=False)
+        if not project_id:
+            return jsonify({"error": "no_project",
+                            "message": "No active project."}), 400
+
+        items, version = _checklist_pack(project_id)
+        try:
+            updated = mutate(items, payload)
+        except _order.OrderError as exc:
+            return jsonify({"error": "bad_order",
+                            "message": str(exc)}), 400
+
+        try:
+            _write_checklist_pack(project_id, updated, version)
+        except _db.WriteConflict as exc:
+            log.info("checklist order conflict: %s", exc)
+            return jsonify({
+                "error": "conflict",
+                "message": ("Someone else changed this checklist while you "
+                            "were editing. Reload to see their version, then "
+                            "make your change again."),
+                "expected_version": exc.expected,
+                "current_version": exc.actual,
+            }), 409
+
+        stored = list(_checklist_pack(project_id)[0])
+        _db.append_audit(entity="checklist_item", action="reorder",
+                         entity_id=entity_id, project_id=project_id,
+                         user_id=_perm.current_user_id(),
+                         diff=success(payload))
+        return jsonify({
+            "entity": "checklist_item",
+            "items": [{"id": row.get("id"), "item_num": row.get("item_num"),
+                       "section": row.get("section")} for row in stored],
+        })
+
+    @app.route("/api/edit/checklist_item/<entity_id>/move", methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_checklist_move(entity_id: str):
+        """Move one item up or down within its section."""
+        from engine import checklist_order as _order
+        return _checklist_op(
+            entity_id,
+            lambda items, payload: _order.move(items, entity_id,
+                                               payload.get("delta") or 0),
+            success=lambda payload: {"move": [entity_id,
+                                              payload.get("delta")]})
+
+    @app.route("/api/edit/checklist_item/<entity_id>/section",
+               methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_checklist_relocate(entity_id: str):
+        """Move one item into another section, appended at its end."""
+        from engine import checklist_order as _order
+        return _checklist_op(
+            entity_id,
+            lambda items, payload: _order.relocate(
+                items, entity_id, str(payload.get("section") or "")),
+            success=lambda payload: {"section": [None,
+                                                 payload.get("section")]})
+
+    @app.route("/api/edit/checklist/rename-section", methods=["POST"])
+    @_perm.require_role("user")
+    def api_edit_checklist_rename_section():
+        """Rename a section across every item in it.
+
+        One audit row for the whole operation rather than one per item: the
+        person performed one action, and N rows would bury the edits that
+        matter. Nothing is renumbered — see engine/checklist_order.py for why
+        a rename that would merge two sections is refused instead.
+        """
+        def _mutate(items, payload):
+            from engine import checklist_order as _order
+            _order.rename_section(items, str(payload.get("from") or ""),
+                                  str(payload.get("to") or ""))
+            return items
+
+        return _checklist_op(
+            "*", _mutate,
+            success=lambda payload: {"section": [payload.get("from"),
+                                                 payload.get("to")]})
 
     # ── Development harness ───────────────────────────────────────
     #

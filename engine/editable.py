@@ -196,6 +196,12 @@ def _registry() -> dict[str, Entity]:
         "checklist_item": Entity(
             name="checklist_item", model_name="ChecklistItem",
             id_column="external_id",
+            # Unblocked by E4.4a: an item can only be addressed — created,
+            # deleted or edited — once its public id identifies one row.
+            creatable=True, deletable=True, id_prefix="CL-",
+            create_defaults={"status": "Unchecked", "priority": "Medium",
+                             "testing_type": "Functional",
+                             "category": "Positive", "section": "Manual"},
             fields={
                 "objective": _text(2000, required=True),
                 "section": _text(200),

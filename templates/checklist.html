@@ -1,4 +1,18 @@
 {% extends "base.html" %}
+{% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+
+{#- E4.4: every field below is editable in place when EDITORS_ENABLED is on.
+    ``cl_edit`` maps public id -> {row_version, ai_generated, ...}; an item
+    missing from it cannot be addressed by the edit endpoint, so it renders
+    read-only rather than offering an editor that would 404 on save. -#}
+{% set cl_edit = edit_metadata('checklist') %}
+
+{% macro cl_field(item, field, value, kind="text", label=None) %}
+  {%- set meta = cl_edit.get(item.id) if cl_edit else None -%}
+  {{ editable("checklist_item", item.id, field, value,
+              version=meta.row_version if meta else None,
+              kind=kind, label=label, readonly=(meta is none)) }}
+{%- endmacro %}
 {% block title %}TestForTge — {{ t.cl_title }}{% endblock %}
 
 {% block content %}
@@ -376,6 +390,22 @@
 </div>
 {% endif %}
 {% if has_data and checklist %}
+{%- if editors_enabled() %}
+<div class="cl-editor-bar">
+    <button type="button" class="btn btn-secondary"
+            data-cl-add="{{ (checklist | map(attribute='section') | first) or 'Manual' }}">
+        + {{ t.get('cl_add_item', 'New checklist item') }}
+    </button>
+    <span class="cl-editor-hint">
+        {{ t.get('cl_editor_hint',
+                 'Click any field to edit it. Changes are saved for the whole team.') }}
+    </span>
+    <span class="cl-editor-status" data-cl-editor-status
+          data-status-class="cl-editor-status"
+          role="status" aria-live="polite"></span>
+</div>
+{%- endif %}
+
 <div class="filter-bar">
     <label>{{ t.filter }}:</label>
     <button class="filter-btn active" onclick="filterCL('all', this)">{{ t.all }}</button>
@@ -401,18 +431,51 @@
             {# The section row carries the section's own number when the
                low-level generator produced one ("1", "2", "3") — the
                reference sheet numbers sections, not just checks. #}
-            {% set ns = namespace(current_section='') %}
+            {%- set all_sections = checklist | map(attribute='section')
+                                              | reject('none') | unique | list %}
+            {#- A move is bounded by its section, so the controls have to be
+                disabled at the *section* edges. loop.first/loop.last describe
+                the whole pack: with them the last item of section 1 offered a
+                "move down" the server correctly refused to act on, which
+                reads as a broken button. -#}
+            {%- set first_in_section = {} %}
+            {%- set last_in_section = {} %}
+            {%- for cl in checklist %}
+              {%- if cl.section not in first_in_section %}
+                {%- set _ = first_in_section.update({cl.section: cl.id}) %}
+              {%- endif %}
+              {%- set _ = last_in_section.update({cl.section: cl.id}) %}
+            {%- endfor %}
+            {% set ns = namespace(current_section='', first=true) %}
             {% for cl in checklist %}
             {% if cl.section != ns.current_section %}
             {% set ns.current_section = cl.section %}
             <tr class="section-row">
                 <td></td>
                 <td><strong>{{ (cl.item_num or '').split('.')[0] }}</strong></td>
-                <td colspan="5"><strong>{{ cl.section }}</strong></td>
+                <td colspan="5">
+                    <strong>{{ cl.section }}</strong>
+                    {%- if editors_enabled() and cl_edit %}
+                    {# Renaming is a bulk operation over the section's items,
+                       so it is one control here rather than an editable field
+                       repeated on every row — and one audit row rather than
+                       one per item. #}
+                    <button type="button" class="cl-section-btn"
+                            data-cl-rename="{{ cl.section }}"
+                            title="{{ t.get('cl_rename_section', 'Rename this section') }}"
+                            aria-label="{{ t.get('cl_rename_section', 'Rename this section') }}: {{ cl.section }}">✎</button>
+                    <button type="button" class="cl-section-btn"
+                            data-cl-add="{{ cl.section }}"
+                            title="{{ t.get('cl_add_here', 'Add an item to this section') }}"
+                            aria-label="{{ t.get('cl_add_here', 'Add an item to this section') }}: {{ cl.section }}">+</button>
+                    {%- endif %}
+                </td>
             </tr>
             {% endif %}
             <tr class="cl-row{% if (cl.depth or 2) > 2 %} cl-row-sub{% endif %}"
-                data-category="{{ cl.category }}">
+                data-category="{{ cl.category }}" data-cl-id="{{ cl.id }}"
+                data-ie-row
+                {% if cl_edit.get(cl.id) and not cl_edit[cl.id].ai_generated %}data-ie-edited{% endif %}>
                 <td>
                     <select class="status-select-sm">
                         <option value="Unchecked">—</option>
@@ -422,12 +485,37 @@
                         <option value="Blocked">BLK</option>
                     </select>
                 </td>
-                <td class="cl-num">{{ cl.item_num or '' }}</td>
-                <td><strong>{{ cl.id }}</strong></td>
-                <td>{{ cl.objective }}</td>
-                <td><span class="badge badge-cat-{{ cl.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cl.category }}</span></td>
-                <td><span class="badge badge-{{ cl.priority|lower }}">{{ cl.priority }}</span></td>
-                <td><input type="text" class="inline-input" placeholder="—"></td>
+                <td class="cl-num" data-cl-num>{{ cl.item_num or '' }}</td>
+                <td><strong>{{ cl.id }}</strong> {{ edited_marker(t.get('cl_edited', 'edited')) }}</td>
+                <td>{{ cl_field(cl, "objective", cl.objective, kind="textarea") }}</td>
+                <td><span class="badge badge-cat-{{ cl.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ cl_field(cl, "category", cl.category) }}</span></td>
+                <td><span class="badge badge-{{ cl.priority|lower }}">{{ cl_field(cl, "priority", cl.priority) }}</span></td>
+                <td>
+                    {%- if cl_edit.get(cl.id) and editors_enabled() %}
+                    {{ cl_field(cl, "comments", cl.comments, kind="textarea") }}
+                    <span class="cl-row-actions">
+                        <button type="button" class="cl-row-btn" data-cl-move="-1"
+                                title="{{ t.get('cl_move_up', 'Move up') }}"
+                                aria-label="{{ t.get('cl_move_up', 'Move up') }}: {{ cl.id }}"
+                                {% if cl.id == first_in_section[cl.section] %}disabled{% endif %}>↑</button>
+                        <button type="button" class="cl-row-btn" data-cl-move="1"
+                                title="{{ t.get('cl_move_down', 'Move down') }}"
+                                aria-label="{{ t.get('cl_move_down', 'Move down') }}: {{ cl.id }}"
+                                {% if cl.id == last_in_section[cl.section] %}disabled{% endif %}>↓</button>
+                        <button type="button" class="cl-row-btn"
+                                data-cl-relocate="{{ cl.section }}"
+                                data-cl-sections="{{ all_sections | join('|') }}"
+                                title="{{ t.get('cl_move_section', 'Move to another section') }}"
+                                aria-label="{{ t.get('cl_move_section', 'Move to another section') }}: {{ cl.id }}">⇄</button>
+                        <button type="button" class="cl-row-btn cl-row-del"
+                                data-cl-delete="{{ cl.id }}"
+                                title="{{ t.get('cl_delete', 'Delete this item') }}"
+                                aria-label="{{ t.get('cl_delete', 'Delete this item') }}: {{ cl.id }}">✕</button>
+                    </span>
+                    {%- else %}
+                    <input type="text" class="inline-input" placeholder="—">
+                    {%- endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -457,6 +545,15 @@
 {% endblock %}
 
 {% block scripts %}
+{{ editable_assets(csp_nonce) }}
+{%- if editors_enabled() %}
+{#- Shared plumbing first: cl-editor.js reads window.TestFortgeEditor as it
+    loads, and deferred scripts run in document order. -#}
+<script src="{{ url_for('static', filename='js/editor-shared.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+<script src="{{ url_for('static', filename='js/cl-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+{%- endif %}
 <script nonce="{{ csp_nonce }}">
 function filterCL(category, btn) {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));

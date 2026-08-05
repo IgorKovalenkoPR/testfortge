@@ -57,6 +57,23 @@ def editing_on(monkeypatch):
     return True
 
 
+@pytest.fixture
+def read_only_entity(monkeypatch):
+    """A registered entity that is edited in place only.
+
+    Registered for the test rather than borrowing a real one: creatable and
+    deletable are per-entity flags whose whole point is that they can be
+    turned on, and they are being turned on one editor at a time.
+    """
+    entity = editable.Entity(
+        name="in_place_only", model_name="ChecklistItem",
+        id_column="external_id", fields={"objective": editable.Field()})
+    registry = dict(editable.entities())
+    registry[entity.name] = entity
+    monkeypatch.setattr(editable, "_ENTITIES", registry)
+    return entity.name
+
+
 # ── Creating a case by hand ───────────────────────────────────────
 
 class TestCreate:
@@ -106,9 +123,14 @@ class TestCreate:
         assert db.pack_versions(project)["test_cases"] > before
 
     def test_an_entity_that_does_not_allow_it_says_so(self, project,
-                                                      editing_on):
+                                                      editing_on,
+                                                      read_only_entity):
+        """Tested against a registered entity with the flag off, rather than
+        against whichever real entity happens not to have it yet: E4.4 made
+        the checklist creatable and E4.5 will do the same for bugs, and a
+        test that tracks that is testing the registry, not the rule."""
         with pytest.raises(editable.NotCreatable):
-            editable.create("checklist_item", project, {})
+            editable.create(read_only_entity, project, {})
 
     def test_no_project_is_refused(self, editing_on, app):
         with pytest.raises(editable.EntityNotFound):
@@ -156,9 +178,10 @@ class TestRemove:
         assert db.pack_versions(project)["test_cases"] > before
 
     def test_an_entity_that_does_not_allow_it_says_so(self, project,
-                                                      editing_on):
+                                                      editing_on,
+                                                      read_only_entity):
         with pytest.raises(editable.NotDeletable):
-            editable.remove("checklist_item", project, "CL-001")
+            editable.remove(read_only_entity, project, "X-001")
 
 
 # ── Edit metadata for the page ────────────────────────────────────
