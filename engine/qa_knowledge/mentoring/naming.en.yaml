@@ -1,0 +1,472 @@
+version: 1
+pack: naming
+lang: en
+label: Naming elements and writing steps
+
+# Every answer here is the rule the generator already enforces, quoted
+# rather than paraphrased.
+#
+# The rules live in style/wording_rules.yaml and glossary/ui_terms.en.yaml,
+# measured from the team's 4,808-case reference plan, and they are read by
+# tc_author, checklist_author and glossary.lint_text. If chat advice and
+# generated output disagree, the tester is told one thing and shown
+# another, and the advice is what loses. So these entries restate the
+# rules; they do not have opinions of their own.
+#
+# Two distinctions in here are the ones people actually get wrong, and both
+# are visible only when you read the rules rather than assume them:
+#
+#   * "Press" is approved — for keyboard keys only. "Press the Enter key"
+#     is right and "press the Submit button" is wrong. Advice that bans
+#     "press" outright is as incorrect as advice that allows it anywhere.
+#   * "should" is banned in a TITLE and accepted in an EXPECTED RESULT.
+#     The reviewed training deliverable uses it in results throughout and
+#     the reviewing team lead did not object; the arbitration is recorded
+#     in wording_rules.yaml. What is actually banned in a result is
+#     grading it — "correctly", "properly", "works fine", "as expected".
+
+entries:
+
+  - id: naming_click_or_press
+    any: [click or press, press or click, click on, "press the", tap or click,
+          which verb, what verb, click vs press]
+    weight: 1
+    answer: |
+      **"Click on"** for anything you point at, **"Tap"** for the mobile
+      equivalent — and **"Press"** only for keyboard keys.
+
+      • `Click on the "Submit" button`
+      • `Tap the "Submit" button` — mobile
+      • `Press the "Enter" key` — this is what "Press" is reserved for
+
+      So a step that presses a button is wrong, and a step that clicks a key
+      is wrong too. The rule is not "never press", it is "press what your
+      fingers press".
+
+      The approved verb list is short on purpose: **Go to, Click on, Tap,
+      Expand, Collapse, Select, Fill in, Enter, Clear, Leave … empty, Mark,
+      Unmark, Press, Hover over, Scroll, Swipe, Upload, Drag and drop,
+      Change, Confirm, Pay attention to, Try to find.** One action per step,
+      and always with an explicit object.
+    follow_up:
+      - "How do I write a scroll step?"
+      - "How should a test case title start?"
+    source: qa_knowledge/style/wording_rules.yaml — action_verbs
+
+  - id: naming_dropdown_form
+    any: [dropdown, drop-down, drop down, combobox, select element, spinner
+          control, picker]
+    weight: 0.5
+    answer: |
+      **Write "drop-down"**, hyphenated, every time.
+
+      The glossary keeps one canonical term per control precisely so that a
+      tester who did not write the case can search for it. Synonyms are what
+      make a suite unsearchable — three names for one control means three
+      partial searches.
+
+      The ones people reach for a synonym on:
+
+      • **drop-down** — not the unhyphenated form, not "select", not
+        "combobox"
+      • **entry field**, or the field's own label — not "textbox"
+      • **Accordion** — not "spoiler", not "expander"
+      • **Hamburger button** — not "burger menu"
+      • **Modal** — not "lightbox"
+
+      And name it with its label quoted exactly: `the "Industries" drop-down`.
+    follow_up:
+      - "What do I call the box that covers the page?"
+      - "How do I name a field with no label?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_no_label
+    any: [no label, without a label, magnifier, magnifying glass icon,
+          only an icon, icon only, unlabelled, unlabeled, placeholder]
+    weight: 0.5
+    answer: |
+      **Name it, in this order of preference — never by position alone.**
+
+      1. **Its placeholder text**, quoted: `the "Search" entry field`.
+      2. **Its accessible name** — the `aria-label` or `title`. It is what a
+         screen reader announces and usually what the developer called it.
+      3. **The control type plus what it does**: `the search entry field in
+         the Header`.
+
+      Position is a qualifier, not a name. "The icon on the right" and "the
+      second card" both stop being true the moment the layout changes, and
+      neither tells the next tester what to look for. If two identical
+      controls exist, name the control and *then* qualify: `the "Delete"
+      button in the second row`.
+
+      Page regions are proper nouns while you are at it: **Header, Footer,
+      Homepage, Sidebar, Navigation**. Write "in the Header".
+    follow_up:
+      - "Can I write 'the second card in the list'?"
+      - "Do I capitalise Header and Footer?"
+    source: qa_knowledge/style/wording_rules.yaml — element_naming
+
+  - id: naming_profile_menu
+    any: [profile picture, avatar, account icon, user icon, opens when you
+          press, opens when i click, what do i call the thing]
+    weight: 0.5
+    answer: |
+      **A drop-down** — and name it by its trigger and its label, not by what
+      it looks like.
+
+      `Click on the user avatar in the Header` → `the account drop-down is
+      displayed`. If the panel has a visible heading or the design names it,
+      quote that: `the "My account" drop-down`.
+
+      If it covers the page and blocks interaction with what is behind it,
+      it is a **Modal**, not a drop-down — that distinction matters because
+      the two behave differently under Escape, under a click outside, and on
+      a small screen, and those are three test cases.
+    follow_up:
+      - "Is it dropdown or drop-down?"
+      - "What do I call the box that covers the page?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_capitals
+    any: [capitalise, capitalize, capital letter, uppercase, header and footer,
+          proper noun]
+    weight: 0.5
+    answer: |
+      **Yes — page regions are proper nouns.** Header, Footer, Homepage,
+      Sidebar, Navigation. Write "in the Header", not "in the header".
+
+      This is not a style preference; it is three separate reviewer comments
+      in the reference plan, all of them the same sentence: *"Footer should be
+      started from a capital letter."*
+
+      The reason it earns a rule: capitalised, "Header" reads as the region of
+      the page. Lower-case, "header" could be an HTTP header, a table header,
+      or a heading — and a step that says "check the header" has said three
+      possible things.
+    follow_up:
+      - "How do I name a field with no label?"
+      - "How should a test case title start?"
+    source: qa_knowledge/style/wording_rules.yaml — element_naming
+
+  - id: naming_by_position
+    any: [second card, third item, the one on the right, icon on the right,
+          first button, by position, the second one, last element]
+    weight: 0.5
+    answer: |
+      **Avoid it.** "The second card in the list" is not a name — it is a
+      description of a layout that will change, and it identifies nothing to
+      a tester reading the case a year from now.
+
+      Name the element, then qualify by position only if two identical ones
+      genuinely exist:
+
+      • not `Click on the second card` but `Click on the "AI Assistant
+        Quality Audit" case study card`
+      • when the label really is duplicated: `Click on the "Delete" button in
+        the second row of the results table`
+
+      There is a second reason beyond durability. If the ordering is what you
+      are testing, a case that identifies elements *by* ordering cannot fail
+      — it will find whatever is in second place and call it correct.
+    follow_up:
+      - "How do I name a field with no label?"
+      - "Do I capitalise Header and Footer?"
+    source: qa_knowledge/style/wording_rules.yaml — element_naming
+
+  - id: naming_title_grammar
+    any: [title start, title begin, name a test case, title should, case title,
+          how to name a test case, naming a test case, summary should]
+    weight: 1
+    answer: |
+      **`Verify that <actor> can <action> via the "<label>" <control type>`.**
+
+      Every title in the reference plan opens with **"Verify that"** — 2,649
+      of 4,808 are literally "Verify that User can …", and 101 are "Verify
+      that User cannot …". So:
+
+      • **Always open with "Verify that".** No other opener appears.
+      • **Name the actor**: User, or the specific role when the case only
+        holds for that role — Manager, Admin, Sales Head.
+      • **"can" for positive, "cannot" for negative.** Not "should", not
+        "must", not "is able to", not "verify the ability to".
+      • **Quote the label and name the control type**: `the "Create" button`,
+        `the "Department" drop-down`.
+      • **One assertion per title.** A title joining two independent checks
+        with "and" gets split.
+      • **No trailing period**, and 60–160 characters is the norm.
+
+      `Verify that User cannot submit the form via the "Save" button while
+      the "Email" entry field is empty`
+    follow_up:
+      - "Can I write 'should' in an expected result?"
+      - "My title is 240 characters — too long?"
+    source: qa_knowledge/style/house_style.yaml — summary_grammar
+
+  - id: naming_should_in_results
+    any: [should in the expected, should in expected, write should, use should,
+          is should allowed, should display, should be displayed]
+    weight: 1
+    answer: |
+      **In an expected result, "should" is accepted. In a title it is not.**
+
+      That split is deliberate and it is arbitrated, not assumed. The team's
+      reviewed training deliverable uses "should" throughout its expected
+      results — "The entered data should be accepted", "Button should be
+      hidden when there is no additional data" — and the reviewing team lead
+      did not object. The present-tense declarative form, "The entered data
+      is accepted", is equally accepted and is what the client corpus uses.
+      **Do not rewrite one into the other**; both are house style.
+
+      Titles are different: there, every case opens "Verify that <actor> can
+      / cannot …", and "should" never appears.
+
+      Two words stay banned in both places: **"must"** and **"shall"**.
+      Neither reference corpus uses them and they read as a requirement
+      rather than an observation.
+
+      What actually breaks an expected result is not "should" — it is
+      grading. See the next rule.
+    follow_up:
+      - "What makes an expected result unusable?"
+      - "How should a test case title start?"
+    source: qa_knowledge/style/wording_rules.yaml — result_wording
+
+  - id: naming_result_wording
+    any: [correctly, properly, works fine, as expected, expected result,
+          good expected result, works as designed, validated correctly]
+    weight: 0.5
+    answer: |
+      **State an observable outcome. Never grade it.**
+
+      Banned in expected results and in checklist objectives: *correctly,
+      incorrectly, correct, incorrect, properly, as expected, works fine,
+      works as designed, appropriately, successfully works*. The reviewer
+      comment behind the rule is blunt: *"Try do not use correct/incorrect,
+      specify the action or the result."*
+
+      The problem with a grade is that nobody can fail it. "The filter works
+      correctly" — correctly according to whom, and how would the next
+      tester know? Replace it with what is on the screen:
+
+      • not "the filter works correctly" but **"only projects related to the
+        selected industry are displayed"**
+      • not "the form is validated correctly" but **'the "Name" entry field
+        is highlighted in red and an error message is displayed below the
+        field'**
+
+      A negative case asserts **both halves**: the action is blocked *and*
+      the feedback the user sees. And when there are several independent
+      outcomes, number them — 1. … 2. … 3. …
+    follow_up:
+      - "Can I write 'should' in an expected result?"
+      - "How do I split a step that does two things?"
+    source: qa_knowledge/style/wording_rules.yaml — result_wording
+
+  - id: naming_one_action_per_step
+    any: [one step or several, split the step, two actions, one action,
+          several actions, in one step, combine steps, three things]
+    weight: 0.5
+    answer: |
+      **Separate steps — one action each, each with its object.**
+
+      "Open the form, fill the email and click Submit" is three actions, so it
+      becomes three steps:
+
+      1. `Click on the "Contact us" button in the Header`
+      2. `Fill in the "Email" entry field with a valid email:
+         qa.tester@example.com`
+      3. `Click on the "Submit" button`
+
+      Two reasons, and the second is the one that bites. A combined step
+      cannot record where it failed — "step 2 failed" tells you nothing when
+      step 2 did three things. And test data belongs to a specific action; a
+      step that fills three fields has nowhere to put three values.
+
+      Also banned as steps, because they are not executable by anyone but
+      their author: *"Navigate to the relevant page", "Perform the action",
+      "Observe the result", "Do the same for other fields"*.
+    follow_up:
+      - "How do I write a scroll step?"
+      - "What makes an expected result unusable?"
+    source: qa_knowledge/style/wording_rules.yaml — action_verbs
+
+  - id: naming_scroll
+    any: [scroll, scrolling, swipe down, scroll step]
+    weight: 0.5
+    answer: |
+      **"Scroll" always names its object and its direction.**
+
+      `Scroll the page down to the Footer` — not a bare "Scroll down". The
+      reviewer comment preserved in the rules is a single question: *"1. What
+      do you scroll?"* A page, a modal, a table and a drop-down list all
+      scroll independently, and a step that does not say which one is not
+      executable by a second person.
+
+      While you are in that part of the case: observation steps use **"Pay
+      attention to <element>"** or **"Try to find <element>"**. Never put
+      "Verify", "Check" or "Ensure" in a step — the assertion belongs in the
+      expected result, and a step that asserts has nowhere to record what
+      was actually seen.
+    follow_up:
+      - "How do I split a step that does two things?"
+      - "What makes an expected result unusable?"
+    source: qa_knowledge/style/wording_rules.yaml — action_verbs
+
+  - id: naming_quote_labels
+    any: [quote the label, exactly as on screen, exact label, copy the label,
+          label exactly]
+    weight: 0.5
+    answer: |
+      **Yes — exactly as it is rendered, in straight quotes.**
+
+      Including the capitalisation the design uses, and including brackets if
+      the design draws them: `the [Show more] button`, `the "Contact us"
+      button`. The corpus uses both the quoted and the bracketed form; be
+      consistent inside one document.
+
+      The reason is that the label is half the locator. A tester who did not
+      write the case has the label and the control type and nothing else to
+      find the control with — and an automation engineer reading the case
+      will use that exact string to write the selector. Retyping it from
+      memory as "Contact Us" when the screen says "Contact us" costs someone
+      a failing locator later.
+    follow_up:
+      - "How do I name a field with no label?"
+      - "Do I capitalise Header and Footer?"
+    source: qa_knowledge/style/wording_rules.yaml — element_naming
+
+  - id: naming_accordion
+    any: [accordion, expandable section, expander, spoiler, collapsible,
+          shows more text, read more section]
+    weight: 0.5
+    answer: |
+      **"Accordion"** — not "spoiler", not "expander", not "collapsible".
+
+      The verbs that go with it are **Expand** and **Collapse**, both on the
+      approved list: `Expand the "Delivery options" Accordion`.
+
+      Worth knowing what to test on one, since the name is the easy part: the
+      collapsed default state, one section expanding, whether expanding a
+      second collapses the first (the two behaviours are different products),
+      keyboard operation, and whether the hidden content is reachable by
+      search and by a screen reader while collapsed.
+    follow_up:
+      - "Is it dropdown or drop-down?"
+      - "What do I call the box that covers the page?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_modal
+    any: [modal, lightbox, popup, pop-up, dialog, overlay, covers the page,
+          blocks the page, window over the page, over the page, blocks it,
+          appears over, on top of the page]
+    weight: 0.5
+    answer: |
+      **"Modal"** — a surface drawn over the page that blocks interaction
+      with what is behind it. Not "lightbox", not "popup window".
+
+      Name it by its heading: `the "Delete project?" Modal`.
+
+      The distinction that matters when you test it: a Modal blocks the page
+      behind it, and a drop-down does not. So a Modal owes you a specific set
+      of checks — Escape closes it, a click on the backdrop closes it (or
+      deliberately does not), focus moves into it and is trapped there while
+      it is open, the page behind it does not scroll, and closing it returns
+      focus to whatever opened it. Those are the cases that get missed, and
+      they are missed more often when the case calls it a "popup".
+    follow_up:
+      - "What do I call the thing that opens from the avatar?"
+      - "Is it dropdown or drop-down?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_hamburger
+    any: [hamburger, three-line, three line menu, burger, mobile menu icon]
+    weight: 1
+    answer: |
+      **"Hamburger button"** — capitalised, and "button" rather than "menu",
+      because the control you click and the menu it opens are two different
+      things and often two different defects.
+
+      `Click on the Hamburger button in the Header` → `the Navigation menu is
+      displayed`.
+
+      That separation earns its keep in the bug report: "the Hamburger button
+      does nothing" and "the Navigation menu opens empty" are different
+      failures, and calling both of them "the burger menu is broken" loses
+      the distinction.
+    follow_up:
+      - "Is it dropdown or drop-down?"
+      - "How do I name a field with no label?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_entry_field
+    any: [textbox, text box, text field, input field, entry field, "can i say
+          textbox"]
+    weight: 0.5
+    answer: |
+      **"Entry field"**, or the field's own label — the house glossary does
+      not use "textbox".
+
+      `Fill in the "Email" entry field with a valid email` — and name the
+      field *and* say whether the data is valid or invalid, then repeat the
+      literal value in the test-data column. "Fill in the field with valid
+      data" is not executable: the next tester does not know what you typed.
+
+      For the deliberate omission in a negative case there is a phrase for it:
+      **`Leave the "Email" entry field empty`**. It reads as intent rather
+      than as a step someone forgot to finish.
+    follow_up:
+      - "Is it dropdown or drop-down?"
+      - "How do I split a step that does two things?"
+    source: qa_knowledge/glossary/ui_terms.en.yaml
+
+  - id: naming_title_length
+    any: [too long, characters, how long should the title, length of the title,
+          "240", shorten the title]
+    all: [[title, summary, name]]
+    weight: 0.5
+    answer: |
+      **Too long — 60 to 160 characters is the corpus norm and 220 is the
+      hard ceiling.**
+
+      A title that long is almost always two cases wearing one name. Look for
+      the "and": one assertion per title, and a title joining two independent
+      checks gets split into two cases. That usually shortens it below the
+      norm without any rewording at all.
+
+      The other two things that pad a title unnecessarily: restating the
+      module or page that the section header already carries, and describing
+      the steps instead of the assertion. The title says *what is verified*;
+      the steps say how.
+    follow_up:
+      - "How should a test case title start?"
+      - "How do I split a step that does two things?"
+    source: qa_knowledge/style/house_style.yaml — summary_grammar
+
+  - id: naming_general
+    # Catch-all; declined in the fast path so specific entries win.
+    any: [what do i call, what is the term, terminology, house style, wording,
+          how should i write, naming]
+    weight: -3
+    answer: |
+      **The house rules, in one place** — all measured from the team's
+      reference plan, and the same ones the generator applies:
+
+      • **Elements**: the canonical glossary term, with the on-screen label
+        quoted exactly — `the "Industries" drop-down`. Page regions are proper
+        nouns: Header, Footer, Homepage.
+      • **Never by position alone.** Name it, then qualify.
+      • **Steps**: one action each, an approved verb, an explicit object.
+        "Click on" for pointing, "Tap" for mobile, "Press" for keyboard keys
+        only. "Scroll" always names what it scrolls.
+      • **Titles**: `Verify that <actor> can / cannot <action> via the
+        "<label>" <control>`. No "should", no "must", no trailing period,
+        one assertion, 60–160 characters.
+      • **Expected results**: observable facts, never grades — no "correctly",
+        "properly", "works fine". "should" is accepted here; "must" is not.
+
+      Ask about any one of them and you get the rule with its source.
+    follow_up:
+      - "Should I write click or press?"
+      - "How should a test case title start?"
+      - "What makes an expected result unusable?"
+    source: qa_knowledge/style/wording_rules.yaml

@@ -327,6 +327,99 @@ def score_all(answers: Iterable[tuple[Item, str, str | None]]) -> Report:
     return Report(results=[score(i, a, r) for i, a, r in answers])
 
 
+# ── Running the golden set against the rule layer ─────────────────────
+
+#: Chat intents mapped onto golden-set route names. The rule layer's
+#: intents predate the golden set and are not going to be renamed for it:
+#: routes/chat.py and the front-end both read them, and several are
+#: asserted by existing tests.
+_INTENT_ROUTES: dict[str, str] = {
+    "greeting": "fast_path:greeting",
+    "gratitude": "fast_path:gratitude",
+    "help_menu": "fast_path:default_help",
+    "bug_form": "fast_path:bug_form",
+    "clarify_requirement": "fast_path:clarify",
+    # chatbot_guide's severity decision tree. It composes over cue
+    # combinations no single pack entry covers, so it legitimately answers
+    # a subset of the severity questions and is counted as that pack.
+    "severity_recommendation": "pack:severity_priority",
+}
+
+
+def route_of(intent: str | None) -> str | None:
+    """Normalise a ChatReply intent to a golden-set route name."""
+    if not intent:
+        return None
+    if intent.startswith(("pack:", "istqb:", "fast_path:")):
+        return intent
+    if intent in _INTENT_ROUTES:
+        return _INTENT_ROUTES[intent]
+    # The glossary path tags its intent with the term it matched
+    # ("istqb_glossary:failure"). The term is useful in the transcript and
+    # noise in a route, so it collapses to one owner.
+    if intent.startswith("istqb_glossary"):
+        return "istqb:glossary"
+    if intent.startswith("troubleshoot_"):
+        return "fast_path:troubleshoot"
+    if intent.startswith("help_") or intent.startswith("module_"):
+        return "fast_path:module_help"
+    if intent.startswith("diag_") or intent.startswith("bug_summary"):
+        return "fast_path:troubleshoot"
+    return f"fast_path:{intent}"
+
+
+def run_rule_layer(items: Iterable[Item] | None = None) -> Report:
+    """Score the golden set against the deterministic chain only.
+
+    No LLM, no network, no API key — which is what makes this runnable in
+    CI on every push.
+
+    Both halves of the deterministic chain are exercised, in the order
+    ``respond()`` uses them when no API key is present: ``try_fast_path``
+    first, then ``rule_based_fallback``. Measuring only the fast path was a
+    real mistake in the first version of this harness — eight of the twelve
+    product-help items failed, and the reason was not that Tedgie cannot
+    answer them but that module help lives in the fallback. A harness that
+    measures half the chain reports defects that are not there, which is
+    worse than measuring nothing.
+    """
+    from engine import chatbot  # imported here so loading this module stays cheap
+
+    graded: list[tuple[Item, str, str | None]] = []
+    for item in items if items is not None else load():
+        lang = "ua" if item.lang == "uk" else item.lang
+        try:
+            reply = chatbot.try_fast_path(item.question, lang)
+            if reply is None:
+                reply = chatbot.rule_based_fallback(item.question, lang)
+        except Exception:  # pragma: no cover — a crash is a failure, not an error
+            reply = None
+        text = reply.text if reply else ""
+        graded.append((item, text, route_of(reply.intent if reply else None)))
+    return score_all(graded)
+
+
+def format_report(report: Report, *, verbose: bool = False) -> str:
+    """Render a report for CI logs and the local runner."""
+    lines = [
+        f"golden set: {report.passed}/{report.total} passed "
+        f"({report.rate:.0%}), routing {report.route_rate:.0%}",
+    ]
+    for pack, (ok, total) in sorted(report.by_pack().items()):
+        lines.append(f"  {pack:19} {ok:3}/{total:<3} {ok / total:.0%}")
+    for lang, (ok, total) in sorted(report.by_lang().items()):
+        lines.append(f"  lang {lang:14} {ok:3}/{total:<3} {ok / total:.0%}")
+    if report.violations:
+        lines.append(f"  wrong advice: {len(report.violations)}")
+        for r in report.violations:
+            lines.append(f"    {r.item.id}: {r.explain()}")
+    if verbose:
+        for r in report.failures():
+            if r not in report.violations:
+                lines.append(f"    {r.item.id} [{r.item.pack}] {r.explain()}")
+    return "\n".join(lines)
+
+
 def by_pack(items: Iterable[Item]) -> dict[str, list[Item]]:
     out: dict[str, list[Item]] = {}
     for it in items:

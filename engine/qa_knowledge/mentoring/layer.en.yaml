@@ -1,0 +1,372 @@
+version: 1
+pack: layer
+lang: en
+label: Backend or frontend
+
+# The whole pack has one lesson: don't guess the layer, look. Every entry
+# ends up pointing at the network tab and the console, because those two
+# turn a guess into evidence in about ten seconds, and because a bug report
+# that carries them does not come back.
+#
+# Tedgie is deliberately unwilling to name a layer from a symptom alone.
+# That refusal is the teaching: a junior who learns "wrong total means
+# backend" will be wrong often and confidently, and will have no way to
+# tell. A junior who learns "compare the response with the screen" is
+# right every time and needs no heuristic at all.
+
+entries:
+
+  - id: layer_wrong_value
+    any: [total, sum, amount, price, wrong value, wrong number, wrong data,
+          wrong result, calculation, discount, balance]
+    all: [[backend, frontend, back end, front end, which layer, server side,
+           client side, whose bug]]
+    answer: |
+      **Don't guess — compare the response with the screen.** It takes ten
+      seconds and it settles the question completely.
+
+      1. Open DevTools → **Network**, reproduce the action, and find the
+         request that returns the value.
+      2. Look at the response **payload**. Is the number in it already wrong?
+      3. If the response is wrong → it happened before rendering. If the
+         response is right and the screen shows something else → it happened
+         during rendering.
+
+      Whichever it is, you now have the evidence attached to the report, and
+      the developer does not have to repeat your work to find out which half
+      of the system to open. Until you have looked, the honest answer is "I
+      can't tell yet" — a symptom like a wrong total genuinely happens on
+      both sides, and picking one from the symptom is how bugs get assigned
+      to the wrong person for two days.
+    follow_up:
+      - "What evidence should I attach?"
+      - "How do I capture a HAR file?"
+      - "The response is right but the screen is empty."
+    source: TestForTge mentoring pack
+
+  - id: layer_how_to_tell_server
+    any: [server side, how do i know, how can i tell, how to tell, is it the
+          server, whose side, which layer, backend or frontend, back end or
+          front end]
+    weight: 0.5
+    answer: |
+      **Three checks, in this order.** Each one takes seconds and any of them
+      can end the question.
+
+      1. **Network tab.** Find the request. A **500** or any other 5xx status
+         is the server saying it failed — that is not ambiguous. A 4xx usually
+         means the request itself was wrong, which is often a client defect.
+      2. **The response payload.** If the data arrives already wrong, the
+         problem happened before it reached the browser.
+      3. **The console.** A JavaScript error with the request having returned
+         200 and correct data points the other way.
+
+      Two useful shortcuts. If it reproduces when you call the API directly
+      — Postman, curl, or the browser's "copy as fetch" — the interface is
+      not involved at all. And if it only happens in one browser, it is
+      almost certainly not the server: the server cannot tell which browser
+      asked.
+    follow_up:
+      - "How do I capture a HAR file?"
+      - "Do I need SQL to test the API?"
+    source: TestForTge mentoring pack
+
+  - id: layer_evidence
+    # "cannot reproduce" deliberately absent: the process pack owns that
+    # conversation, and both packs matching it meant the answer depended on
+    # which scored higher on the day.
+    any: [what evidence, what should i attach, what to attach, sends it back,
+          send it back, sent back, not enough information,
+          returned my bug, rejected]
+    all: [[attach, evidence, report, bug, information]]
+    weight: 1
+    answer: |
+      **Attach what removes the developer's need to reproduce it themselves.**
+      In rough order of how often it is what was missing:
+
+      • **Steps**, numbered, from a known starting state, with the test data
+        you used. "Log in as X, open Y, click Z."
+      • **The network request and response** for the failing call — status,
+        payload, and the timing. A **HAR** export carries the whole exchange.
+      • **The console log**, including anything printed before the failure,
+        not only the red line.
+      • **Environment and build**: which URL, which version, which browser
+        and OS, which account and role.
+      • **A screenshot or short video** — last, not first. It shows what
+        happened and never why.
+
+      One habit is worth more than the list: capture all of it during the
+      first reproduction. Going back for the console log after the fact costs
+      a second reproduction, and intermittent defects do not always grant one.
+    follow_up:
+      - "How do I capture a HAR file?"
+      - "The developer says cannot reproduce."
+    source: TestForTge mentoring pack
+
+  - id: layer_spinner
+    any: [spinner, loading forever, spins forever, never loads, hangs, stuck
+          loading, keeps loading, nothing happens after]
+    answer: |
+      **Three different defects look exactly like this, and the Network tab
+      separates them in one look.**
+
+      Reproduce with DevTools → Network open, then read which of these it is:
+
+      1. **No request appears** — the click never fired the call. Client-side:
+         a handler that threw, a disabled control, a validation that silently
+         refused. Check the console for the error.
+      2. **The request is pending and never finishes** — it left and nothing
+         came back. Note how long you waited and whether it eventually times
+         out; capture the request so the timeout can be seen.
+      3. **The response came back fine and the spinner stayed** — the answer
+         was never handled. That is a rendering defect, and the response in
+         your evidence proves the data was fine.
+
+      Attach whichever of the three you found. "The spinner spins forever" is
+      the same sentence for all three, which is why it is one of the most
+      commonly returned bug reports.
+    follow_up:
+      - "What evidence should I attach?"
+      - "The response is right but the screen is empty."
+    source: TestForTge mentoring pack
+
+  - id: layer_500
+    any: ["500", "502", "503", 5xx, internal server error, server error]
+    weight: 1
+    answer: |
+      **A 500 is the server telling you it failed. Always report it.**
+
+      It is not your mistake and it does not need justifying: whatever you
+      sent, a correct system answers with a meaningful error, not a 500. Even
+      if you sent nonsense on purpose, an unhandled crash on nonsense input
+      is itself a valid defect — it usually means the input was never
+      validated.
+
+      Make the report cheap to act on: the request URL and method, the
+      payload you sent, the full response, the time it happened, and the
+      account you used. The developer will want the server log for that
+      timestamp, and your timestamp is what lets them find it.
+
+      One thing worth checking first: whether it reproduces. A 500 that
+      happened once during a deployment is a different conversation from one
+      that happens every time.
+    follow_up:
+      - "What evidence should I attach?"
+      - "What severity for a 500?"
+    source: TestForTge mentoring pack
+
+  - id: layer_stale_ui
+    any: [does not refresh, doesn't refresh, until i reload, after refresh it,
+          have to reload, only after reload, stale, list does not update,
+          not updated until]
+    weight: 1
+    answer: |
+      **The data was saved correctly — this is a frontend state defect.**
+
+      Confirm it in two steps so the report says so with evidence: the save
+      request returned success, and after a reload the record is there. That
+      means the value was persisted and the database is right; what failed is
+      that the interface kept showing what it had before.
+
+      Say this explicitly in the report. Written as "the record is not saved",
+      the developer goes looking in the wrong half of the system and comes
+      back to tell you it works. Written as "saved and persisted; the list
+      still shows the old value until a manual reload", the defect is already
+      localised for them.
+
+      Worth noting whether other views update — sometimes one component
+      subscribes to the change and another does not, and that difference is
+      the clue.
+    follow_up:
+      - "What evidence should I attach?"
+      - "Is a wrong total backend or frontend?"
+    source: TestForTge mentoring pack
+
+  - id: layer_validation
+    any: [validation, validate, empty email, required field, accepts empty,
+          lets me submit, allows invalid, bypass]
+    weight: 0.5
+    answer: |
+      **Report it as both, and test the API directly before you write it up.**
+
+      Interface validation is a convenience for the user. The check that
+      matters is on the server, because anything the browser enforces can be
+      bypassed — DevTools, a direct call from Postman or curl, or simply a
+      client that never runs your JavaScript.
+
+      So do this: send the same invalid data straight to the API. Then you
+      know which of two very different defects you have.
+
+      • **The interface refuses it and the API accepts it** — that is a
+        security-relevant defect, not a cosmetic one. Invalid or malicious
+        data can reach storage.
+      • **Both accept it** — the requirement is unimplemented, and the report
+        should name the requirement.
+      • **The API refuses it and the interface let you press submit** — a
+        usability defect: the user gets a server error where they should have
+        got inline feedback.
+    follow_up:
+      - "How do I call the API directly?"
+      - "What severity for missing server-side validation?"
+    source: TestForTge mentoring pack
+
+  - id: layer_browser_specific
+    any: [works in chrome, only in safari, not in safari, only in firefox,
+          not in firefox, in edge, different browser, one browser]
+    weight: 1
+    answer: |
+      **If it happens in one browser and not another, it is in the client.**
+
+      The reason is simple: the same request went out and the same response
+      came back — the API cannot tell which browser asked, and did not behave
+      differently. What differs is the code that ran afterwards.
+
+      Confirm and localise it:
+
+      1. **The console in the failing browser.** Cross-browser defects almost
+         always leave an error there, and it usually names the unsupported
+         feature.
+      2. **The exact version**, both of them. "Safari 17.2 fails, Chrome 121
+         works" is actionable; "Safari fails" is not.
+      3. **Whether it is the rendering or the behaviour** — a layout that
+         breaks and a button that does nothing are different defects with the
+         same trigger.
+      4. **A private window**, to rule out an extension or cached assets.
+
+      Then check compatibility for whatever the console named. Often the
+      answer is a feature the failing browser does not implement, and the
+      report can say so.
+    follow_up:
+      - "What evidence should I attach?"
+      - "How do I test on a browser I don't have?"
+    source: TestForTge mentoring pack
+
+  - id: layer_console_habit
+    any: [every bug, always look, should i look at the console, open the console,
+          worth opening, do i need to check the console]
+    all: [[console]]
+    weight: 1
+    answer: |
+      **Yes — make it a habit, and keep it open while you test.**
+
+      It is free. The tab is already there, it costs nothing to leave open,
+      and it turns "the page looked wrong" into "the page looked wrong and
+      threw this error at this moment". That difference is often the whole
+      investigation.
+
+      Two things it gives you that nothing else does. It catches defects that
+      have no visible symptom yet — an error thrown on a path you happened not
+      to look at. And it timestamps the failure against your action, which is
+      what lets a developer line it up with the server log.
+
+      Keep **Network** open next to it for the same reason. Between them, most
+      bug reports get the evidence they need during the first reproduction
+      instead of the second.
+    follow_up:
+      - "What evidence should I attach?"
+      - "How do I capture a HAR file?"
+    source: TestForTge mentoring pack
+
+  - id: layer_render_failure
+    any: [response is correct, response is right, data comes back, comes back
+          fine, shows nothing, screen is empty, blank screen, nothing is
+          displayed, empty page]
+    weight: 1
+    answer: |
+      **Correct response plus empty screen is a rendering defect.**
+
+      You have already done the hard half: the data arrived. What failed is
+      the code that was supposed to display it, and your evidence proves the
+      call was fine — which is exactly what stops this being assigned to the
+      wrong person.
+
+      Next, the console. A rendering failure this complete nearly always threw
+      an exception, and the stack trace usually names the component. Attach it
+      with the response you captured.
+
+      Two checks worth adding to the report: whether it fails with every data
+      set or only this one — a single record with an unexpected shape, an empty
+      list, a null field, a very long string — and whether a reload fixes it.
+      Both narrow the cause considerably.
+    follow_up:
+      - "What evidence should I attach?"
+      - "The list doesn't refresh until I reload."
+    source: TestForTge mentoring pack
+
+  - id: layer_har
+    any: [har, har file, export the network, save the network, network log,
+          capture the traffic]
+    weight: 1
+    answer: |
+      **DevTools → Network → export.** In Chrome and Edge it is the download
+      arrow in the Network toolbar ("Export HAR"); in Firefox it is in the
+      toolbar's context menu; in Safari it is Export from the Network tab.
+
+      Two things to do before you export, both easy to forget:
+
+      • **Tick "Preserve log"** — otherwise a navigation or a redirect clears
+        everything you just captured.
+      • **Clear, then reproduce.** A HAR of the whole session is far harder to
+        read than one of the failing action.
+
+      One caution worth taking seriously: a HAR contains everything that was
+      sent, including **auth tokens, cookies and any personal data in the
+      payloads**. Use a test account, and if the ticket is visible beyond the
+      team, say what you scrubbed. If you only need one call, exporting a
+      single request instead of the whole log is usually enough.
+    follow_up:
+      - "What evidence should I attach?"
+      - "Should I test with real user data?"
+    source: TestForTge mentoring pack
+
+  - id: layer_sql
+    any: [sql, database, query the db, select statement, do i need to know sql,
+          learn sql]
+    weight: 0.5
+    answer: |
+      **Not required to start, and useful sooner than you think.**
+
+      Most backend testing needs no database access at all: you can send
+      requests, read responses, and check that what the API returns matches
+      what it was told. That covers the majority of API defects, and the
+      response is better evidence in a bug report than a query result anyway,
+      because it is what the application actually served.
+
+      Where SQL earns its keep is the questions the API will not answer.
+      Was the record written, or only echoed back? Did the update touch other
+      rows? Is the data still consistent after a failed operation?
+
+      The smallest useful amount is genuinely small: `SELECT` with `WHERE`,
+      `ORDER BY`, `COUNT`, and a `JOIN` when you need two tables. That is a
+      weekend, not a course. Learn it on a read-only account — testers do not
+      need write access, and not having it is a feature.
+    follow_up:
+      - "How do I call the API directly?"
+      - "What evidence should I attach?"
+    source: TestForTge mentoring pack
+
+  - id: layer_general
+    # Catch-all; declined in the fast path so more specific owners win.
+    any: [backend, frontend, back end, front end, which layer, server side,
+          client side, whose bug, network tab]
+    weight: -3
+    answer: |
+      **Don't reason from the symptom — look at the exchange.** The routine is
+      the same for every bug and takes under a minute:
+
+      1. **Network tab**, reproduce, find the request.
+      2. **Status**: 5xx says the server failed; 4xx usually says the request
+         was wrong; 200 moves you to the next step.
+      3. **Payload**: if the data arrives wrong, it went wrong before the
+         browser. If it arrives right and the screen disagrees, it went wrong
+         after.
+      4. **Console**: an exception here with a good response means rendering.
+
+      Then attach what you found. The point of the routine is not the label —
+      it is that the report carries the evidence, so nobody has to redo your
+      investigation to decide who picks it up.
+    follow_up:
+      - "What evidence should I attach?"
+      - "How do I capture a HAR file?"
+      - "Should I look at the console for every bug?"
+    source: TestForTge mentoring pack

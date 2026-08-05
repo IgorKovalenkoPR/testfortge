@@ -1,0 +1,502 @@
+version: 1
+pack: process
+lang: en
+label: Process and judgement
+
+# The questions in this pack are the ones with no clean answer, which is
+# exactly why they need one. "How many cases for a login form", "when is
+# testing done", "what do I cut" — a junior asking these has usually
+# already been told "it depends", which is true and useless.
+#
+# So every entry converts the question into a method the asker can apply
+# today, and says what to measure. Where the syllabus has the canonical
+# answer (test levels, principles, techniques, the test plan) the ISTQB
+# layer keeps it and this pack stays out.
+
+entries:
+
+  - id: proc_no_time_for_regression
+    any: [no time, not enough time, cut, skip, reduce the scope, short on time,
+          deadline, release tomorrow, only one day]
+    all: [[regression, testing, test, scope]]
+    weight: 1
+    answer: |
+      **Choose by risk, and decide what to keep rather than what to drop.**
+      The list you keep is short and defensible; the list you drop is long
+      and nobody argues with it.
+
+      Keep, in this order:
+
+      1. **What changed**, and what the change touches. Read the diff or ask
+         the developer which modules moved. This is the highest-yield
+         selection there is — defects cluster where work happened.
+      2. **The paths that carry money or data.** Sign-in, checkout, payment,
+         permissions, anything that writes.
+      3. **A smoke pass over everything else** — shallow and broad, so a
+         catastrophic break anywhere is still caught.
+      4. **Last release's defects**, in the areas that were fixed.
+
+      Then say out loud what is not covered, in writing, before the release —
+      "no cross-browser pass, no export flows, no admin area". Uncommunicated
+      reduced scope becomes a surprise; communicated reduced scope is a
+      business decision someone else signs.
+    follow_up:
+      - "When can I say testing is done?"
+      - "What is risk-based testing?"
+    source: TestForTge mentoring pack
+
+  - id: proc_when_is_testing_done
+    any: [testing is done, testing is complete, when do i stop, when can i stop,
+          finished testing, enough testing, definition of done, sign off]
+    weight: 1
+    answer: |
+      **When the exit criteria you agreed at the start are met — not when the
+      defects run out.**
+
+      Defects never run out; that is one of the seven principles. So "done"
+      has to be defined before you begin, and it is usually a short list:
+
+      • the planned coverage is executed — the cases ran, the checklist is
+        walked;
+      • **no open defects above an agreed severity**, with the exceptions
+        listed and accepted by name;
+      • the risks identified in planning are each either tested or explicitly
+        accepted;
+      • the results are reported and someone has taken the decision.
+
+      If nobody defined those, that is the actual answer to your question:
+      propose them now, in writing, and get agreement. It converts "are we
+      done?" from an argument into a checklist.
+
+      One thing worth saying plainly: "done" is a decision, not a discovery.
+      Your job is to make the state of the product legible enough for someone
+      to take it.
+    follow_up:
+      - "What are entry and exit criteria for?"
+      - "We have no time for regression — what do I cut?"
+    source: ISTQB CTFL §1.4.4, §5.1
+
+  - id: proc_how_many_cases
+    any: [how many test cases, how many cases, how many checks, number of test
+          cases, how many tests]
+    weight: 1
+    answer: |
+      **The count is an output, not a decision.** Pick the techniques, apply
+      them, and count what falls out.
+
+      For a login form, that is roughly:
+
+      • **Equivalence partitioning** — valid credentials; wrong password;
+        unknown user; empty fields. Four classes, one case each; more cases
+        from the same class add nothing.
+      • **Boundary values** on anything with a limit — minimum and maximum
+        password length, one below and one above each.
+      • **Negative and security cases** — locked account, expired password,
+        attempt limit and what happens after it, whether the error message
+        distinguishes "no such user" from "wrong password" (it should not).
+      • **State** — already signed in, session expired, browser back after
+        signing out.
+
+      That lands somewhere around 12–20 for a login form, and the number is
+      not the point: the technique is what you defend in a review, and it is
+      what tells you when to stop.
+
+      Then let risk trim it. A prototype does not need the attempt-limit
+      case; a banking login needs it first.
+    follow_up:
+      - "What test design techniques should I know first?"
+      - "Is a checklist worse than test cases?"
+    source: ISTQB CTFL §4
+
+  - id: proc_no_requirements
+    any: [no requirements, without requirements, nothing documented, no specs,
+          no spec, no documentation, undocumented, no acceptance criteria]
+    weight: 1
+    answer: |
+      **Test it exploratory, with a written charter, and let the questions you
+      generate become the requirements.**
+
+      An hour of this produces more than waiting does:
+
+      1. **Write a charter** before you start — "explore the checkout with
+         invalid card data to discover validation and error handling, 60
+         minutes". A charter is what separates exploration from clicking
+         around, and it is what makes the session reportable.
+      2. **Use analogous products as the oracle.** You know what a sign-up
+         form does. Standard behaviour is a defensible expectation, and where
+         this product differs is exactly what needs asking about.
+      3. **Note every assumption you make** as you go. That list is the most
+         valuable thing you produce — it is a requirements document written
+         from the outside, and it is much easier for a product owner to
+         correct than to author.
+      4. **Ask, with specifics.** "What should happen when the card is
+         declined?" gets an answer. "Are there requirements?" does not.
+
+      Risk-order the areas first, so if the session gets cut short you spent
+      it where a defect would matter.
+    follow_up:
+      - "How do I test something I don't understand?"
+      - "My exploratory session found nothing — was it wasted?"
+    source: ISTQB CTFL §4.4
+
+  - id: proc_estimate_overrun
+    any: [estimate was, took longer, overran, over my estimate, underestimated,
+          "3 days", took twice, missed my estimate]
+    weight: 1
+    answer: |
+      **Probably nothing about your test design — the overrun is usually in
+      the work nobody budgets.**
+
+      The four that account for most of it:
+
+      • **Retest and confirmation.** Every defect you find comes back to be
+        verified, and often twice. If you budgeted execution only, a
+        defect-rich build doubles your time by design.
+      • **Environment downtime.** Waiting for a deploy, a broken staging, a
+        fixture that has to be rebuilt. It is real work time and it is
+        invisible in an estimate that only counts cases.
+      • **Rework** after requirements move under you.
+      • **Waiting on answers** — blocked on a question is not free.
+
+      So the fix is not padding, it is measuring. From this run on, record
+      four numbers: time on design, time on execution, time on retest, and
+      time blocked. After two or three features you will have your own
+      multiplier, and it will be better than any rule of thumb — including
+      the common "add 30% for retest", which is right on average and wrong
+      for your project.
+
+      One more thing worth checking: was the scope you estimated the scope you
+      tested? Overruns are often scope growth that nobody re-estimated.
+    follow_up:
+      - "How do I estimate a feature I've never seen?"
+      - "Do I retest only the fixed bug?"
+    source: ISTQB CTFL §5.2
+
+  - id: proc_reopened
+    any: [reopened, reopen, keeps coming back, failed retest, still broken after
+          the fix, fix did not work]
+    weight: 1
+    answer: |
+      **As briefly as possible — and a second reopen is a signal about the
+      report, not only about the fix.**
+
+      When you reopen, say precisely what you retested and what you saw:
+      the build number, the steps, and how it differed from the fix's claim.
+      "Still broken" restarts the whole investigation; "still fails on build
+      412, same steps, the error is now 400 instead of 500" moves it forward.
+
+      If the same defect reopens twice, one of three things is true and it is
+      worth naming which:
+
+      • **the root cause was never found** — the symptom was patched;
+      • **your steps were ambiguous**, and the developer fixed a different
+        defect than the one you found;
+      • **there are two defects** with one symptom, and one of them is fixed.
+
+      The third is common and easy to miss. If the behaviour changed but is
+      still wrong, that is evidence for it.
+    follow_up:
+      - "Do I retest only the fixed bug?"
+      - "The developer says cannot reproduce."
+    source: ISTQB CTFL §5.5
+
+  - id: proc_retest_scope
+    any: [retest only, only the fixed, around it, confirmation testing or,
+          after a fix, verify the fix, what else should i test after]
+    weight: 1
+    answer: |
+      **Both, and they are two named activities — do not merge them.**
+
+      **Confirmation testing** is the fix itself: the exact steps from the
+      report, on the build that claims the fix. If those pass, the defect is
+      fixed and nothing more.
+
+      **Regression testing** is what the fix might have broken: the feature
+      it lives in, whatever shares the code the developer touched, and the
+      paths that consume the same data. Ask the developer what they changed
+      — it is a thirty-second question and it beats guessing at the blast
+      radius.
+
+      How much regression depends on the fix. A one-line change to a label
+      needs the label checked. A change in a shared validation routine needs
+      every form that uses it, and that is worth saying out loud in the
+      ticket so the cost of the fix is visible.
+
+      Also re-run the *negative* case if there was one. A fix that makes the
+      valid path work by removing the validation passes confirmation
+      perfectly.
+    follow_up:
+      - "What is the difference between smoke and regression?"
+      - "How long should a bug stay reopened?"
+    source: ISTQB CTFL §2.2.3
+
+  - id: proc_should_i_automate
+    any: [should i automate, worth automating, automate this, automation
+          candidate, automate the test]
+    weight: 1
+    answer: |
+      **Four questions. Three yeses make it worth doing.**
+
+      1. **How often will it run?** A case that runs every build earns its
+         cost quickly; one that runs at each release does so slowly; one that
+         runs once never does.
+      2. **Is the behaviour stable?** Automating a screen still being
+         redesigned means maintaining the test more often than running it.
+      3. **Is the check mechanical?** Exact values, states and text are
+         cheap to assert. "Does this look right", "is this usable", "is the
+         wording appropriate" are not, and a script that pretends otherwise
+         produces confident nonsense.
+      4. **What does maintenance cost?** Every automated case is code you own
+         forever. A suite nobody trusts because it fails randomly is worse
+         than no suite — it trains the team to ignore red.
+
+      The best early candidates are almost always the boring ones: smoke
+      paths, data setup for manual testing, and the same form filled with
+      forty combinations. The worst are exploratory work and one-off
+      investigations.
+    follow_up:
+      - "We have no time for regression — what do I cut?"
+      - "How many test cases for a login form?"
+    source: TestForTge mentoring pack
+
+  - id: proc_cannot_reproduce
+    any: [cannot reproduce, can't reproduce, cant reproduce, not reproducible,
+          works for me, closed as cannot, no repro]
+    weight: 1
+    answer: |
+      **Assume you are both right, and find the difference.** Almost always
+      there is one, and it is in this list:
+
+      • **Build and version.** Are you on the same one? A fix or a deploy
+        between your run and theirs explains most of these.
+      • **Environment.** Staging against local, different configuration,
+        different feature flags.
+      • **Account and role.** Permissions, plan, locale, an account with
+         existing data versus a fresh one.
+      • **Data.** The record you used may be the cause. An empty list, a very
+        long name, a null field — these reproduce for you and nobody else.
+      • **State.** Cache, cookies, an existing session, a previous action in
+        the same session.
+      • **Timing.** Did you click twice, or fast? A race condition is real and
+        it does not reproduce on demand.
+
+      Then reproduce it once more and capture everything: a video with the
+      console and Network visible, the exact data, the account, the build.
+      An intermittent defect with a video is a defect; without one it is a
+      disagreement.
+
+      If it genuinely will not reproduce for you either, say so in the ticket
+      and record what you tried. That is information, and closing it silently
+      is not.
+    follow_up:
+      - "What evidence should I attach?"
+      - "How long should a bug stay reopened?"
+    source: TestForTge mentoring pack
+
+  - id: proc_checklist_vs_cases
+    any: [checklist worse, checklist or test case, checklist instead,
+          checklists better, checklist vs, why use a checklist]
+    weight: 1
+    answer: |
+      **Different tools, and the choice depends on who reads it.** Neither is
+      the junior version of the other.
+
+      **A checklist** is one observable check per line, no steps. It covers
+      breadth fast, it is quick to write and to walk, and it assumes the
+      reader knows the product. Best for smoke passes, recurring
+      cross-cutting concerns, and giving an experienced tester coverage
+      without ceremony.
+
+      **A test case** carries preconditions, steps, data and an expected
+      result. It is reproducible by someone who has never seen the product,
+      it is auditable, and it is what an automation engineer implements from.
+      Best where a defect is expensive, where the flow is long, and where
+      somebody other than the author will run it.
+
+      The real trade is detail against speed. On most projects both exist: a
+      checklist for the wide shallow pass, cases for the paths where being
+      wrong costs money. Choosing one everywhere is the only clear mistake.
+    follow_up:
+      - "How many test cases for a login form?"
+      - "When can I say testing is done?"
+    source: TestForTge mentoring pack
+
+  - id: proc_dont_understand
+    any: [do not understand, don't understand, dont understand, no idea what,
+          never seen this, unfamiliar, new domain, do not know the product]
+    weight: 1
+    answer: |
+      **Learn it by testing it — and turn every gap into a question with a
+      specific answer.**
+
+      A method that works from cold, in about an hour:
+
+      1. **Tour it before you judge it.** Open every screen, click every
+         control, change nothing that matters. You are building a map, not
+         finding defects yet.
+      2. **Say out loud what each part seems to be for.** Where you cannot,
+         that is the first thing to ask about — and "what is this screen for?"
+         is a fair question that people are glad to answer.
+      3. **Borrow expectations from products you do know.** You have used a
+         cart, a search, a sign-up. Standard behaviour is a legitimate oracle
+         and any deviation is worth a question.
+      4. **Ask specifically.** "What should happen when two people edit the
+         same record?" gets a real answer; "can you explain the module?"
+         gets a tour you will forget.
+      5. **Write down what you learn** as you go. In a week you will be the
+         person who documents this for the next tester.
+
+      Not understanding the domain yet is a normal starting state, not a
+      disqualification. The questions you ask while it is unfamiliar are
+      often the best ones anyone asks about it.
+    follow_up:
+      - "The build arrived with no requirements. What do I test?"
+      - "My exploratory session found nothing — was it wasted?"
+    source: TestForTge mentoring pack
+
+  - id: proc_stlc
+    any: [stlc, software testing lifecycle, testing life cycle, stages of
+          testing, phases of testing, test process stages]
+    weight: 1
+    answer: |
+      **The lifecycle, and what each stage actually produces:**
+
+      1. **Requirement analysis** — read the test basis, find what is
+         testable and what is missing. Output: questions, risks, and the
+         defects you found in the requirements before any code existed. This
+         is the cheapest stage to find them in.
+      2. **Planning** — scope, approach, effort, environments, entry and exit
+         criteria. Output: the plan and the estimate.
+      3. **Design** — conditions, cases, checklists, data. Output: the
+         testware, and traceability back to the basis.
+      4. **Environment setup** — often in parallel, and often the thing that
+         actually blocks you. Output: a place to run and data to run with.
+      5. **Execution** — run, compare, log defects, retest, regress.
+         Output: results and defect reports.
+      6. **Closure** — report against the exit criteria, record what was not
+         covered, capture lessons. Output: the decision, and what the next
+         project should do differently.
+
+      They overlap in practice — design starts before planning finishes, and
+      analysis never really stops. The value of the list is that each stage
+      has an output, so "we are in design" means something checkable.
+    follow_up:
+      - "What are entry and exit criteria for?"
+      - "What goes in a test plan?"
+    source: ISTQB CTFL §1.4
+
+  - id: proc_duplicate
+    any: [same bug, duplicate, two testers found, already reported,
+          someone else reported, both filed]
+    weight: 1
+    answer: |
+      **Keep the first one, link the second as a duplicate, and merge what the
+      second one knows.**
+
+      The order matters less than the merge. The second report almost always
+      contains something the first does not — different steps, a different
+      environment, another affected screen — and that is evidence about the
+      scope of the defect. Copy it into the original before closing the
+      duplicate; do not delete it.
+
+      Two reasons not to just discard it. Two independent reports are a signal
+      about frequency and impact, which is a priority input. And if it turns
+      out later that they were *not* the same defect, the closed duplicate is
+      the record that finds the second one.
+
+      One check before you merge: same symptom is not the same defect. If the
+      steps differ significantly, they may be two causes with one appearance,
+      and merging them means one gets fixed and the other silently does not.
+    follow_up:
+      - "The developer says cannot reproduce."
+      - "How long should a bug stay reopened?"
+    source: ISTQB CTFL §5.5
+
+  - id: proc_exploratory_found_nothing
+    any: [found nothing, no bugs found, session found nothing, nothing wrong,
+          wasted, waste of time, did not find any]
+    weight: 1
+    answer: |
+      **Not wasted — you produced information, which is the actual product of
+      testing.**
+
+      "No defects found in this area under this charter" is a real result. It
+      raises confidence where you looked, it narrows where the risk still
+      lives, and it is evidence for a release decision. Absence of defects is
+      only worthless when nobody records where you looked.
+
+      So make it count. Write up the session: the charter, the areas covered,
+      the data you used, what you did not get to, and the questions that came
+      up. That last list is usually the most valuable thing in it — a session
+      that finds no defects almost always finds several things nobody had
+      decided yet.
+
+      Then be suspicious of one thing: whether you tested where defects
+      actually are. A clean session in an area nobody changed is expected. A
+      clean session over a rewritten module is worth a second, harsher look
+      with nastier data — long strings, empty states, concurrent edits, the
+      unhappy paths.
+    follow_up:
+      - "How do I test something I don't understand?"
+      - "The build arrived with no requirements. What do I test?"
+    source: ISTQB CTFL §4.4
+
+  - id: proc_estimate_unknown
+    any: [estimate a feature, how do i estimate, estimate testing for,
+          never seen, no idea how long, estimate for something new]
+    weight: 1
+    answer: |
+      **Anchor on something analogous, then give a range with your assumptions
+      attached.** A single number about an unseen feature is a guess wearing a
+      decimal point.
+
+      1. **Find the closest thing you have already tested** and start from
+         what it actually took. Your own past numbers beat any formula.
+      2. **Break it down** — how many screens, how many flows, how many
+         roles, how many integrations. Estimating five small things is far
+         more accurate than estimating one large one.
+      3. **Add the invisible work explicitly**: test design, environment and
+         data setup, retest of the defects you will find, and regression on
+         what it touches.
+      4. **Give a range**, and say what it depends on. "4–7 days: 4 if the
+         environment is ready and there are acceptance criteria, 7 if I have
+         to derive expectations from scratch."
+      5. **Name the unknowns as risks**, because they are the negotiable part.
+         If nobody can say what the feature does when the payment provider
+         times out, that is a risk with a cost, and it belongs in the estimate
+         rather than in your evenings.
+
+      Then record what it really took. Two features of that and you are
+      estimating from measurement instead of from feel.
+    follow_up:
+      - "My estimate was 3 days and it took 6 — what went wrong?"
+      - "What goes in a test plan?"
+    source: ISTQB CTFL §5.2
+
+  - id: proc_general
+    # Catch-all; declined in the fast path so specific entries win.
+    any: [process, workflow, best practice, how do i approach, methodology,
+          where do i start]
+    weight: -3
+    answer: |
+      **Four questions that answer most process questions, in order:**
+
+      1. **What is the risk?** What breaks, how likely, how bad. It orders
+         everything else — coverage, depth, what gets cut when time does.
+      2. **What is the oracle?** How will you know a result is wrong —
+         requirement, analogous product, common sense, a stakeholder? If you
+         cannot say, that is the first thing to resolve.
+      3. **What is "done" here?** Exit criteria agreed before you start, so
+         finishing is a checklist rather than an argument.
+      4. **What will you tell people?** Coverage, what was not covered, and
+         the risks accepted. Testing that is not reported did not inform a
+         decision.
+
+      Ask me about any specific one — regression under time pressure,
+      estimating, exploratory charters, retest scope, automating a case — and
+      you get the method rather than the principle.
+    follow_up:
+      - "When can I say testing is done?"
+      - "We have no time for regression — what do I cut?"
+      - "Should I automate this test?"
+    source: TestForTge mentoring pack

@@ -1,0 +1,359 @@
+version: 1
+pack: severity_priority
+lang: en
+label: Severity and priority
+
+# Severity is what the tester owns: measured impact, argued from evidence.
+# Priority is what the business owns. Almost every junior mistake in this
+# area is one of those two sentences being violated — either severity
+# inflated to force a fix, or priority conceded without an argument.
+#
+# Entries answer concrete triage questions. "What is severity" is left to
+# the ISTQB layer on purpose: it quotes the syllabus verbatim for people
+# revising for the exam, and this pack would only paraphrase it worse.
+
+entries:
+
+  - id: sp_cosmetic_text
+    any: [typo, misspell, spelling, copyright, footer, wording, capital letter,
+          punctuation, wrong text, label is wrong]
+    all: [[severity, priority, serious, triage, how bad]]
+    answer: |
+      **Recommended severity: Minor** — Trivial if it is purely decorative
+      and nobody reads it.
+
+      _Why:_ nothing is blocked. The user completes every workflow, the data
+      is correct, and only the presentation is wrong. That is the definition
+      of the bottom of the scale.
+
+      **Priority is a separate question, and it may well be high.** A
+      misspelt company name or a wrong year in the copyright line is
+      embarrassing where customers can see it, so the business often wants
+      it in the next release even though the system does not care. Say both
+      in the report: low severity, and let the product owner set urgency.
+    follow_up:
+      - "Can severity be low and priority high?"
+      - "Who decides priority?"
+      - "Is a 3px misalignment worth reporting?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_cosmetic_layout
+    any: [off centre, off center, misalign, alignment, pixel, "3px", padding,
+          overlap, font size, colour is wrong, color is wrong, even a bug]
+    all: [[severity, priority, worth, report, even a bug, triage]]
+    answer: |
+      **Yes, report it — at Trivial, or Minor if it looks broken rather than
+      imperfect.**
+
+      _Why report at all:_ writing the bug costs you minutes and the severity
+      field already carries your judgement that it is small. A defect nobody
+      logged cannot be prioritised, and "we knew about it" after release is a
+      worse conversation than a Trivial ticket nobody chose to fix.
+
+      Attach a screenshot with the viewport size, and say whether it appears
+      at every breakpoint or one. If it only happens at one width, that is
+      the useful part of the report.
+
+      One exception worth naming: if the misalignment hides or overlaps a
+      control so it cannot be used, it stopped being cosmetic and becomes
+      Major.
+    follow_up:
+      - "What severity for a footer typo?"
+      - "How much evidence should I attach?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_crash_narrow_audience
+    any: [crash, crashes, breaks, fails completely, cannot complete, "500",
+          error page, white screen, blocked]
+    all: [[severity, priority, serious, triage, how bad]]
+    weight: 0.5
+    answer: |
+      **Recommended severity: Critical** if there is no workaround, High if a
+      workaround exists.
+
+      _Why:_ severity measures impact **when the defect is hit**, not how
+      many users hit it. A checkout that dies for one country is a total
+      failure for every user in that country — they cannot complete the
+      purchase at all, and there is no way round it from the interface.
+
+      How many users are affected belongs in the report as evidence, and it
+      is what the business will use to set priority. Do not lower severity
+      to reflect a small audience: you would be doing the product owner's
+      job for them, badly, and hiding the fact that the failure is total.
+    follow_up:
+      - "Who decides priority?"
+      - "What evidence should I attach?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_data_loss
+    any: [data loss, loses data, lost data, unsaved, loses the form,
+          disappears, deleted, corrupt]
+    all: [[severity, priority, serious, triage, how bad]]
+    weight: 1
+    answer: |
+      **Recommended severity: Critical.** Data loss sits at the top of the
+      scale even when it is rare.
+
+      _Why:_ the user cannot undo it and cannot recover the work themselves.
+      Frequency is a priority input, not a severity one — a defect that
+      loses data one time in fifty still loses that data completely.
+
+      In the report, be explicit about what was lost and whether anything
+      survived: a form the user retyped is annoying, a submitted record that
+      vanished after confirmation is a different bug and often a
+      reconciliation problem behind it.
+    follow_up:
+      - "How do I prove data was lost?"
+      - "Rare but severe — how do I argue priority?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_security
+    any: [password, plain text, security, token, api key, exposed, leak,
+          unauthorised, unauthorized, other user's, personal data]
+    all: [[severity, priority, serious, triage, how bad]]
+    weight: 1
+    answer: |
+      **Recommended severity: Critical**, and report it privately if your
+      team has a channel for that.
+
+      _Why:_ a security defect is an exposure, so its impact is not measured
+      by whether the feature works. A password rendered in plain text is
+      readable by anyone at the user's shoulder, by screen-sharing, and often
+      by the browser's autofill store and any screenshot the user takes.
+
+      Do not experiment further than you need to confirm it, and do not use
+      real credentials or real personal data while confirming. Write down
+      exactly what you saw and stop there — reproducing an exposure more
+      widely than necessary is its own risk.
+    follow_up:
+      - "What evidence should I attach for a security bug?"
+      - "Should I test with real user data?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_performance_vs_requirement
+    any: [slower, slow, seconds, timeout, performance, takes too long,
+          response time]
+    all: [[severity, priority, serious, triage, how bad]]
+    answer: |
+      **Recommended severity: Major** when a stated requirement is violated,
+      Medium when there is no stated number and it merely feels slow.
+
+      _Why:_ nothing is visibly broken, so the reflex is to call it cosmetic.
+      But a measurable acceptance criterion was not met, and that is a
+      functional failure of the requirement. The requirement is the evidence
+      — quote it in the report, with your measured number next to it.
+
+      If no requirement exists, say so plainly and propose one. "8s against
+      an unstated target" is a question for the product owner; "8s against a
+      2s SLA" is a defect that needs no discussion.
+    follow_up:
+      - "How do I measure response time properly?"
+      - "There is no requirement — is it still a bug?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_localisation
+    any: [localis, localiz, translat, untranslated, wrong language, english on,
+          not translated, ukrainian version]
+    all: [[severity, priority, serious, triage, how bad]]
+    answer: |
+      **Recommended severity: Minor** when the user can still understand and
+      proceed, **Major** when they cannot.
+
+      _Why:_ this one deserves reasoning rather than a reflex. An untranslated
+      error message on a language version is a real defect, and the question
+      that sets its level is whether the user can act on it. "Invalid email
+      format" in English is understood by most people and blocks nobody.
+      Untranslated payment or legal wording, or a message the user must act on
+      to continue, is Major — and if the language switch itself is the thing
+      that fails, that is a functional defect, not a localisation one.
+
+      Say in the report which strings, on which screens, and whether the rest
+      of the page is translated: one missing key and a whole missing bundle
+      are different bugs with the same symptom.
+    follow_up:
+      - "How do I test a language switch?"
+      - "What severity for a wrong date format?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_environment_only
+    any: [staging, test environment, only on dev, dev environment, qa environment,
+          not on production, local only]
+    all: [[severity, priority, serious, triage, blocked, how bad]]
+    weight: 0.5
+    answer: |
+      **Severity stays high — Critical if it blocks testing entirely — but say
+      clearly that it is environment-scoped.**
+
+      _Why:_ two different impacts are in play and they must not be merged.
+      For the team, a broken login on staging blocks all testing, which is as
+      severe as it gets. For users, nothing is affected yet, so the business
+      may reasonably set a lower priority than the severity suggests.
+
+      Write both: "blocks all testing on staging; not reproducible on
+      production". Then check the obvious environment causes before filing it
+      as a product defect — configuration, test data, an expired certificate,
+      a stale build. If it turns out to be environment configuration, it is
+      still worth a ticket, just not against the product.
+    follow_up:
+      - "How do I tell a config problem from a product defect?"
+      - "Who decides priority?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_low_sev_high_prio
+    any: [low but priority, low severity, severity is low, high priority,
+          both, can that happen, can that even happen, at the same time]
+    all: [[severity]]
+    weight: 1
+    answer: |
+      **Yes — and it is completely normal.** The two fields answer different
+      questions, so they are free to disagree.
+
+      Severity is technical impact: how badly the system behaves when the
+      defect is exercised. Priority is business urgency: how soon it must be
+      fixed. Different owners, different evidence.
+
+      The classic pair, both real:
+
+      • **Low severity, high priority** — the company logo is misspelt on the
+        homepage. The system is perfectly fine and the brand is not. Ships in
+        the next hotfix.
+      • **High severity, low priority** — an export crashes for a report only
+        three internal users run, and they have a manual workaround. Total
+        failure, no urgency.
+
+      When they disagree, say so explicitly in the report instead of splitting
+      the difference in one field.
+    follow_up:
+      - "Who decides priority?"
+      - "Should I raise severity to get a fix faster?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_who_decides
+    any: [who decides, who sets, who chooses, my call, whose call, i or the,
+          me or the, allowed to set, can i change the priority]
+    all: [[priority, severity]]
+    weight: 1
+    answer: |
+      **You propose severity from evidence. The business decides priority.**
+
+      Severity is a technical judgement about impact, and you are the person
+      who just measured it — so it is yours to set and yours to defend with
+      what you observed. Nobody outranks the evidence.
+
+      Priority is a release decision: it weighs the defect against the roadmap,
+      the customers waiting, the cost of the fix and the risk of shipping it.
+      That is the product owner's or manager's call, and they will often know
+      things about it that you do not.
+
+      Where testers lose this argument is by fighting the wrong one. If you
+      believe something is more urgent than it was ranked, do not raise
+      severity — bring the impact: how many users, how often, what it costs,
+      whether there is a workaround. That changes priorities. Re-labelling
+      severity does not.
+    follow_up:
+      - "Can severity be low and priority high?"
+      - "The developer says won't fix. Now what?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_inflation
+    any: [set severity critical, mark it critical, make them fix, fix it faster,
+          raise the severity, bump the severity, exaggerate, inflate]
+    all: [[severity, priority]]
+    weight: 1.5
+    answer: |
+      **Never inflate severity to force attention.** It is the fastest way to
+      lose the only leverage you have.
+
+      Severity is a factual claim about impact. If yours turn out not to
+      survive scrutiny, every future Critical you file is discounted — and
+      the one time it really is critical, nobody moves. Credibility is a
+      tester's working capital and this spends it.
+
+      What actually works is arguing **priority**, which is the field the
+      question is really about: how many users hit this, how often, what it
+      costs them, whether a workaround exists, which customer is waiting.
+      That is a business case and it moves release decisions. A wrong number
+      in a severity field does not.
+    follow_up:
+      - "Who decides priority?"
+      - "The developer says won't fix. Now what?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_wont_fix
+    any: [won't fix, wont fix, will not fix, says it's minor, says its minor,
+          closed my bug, disagrees with, pushed back, rejected my bug]
+    weight: 1
+    answer: |
+      **Do not argue the label — bring the impact, then hand the decision to
+      the person who owns it.**
+
+      Three steps, in this order:
+
+      1. **Check whether they are right.** Re-read your own report as a
+         stranger would. If your evidence does not show the impact you claimed,
+         that is worth knowing before the conversation.
+      2. **Add the evidence you have and they do not.** How many users reach
+         this path, how often, what it costs them, whether there is a
+         workaround, which requirement it violates. Measure it if you can —
+         a number ends the discussion that adjectives prolong.
+      3. **Escalate to priority, not to volume.** "I disagree" goes nowhere;
+         "this affects the paid signup flow, here is the count" goes to the
+         product owner, and priority is theirs to set. Record the decision
+         when it goes against you: a defect deliberately not fixed is a
+         documented business decision, and that is a legitimate outcome.
+    follow_up:
+      - "Who decides priority?"
+      - "The developer says cannot reproduce."
+    source: ISTQB CTFL §5.5
+
+  - id: sp_scale_size
+    any: [how many severity, how many levels, how many severities, size of the
+          scale, levels should we have, levels do we need]
+    answer: |
+      **Four is the usual scale, and three works.** What matters far more than
+      the number is that the whole team means the same thing by each level.
+
+      A workable four: **Critical** — a core workflow is blocked, data is lost,
+      or something is exposed; **Major** — a feature is significantly impaired
+      but there is a workaround; **Minor** — an annoyance, workflows unaffected;
+      **Trivial** — cosmetic.
+
+      Write those definitions down where the bug tracker can see them and agree
+      them out loud once. A larger scale does not buy precision — it moves the
+      argument from "is this Major or Minor" to "is this level 6 or level 7",
+      which is the same argument with less shared meaning behind it.
+    follow_up:
+      - "What is the difference between severity and priority?"
+      - "Who decides priority?"
+    source: ISTQB CTFL §5.5
+
+  - id: sp_general
+    # The catch-all: negative weight so any specific entry above wins. It
+    # fires when the question is plainly about severity or priority but
+    # names no case, which usually means the asker wants the method.
+    any: [severity, priority, triage, how bad is]
+    weight: -3
+    none_of_note: >
+      Definitional questions never reach here — mentoring stands down for
+      those and the ISTQB layer answers them verbatim from the syllabus.
+    answer: |
+      **How to pick a severity, in the order that actually works:**
+
+      1. **Can the user finish the job?** No, and no workaround → Critical.
+         No, but there is a workaround → Major.
+      2. **Is data lost, wrong, or exposed?** → Critical, regardless of how
+         rare it is. Rarity is a priority input.
+      3. **Is a stated requirement violated?** → Major, even when nothing
+         looks broken. Quote the requirement as evidence.
+      4. **Otherwise it is presentation** → Minor, or Trivial if purely
+         decorative.
+
+      Then set priority separately, or rather propose it: severity is your
+      technical judgement, priority is the business's release decision. Say
+      both in the report and let them disagree if the case calls for it — a
+      misspelt logo really is low severity and high priority.
+    follow_up:
+      - "What severity for a footer typo?"
+      - "Can severity be low and priority high?"
+      - "Who decides priority?"
+    source: ISTQB CTFL §5.5

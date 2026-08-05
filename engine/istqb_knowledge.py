@@ -194,8 +194,15 @@ TESTING_PRINCIPLES: list[tuple[str, str]] = [
     ("Testing shows the presence, not the absence of defects",
      "Tests can demonstrate defects exist but cannot prove their absence."),
     ("Exhaustive testing is impossible",
-     "Trying everything is infeasible except in trivial cases. Use techniques, "
-     "prioritisation and risk-based testing to focus effort."),
+     # The compressed version said only "trying everything is infeasible",
+     # which restates the principle rather than giving its reason. The
+     # syllabus's reason — the number of input and precondition combinations
+     # — is the part that answers "but why?", which is how the question is
+     # always actually asked.
+     "Testing everything is infeasible except in trivial cases: the number of "
+     "possible input and precondition combinations is effectively infinite, so "
+     "no realistic amount of time covers them all. Use test techniques, "
+     "prioritisation and risk-based testing to focus effort instead."),
     ("Early testing saves time and money",
      "Defects removed early avoid downstream cost. Both static and dynamic "
      "testing should start as early as possible in the SDLC."),
@@ -439,8 +446,14 @@ TOPIC_TRIGGERS: dict[str, tuple[str, ...]] = {
         "seven principle", "7 principle", "testing principle",
         "principles of testing", "istqb principles",
         "principles", "test principle",
+        # People ask for a principle by what it says, not by its number.
+        # Measured: "why is exhaustive testing impossible" — the single
+        # most common way anyone asks about principle 2 — matched nothing
+        # and fell through to the LLM with no syllabus context at all.
+        "exhaustive", "defects cluster", "clustering of defects",
+        "pesticide paradox", "absence of error",
         "семи принцип", "сім принцип", "принципи тестування",
-        "принципи тест",
+        "принципи тест", "вичерпне тестування",
     ),
     "process": (
         "test process", "test activities", "test lifecycle",
@@ -622,8 +635,11 @@ GLOSSARY_ALIASES: dict[str, tuple[str, ...]] = {
     "qa": ("quality assurance", "qa", "забезпечення якості"),
     "coverage": ("coverage", "покриття"),
     "traceability": ("traceability", "трасування", "трасуванність"),
-    "regression testing": ("regression testing", "регресійне тестування",
-                           "регресія"),
+    # "regression" on its own is how the comparison is always asked
+    # ("smoke vs regression"), and without it the multi-term detector found
+    # one term and fell back to a single definition.
+    "regression testing": ("regression testing", "regression",
+                           "регресійне тестування", "регресія"),
     "confirmation testing": ("confirmation testing", "re-testing",
                               "підтверджуюче тестування"),
     "smoke testing": ("smoke testing", "smoke", "димне тестування"),
@@ -654,6 +670,30 @@ _DEFINE_INTENT_UA: tuple[str, ...] = (
     "що таке", "що це", "що значить", "поясни", "розкажи про",
     "розкажи що таке", "значення", "визначення",
 )
+
+
+def detect_glossary_terms(message: str) -> list[str]:
+    """Every glossary term the message mentions, in order of appearance.
+
+    The singular :func:`detect_glossary_term` returns the *longest* single
+    match, which is right for "what is a defect" and wrong for "what is the
+    difference between error, defect and failure" — measured: that question,
+    the most-asked one in testing, was answered with the definition of
+    "failure" alone. Comparative questions need every term, so they get
+    their own detector rather than a special case inside the singular one.
+
+    No definitional cue is required here; the caller decides. Mention-only
+    sentences are the caller's problem to exclude.
+    """
+    low = (message or "").strip().lower()
+    if not low:
+        return []
+    found: list[tuple[int, str]] = []
+    for term, aliases in GLOSSARY_ALIASES.items():
+        positions = [low.find(a) for a in aliases if a in low]
+        if positions:
+            found.append((min(positions), term))
+    return [term for _, term in sorted(found)]
 
 
 def detect_glossary_term(message: str) -> str | None:

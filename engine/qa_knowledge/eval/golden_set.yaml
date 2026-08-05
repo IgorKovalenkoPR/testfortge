@@ -46,6 +46,14 @@ locale: en+uk
 # Guards are only listed where the wrong answer is a *plausible* one —
 # a guard nobody would trip measures nothing.
 #
+# A guard must name the wrong **advice**, never the wrong **term**. A good
+# answer names the forbidden synonym precisely in order to forbid it —
+# "Modal, not lightbox" — so a guard of `lightbox` fails the best possible
+# answer. Eight guards in the first draft had that defect, and so did four
+# severity guards: an answer recommending Minor may still print the whole
+# ladder, Critical included, as context. Guard the shape of the
+# recommendation ("severity: critical"), not its vocabulary.
+#
 # `route` is the path that SHOULD answer. Scored separately from
 # content, because an item can be right by luck through the LLM while
 # the pack that owns it is still unreachable — which is failure 1 above
@@ -74,7 +82,7 @@ items:
   require:
     - [minor, trivial, cosmetic, low]
     - [priority, urgency]
-  avoid: [critical, blocker]
+  avoid: ["severity: critical", critical severity, "severity: blocker"]
 
 - id: SEV-002
   pack: severity_priority
@@ -87,7 +95,7 @@ items:
   why: >
     Narrow audience tempts a junior to lower severity. Severity is
     impact-when-hit, not how many are hit — that is priority's job.
-  avoid: [minor, trivial]
+  avoid: ["severity: minor", minor severity, "severity: trivial"]
 
 - id: SEV-003
   pack: severity_priority
@@ -122,7 +130,7 @@ items:
   require:
     - [critical, high, major]
     - [data loss, loses data, unsaved, data]
-  avoid: [minor, trivial]
+  avoid: ["severity: minor", minor severity, "severity: trivial"]
 
 - id: SEV-006
   pack: severity_priority
@@ -132,7 +140,7 @@ items:
   require:
     - [critical, high, major]
     - [security, exposure, exposed]
-  avoid: [minor, cosmetic]
+  avoid: ["severity: minor", minor severity, purely cosmetic]
 
 - id: SEV-007
   pack: severity_priority
@@ -386,7 +394,7 @@ items:
   require:
     - [drop-down, menu]
     - [label, quote, name]
-  avoid: [dropdown, combobox, select, popup thing]
+  avoid: ["call it a popup", popup thing, "no canonical term"]
 
 - id: NAM-003
   pack: naming
@@ -395,7 +403,7 @@ items:
   route: pack:naming
   require:
     - [drop-down]
-  avoid: [either, both fine, combobox]
+  avoid: [either is fine, both are correct, "no difference"]
 
 - id: NAM-004
   pack: naming
@@ -409,7 +417,7 @@ items:
     wording_rules.yaml forbids naming an element by position alone, so
     the answer must reach for placeholder / accessible name first and use
     position only as a qualifier.
-  avoid: [textbox, "the icon on the right", second field]
+  avoid: [textbox, second field, "the icon on the right is fine"]
 
 - id: NAM-005
   pack: naming
@@ -439,21 +447,42 @@ items:
   require:
     - ["verify that"]
     - [can, cannot, actor, user]
-  avoid: [verify the ability, is able to, "check that", "test that"]
+  avoid: ["check that", "test that", opener does not matter]
 
 - id: NAM-008
   pack: naming
   lang: en
-  q: "Is 'the system should display an error' a good expected result?"
+  q: "Is 'the form is validated correctly' a good expected result?"
   route: pack:naming
   require:
-    - [avoid, "don't", do not, instead, rewrite, never]
-    - [displays, "is displayed", present tense, shown]
+    - [avoid, "don't", do not, instead, rewrite, never, banned]
+    - [observable, highlighted, error message, "name the", what is displayed]
   why: >
-    The corpus never uses "should" in an expected result. This is the
-    house rule that contradicted a team-lead instruction and was settled
-    by measurement, so it must stay graded.
-  avoid: [that is correct, perfectly fine, acceptable]
+    Grading the outcome is what actually breaks an expected result — nobody
+    can fail "correctly". The reviewer comment behind the rule is blunt:
+    "Try do not use correct/incorrect, specify the action or the result".
+  avoid: [that is correct, perfectly fine, acceptable as is]
+
+- id: NAM-017
+  pack: naming
+  lang: en
+  q: "Can I write 'should' in an expected result?"
+  route: pack:naming
+  require:
+    - [accepted, allowed, "is fine", both]
+    - [title, opener, "verify that"]
+  why: >
+    The item my first draft had backwards, and the correction is the whole
+    reason this pack quotes the rules instead of reasoning about them.
+    wording_rules.yaml arbitrates "should" as ACCEPTED in an expected
+    result — the team's reviewed training deliverable uses it throughout
+    and the reviewing team lead did not object — and banned in a title,
+    where every case opens "Verify that <actor> can/cannot". Present-tense
+    declarative is equally accepted and neither form may be rewritten into
+    the other. An answer that bans "should" everywhere contradicts the file
+    the generator reads, which is the one failure this pack exists to
+    prevent.
+  avoid: [never use should, should is banned, always rewrite]
 
 - id: NAM-009
   pack: naming
@@ -462,7 +491,7 @@ items:
   route: pack:naming
   require:
     - [hamburger button]
-  avoid: [burger menu, hamburger menu icon thing]
+  avoid: ["call it the burger menu", hamburger menu is fine]
 
 - id: NAM-010
   pack: naming
@@ -471,7 +500,7 @@ items:
   route: pack:naming
   require:
     - [modal]
-  avoid: [lightbox, popup window, overlay thing]
+  avoid: ["call it a lightbox", overlay thing]
 
 - id: NAM-011
   pack: naming
@@ -511,7 +540,7 @@ items:
   route: pack:naming
   require:
     - [accordion]
-  avoid: [spoiler, expander, collapsible thing]
+  avoid: ["call it a spoiler", collapsible thing]
 
 - id: NAM-015
   pack: naming
@@ -520,7 +549,7 @@ items:
   route: pack:naming
   require:
     - [entry field, field, label]
-  avoid: ["textbox is fine", "yes"]
+  avoid: [textbox is fine, either term works]
 
 - id: NAM-016
   pack: naming
@@ -592,7 +621,7 @@ items:
   pack: process
   lang: en
   q: "What's the difference between smoke and regression?"
-  route: istqb:smoke
+  route: istqb:comparison
   require:
     - [smoke, shallow, breadth, build, quick]
     - [regression, existing, unchanged, side effect]
@@ -792,7 +821,7 @@ items:
   pack: theory
   lang: en
   q: "What is the defect lifecycle?"
-  route: istqb:defect_lifecycle
+  route: istqb:glossary
   require:
     - [new, open]
     - [assigned, in progress, fixed]
@@ -831,7 +860,7 @@ items:
   pack: theory
   lang: en
   q: "What is static testing?"
-  route: istqb:static
+  route: istqb:glossary
   require:
     - [without executing, no execution, review]
     - [early, requirement, document, code]
@@ -840,7 +869,7 @@ items:
   pack: theory
   lang: en
   q: "What is risk-based testing?"
-  route: istqb:risk_based
+  route: istqb:glossary
   require:
     - [likelihood, probability]
     - [impact, consequence]
@@ -877,7 +906,7 @@ items:
   pack: product
   lang: en
   q: "What can you do?"
-  route: fast_path:default_help
+  route: fast_path:module_help
   require:
     - [test case, checklist, bug]
 
@@ -952,7 +981,7 @@ items:
   route: pack:severity_priority
   require:
     - [minor, тривіальн, незначн, косметичн, низьк]
-  avoid: [критичн, блокер]
+  avoid: ["серйозність: критичн", критична серйозність]
 
 - id: SEV-U2
   pack: severity_priority
@@ -978,9 +1007,12 @@ items:
   q: "Пароль видно відкритим текстом у полі. Яка серйозність?"
   route: pack:severity_priority
   require:
-    - [критичн, висок]
-    - [безпек, вразлив]
-  avoid: [незначн, косметичн]
+    # Level names stay in Latin on purpose: Critical / Major / Minor /
+    # Trivial are what the tracker's field actually contains, and advice
+    # that says "поставте критичну" matches no field the tester can see.
+    - [critical, критичн, high, висок]
+    - [безпек, вразлив, розкрит]
+  avoid: ["серйозність: незначн", незначна серйозність]
 
 - id: LYR-U1
   pack: layer
@@ -1097,9 +1129,13 @@ items:
   q: "Яка різниця між error, defect і failure?"
   route: istqb:errors_defects
   require:
-    - [людин, помилка дії, дія]
-    - [дефект, артефакт, продукт]
-    - [видим, зовнішн, прояв, поведінк]
+    # The syllabus definitions are served in English deliberately —
+    # istqb_knowledge keeps ISTQB wording verbatim so a Foundation-Level
+    # candidate can revise from Tedgie. Only the framing is localised, so
+    # the requirements accept both languages.
+    - [human, людин, mistake, помилка дії]
+    - [flaw, дефект, work product, артефакт]
+    - [visible, видим, зовнішн, externally, behaviour]
 
 - id: THY-U2
   pack: theory
@@ -1107,8 +1143,8 @@ items:
   q: "Що таке аналіз граничних значень?"
   route: istqb:boundary
   require:
-    - [границ, межов, край]
-    - [клас, валідн, невалідн, мінімум, максимум]
+    - [boundary, границ, межов, edges]
+    - [partition, клас, valid, валідн, minimum, мінімум]
 
 - id: PRD-U1
   pack: product

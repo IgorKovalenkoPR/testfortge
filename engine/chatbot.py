@@ -104,8 +104,10 @@ _HELP_EN = {
     ),
     "checklist": (
         "**Checklist** produces a low-level TestFort checklist (HDR_001, "
-        "FTR_001…). Same inputs as Test Cases. Use it for quick regression "
-        "sweeps or smoke passes."
+        "FTR_001…) — one observable check per item, grouped into sections by "
+        "page area, with the numbers as stable identifiers. It trades step "
+        "detail for coverage breadth, so use it for quick regression sweeps "
+        "or smoke passes. Same inputs as Test Cases."
     ),
     "test_execution": (
         "**Test Execution** runs selected test cases or checklist items "
@@ -318,8 +320,13 @@ _MODULE_SYNONYMS = {
         "download xlsx", "download markdown", "download csv",
         "export bug", "export test case", "export estim", "export checklist",
         "markdown export", "xlsx export",
+        # Nobody types "xlsx". The list held every technical spelling of the
+        # format and not the word users actually use, so "How do I export to
+        # Excel?" fell through to the generic help menu.
+        "export to excel", "export in excel", "excel export", "download excel",
+        "save as excel", "export the results", "export results", "excel file",
         "експорт", "вивантаж у xlsx", "зберегти xlsx", "експортувати",
-        "завантажити результат",
+        "завантажити результат", "експорт в excel", "вивантажити в excel",
     ],
     "estimation":     [
         "estimation", "estimate hours", "estimating", "man-hours",
@@ -337,7 +344,7 @@ _MODULE_SYNONYMS = {
     "checklist":      [
         "checklist", "check list", "smoke checklist", "regression list",
         "low-level check", "smoke pass",
-        "чек-ліст", "чеклист", "смоук чек", "регресійний список",
+        "чек-ліст", "чеклист", "чекліст", "смоук чек", "регресійний список",
     ],
     "test_execution": [
         "test execution", "execution", "run test", "run tests",
@@ -420,7 +427,15 @@ _BROKEN_UA = ["помилк", "не працю", "зламан", "не вдає�
 # requirement / user story and we want to help them shape it.
 _REQ_MARKERS_EN = ["as a ", "user can ", "user should ", "the system should",
                    "feature:", "requirement:"]
-_REQ_MARKERS_UA = ["як ", "користувач має", "користувач може", "система має",
+#: The English list keys on "as a " — the user-story opener. The Ukrainian
+#: one keyed on a bare "як ", which is also the word for "how", so every
+#: Ukrainian how-question was treated as a requirement to be shaped:
+#: "Як згенерувати чекліст?" was answered with clarifying questions about
+#: the requirement instead of with the module's help card. Measured on the
+#: golden set. The opener needs its actor to count as a user story.
+_REQ_MARKERS_UA = ["як користувач", "як адміністратор", "як менеджер",
+                   "як гість", "як тестувальник", "як власник",
+                   "користувач має", "користувач може", "система має",
                    "вимога:", "функція:"]
 
 
@@ -684,17 +699,31 @@ def _troubleshoot(lang: str, user_msg: str) -> ChatReply:
         )
 
     # ── 7) Generic fallback ────────────────────────────────────────────
+    # Asking for detail is right, but asking for detail and nothing else
+    # sends the user away with no move to try. The three causes named here
+    # are the ones the specific branches above cover, so most people can
+    # self-serve while they are writing the answer.
     if lang == "ua":
         return ChatReply(
             text=("Опишіть, що саме не працює: який модуль, який крок, "
-                  "яке повідомлення зʼявилось? Я підкажу наступний крок."),
+                  "яке повідомлення зʼявилось? Я підкажу наступний крок.\n\n"
+                  "Найчастіші причини, поки ви пишете: 1) URL недоступний "
+                  "або закритий логіном — вставте пряме посилання на "
+                  "сторінку; 2) не задано API-ключ у налаштуваннях; "
+                  "3) тимчасовий збій — спробуйте ще раз, кнопка "
+                  "перегенерації не втрачає вже збережене."),
             intent="troubleshoot_generic",
             follow_up=["Який модуль?", "Який саме крок?", "Текст помилки?",
                        "Який браузер / ОС?"],
         )
     return ChatReply(
         text=("Tell me what's broken: which module, which step, and the "
-              "error text you saw. I'll suggest the next move."),
+              "error text you saw. I'll suggest the next move.\n\n"
+              "Most common causes, while you're typing: 1) the URL is "
+              "unreachable or behind a login — paste a direct page URL; "
+              "2) no API key is set in settings; 3) a transient failure — "
+              "retry, the regenerate button keeps what you've already "
+              "edited."),
         intent="troubleshoot_generic",
         follow_up=["Which module?", "Which step?", "Error text?",
                    "Which browser / OS?"],
@@ -953,6 +982,17 @@ _DEFINITIONAL_CUES: tuple[str, ...] = (
 )
 
 
+#: Asking where something is, how to see it, or who can reach it is never
+#: an attempt to file it.
+_LOCATIONAL_CUES = (
+    "where do i", "where can i", "where is", "where are", "how do i see",
+    "how do i find", "how do i view", "how do i open", "how do i export",
+    "how to see", "how to find", "how to export", "who can see",
+    "де подивитись", "де побачити", "де знайти", "де і", "як подивитись",
+    "як знайти", "як експортувати", "як відкрити", "хто бачить",
+)
+
+
 def _wants_bug_form(low: str) -> bool:
     """Strict bug-form intent classifier.
 
@@ -960,8 +1000,18 @@ def _wants_bug_form(low: str) -> bool:
     a bug — i.e. matches one of the curated trigger phrases. Bare
     mentions of the word 'bug' / 'баг' (e.g. 'what is a bug?',
     'що таке баг') no longer hijack the conversation; they fall through
-    to the ISTQB glossary lookup."""
+    to the ISTQB glossary lookup.
+
+    A definitional veto was already here. A *locational* one was missing,
+    and the trigger list contains the bare noun phrase "bug report" — so
+    "Where do I see the bug reports?" opened the filing form instead of
+    telling the user where the module is. Measured on the golden set; the
+    same defect answers "how do I export bug reports" and "who can see bug
+    reports" with a blank filing form.
+    """
     if any(cue in low for cue in _DEFINITIONAL_CUES):
+        return False
+    if any(cue in low for cue in _LOCATIONAL_CUES):
         return False
     return _any(low, _BUG_REPORT_TRIGGERS_EN) or _any(low, _BUG_REPORT_TRIGGERS_UA)
 
@@ -1487,6 +1537,114 @@ def _ai_respond(message: str, lang: str) -> ChatReply | None:
     return ChatReply(text=text, intent=intent)
 
 
+#: Comparative shapes. Deliberately excludes a bare " or " (too common to
+#: mean anything) and includes the Ukrainian forms, which is how half the
+#: team asks.
+_COMPARATIVE = (
+    "difference between", " vs ", " vs.", "vs. ", " versus ", "compared to",
+    "чим відрізня", "яка різниця", "у чому різниця", "в чому різниця",
+    "різниця між",
+)
+
+#: Term sets the syllabus already compares in one place. When a comparative
+#: question names one of these, the topic answer is better than anything
+#: assembled from separate glossary entries — it is the syllabus's own
+#: comparison, in its own wording.
+_COMPARISON_TOPICS: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"error", "defect", "failure"}), "errors_defects"),
+    (frozenset({"error", "defect"}), "errors_defects"),
+    (frozenset({"defect", "failure"}), "errors_defects"),
+    (frozenset({"verification", "validation"}), "verification_validation"),
+    (frozenset({"severity", "priority"}), "severity"),
+    (frozenset({"regression testing", "confirmation testing"}), "confirmation"),
+)
+
+
+def _is_comparative(message: str) -> bool:
+    low = _norm(message)
+    return any(cue in low for cue in _COMPARATIVE)
+
+
+def _istqb_comparison_reply(message: str, lang: str) -> ChatReply | None:
+    """Answer a "difference between X and Y" question with every term.
+
+    Measured before this existed: "What is the difference between error,
+    defect and failure?" — the most-asked question in testing — returned the
+    definition of *failure* alone, because the glossary detector takes the
+    longest single alias match. "Verification vs validation" returned
+    verification. Both are the kind of failure that reads as an answer, so
+    nobody reports it.
+    """
+    try:
+        from . import istqb_knowledge
+    except Exception:  # pragma: no cover — defensive
+        return None
+    terms = istqb_knowledge.detect_glossary_terms(message)
+    if len(terms) < 2:
+        return None
+    found = set(terms)
+    # Prefer the largest matching set, so {error, defect, failure} is not
+    # served by the two-term entry that happens to be listed first.
+    for keys, topic in sorted(_COMPARISON_TOPICS, key=lambda kv: -len(kv[0])):
+        if keys <= found:
+            reply = _istqb_reply(topic, lang)
+            if reply is not None:
+                return reply
+    parts = []
+    for term in terms:
+        body = istqb_knowledge.TERMS_GLOSSARY.get(term)
+        if body:
+            ref = istqb_knowledge._GLOSSARY_REFS.get(term, "ISTQB CTFL")
+            parts.append(f"**{term.title()}** ({ref})\n{body}")
+    if len(parts) < 2:
+        return None
+    lead = ("Порівняння за глосарієм ISTQB CTFL:"
+            if lang == "ua" else
+            "Side by side, from the ISTQB CTFL glossary:")
+    return ChatReply(
+        text=lead + "\n\n" + "\n\n".join(parts),
+        intent="istqb:comparison",
+        suggestions=["Show the seven testing principles",
+                     "Show test types",
+                     "Show defect lifecycle"],
+    )
+
+
+def _mentoring_reply(message: str, lang: str = "en", *,
+                     allow_catch_all: bool = False) -> ChatReply | None:
+    """Answer from a mentoring pack, or None to let the chain continue.
+
+    Stands down for definitional questions about syllabus subjects. Shape
+    and subject are both required: "what do I attach to a bug report" is a
+    definitional shape about nothing in the syllabus and belongs here,
+    while "severity of a footer typo" is a syllabus subject in no
+    definitional shape and also belongs here. Only the intersection —
+    "what is severity" — goes back to the ISTQB layer.
+    """
+    try:
+        from . import mentoring
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("mentoring packs unavailable: %s", exc)
+        return None
+    if mentoring.is_definitional(message):
+        if _istqb_detect_glossary(message) or _istqb_detect_topic(message):
+            return None
+    try:
+        found = mentoring.answer(message, lang)
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning("mentoring lookup failed: %s", exc)
+        return None
+    if found is None:
+        return None
+    if found.is_catch_all and not allow_catch_all:
+        return None
+    return ChatReply(
+        text=found.text.strip(),
+        intent=found.route,
+        suggestions=list(found.follow_up),
+    )
+
+
 def try_fast_path(message: str, lang: str = "en") -> ChatReply | None:
     """Run the pre-LLM portion of :func:`respond`.
 
@@ -1517,6 +1675,31 @@ def try_fast_path(message: str, lang: str = "en") -> ChatReply | None:
     if any(_has_token_phrase(g) for g in _GRATITUDE):
         return _gratitude(lang)
 
+    # Mentoring packs — the concrete questions a tester actually asks:
+    # "what severity is a footer typo", "is this backend or frontend",
+    # "click or press in a step", "what do I cut when there's no time".
+    #
+    # Runs BEFORE the guide handlers and before the glossary / topic
+    # detectors, and that order is the point. `_istqb_detect_topic`
+    # matches a bare keyword, so the word "severity" anywhere in a message
+    # used to route to the *definition* of severity — measured on thirteen
+    # mentee questions, four of five concrete triage questions were
+    # answered with a definition. Placing this layer after the detectors
+    # would leave that defect exactly where it was.
+    #
+    # Two guards keep it from stealing what it should not:
+    #   * definitional questions ("what is severity", "яка різниця між…")
+    #     are handed back, so the ISTQB layer keeps quoting the syllabus
+    #     verbatim for people revising for the exam;
+    #   * the packs' catch-all entries are declined here, so a question
+    #     that merely mentions severity without naming a case still
+    #     reaches chatbot_guide's severity decision tree, which composes
+    #     over cue combinations (intermittent × critical-area × blocking)
+    #     that no single pack entry covers.
+    mentor_reply = _mentoring_reply(raw, lang)
+    if mentor_reply is not None:
+        return mentor_reply
+
     # Guide-promised handlers — match the six concrete sample
     # questions advertised in templates/guide.html ("What Tedgie is
     # good at"). Run BEFORE the glossary, ISTQB topic detector and
@@ -1537,6 +1720,20 @@ def try_fast_path(message: str, lang: str = "en") -> ChatReply | None:
         guide_reply = None
     if guide_reply is not None:
         return guide_reply
+
+    # Comparative questions run before the single-term glossary lookup,
+    # because that lookup returns the longest *single* alias match and a
+    # comparison needs all of them. "Difference between error, defect and
+    # failure" used to answer with the definition of failure.
+    if _is_comparative(raw):
+        cmp_topic = _istqb_detect_topic(raw)
+        if cmp_topic is not None:
+            cmp_reply = _istqb_reply(cmp_topic, lang)
+            if cmp_reply is not None:
+                return cmp_reply
+        cmp_multi = _istqb_comparison_reply(raw, lang)
+        if cmp_multi is not None:
+            return cmp_multi
 
     # Definitional questions ("what is a bug", "що таке дефект", ...) —
     # always answered with the verbatim ISTQB glossary entry. Runs
@@ -1589,7 +1786,14 @@ def rule_based_fallback(message: str, lang: str = "en") -> ChatReply:
     # Troubleshooting intent — anything that sounds like a failure.
     # Runs before module help so "Automation is broken" routes to the
     # troubleshooter rather than the static help card.
-    if _any(low, _BROKEN_EN) or _any(low, _BROKEN_UA):
+    #
+    # The locational veto matters because "bug" is one of the failure
+    # triggers, and the bare noun makes every question *about* bugs look
+    # like a report of one: "Where do I see the bug reports?" was answered
+    # with "tell me what's broken". Asking where a thing is is never a
+    # report that it is broken.
+    if (_any(low, _BROKEN_EN) or _any(low, _BROKEN_UA)) and \
+            not any(cue in low for cue in _LOCATIONAL_CUES):
         return _troubleshoot(lang, raw)
 
     # Requirement shaping wins over module help so a clear "as a user…"
@@ -1647,6 +1851,17 @@ def rule_based_fallback(message: str, lang: str = "en") -> ChatReply:
             glos_reply = _istqb_glossary_reply(best_term, lang)
             if glos_reply is not None:
                 return glos_reply
+
+    # Mentoring catch-alls — the "here is the method" answers, declined in
+    # the fast path so named cases reach their specific owners. They run
+    # BEFORE the RAG retriever on purpose: the retriever will answer a
+    # question like "how should I write this" with whatever syllabus
+    # paragraph scores highest, and measured on the golden set that was a
+    # Java Selenium snippet at 10.6 against a relevance floor of 4.0. A
+    # curated method beats a confident irrelevant passage.
+    mentor_general = _mentoring_reply(raw, lang, allow_catch_all=True)
+    if mentor_general is not None:
+        return mentor_general
 
     # ISTQB RAG retriever — searches the syllabus + textbook corpus
     # for the closest passage. Only fires for messages that look like
