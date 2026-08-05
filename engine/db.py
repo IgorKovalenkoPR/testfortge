@@ -3388,7 +3388,8 @@ def load_edit_metadata(project_id: str, kind: str = "test_cases") -> dict:
     touched. One query beside the pack rather than a per-row lookup: a
     project with 200 cases would otherwise open 200 connections to render.
     """
-    models = {"test_cases": TestCase, "checklist": ChecklistItem}
+    models = {"test_cases": TestCase, "checklist": ChecklistItem,
+              "bugs": BugReport}
     model = models.get(kind)
     if not project_id or model is None:
         return {}

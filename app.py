@@ -273,6 +273,28 @@ def _template_edit_metadata(kind: str = "test_cases") -> dict:
 app.jinja_env.globals["edit_metadata"] = _template_edit_metadata
 
 
+def _template_bug_status_options(current: str) -> list:
+    """The statuses this person may move this bug to, from where it is (E4.5).
+
+    Filtered by role as well as by transition, so the control cannot offer a
+    move the server will refuse. Hiding an option is UX, not a permission —
+    ``engine.editable``'s field guard checks again on the way in.
+    """
+    try:
+        from engine import bug_workflow, permissions
+        allowed = bug_workflow.allowed_from(current)
+        return [status for status in allowed
+                if bug_workflow.role_required(status) == "user"
+                or permissions.has_role(bug_workflow.role_required(status))]
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("bug status options unavailable: %s", exc)
+        from engine.bug_report import BUG_STATUSES
+        return list(BUG_STATUSES)
+
+
+app.jinja_env.globals["bug_status_options"] = _template_bug_status_options
+
+
 @app.route("/api/csrf-token", methods=["GET"])
 def api_csrf_token():
     """Mint a CSRF token for the current session.

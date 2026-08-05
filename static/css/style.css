@@ -2751,3 +2751,38 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) {
     .cl-row-actions { transition: none; }
 }
+
+/* ── Bug Reports editor (E4.5) ─────────────────────────────────────
+   The body fields use the .ie rules above. The status control is a real
+   <select> because which values are legal depends on the bug's current
+   status and on the person's role — see engine/bug_workflow.py. */
+
+.bug-editor-status {
+    font-size: 0.85em;
+    font-weight: 600;
+    margin-left: 12px;
+}
+.bug-editor-status-ok { color: #047857; }
+.bug-editor-status-error { color: #b91c1c; }
+.bug-editor-status-info { color: #475569; }
+
+.bug-status-select {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #0f172a;
+    font-size: 0.82em;
+    font-weight: 600;
+    padding: 3px 6px;
+}
+
+.bug-status-select:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.bug-status-select:disabled {
+    /* While the change is in flight. Kept legible rather than greyed to
+       nothing: it still says what the status is. */
+    opacity: 0.65;
+}

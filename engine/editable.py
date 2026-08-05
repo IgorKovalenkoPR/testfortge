@@ -137,6 +137,17 @@ class Entity:
     # them by setting two flags instead of by writing them again.
     creatable: bool = False
     deletable: bool = False
+    # ── Per-field guards (E4.5) ────────────────────────────────────
+    #
+    # ``field → callable(old, new, has_role)`` that raises to refuse the
+    # change. Validation answers "is this value the right shape"; a guard
+    # answers "may this value follow that one, from this person" — which
+    # needs the old value and the actor, and so cannot live in ``Field``.
+    #
+    # Declared on the entity rather than checked in the route, because a
+    # rule enforced in one handler is a rule the next handler forgets. Every
+    # caller of ``patch`` gets it.
+    field_guards: dict = _dc_field(default_factory=dict)
     # ``TC-`` → TC-001, TC-002 … Only ids matching the prefix are counted,
     # so a project full of generator ids (SC1_004, REC_002) still starts a
     # hand-written case at TC-001.
@@ -156,6 +167,17 @@ def _text(max_length: int, *, required: bool = False) -> Field:
 
 def _choice(choices, *, required: bool = False) -> Field:
     return Field(kind="choice", choices=tuple(choices), required=required)
+
+
+def _bug_status_guard(old, new, has_role) -> None:
+    """Refuse a status move the workflow does not allow (E4.5).
+
+    Imported lazily so this module keeps loading without the bug vocabulary,
+    and so a circular import cannot form: ``bug_workflow`` reads
+    ``bug_report``, which knows nothing about editing.
+    """
+    from engine import bug_workflow
+    bug_workflow.check(old, new, has_role=has_role)
 
 
 def _registry() -> dict[str, Entity]:
@@ -217,6 +239,19 @@ def _registry() -> dict[str, Entity]:
         "bug": Entity(
             name="bug", model_name="BugReport", id_column="external_id",
             audit_entity="bug",
+            # Requirement 7's other half: a bug somebody files by hand. The
+            # older ``POST /create-bug-report`` form stays — it is how a
+            # tester files one mid-run — and this is the same act from the
+            # editor, through the same allowlist and audit.
+            #
+            # Not deletable. Deleting a bug destroys evidence somebody
+            # gathered, and ``routes/bugs.py`` already decided that question:
+            # bulk delete is admin-only there. Offering a per-row delete here
+            # to every member would quietly undo that.
+            creatable=True, id_prefix="BUG-",
+            create_defaults={"severity": "Minor", "priority": "Medium",
+                             "status": "Open"},
+            field_guards={"status": _bug_status_guard},
             fields={
                 "title": _text(500, required=True),
                 # Here a closed vocabulary is real, and enforcing it is what
@@ -391,13 +426,29 @@ def get(entity_name: str, project_id: str, entity_id: str) -> dict | None:
 
 # ── Writing ───────────────────────────────────────────────────────
 
+def _default_has_role(role: str) -> bool:
+    """Whether the current actor holds ``role``.
+
+    Falls back to True outside a request: the CLI, the detached
+    ``runner_worker`` and the migration scripts have no session to ask, and
+    refusing there would break the automated paths in the name of a rule
+    written for people using the UI.
+    """
+    try:
+        from engine import permissions
+        return bool(permissions.has_role(role))
+    except Exception:      # pragma: no cover — no request context at all
+        return True
+
+
 def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
           *, expected_version: int | None = None,
-          actor: str | None = None) -> dict:
+          actor: str | None = None, has_role=None) -> dict:
     """Apply an edit and return the row as the client should now see it.
 
     Raises :class:`FieldNotEditable`, :class:`ValidationFailed`,
-    :class:`EntityNotFound` or :class:`engine.db.WriteConflict`.
+    :class:`EntityNotFound`, :class:`engine.db.WriteConflict`, or whatever a
+    registered field guard raises (E4.5 — ``bug_workflow.TransitionRefused``).
     """
     from engine import db as _db
 
@@ -405,6 +456,7 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
     if not project_id:
         raise EntityNotFound("no active project")
     values = validate(entity_name, changes)     # before touching the DB
+    role_oracle = has_role or _default_has_role
 
     with _db.session_scope() as sess:
         row = _one(sess, config, project_id, entity_id)
@@ -417,11 +469,21 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
             raise _db.WriteConflict(entity_name, int(expected_version),
                                     current)
 
+        changed = {name: (getattr(row, name, None), new_value)
+                   for name, new_value in values.items()
+                   if getattr(row, name, None) != new_value}
+
+        # Guards run as a complete pass before anything is applied — the same
+        # contract ``validate`` has, so a patch is never half-refused. Only
+        # for fields that actually change: re-posting the value a form
+        # rendered is not a transition and must not be refused as one.
+        for name, (old_value, new_value) in changed.items():
+            guard = config.field_guards.get(name)
+            if guard is not None:
+                guard(old_value, new_value, role_oracle)
+
         diff = {}
-        for name, new_value in values.items():
-            old_value = getattr(row, name, None)
-            if old_value == new_value:
-                continue
+        for name, (old_value, new_value) in changed.items():
             diff[name] = [old_value, new_value]
             setattr(row, name, new_value)
 

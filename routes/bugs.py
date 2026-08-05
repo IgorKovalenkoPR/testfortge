@@ -30,6 +30,7 @@ from engine.bug_report import (
 
 from engine import db as _db
 from engine import bug_areas as _bug_areas
+from engine import bug_workflow as _bug_workflow
 from engine import permissions as _perm
 from engine import workspace as _workspace
 # CSV injection guard, shared with engine/exporter.py — a cell beginning
@@ -413,6 +414,27 @@ def register(app: Flask) -> None:
         # function during Sprint 4 anticipated. Checked here rather than by
         # splitting the endpoint, because the toolbar posts every action to
         # one URL and changing that buys nothing.
+        # E4.5's status workflow applies here too. A rule the bulk toolbar can
+        # bypass is decorative: "Set status → Closed" over twenty checkboxes
+        # is the *easiest* way to skip a gate that the single-row editor
+        # enforces. ``close`` is the same act under its own action name.
+        if action in ("status", "close"):
+            target = "Closed" if action == "close" else (value or "")
+            required = _bug_workflow.role_required(target)
+            if required != "user" and not _perm.has_role(required):
+                flash(g.t.get(
+                    "bug_bulk_status_role",
+                    "Closing bug reports is limited to admins — it is the "
+                    "sign-off that a fix was verified. Mark them Resolved "
+                    "instead, or ask an admin."), "error")
+                return redirect(url_for("bug_reports_page"))
+            # Per-bug transitions are deliberately *not* checked: a bulk
+            # action spanning bugs in different states would then be
+            # half-applied or refused wholesale, and neither is what the
+            # operator asked for. The role gate is the part that protects
+            # something; the transition map is guidance for the editor, which
+            # is where a person sees one bug's actual state.
+
         if action == "delete" and not _perm.has_role("admin"):
             flash(g.t.get(
                 "bug_bulk_delete_admin",

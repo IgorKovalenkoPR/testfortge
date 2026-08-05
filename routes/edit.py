@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from flask import Flask, jsonify, request
 
+from engine import bug_workflow as _bug_workflow
 from engine import db as _db
 from engine import editable as _editable
 from engine import features as _features
@@ -255,6 +256,15 @@ def register(app: Flask) -> None:
             return jsonify({"error": "validation_failed",
                             "message": str(exc),
                             "field": exc.field_name}), 400
+        except _bug_workflow.TransitionRefused as exc:
+            # 403 when it is about who you are, 400 when it is about the move.
+            # A client that showed "try again" for the first would be lying;
+            # the answer there is "ask an admin".
+            code = 403 if exc.reason == "needs_role" else 400
+            return jsonify({"error": "transition_refused",
+                            "reason": exc.reason,
+                            "field": "status",
+                            "message": str(exc)}), code
         except _editable.AmbiguousEntity as exc:
             # Not a 409-and-reload: the id will still be duplicated after a
             # reload. Named so the message can say what is actually wrong.
@@ -323,6 +333,11 @@ def register(app: Flask) -> None:
             return jsonify({"error": "validation_failed",
                             "message": str(exc),
                             "field": exc.field_name}), 400
+        except _bug_workflow.TransitionRefused as exc:
+            code = 403 if exc.reason == "needs_role" else 400
+            return jsonify({"error": "transition_refused",
+                            "reason": exc.reason,
+                            "message": str(exc)}), code
         except _editable.EntityNotFound as exc:
             return jsonify({"error": "no_project",
                             "message": str(exc)}), 400

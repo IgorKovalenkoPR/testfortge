@@ -1,4 +1,18 @@
 {% extends "base.html" %}
+{% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+
+{#- E4.5: the bug body is editable in place when EDITORS_ENABLED is on.
+    ``bug_edit`` maps public id -> {row_version, ai_generated, ...}; a report
+    missing from it cannot be addressed by the edit endpoint, so it renders
+    read-only rather than offering an editor that would 404 on save. -#}
+{% set bug_edit = edit_metadata('bugs') %}
+
+{% macro bug_field_edit(bug, field, value, kind="text", label=None) %}
+  {%- set meta = bug_edit.get(bug.id) if bug_edit else None -%}
+  {{ editable("bug", bug.id, field, value,
+              version=meta.row_version if meta else None,
+              kind=kind, label=label, readonly=(meta is none)) }}
+{%- endmacro %}
 {% block title %}{{ t.get('bug_title', 'Bug Reports') }}{% endblock %}
 
 {% block content %}
@@ -223,6 +237,17 @@
    gated by ``{% if bugs %}`` because they're meaningless without
    any rows to act on. #}
 <div class="bug-actions">
+    {%- if editors_enabled() %}
+    {# Requirement 7's other half. The older /create-bug-report form stays —
+       it is how a tester files one mid-run, with the run's context attached —
+       and this is the same act from the editor: an empty report to fill in. #}
+    <button type="button" class="btn btn-secondary" id="bug-create">
+        + {{ t.get('bug_create', 'New bug report') }}
+    </button>
+    <span class="bug-editor-status" data-bug-editor-status
+          data-status-class="bug-editor-status"
+          role="status" aria-live="polite"></span>
+    {%- endif %}
     <a href="{{ url_for('export_bug_reports') }}" class="btn btn-secondary"><i data-lucide="file-text" class="icon-sm"></i> {{ t.get('bug_export', 'Export Bug Reports') }}</a>
     <label class="bug-select-all">
         <input type="checkbox" id="bug-select-all">
@@ -245,7 +270,9 @@
 
 {# ── Bug Cards ── #}
 {% for bug in bugs %}
-<div class="bug-card severity-{{ bug.severity | lower }}" data-bug-id="{{ bug.db_id }}">
+<div class="bug-card severity-{{ bug.severity | lower }}" data-bug-id="{{ bug.db_id }}"
+     id="{{ bug.id }}" data-ie-row
+     {% if bug_edit.get(bug.id) and not bug_edit[bug.id].ai_generated %}data-ie-edited{% endif %}>
     <div class="bug-header">
         {% if bug.db_id %}
         <label class="bug-checkbox-label" title="{{ t.get('bug_select_one', 'Select for bulk action') }}">
@@ -253,17 +280,35 @@
         </label>
         {% endif %}
         <span class="bug-id">{{ bug.id }}</span>
-        <span class="bug-title-text">{{ bug.title | safe_display }}</span>
+        <span class="bug-title-text">
+            {{ bug_field_edit(bug, "title", bug.title, kind="textarea") }}
+            {{ edited_marker(t.get('bug_edited', 'edited')) }}
+        </span>
         <div class="bug-badges">
-            <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug.severity }}</span>
-            <span class="badge priority-badge">{{ bug.priority }}</span>
+            <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug_field_edit(bug, "severity", bug.severity, kind="choice") }}</span>
+            <span class="badge priority-badge">{{ bug_field_edit(bug, "priority", bug.priority, kind="choice") }}</span>
+            {%- if bug_edit.get(bug.id) and editors_enabled() %}
+            {# Only the statuses reachable from this bug's current one, so the
+               control cannot offer a move the server will refuse. Closing is
+               admin-only and the option is simply absent for a user — the
+               server checks again, because a hidden option is UX, not a
+               permission. #}
+            <select class="bug-status-select" data-bug-status="{{ bug.id }}"
+                    data-bug-version="{{ bug_edit[bug.id].row_version }}"
+                    aria-label="{{ t.get('bug_status', 'Status') }}: {{ bug.id }}">
+                {%- for option in bug_status_options(bug.status) %}
+                <option value="{{ option }}"{% if option == bug.status %} selected{% endif %}>{{ option }}</option>
+                {%- endfor %}
+            </select>
+            {%- else %}
             <span class="badge status-badge-{{ bug.status | lower | replace(' ', '-') }}">{{ bug.status }}</span>
+            {%- endif %}
         </div>
     </div>
     <div class="bug-body">
         <table class="bug-details-table">
             {# ── ISTQB-mandatory metadata ── #}
-            <tr><td class="label">{{ t.get('bug_environment', 'Environment') }}</td><td>{{ bug.environment }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_environment', 'Environment') }}</td><td>{{ bug_field_edit(bug, "environment", bug.environment) }}</td></tr>
             <tr><td class="label">{{ t.get('bug_frequency', 'Frequency') }}</td><td>{{ bug.frequency or 'Always' }}</td></tr>
             {% if bug.affects_version %}
             <tr><td class="label">{{ t.get('bug_affects_version', 'Affects Version') }}</td><td>{{ bug.affects_version }}</td></tr>
@@ -271,11 +316,14 @@
             {% if bug.found_in_build %}
             <tr><td class="label">{{ t.get('bug_found_in_build', 'Found in Build') }}</td><td><code>{{ bug.found_in_build }}</code></td></tr>
             {% endif %}
-            <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug.preconditions or '—' }}</td></tr>
-            <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td><td><pre class="steps">{{ bug.steps_to_reproduce or '—' }}</pre></td></tr>
-            <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td><td class="actual-result">{{ bug.actual_result | bug_field }}</td></tr>
-            {% if bug.expected_result %}
-            <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td><td>{{ bug.expected_result | bug_field }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_preconditions', 'Preconditions') }}</td><td>{{ bug_field_edit(bug, "preconditions", bug.preconditions, kind="textarea") }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_steps', 'Steps to Reproduce') }}</td>
+                <td>{{ bug_field_edit(bug, "steps_to_reproduce", bug.steps_to_reproduce, kind="textarea") }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_actual', 'Actual Result') }}</td>
+                <td class="actual-result">{{ bug_field_edit(bug, "actual_result", bug.actual_result, kind="textarea") }}</td></tr>
+            {% if bug.expected_result or (bug_edit.get(bug.id) and editors_enabled()) %}
+            <tr><td class="label">{{ t.get('bug_expected', 'Expected Result') }}</td>
+                <td>{{ bug_field_edit(bug, "expected_result", bug.expected_result, kind="textarea") }}</td></tr>
             {% endif %}
             {# ── Jira workflow / traceability ── #}
             {% if bug.component %}
@@ -347,8 +395,12 @@
             {% if bug.created_at %}
             <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at[:19] }}</td></tr>
             {% endif %}
-            {% if bug.comment %}
-            <tr><td class="label">{{ t.get('bug_comment', 'Comment') }}</td><td>{{ bug.comment | bug_field }}</td></tr>
+            {# Shown while editing even when empty: otherwise a bug with no
+               comment offers no way to add one, which is the only way this
+               field is ever filled in by hand. #}
+            {% if bug.comment or (bug_edit.get(bug.id) and editors_enabled()) %}
+            <tr><td class="label">{{ t.get('bug_comment', 'Comment') }}</td>
+                <td>{{ bug_field_edit(bug, "comment", bug.comment, kind="textarea") }}</td></tr>
             {% endif %}
         </table>
     </div>
@@ -520,6 +572,16 @@ pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consola
     background: #fff;
 }
 </style>
+
+{{ editable_assets(csp_nonce) }}
+{%- if editors_enabled() %}
+{#- Shared plumbing first: bug-editor.js reads window.TestFortgeEditor as it
+    loads, and deferred scripts run in document order. -#}
+<script src="{{ url_for('static', filename='js/editor-shared.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+<script src="{{ url_for('static', filename='js/bug-editor.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
+{%- endif %}
 
 <script nonce="{{ csp_nonce }}">
 /* The nonce is required: script-src dropped 'unsafe-inline' in 466226e,
