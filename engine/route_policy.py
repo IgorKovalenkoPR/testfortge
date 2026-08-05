@@ -90,6 +90,12 @@ OPEN: dict[str, str] = {
 POLICY: dict[str, str] = {
     # ── The shell — reachable before you are in a team ────────────
     "index": "login",
+    # ── Dashboard (E7) ────────────────────────────────────────────
+    # Saving your own widget layout and exporting the numbers you can already
+    # see are ordinary member actions. ``dashboard_targets`` is absent on
+    # purpose: it carries @require_role("admin") and is self-enforcing.
+    "dashboard_layout": "login",
+    "dashboard_export_csv": "login",
     "guide_page": "login",
 
     # ── Projects: creating and reconfiguring is admin work ────────

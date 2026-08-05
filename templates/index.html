@@ -237,7 +237,135 @@
 {% endif %}
 
 {# ═══ TEST METRICS SECTION ═══ #}
-{% if metrics.has_data %}
+{%- set dash_widgets = dash_widgets or ['kpis', 'metrics', 'projects'] %}
+
+{% if dash_v2 and metrics.has_data and active_project_id %}
+{# ── E7.4: narrow the numbers ──────────────────────────────────────
+   A dashboard nobody can narrow answers one question. Everything here is a
+   GET parameter, so a filtered view is a URL somebody can send to a
+   colleague — which is most of what "share the dashboard" ever meant. #}
+<div class="card dash-filters">
+  <form method="GET" action="{{ url_for('index') }}" class="dash-filter-row">
+    <label>
+      <span>{{ t.get('dash_period', 'Period') }}</span>
+      <select name="period">
+        {%- for period in dash_periods %}
+        <option value="{{ period }}"
+                {% if dash_filters.period == period %}selected{% endif %}>
+          {{ t.get('dash_period_' ~ period, period) }}
+        </option>
+        {%- endfor %}
+      </select>
+    </label>
+
+    {%- if dash_options.runs %}
+    <label>
+      <span>{{ t.get('dash_run', 'Run') }}</span>
+      <select name="run">
+        <option value="">{{ t.get('dash_all', 'All') }}</option>
+        {%- for run in dash_options.runs %}
+        <option value="{{ run.id }}"
+                {% if dash_filters.run_id == run.id %}selected{% endif %}>
+          #{{ run.id }}{% if run.started_at %} · {{ run.started_at[:10] }}{% endif %}
+          {%- if run.tester %} · {{ run.tester }}{% endif %}
+        </option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
+
+    {%- if dash_options.testers %}
+    <label>
+      <span>{{ t.get('dash_tester', 'Tester') }}</span>
+      <select name="tester">
+        <option value="">{{ t.get('dash_all', 'All') }}</option>
+        {%- for tester in dash_options.testers %}
+        <option value="{{ tester }}"
+                {% if dash_filters.tester == tester %}selected{% endif %}>{{ tester }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
+
+    {%- if dash_options.suites %}
+    <label>
+      <span>{{ t.get('dash_suite', 'Suite') }}</span>
+      <select name="suite">
+        <option value="">{{ t.get('dash_all', 'All') }}</option>
+        {%- for suite in dash_options.suites %}
+        <option value="{{ suite }}"
+                {% if dash_filters.suite == suite %}selected{% endif %}>{{ suite }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
+
+    {%- if dash_options.environments %}
+    <label>
+      <span>{{ t.get('dash_environment', 'Environment') }}</span>
+      <select name="environment">
+        <option value="">{{ t.get('dash_all', 'All') }}</option>
+        {%- for env in dash_options.environments %}
+        <option value="{{ env }}"
+                {% if dash_filters.environment == env %}selected{% endif %}>{{ env }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
+
+    <button type="submit" class="btn btn-secondary btn-sm">
+      {{ t.get('dash_apply', 'Apply') }}
+    </button>
+    {%- if dash_filters.active %}
+    <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">
+      {{ t.get('dash_clear', 'Clear') }}
+    </a>
+    {%- endif %}
+    <a class="btn btn-secondary btn-sm"
+       href="{{ url_for('dashboard_export_csv', **dash_filters.as_query()) }}">
+      {{ t.get('dash_export', 'Export CSV') }}
+    </a>
+  </form>
+  {%- if dash_filters.active %}
+  <p class="hint dash-filter-note">
+    {{ t.get('dash_filtered_note',
+             'These numbers are filtered. The export follows the same filter.') }}
+  </p>
+  {%- endif %}
+</div>
+{% endif %}
+
+{% if dash_v2 and 'kpis' in dash_widgets and metrics.has_data %}
+{# ── E7.3: targets and RAG ─────────────────────────────────────────
+   A tile with no target is left uncoloured on purpose: an untargeted number
+   is just a number, and colouring it would invent an opinion the team has
+   not expressed. #}
+<div class="card dash-kpis">
+  <h2><i data-lucide="target" class="icon icon-coral"></i>
+      {{ t.get('dash_kpi_title', 'KPIs against target') }}</h2>
+  <div class="dash-kpi-grid">
+    {%- for kpi in dash_kpis %}
+    <div class="dash-kpi{% if kpi.status %} dash-kpi-{{ kpi.status }}{% endif %}">
+      <div class="dash-kpi-value">
+        {{ kpi.value | round(1) if kpi.unit == '%' else kpi.value | int }}{{ kpi.unit }}
+      </div>
+      <div class="dash-kpi-label">{{ kpi.label }}</div>
+      <div class="dash-kpi-target">
+        {%- if kpi.target is not none %}
+        {{ t.get('dash_target', 'target') }}
+        {{ '≥' if kpi.higher_is_better else '≤' }}
+        {{ kpi.target | round(1) if kpi.unit == '%' else kpi.target | int }}{{ kpi.unit }}
+        {%- else %}
+        <span class="dash-kpi-untargeted">{{ t.get('dash_no_target', 'no target set') }}</span>
+        {%- endif %}
+      </div>
+    </div>
+    {%- endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if (not dash_v2 or 'metrics' in dash_widgets) and metrics.has_data %}
 <div class="card">
     <h2><i data-lucide="bar-chart-3" class="icon icon-coral"></i> Test Metrics</h2>
     <p class="subtitle">Select a metric to display</p>
@@ -535,7 +663,7 @@
 </div>
 {% endif %}
 
-{% if projects %}
+{% if projects and (not dash_v2 or 'projects' in dash_widgets) %}
 <div class="card">
     <h2>{{ t.saved_projects }}</h2>
     <table class="data-table">
@@ -678,5 +806,58 @@ document.addEventListener('click', function (ev) {
   }
 });
 </script>
+
+{%- if dash_v2 and active_project_id %}
+{# ── E7.2 / E7.3: customise ────────────────────────────────────────
+   Two forms, two owners. The layout is this person's; the targets are the
+   project's and only an admin may set them — a dashboard where two people
+   see different colours for the same number is worse than one with no
+   colours at all. #}
+<details class="card dash-customise">
+  <summary>{{ t.get('dash_customise', 'Customise this dashboard') }}</summary>
+
+  <form method="POST" action="{{ url_for('dashboard_layout') }}"
+        class="dash-customise-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3>{{ t.get('dash_widgets_title', 'What to show') }}</h3>
+    <p class="hint">{{ t.get('dash_widgets_hint',
+                             'Yours alone — it does not change what anyone else sees.') }}</p>
+    {%- for name in dash_all_widgets %}
+    <label class="dash-widget-toggle">
+      <input type="checkbox" name="widgets" value="{{ name }}"
+             {% if name in dash_widgets %}checked{% endif %}>
+      {{ dash_widget_labels.get(name, name) }}
+    </label>
+    {%- endfor %}
+    <button type="submit" class="btn btn-secondary btn-sm">
+      {{ t.get('dash_save_layout', 'Save layout') }}
+    </button>
+  </form>
+
+  {%- if is_admin %}
+  <form method="POST" action="{{ url_for('dashboard_targets') }}"
+        class="dash-customise-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h3>{{ t.get('dash_targets_title', 'KPI targets for this project') }}</h3>
+    <p class="hint">{{ t.get('dash_targets_hint',
+                             'Shared by everyone on the project. Leave a field empty for no target.') }}</p>
+    <div class="dash-target-grid">
+      {%- for kpi in dash_kpis %}
+      <label>
+        <span>{{ kpi.label }}{% if kpi.unit %} ({{ kpi.unit }}){% endif %}</span>
+        <input type="number" step="any" name="target_{{ kpi.key }}"
+               value="{{ '' if kpi.target is none else kpi.target }}"
+               placeholder="{{ t.get('dash_no_target', 'no target set') }}">
+      </label>
+      {%- endfor %}
+    </div>
+    <button type="submit" class="btn btn-secondary btn-sm">
+      {{ t.get('dash_save_targets', 'Save targets') }}
+    </button>
+  </form>
+  {%- endif %}
+</details>
+{%- endif %}
+
 {% endblock %}
     

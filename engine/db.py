@@ -424,6 +424,9 @@ _EDITABLE_COLUMN_MIGRATIONS = (
      "ALTER TABLE estimation ADD COLUMN edited_at TIMESTAMP"),
     ("estimation", "original_payload",
      "ALTER TABLE estimation ADD COLUMN original_payload TEXT"),
+    # ── Dashboard (E7.3) ──────────────────────────────────────────
+    ("project", "settings",
+     "ALTER TABLE project ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'"),
 )
 
 
@@ -778,6 +781,11 @@ class Project(Base):
     # counter needs an atomic ``SET v = v + 1 WHERE v = ?``, and that is
     # what makes the check race-free — read-modify-write on JSON could miss
     # a bump and weaken the guard it implements.
+    #: Project-level settings — KPI targets today (E7.3). A JSON column
+    #: because it is read whole, written whole and never queried across
+    #: projects; a table would buy indexing nobody needs.
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict,
+                                            server_default="{}")
     tc_version: Mapped[int] = mapped_column(Integer, nullable=False,
                                              default=0, server_default="0")
     cl_version: Mapped[int] = mapped_column(Integer, nullable=False,
@@ -2702,6 +2710,73 @@ def take_merge_report(kind: str):
     route repeat a message about a merge that did not happen this time.
     """
     return _LAST_MERGE_REPORT.pop(kind, None)
+
+
+class UserSetting(Base):
+    """One person's preference — dashboard layout today (E7.2).
+
+    Keyed on a free-text ``owner`` rather than a foreign key to ``app_user``,
+    because a preference has to work in both eras: a signed-in user id when
+    ``AUTH_ENABLED`` is on, and the session id otherwise. A foreign key would
+    make the anonymous case impossible to store, which is the case most
+    installations are in today.
+
+    Not on ``app_user`` as a JSON column for the same reason.
+    """
+    owner: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+def get_user_setting(owner: str, key: str):
+    """One person's stored preference, or ``None``."""
+    if not owner or not key:
+        return None
+    with session_scope() as sess:
+        row = sess.get(UserSetting, (str(owner)[:64], key))
+        return (row.value or {}).get("v") if row is not None else None
+
+
+def set_user_setting(owner: str, key: str, value) -> None:
+    """Store it, wrapped so a list or a scalar round-trips through JSON."""
+    if not owner or not key:
+        return
+    owner = str(owner)[:64]
+    with session_scope() as sess:
+        row = sess.get(UserSetting, (owner, key))
+        if row is None:
+            sess.add(UserSetting(owner=owner, key=key, value={"v": value}))
+        else:
+            row.value = {"v": value}
+
+
+def get_project_setting(project_id: str, key: str):
+    """A project-level setting out of ``project.settings`` (E7.3)."""
+    if not project_id or not key:
+        return None
+    with session_scope() as sess:
+        row = sess.get(Project, project_id)
+        if row is None:
+            return None
+        return (getattr(row, "settings", None) or {}).get(key)
+
+
+def set_project_setting(project_id: str, key: str, value) -> None:
+    if not project_id or not key:
+        return
+    with session_scope() as sess:
+        row = sess.get(Project, project_id)
+        if row is None:
+            raise ValueError(f"no such project: {project_id}")
+        # Re-bound rather than mutated: SQLAlchemy's change detection on a
+        # JSON column does not see an in-place dict update reliably across
+        # backends, and a silently unsaved setting is the kind of bug people
+        # blame on the browser.
+        settings = dict(getattr(row, "settings", None) or {})
+        settings[key] = value
+        row.settings = settings
 
 
 def bump_pack_version(project_id: str, kind: str) -> None:

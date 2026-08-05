@@ -50,6 +50,13 @@ class TestValueParsing:
     def test_env_is_read_at_call_time_not_import_time(self, monkeypatch):
         # Flipping a flag in the Render dashboard has to take effect on
         # the next request, not the next deploy.
+        #
+        # The starting state is asserted from a *deleted* variable rather than
+        # from "nobody sets this one": this test used to rely on DASHBOARD_V2
+        # being unset anywhere, and broke the moment E7 shipped and the suite
+        # began running with it on. What is under test is call-time reading,
+        # not which flag happens to be unfashionable.
+        monkeypatch.delenv("DASHBOARD_V2", raising=False)
         assert features.is_enabled("DASHBOARD_V2") is False
         monkeypatch.setenv("DASHBOARD_V2", "1")
         assert features.is_enabled("DASHBOARD_V2") is True
