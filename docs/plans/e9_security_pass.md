@@ -112,10 +112,21 @@ DENY` already covered the other direction.
 Two of the results above are configuration rather than code, so they hold
 only if the deployment says so:
 
-1. `BEHIND_HTTPS=1` — it is in `render.yaml`, and a live check of the
-   response headers on 2026-07-13 found no `Strict-Transport-Security`,
-   which means the variable was not in effect on that host at that time.
-   Confirm with `curl -sI https://<host>/ | grep -i strict`.
+1. `BEHIND_HTTPS=1` — **verified in effect on 2026-08-06.** A live check on
+   2026-07-13 had found no `Strict-Transport-Security`, which meant the
+   variable was not reaching that host at that time; it is now.
+   `curl -sSI https://testfortge.onrender.com/healthz` returns
+
+       strict-transport-security: max-age=63072000; includeSubDomains; preload
+       Set-Cookie: session=…; Secure; HttpOnly; Path=/; SameSite=Lax
+
+   The header is the visible half and the cookie is the half that matters:
+   the same flag gates `Secure` and `WTF_CSRF_SSL_STRICT`, so a missing
+   HSTS header was never only a missing HSTS header. Both are on.
+
+   Worth re-checking after any change to the service's environment, and
+   worth allowing ~60 s for the first request — the free plan sleeps, and a
+   25-second `curl` timeout reads as an outage when it is a cold start.
 2. `AUTOMATION_INGEST_TOKEN` — with it unset the ingest endpoint answers
    403 and refuses everything, which is the safe default but also means CI
    result upload silently does nothing.
