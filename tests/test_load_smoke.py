@@ -43,12 +43,17 @@ from engine import db as _db
 #: The programme's number, from the E9 task list.
 USERS = 10
 
-#: Requests each person makes: read the dashboard, read the pack, read
-#: the bug list, file a bug, re-read the bug list. Modelled on what a
-#: tester's minute actually looks like rather than on one endpoint
-#: hammered, because a single-endpoint benchmark measures that endpoint
-#: and this is meant to measure the organisation as a shared scope.
-JOURNEY = ("dashboard", "test cases", "bug list", "file a bug", "bug list")
+#: The page loads each person makes: the dashboard, the pack, the bug list
+#: (twice — before and after filing, which is what a person does), and the
+#: filing itself. Modelled on what a tester's minute looks like rather
+#: than on one endpoint hammered, because a single-endpoint benchmark
+#: measures that endpoint and this is meant to measure the organisation as
+#: a shared scope.
+#:
+#: Signing in and switching project are deliberately **not** here. They
+#: happen once per session and one of them is Argon2; letting either into
+#: the page percentile would measure the password hash.
+JOURNEY = ("dashboard", "test cases", "bug list", "file a bug")
 
 #: p95 budget for a page, in milliseconds.
 #:
@@ -219,7 +224,7 @@ def _journey(base_url: str, email: str, project_id: str, tag: str,
                "actual_result": "measured",
                "expected_result": "measured",
                "csrf_token": filing_token})
-    call("bug list again", "GET", "/bug-reports?lang=en")
+    call("bug list", "GET", "/bug-reports?lang=en")
     return timings
 
 
