@@ -591,6 +591,14 @@ def _apply_security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     resp.headers.setdefault("Permissions-Policy",
                             "geolocation=(), microphone=(), camera=()")
+    # Cross-origin isolation. X-Frame-Options: DENY already stops this app
+    # being framed; COOP is the other direction — it severs the window
+    # reference a page *we* open (or that opens us) would otherwise keep,
+    # which is what makes a tabnabbing or cross-window-scripting attempt
+    # cheap. `same-origin-allow-popups` rather than `same-origin` because
+    # the Google sign-in flow opens a popup and needs to talk back to it.
+    resp.headers.setdefault("Cross-Origin-Opener-Policy",
+                            "same-origin-allow-popups")
     # HSTS — only when we know TLS terminates in front of us
     # (``BEHIND_HTTPS=1``). Emitting it over plain HTTP (e.g. local dev)
     # would wrongly pin the loopback host to HTTPS. Two years + preload

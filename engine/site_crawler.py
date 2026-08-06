@@ -16,6 +16,8 @@ import re
 import socket
 import ssl
 import urllib.request
+
+from engine import security as _security
 import urllib.error
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -1055,7 +1057,11 @@ def _fetch_page(url: str) -> tuple[str, str]:
             # silently under-covered that site. See _decompress.
             "Accept-Encoding": "gzip, deflate",
         })
-        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT, context=ctx) as resp:
+        # safe_opener, not urlopen: the policy has to apply to every hop.
+        # urlopen follows redirects by default, so validating only the
+        # first URL let an allowed host bounce the fetch to a private
+        # address. See engine.security._ValidatingRedirectHandler.
+        with _security.safe_opener().open(req, timeout=FETCH_TIMEOUT, context=ctx) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" not in content_type and "application/xhtml" not in content_type:
                 return "", f"Not HTML: {content_type}"

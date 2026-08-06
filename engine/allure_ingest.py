@@ -342,7 +342,23 @@ def parse_archive(data: bytes) -> RunSummary:
                         f"{member.file_size // 1024} KB; skipped.")
                     continue
                 try:
-                    docs.append(json.loads(zf.read(member).decode("utf-8")))
+                    # A bounded read, not zf.read(): `member.file_size` above
+                    # comes from the archive's own header, which the uploader
+                    # controls. A member declaring 1 KB and containing 200 MB
+                    # passes that check and then expands in memory — zipfile
+                    # does notice the mismatch, but only after the expansion,
+                    # which is the whole cost on a half-gigabyte dyno. Reading
+                    # one byte past the cap makes the declared size
+                    # irrelevant: an oversized member fails to parse instead
+                    # of being trusted.
+                    with zf.open(member) as fh:
+                        raw = fh.read(MAX_MEMBER_BYTES + 1)
+                    if len(raw) > MAX_MEMBER_BYTES:
+                        warnings.append(
+                            f"{os.path.basename(member.filename)} is larger "
+                            f"than its header claims; skipped.")
+                        continue
+                    docs.append(json.loads(raw.decode("utf-8")))
                 except (ValueError, UnicodeDecodeError, OSError) as exc:
                     warnings.append(
                         f"{os.path.basename(member.filename)}: "

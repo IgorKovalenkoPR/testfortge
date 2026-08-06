@@ -19,6 +19,8 @@ import re
 import ssl
 import time
 import urllib.request
+
+from engine import security as _security
 import urllib.error
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -408,7 +410,11 @@ def _fetch_test_page(url: str, timeout: int = 8) -> TestPageData:
     try:
         req = urllib.request.Request(url, headers=_HEADERS)
         start = time.monotonic()
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+        # safe_opener, not urlopen: the policy has to apply to every hop.
+        # urlopen follows redirects by default, so validating only the
+        # first URL let an allowed host bounce the fetch to a private
+        # address. See engine.security._ValidatingRedirectHandler.
+        with _security.safe_opener().open(req, timeout=timeout, context=_SSL_CTX) as resp:
             elapsed = time.monotonic() - start
             page.status_code = resp.status
             page.response_time_ms = int(elapsed * 1000)
@@ -493,7 +499,8 @@ def _check_url_status(url: str, timeout: int = 5) -> tuple[int, float]:
         try:
             req = urllib.request.Request(url, method=method, headers=_HEADERS)
             start = time.monotonic()
-            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+            # Same reason as above — every hop is checked.
+            with _security.safe_opener().open(req, timeout=timeout, context=_SSL_CTX) as resp:
                 elapsed = time.monotonic() - start
                 return resp.status, elapsed
         except urllib.error.HTTPError as e:

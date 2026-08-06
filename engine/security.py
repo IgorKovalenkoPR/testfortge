@@ -37,6 +37,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+import urllib.request
 from urllib.parse import urlparse
 
 
@@ -169,3 +170,35 @@ def require_safe_url(url: str) -> None:
         # Truncate the displayed URL — operator paste-bombs are common.
         shown = (url or "")[:200]
         raise UnsafeUrlError(f"URL blocked by SSRF policy: {shown!r}")
+
+
+class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-check the policy on every hop of a redirect chain.
+
+    Validating only the URL the operator typed is the classic SSRF bypass,
+    and it was live here: ``urllib.request.urlopen`` follows up to ten
+    redirects by default, so a page at an allowed host answering
+    ``302 Location: http://169.254.169.254/latest/meta-data/`` had its
+    target fetched with no check at all. Every guard in this module ran,
+    passed, and protected nothing — the check was on the first hop and the
+    attack is on the second.
+
+    Found by the E9.8 security pass, by reading what happens *after* the
+    check rather than testing the check itself, which was already solid:
+    sixteen probes including decimal-encoded loopback, IPv4-mapped IPv6 and
+    cloud-metadata hostnames all refused correctly.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        require_safe_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def safe_opener(*handlers) -> urllib.request.OpenerDirector:
+    """An opener that applies the SSRF policy to redirects as well.
+
+    Use this instead of :func:`urllib.request.urlopen` anywhere the URL is
+    operator- or crawl-supplied. The extra handlers are appended, so a
+    caller that needs its own (a cookie jar, a proxy) keeps them.
+    """
+    return urllib.request.build_opener(_ValidatingRedirectHandler, *handlers)
