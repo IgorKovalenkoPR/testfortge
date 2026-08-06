@@ -113,8 +113,7 @@ Two things kept it hidden:
 | E9.7 pages p95 | **324 ms** (p50 101 ms), no 5xx, no `database is locked`, all ten writes landed |
 | E9.7 sign-in p95 | 2.9 s — ten Argon2 verifications arriving together, which is the hash doing its job |
 | Twelve simultaneous filings | twelve contiguous ids, none dropped |
-| CI | 3.11 / 3.12 / 3.13 + real Postgres, e2e ×10, all green on `367085a` |
-| Diff | 16 files, +3805 / −50 |
+| CI | 3.11 / 3.12 / 3.13 + real Postgres, e2e ×10, all green |
 
 The load budget is 3000 ms — about nine times the measured p95. The multiple is not generosity: the file also runs on a shared two-core runner, and a performance gate that fails on somebody else's noisy neighbour teaches people to rerun the build. Three seconds still fails on an N+1 across the bug list or a per-request model call.
 
@@ -153,7 +152,7 @@ Twelve simultaneous filings now get twelve contiguous ids, `BUG-001` to `BUG-012
 ## Commits
 
 Oldest last, on `claude/e9-testing-integration-roles-e2e-83a1e8` off
-`1b31777`. 16 files, +3805 / −50.
+`1b31777`.
 
 ```
 fix(bugs): a bug id identifies one bug — E4.4a, extended to bug_report
