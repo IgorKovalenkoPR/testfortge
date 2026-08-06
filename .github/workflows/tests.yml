@@ -123,8 +123,23 @@ jobs:
           | tee /tmp/pg.txt;
           grep -qE "[1-9][0-9]* passed" /tmp/pg.txt
 
+      # Failing test names are echoed as ``::error::`` workflow commands so
+      # they land in the run's *annotations*. Without that the only thing a
+      # failure publishes is "Process completed with exit code 1", and the
+      # names live solely in the job log — which is fine when you can open
+      # the log and useless when you cannot: on a public repository the
+      # logs endpoint refuses an unauthenticated caller, so a red build is
+      # unreadable to anyone without a token. This was measured the hard
+      # way while diagnosing this very run.
       - name: Run test suite
-        run: python run_tests.py
+        run: |
+          set -o pipefail
+          python run_tests.py 2>&1 | tee /tmp/suite.txt || {
+            sed -n '/short test summary info/,$p' /tmp/suite.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
 
       # Coverage gate (E9.6), on the modules the programme set a bar for
       # rather than on the repository. A whole-repo number is dominated by
@@ -174,7 +189,15 @@ jobs:
         env:
           AUTH_ENABLED: "1"
           ORG_MODE: "1"
-        run: python -m pytest tests/ -q --tb=short -p no:cacheprovider
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q --tb=short -p no:cacheprovider \
+            2>&1 | tee /tmp/authon.txt || {
+            sed -n '/short test summary info/,$p' /tmp/authon.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::auth-on $line"; done
+            exit 1
+          }
 
   # ── E9.5 — the golden paths, in a real browser, ten times ─────────
   #
