@@ -30,6 +30,9 @@ from urllib.parse import urljoin, urlparse
 # URLs (the crawled site's pages) into Chromium. Blocks 127.0.0.1,
 # RFC1918, link-local, and cloud-metadata addresses. See engine.security.
 from engine.security import require_safe_url, UnsafeUrlError
+from engine.log import get_logger
+
+log = get_logger(__name__)
 
 # ── Data structures ─────────────────────────────────────────────
 
@@ -136,16 +139,57 @@ class BrowserTestRunner:
         self._parsed_base = urlparse(self.base_url)
 
     def __enter__(self):
+        """Start the driver, then the browser — and unwind if the second fails.
+
+        ``__exit__`` never runs when ``__enter__`` raises, so a failed
+        ``chromium.launch`` used to leave the driver started for the life of
+        the process. That is not a leaked subprocess and nothing more:
+        Playwright's sync API runs its event loop in this thread, so the
+        thread is left *inside a running loop*, and every later
+        ``sync_playwright()`` anywhere in the process then raises
+
+            It looks like you are using Playwright Sync API inside the
+            asyncio loop.
+
+        …instead of whatever the real problem was. The caller in
+        ``qa_persona`` swallows the launch failure (``except Exception:
+        pass``) and generation carries on with no browser findings, so on a
+        dyno where Chromium has just been OOM-killed the visible symptom is
+        one quiet run followed by every subsequent browser run failing for a
+        reason that has nothing to do with it.
+
+        Found by CI: the browsers are not installed in the test matrix, so
+        this file's launch failed there and poisoned the process for
+        ``tests/test_e2e_golden_paths.py`` fourteen files later.
+        """
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=True)
+        try:
+            self._browser = self._pw.chromium.launch(headless=True)
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
         return self
 
     def __exit__(self, *args):
-        if self._browser:
-            self._browser.close()
-        if self._pw:
-            self._pw.stop()
+        # Each step guarded separately: a browser that fails to close must
+        # not skip stopping the driver, which is the half that holds the
+        # event loop. Both are best-effort — this runs on the way out of a
+        # failure as often as on the way out of a success.
+        try:
+            if self._browser:
+                self._browser.close()
+        except Exception as exc:      # pragma: no cover — teardown only
+            log.debug("browser close failed: %s", exc)
+        finally:
+            self._browser = None
+        try:
+            if self._pw:
+                self._pw.stop()
+        except Exception as exc:      # pragma: no cover — teardown only
+            log.debug("playwright stop failed: %s", exc)
+        finally:
+            self._pw = None
 
     def _is_same_site(self, url: str) -> bool:
         """Check if URL belongs to the same site."""
