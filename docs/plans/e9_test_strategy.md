@@ -75,11 +75,44 @@ Postgres, migrations are hand-written SQL, and verifying them only on SQLite
 verifies them on the wrong engine. CI already runs a Postgres service for
 exactly this.
 
+E9.3 added the half a clean database cannot reach:
+`test_migration_populated_copy.py` fills a database through the product's
+own writers, takes the schema back to its pre-programme shape and boots
+again. Three migrations only do anything when rows are already there — the
+editing metadata back-fills them, the renumbering exists for them, and the
+unique index is creatable on an empty table no matter what. It found two
+Postgres-only defects on its first run, both invisible in CI because CI's
+Postgres database is created fresh and the ALTERs therefore never fired: a
+boolean column given an integer default (Postgres refuses the statement, the
+helper logs it, the column never appears) and a JSON model column added as
+TEXT (psycopg2 hands back the string `'{}'`).
+
+The other integration axis is transactional rather than structural.
+`consume_invite` read `used_at` and then set it — safe on SQLite, which
+serialises writers, and not on Postgres READ COMMITTED, where two people
+opening one forwarded invitation both read NULL and both join. It claims the
+token with one conditional UPDATE now.
+
 **Functional (HTTP)** — every module, every role, **CSRF enabled**. The
 project has a standing rule from an earlier sprint: a new POST that is
 csrf-exempt for a machine caller needs a regression test that flips
 `WTF_CSRF_ENABLED=True`, because a form endpoint passes its tests and 400s
 in production otherwise.
+
+Written as a table rather than as one test per endpoint, for the reason
+`route_policy` is: sixty-one hand-kept tests are one endpoint away from
+being wrong, and read as coverage while they are.
+`test_csrf_on_every_post.py` derives the list from the URL map and fails
+closed — an endpoint is either refused without a token or named in `EXEMPT`
+with the credential that authenticates it instead, and each exemption is
+then watched refusing an anonymous caller.
+
+Alongside it, `test_functional_module_matrix.py` asks the question the
+access-control files do not: *did the thing happen, and did the page say
+so?* Each module is performed as an administrator and checked in the
+database and in the returned text, then performed as a plain user and
+checked that **nothing changed** — which is the assertion a gate-level 403
+cannot make.
 
 **Both flag modes** — E9.9's contribution and the strategy's second rule:
 
@@ -91,11 +124,30 @@ unauthenticated case say `anon_client`. Without that, 405 tests failed in
 the mode the product ships in — and the first green authenticated run
 immediately found a real defect.
 
-**E2E** — two axes, deliberately separate. `test_pipeline_e2e.py` walks the
+**E2E** — three axes, deliberately separate. `test_pipeline_e2e.py` walks the
 generation chain (markup → checklist → cases → bundle → ingest → bugs);
 `test_execute_e2e.py` walks the two execution paths to the number a person
-reads. Golden paths with a real browser (E9.5) belong on top of these, not
-instead of them.
+reads. `test_e2e_golden_paths.py` (E9.5) sits on top of both, not instead of
+them: a real Chromium signing in through the form, claiming an invitation,
+creating a project, uploading a pack, walking it one verdict at a time and
+filing a bug the dashboard then counts — plus the two properties that only
+exist with two sessions open at once.
+
+Five journeys rather than one, because one long journey fails at step six
+and says nothing about steps one to five. The browser is also the only
+client in the suite that reads the CSRF token out of the rendered HTML,
+which is what keeps the templates honest.
+
+**Load** — E9.7, `test_load_smoke.py`: ten people in one organisation over
+real HTTP against a threaded server, released from a barrier, with a second
+barrier immediately before the write so the filings genuinely collide.
+Measured 2026-08-06: pages p95 **324 ms** (p50 101 ms), no 5xx, no
+`database is locked`, all ten writes landed. The budget is 3000 ms — about
+nine times the measured p95, because the same file runs on a shared two-core
+runner and a performance gate that fails on somebody else's noisy neighbour
+teaches people to rerun the build. Signing in has its own ceiling: ten Argon2
+verifications arriving together took 2.9 s at p95, and that is the hash doing
+its job rather than the app being slow.
 
 ## Risk matrix
 
@@ -113,8 +165,12 @@ Ordered by what this programme has actually shown, not by intuition.
 | Quality of Tedgie's answers rotting on a prompt edit | high | medium | E6.7 golden-set gate at 100%/100% | ✅ closed |
 | Free-tier resource limits | high | medium | E5.2′ moved browsers to Actions; quotas in E0.12 | 🟡 quotas open |
 | A test passing for the wrong reason | **medium** | high | see below | active practice |
-| Load: 10 concurrent users per org | unknown | medium | E9.7 — not yet measured | ⏳ open |
-| Security: OWASP ASVS-lite on auth/RBAC/upload | unknown | **critical** | E9.8 — not yet run | ⏳ open |
+| An invitation redeemed twice | medium | **critical** | E9.3: the claim is one conditional UPDATE, not a read then a write | ✅ closed |
+| A migration that only fails on Postgres | medium | high | E9.3: the populated-copy upgrade runs on both engines, plus a static check that each ALTER matches the type the model declares | ✅ closed |
+| A new POST shipping without CSRF | medium | high | E9.4: the list comes off the URL map and fails closed | ✅ closed |
+| Load: 10 concurrent users per org | unknown | medium | E9.7 — measured: pages p95 324 ms, no 5xx, no lost writes | ✅ closed |
+| Two simultaneous bug filings sharing a public id | low | medium | nothing but timing; E4.4a's index and retry were never extended to `bug_report`, and `test_load_smoke.py` asserts the property so a change of engine or scale says so | 🟡 guarded, not fixed |
+| Security: OWASP ASVS-lite on auth/RBAC/upload | unknown | **critical** | E9.8 — run 2026-08-05, one High found and closed (`e9_security_pass.md`) | ✅ closed |
 
 ## Tests that pass for the wrong reason
 
@@ -161,9 +217,18 @@ telling the truth about isolation.
 
 Named so the gaps are decisions:
 
-* **Performance beyond a smoke** — E9.7 measures 10 concurrent users per
-  organisation; there is no sustained-load or soak testing, and on a free
-  tier there would be nowhere to run it.
+* **Performance beyond a smoke** — E9.7 measures ten concurrent users in one
+  organisation and nothing else. There is no sustained-load or soak testing,
+  no ramp, and no second organisation; on a free tier there would be nowhere
+  to run one. The budget it enforces is a ceiling on the shape of the answer
+  — "a page still comes back promptly with ten people on it" — and would not
+  notice a 20% regression, which is a benchmark, and a benchmark on a shared
+  runner is a flaky test with a graph.
+* **The Postgres leg runs only in CI** — there is no Postgres on the
+  development machines this was written on, so everything engine-specific in
+  E9.3 is verified by the service container on push. What can be checked
+  without a server is checked without one: each ALTER is compared against
+  the type its model declares, which is what caught both defects locally.
 * **Cross-browser** — Chromium only, in CI and in the generated suites. A
   matrix triples the cost of every run and is a decision for whoever needs
   it.
