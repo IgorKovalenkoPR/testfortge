@@ -383,7 +383,7 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("test_case", "row_version",
      "ALTER TABLE test_case ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("test_case", "ai_generated",
-     "ALTER TABLE test_case ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+     "ALTER TABLE test_case ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT '1'"),
     ("test_case", "edited_by",
      "ALTER TABLE test_case ADD COLUMN edited_by VARCHAR(32)"),
     ("test_case", "edited_at",
@@ -391,7 +391,7 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("checklist_item", "row_version",
      "ALTER TABLE checklist_item ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("checklist_item", "ai_generated",
-     "ALTER TABLE checklist_item ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+     "ALTER TABLE checklist_item ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT '1'"),
     ("checklist_item", "edited_by",
      "ALTER TABLE checklist_item ADD COLUMN edited_by VARCHAR(32)"),
     ("checklist_item", "edited_at",
@@ -399,7 +399,7 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("bug_report", "row_version",
      "ALTER TABLE bug_report ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("bug_report", "ai_generated",
-     "ALTER TABLE bug_report ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+     "ALTER TABLE bug_report ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT '1'"),
     ("bug_report", "edited_by",
      "ALTER TABLE bug_report ADD COLUMN edited_by VARCHAR(32)"),
     ("bug_report", "edited_at",
@@ -417,7 +417,7 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("estimation", "row_version",
      "ALTER TABLE estimation ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("estimation", "ai_generated",
-     "ALTER TABLE estimation ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT 1"),
+     "ALTER TABLE estimation ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT '1'"),
     ("estimation", "edited_by",
      "ALTER TABLE estimation ADD COLUMN edited_by VARCHAR(32)"),
     ("estimation", "edited_at",
@@ -425,8 +425,16 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("estimation", "original_payload",
      "ALTER TABLE estimation ADD COLUMN original_payload TEXT"),
     # ── Dashboard (E7.3) ──────────────────────────────────────────
+    #
+    # ``JSON``, not ``TEXT``, and the difference is Postgres-only. The model
+    # declares ``JSON``; SQLAlchemy's JSON type decodes for itself on SQLite
+    # and leaves it to the driver on Postgres, where psycopg2 only parses
+    # columns whose declared type really is json. An upgraded instance would
+    # therefore hand ``get_project_setting`` the *string* ``'{}'`` and the
+    # dashboard would raise ``AttributeError: 'str' object has no attribute
+    # 'get'`` — on upgraded deployments only, never on a fresh install.
     ("project", "settings",
-     "ALTER TABLE project ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'"),
+     "ALTER TABLE project ADD COLUMN settings JSON NOT NULL DEFAULT '{}'"),
 )
 
 
@@ -437,6 +445,16 @@ def _ensure_editable_columns(engine: Engine) -> None:
     existing row, and both are the honest reading of the data: nothing has
     been edited yet, because until E4 there was no way to edit it, so every
     row present is generator output a regeneration may legitimately replace.
+
+    Every default above is written **quoted**, matching what
+    ``create_all`` emits for the same column. That is not style: Postgres
+    reads a bare ``DEFAULT 1`` on a boolean column as an integer and
+    refuses the statement, while ``DEFAULT '1'`` is a boolean literal both
+    engines accept. Since the failure is caught and logged below, the
+    column would simply never appear, and the ORM's next read of
+    ``ai_generated`` would fail on an upgraded Postgres instance and
+    nowhere else. Exercised by
+    ``tests/test_migration_populated_copy.py`` on both engines.
     """
     from sqlalchemy import inspect as _inspect
 
@@ -2186,30 +2204,55 @@ def consume_invite(token: str, user_id: str) -> str | None:
     Returns the org id on success, ``None`` if the token is not
     claimable. Both writes happen in one transaction, so a crash cannot
     leave a burned token with no membership behind it — which would lock
-    the invitee out with no way to retry.
+    the invitee out with no way to retry, and would look to the admin
+    like the invitation had been accepted.
+
+    **The token is claimed by one conditional UPDATE**, not by reading
+    ``used_at`` and then setting it. An invitation link travels by email
+    and email gets forwarded, so two people opening it at the same moment
+    is ordinary rather than exotic — and read-then-write hands the seat to
+    both of them under Postgres's READ COMMITTED, where each transaction
+    reads NULL before either writes. SQLite hides that by serialising
+    writers, which is precisely why it had to be reasoned about rather
+    than tested for locally. ``rowcount == 0`` means somebody else got
+    there first, and it is the same shape ``_claim_pack_write`` uses for
+    the same reason.
+
+    Claimed *before* the membership is written, so the two orderings agree
+    about failure: if the membership insert then fails, the whole
+    transaction — claim included — rolls back and the link still works.
     """
     if not (token and user_id):
         return None
     now = _utcnow()
     with session_scope() as sess:
         row = sess.get(Invite, token)
-        if row is None or row.used_at is not None \
-                or row.revoked_at is not None or _dt_is_past(row.expires_at):
+        if row is None or row.role not in ORG_ROLES:
             return None
-        if row.role not in ORG_ROLES:
+        org_id, role = row.org_id, row.role
+        invited_by = row.invited_by_user_id
+        claimed = sess.execute(
+            update(Invite)
+            .where(Invite.token == token,
+                   Invite.used_at.is_(None),
+                   Invite.revoked_at.is_(None),
+                   Invite.expires_at > now)
+            .values(used_at=now)
+            .execution_options(synchronize_session=False))
+        if not claimed.rowcount:
+            # Used, revoked or expired — one answer for all three, as
+            # everywhere else this token is inspected.
             return None
         member = sess.query(OrgMember).filter(
-            OrgMember.org_id == row.org_id,
+            OrgMember.org_id == org_id,
             OrgMember.user_id == user_id,
         ).one_or_none()
         if member is None:
-            sess.add(OrgMember(org_id=row.org_id, user_id=user_id,
-                               role=row.role,
-                               added_by_user_id=row.invited_by_user_id))
+            sess.add(OrgMember(org_id=org_id, user_id=user_id, role=role,
+                               added_by_user_id=invited_by))
         else:
-            member.role = row.role
-        row.used_at = now
-        return row.org_id
+            member.role = role
+        return org_id
 
 
 def revoke_invites_for_email(org_id: str, email: str) -> int:
