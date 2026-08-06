@@ -73,6 +73,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # Test-only, and deliberately not in requirements.txt: that file
+          # builds the web image, and a coverage plugin has no business in a
+          # production dyno's site-packages.
+          pip install pytest-cov
           # MCP server tests import `mcp_server.server` which pulls in
           # the `mcp` package + (for the HTTP entrypoint) `uvicorn`.
           # These are listed separately because they're not needed by
@@ -120,6 +124,35 @@ jobs:
 
       - name: Run test suite
         run: python run_tests.py
+
+      # Coverage gate (E9.6), on the modules the programme set a bar for
+      # rather than on the repository. A whole-repo number is dominated by
+      # code nobody is changing, so it drifts up while the new work drifts
+      # down and the gate never fires.
+      #
+      # Branch coverage, not line: the defects this programme found were in
+      # branches — a deactivated user still holding a role, an item keyed on
+      # the wrong tuple, an org that nothing ever wrote. Line coverage was
+      # already high while each of those was live.
+      #
+      # The threshold is the measured floor minus nothing. Set below what is
+      # already true, a gate only fires after a regression has been sitting
+      # there for a while; set at the measured value, the first slip fails
+      # the build. Raise it when the number rises.
+      - name: Coverage gate on the programme's modules
+        if: matrix.python-version == '3.12'
+        run: >-
+          python -m pytest tests/ -q --tb=short -p no:cacheprovider
+          --cov=engine.permissions --cov=engine.auth --cov=engine.route_policy
+          --cov=engine.editable --cov=engine.run_limits --cov=engine.mentoring
+          --cov=engine.manual_run --cov=engine.dashboard_config
+          --cov=engine.dashboard_metrics --cov=engine.tedgie_eval
+          --cov=engine.regeneration --cov=engine.import_preview
+          --cov=engine.estimation_edit --cov=engine.bug_workflow
+          --cov=engine.checklist_order --cov=engine.public_ids
+          --cov=engine.tc_steps --cov=engine.features --cov=engine.security
+          --cov-branch --cov-report=term-missing:skip-covered
+          --cov-fail-under=93
 
       # The authenticated leg (E9.9). The product ships with AUTH_ENABLED
       # and ORG_MODE on, and until this existed the suite could only be run

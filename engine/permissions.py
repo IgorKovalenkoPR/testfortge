@@ -108,11 +108,21 @@ def current_role() -> str | None:
     ``None`` means no access. It is never a default role — treating it as
     one is how a stranger becomes a tester.
     """
-    uid, org = current_user_id(), current_org_id()
-    if not (uid and org):
+    org = current_org_id()
+    if not org:
+        return None
+    # Through current_user(), not current_user_id(): the membership row
+    # survives deactivation, so reading the role straight from it left a
+    # deactivated admin holding "admin". The route-policy gate already
+    # refuses them — it calls current_user() first — so this was not an open
+    # door, but it made every *other* caller of has_role() and is_admin()
+    # depend on the gate having run, which is not a property worth relying
+    # on. Found by E9.2 while closing the branch coverage on this module.
+    user = current_user()
+    if user is None:
         return None
     from engine import db as _db
-    return _db.get_org_role(org, uid)
+    return _db.get_org_role(org, user.get("id"))
 
 
 def is_admin() -> bool:
