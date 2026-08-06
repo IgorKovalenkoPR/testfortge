@@ -9,10 +9,11 @@ A record of what was built and what it found, kept beside
 kind of document for E9.8. The strategy is the standing statement; this is
 what happened when it was carried out.
 
-**Three defects fixed here, and none of them was found by reading the code.**
-Two came out of running the migration on a database with rows in it; the
-third came out of CI, and it is the most serious of the three because it is
-a production failure mode that had no symptom.
+**Five defects fixed here, and not one was found by reading the code.** Two
+came out of running the migration on a database that had rows in it; one out
+of asking what happens when two people open the same invitation; one out of
+CI, which is the most serious because it is a production failure mode with no
+symptom; and one out of a test that was passing for the wrong reason.
 
 ---
 
@@ -105,14 +106,15 @@ Two things kept it hidden:
 
 | | |
 |---|---|
-| Suite, flags off | **3883 passed**, 49 skipped |
-| Suite, `AUTH_ENABLED=1 ORG_MODE=1` | **3883 passed**, 49 skipped |
-| Suite with the browsers removed | **3854 passed**, 78 skipped — was 14 errors |
+| Suite, flags off | **3901 passed**, 54 skipped |
+| Suite, `AUTH_ENABLED=1 ORG_MODE=1` | **3901 passed**, 54 skipped |
+| Suite with the browsers removed | **3872 passed**, 83 skipped — was 14 errors |
 | E9.5 anti-flaky gate | **10 / 10 green** locally (~31 s each) and in CI |
 | E9.7 pages p95 | **324 ms** (p50 101 ms), no 5xx, no `database is locked`, all ten writes landed |
 | E9.7 sign-in p95 | 2.9 s — ten Argon2 verifications arriving together, which is the hash doing its job |
-| CI | 3.11 / 3.12 / 3.13 + real Postgres, e2e ×10, all green |
-| Diff | 13 files, +3122 / −43 |
+| Twelve simultaneous filings | twelve contiguous ids, none dropped |
+| CI | 3.11 / 3.12 / 3.13 + real Postgres, e2e ×10, all green on `367085a` |
+| Diff | 16 files, +3805 / −50 |
 
 The load budget is 3000 ms — about nine times the measured p95. The multiple is not generosity: the file also runs on a shared two-core runner, and a performance gate that fails on somebody else's noisy neighbour teaches people to rerun the build. Three seconds still fails on an N+1 across the bug list or a per-request model call.
 
@@ -151,9 +153,11 @@ Twelve simultaneous filings now get twelve contiguous ids, `BUG-001` to `BUG-012
 ## Commits
 
 Oldest last, on `claude/e9-testing-integration-roles-e2e-83a1e8` off
-`1b31777`. 13 files, +3122 / −43.
+`1b31777`. 16 files, +3805 / −50.
 
 ```
+fix(bugs): a bug id identifies one bug — E4.4a, extended to bug_report
+docs(e9): keep the delivery record in the repository, not only on the PR
 fix(browser): a Chromium that will not start no longer poisons the process
 ci: put the failing test names in the annotations, not only in the log
 docs(e9.8): BEHIND_HTTPS is in effect on the live host — checked, not assumed
