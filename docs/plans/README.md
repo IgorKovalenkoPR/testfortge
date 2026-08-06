@@ -1,8 +1,10 @@
 # TestForTge — Improvement Plans
 
-Five reference plans produced from the 2026-05-19 architectural review.
-Each plan is sized as a focused mini-sprint with task list, file:line
-references, code sketches, tests, risks, and an estimate.
+Started as five reference plans from the 2026-05-19 architectural review,
+each sized as a focused mini-sprint with task list, file:line references,
+code sketches, tests, risks and an estimate. The later entries are a
+different kind of document and are marked as such: an ADR, and the records
+of what an epic actually found once it was carried out.
 
 | File | Sprint | Focus | Effort |
 |---|---|---|---:|
@@ -15,7 +17,11 @@ references, code sketches, tests, risks, and an estimate.
 | [recorder_integration.md](recorder_integration.md) | Recorder | TestLum-inspired Web Recorder via Playwright codegen CLI + multi-locator Page Object + Assertion Mode | ~70 h |
 | [cost_model.md](cost_model.md) | Programme · money | **Running TestFortge on $0/month**: free-tier component map, why the DB must leave Render free, LLM cost per active QA, BYOK, and what $0 genuinely cannot buy | — |
 | [adr/0001-project-workspace-source-of-truth.md](adr/0001-project-workspace-source-of-truth.md) | ADR | Postgres, not the Flask session, is the source of truth for a project's artefacts — the gate E4 and E7 wait on | — |
+| [e5_execute_audit.md](e5_execute_audit.md) | E5 | Audit of the Execute module: six defects, including a run in project A rendering project B's content | — |
 | [team_platform_architecture.md](team_platform_architecture.md) | **Programme** | **Single-tenant tool → multi-team platform**: auth (password + Google OIDC), org/roles, session→DB workspace refactor, editors for Estimation/TC/Checklist/Bugs, storage choice, Tedgie mentor, Dashboard v2 + full test & regression stages | ~1 100 h |
+| [e9_test_strategy.md](e9_test_strategy.md) | E9.1 | Test strategy for the programme, written *after* E1–E7 rather than before: coverage targets, the risk matrix, and the two rules the defects produced | — |
+| [e9_security_pass.md](e9_security_pass.md) | E9.8 | OWASP ASVS-lite on auth / RBAC / upload / storage — one High found and closed (SSRF stopped at the first hop) | — |
+| [e9_delivery_record.md](e9_delivery_record.md) | E9.3–E9.7 | What the integration, functional, browser and load legs were and what they found: two Postgres-only migration defects, an invitation redeemable twice, and a failed Chromium launch that poisoned the whole process | — |
 
 ## Recommended sequencing
 
