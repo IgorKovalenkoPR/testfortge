@@ -169,7 +169,8 @@ Ordered by what this programme has actually shown, not by intuition.
 | A migration that only fails on Postgres | medium | high | E9.3: the populated-copy upgrade runs on both engines, plus a static check that each ALTER matches the type the model declares | ✅ closed |
 | A new POST shipping without CSRF | medium | high | E9.4: the list comes off the URL map and fails closed | ✅ closed |
 | Load: 10 concurrent users per org | unknown | medium | E9.7 — measured: pages p95 324 ms, no 5xx, no lost writes | ✅ closed |
-| Two simultaneous bug filings sharing a public id | low | medium | nothing but timing; E4.4a's index and retry were never extended to `bug_report`, and `test_load_smoke.py` asserts the property so a change of engine or scale says so | 🟡 guarded, not fixed |
+| Two simultaneous bug filings sharing a public id | low | medium | E4.4a's index and retry, extended to `bug_report`; twelve simultaneous filings get twelve contiguous ids and none is dropped | ✅ closed |
+| A bug write that fails and reports success | low | **high** | the filing path treats a failed write as best-effort, so the retry bound has to be sized for the concurrency rather than copied — `test_load_smoke.py` counts the rows | 🟡 bound sized, swallow still there |
 | Security: OWASP ASVS-lite on auth/RBAC/upload | unknown | **critical** | E9.8 — run 2026-08-05, one High found and closed (`e9_security_pass.md`) | ✅ closed |
 
 ## Tests that pass for the wrong reason

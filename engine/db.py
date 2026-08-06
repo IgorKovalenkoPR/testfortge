@@ -530,13 +530,23 @@ def _renumber_duplicate_public_ids(engine: Engine) -> None:
     Row identity is not affected, so a renumbered row keeps its own
     ``row_version`` and ``ai_generated``: the metadata lives on the row, not
     in a table keyed by the public id.
+
+    ``bug_report`` joined the list after E9.7 measured ten people filing at
+    once: its ids are minted the same read-then-write way and had never been
+    constrained, so any instance that has been in use has duplicates waiting
+    for the index below. Its ``project_id`` is nullable — a bug filed
+    through Tedgie before a project is chosen has none — hence the
+    ``IS NOT NULL`` filter: those rows are outside what a unique index over
+    ``(project_id, external_id)`` can constrain on either engine, so
+    renumbering them would rewrite ids nobody asked about.
     """
-    for table in ("test_case", "checklist_item"):
+    for table in ("test_case", "checklist_item", "bug_report"):
         try:
             with engine.begin() as conn:
                 groups = conn.execute(text(
                     f"SELECT project_id, external_id FROM {table} "
                     f"WHERE external_id IS NOT NULL AND external_id <> '' "
+                    f"AND project_id IS NOT NULL "
                     f"GROUP BY project_id, external_id "
                     f"HAVING COUNT(*) > 1"
                 )).all()
@@ -619,8 +629,15 @@ def _ensure_public_id_unique_indexes(engine: Engine) -> None:
     Both have to hold for this index to be creatable, which is exactly why it
     is worth having — it is the thing that would fail loudly if either
     regressed.
+
+    ``bug_report`` was left out until E9.7, on the grounds that nobody files
+    two bugs at the same instant. Ten concurrent testers is exactly the case
+    the organisation model invites, and a bug id is the most-cited id in the
+    product — "reopening BUG-004" names two findings if two rows answer to
+    it. ``save_bug`` retries against this index the way ``editable.create``
+    does.
     """
-    for table in ("test_case", "checklist_item"):
+    for table in ("test_case", "checklist_item", "bug_report"):
         index = f"ux_{table}_project_external_id"
         try:
             with engine.begin() as conn:
@@ -3776,8 +3793,69 @@ def _resolve_bug_area(bug: dict) -> str:
         return "Functional"
 
 
+#: How many times :func:`save_bug` may re-mint a colliding public id.
+#:
+#: Not three, which is what ``editable.create`` uses and what the first
+#: version of this copied. The failure is a herd, not a coin flip: ten
+#: testers filing at once all read the same highest number, and each
+#: successful insert only drains one of them, so a given writer can lose up
+#: to nine races in a row. E9.7 measured exactly that — with three attempts
+#: one filing in ten was dropped, and dropped *quietly*, because
+#: ``routes/bugs._persist_bug`` treats a write failure as best-effort and
+#: the page still says "Bug report created successfully".
+#:
+#: So the bound is set well above the concurrency this product's own
+#: organisation model invites. An unconstrained retry loop is not the
+#: alternative — a genuinely broken insert has to stop somewhere — but the
+#: cost of one more attempt is a single small transaction and the cost of
+#: running out is somebody's finding.
+BUG_ID_ATTEMPTS = 25
+
+
+def _next_external_id(sess, model, project_id: str, like: str) -> str:
+    """One past the highest number already using *like*'s prefix — E4.4a.
+
+    ``BUG-004`` in a project whose highest is ``BUG-011`` returns
+    ``BUG-012``. The prefix is kept rather than normalised because these ids
+    are cited by hand, and a row that switched from ``BUG-`` to ``ITEM_``
+    when it was renumbered would look like a different artefact.
+
+    An id with no trailing number (``"regression"``) gets one appended, so
+    the second occurrence becomes ``regression_001`` instead of colliding
+    forever.
+    """
+    prefix, number = _public_ids.split_id(like)
+    if number is None:
+        prefix, number = f"{like}_", 0
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    highest = number
+    for (value,) in sess.query(model.external_id).filter(
+            model.project_id == project_id,
+            model.external_id.like(f"{prefix}%")).all():
+        match = pattern.match(str(value or ""))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return _public_ids.format_id(prefix, highest + 1)
+
+
 def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
-    """Persist a bug report. Returns the row id (auto-assigned)."""
+    """Persist a bug report. Returns the row id (auto-assigned).
+
+    **Retries once past a public-id collision (E4.4a, extended in E9.7).**
+    Every caller mints ``bug["id"]`` as "one past the highest" by reading the
+    project's bugs and then writing, which is a read-then-write: two people
+    filing at the same moment mint the same number. With
+    ``ux_bug_report_project_external_id`` in place that is an
+    ``IntegrityError`` rather than two rows answering to ``BUG-004``, and the
+    fix is to look again — the second attempt sees the committed row and
+    takes the next number. Bounded, so a genuinely broken insert does not
+    spin.
+
+    The retry lives here rather than in each of the five callers because
+    here is where the write is: a route, the manual walk, the walkthrough
+    runner, Tedgie and the MCP tool all arrive through this function, and a
+    guard repeated five times is the shape where one copy is wrong.
+    """
     if source not in VALID_BUG_SOURCES:
         source = "manual"
     bug = bug or {}
@@ -3788,6 +3866,38 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
         "comment", "reporter", "related_case_id", "run_id",
         "preconditions", "attachment", "assignee", "bug_area",
     )}
+    # Empty string is not an id, and storing it as one would put every
+    # id-less bug in a project into a single collision the unique index
+    # cannot resolve. NULL is what "this bug has no public id" means.
+    external_id = (bug.get("id") or "").strip() or None
+
+    attempts = BUG_ID_ATTEMPTS
+    while True:
+        try:
+            return _insert_bug(project_id, bug, source, extra_keys,
+                               external_id)
+        except IntegrityError as exc:
+            attempts -= 1
+            if not (project_id and external_id):
+                raise
+            if attempts <= 0:
+                # Never silently: the caller in routes/bugs.py wraps this
+                # in a best-effort try, so an exception that gets this far
+                # becomes a bug report the tester was told had been saved.
+                log.warning(
+                    "gave up minting a bug id in project %s after %d "
+                    "attempts — the report was NOT saved: %s",
+                    str(project_id)[:8], BUG_ID_ATTEMPTS, exc.orig)
+                raise
+            with session_scope() as sess:
+                external_id = _next_external_id(
+                    sess, BugReport, project_id, external_id)
+            log.info("bug id collision in project %s, retrying as %s: %s",
+                     str(project_id)[:8], external_id, exc.orig)
+
+
+def _insert_bug(project_id: str | None, bug: dict, source: str,
+                extra_keys: dict, external_id: str | None) -> int:
     with session_scope() as sess:
         # Bump project recency so a fresh bug surfaces the project at
         # the top of the picker dropdown.
@@ -3797,7 +3907,7 @@ def save_bug(project_id: str | None, bug: dict, source: str = "manual") -> int:
                 proj.updated_at = _utcnow()
         row = BugReport(
             project_id=project_id,
-            external_id=bug.get("id"),
+            external_id=external_id,
             title=bug.get("title") or bug.get("summary"),
             severity=bug.get("severity"),
             priority=bug.get("priority"),

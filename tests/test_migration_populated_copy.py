@@ -104,6 +104,10 @@ PROGRAMME_TABLES: tuple[str, ...] = (
 PROGRAMME_INDEXES: tuple[str, ...] = (
     "ux_test_case_project_external_id",
     "ux_checklist_item_project_external_id",
+    # Added after E9.7 measured ten people filing bugs at once. Every
+    # instance that has been in use predates it, which is what makes the
+    # repair-then-constrain order load-bearing here rather than theoretical.
+    "ux_bug_report_project_external_id",
 )
 
 
@@ -628,3 +632,116 @@ class TestDuplicatePublicIdsInTheCopy:
             "Verify that the logo links to the home page"] == "HDR_001"
         assert by_objective[
             "Verify that the duplicate is repaired"] != "HDR_001"
+
+
+class TestDuplicateBugIdsInTheCopy:
+    """The same repair, for the ids people actually cite.
+
+    ``bug_report`` was outside E4.4a until E9.7 measured ten testers filing
+    at once, so **every instance that has been in use has duplicates** —
+    ``create_bug_report`` has always minted "one past the highest" by
+    reading and then writing, and nothing has ever stopped two of those
+    landing on the same number. That makes the repair here load-bearing
+    rather than theoretical: without it the new index cannot be created on
+    any real database, and the guard would silently never go on.
+
+    ``bug_report.project_id`` is nullable, which the other two tables' ids
+    are not, so the last test states what that means.
+    """
+
+    def _make_a_collision(self, engine, project_id: str | None,
+                          title: str) -> None:
+        """A second ``BUG_001``, in the columns a pre-programme row had.
+
+        Raw SQL and a short column list on purpose: this runs while the
+        schema is still rolled back, so ``row_version`` and ``ai_generated``
+        do not exist yet — which is exactly the state a real copy is in, and
+        the migration is what gives them values.
+        """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO bug_report "
+                "(project_id, external_id, title, severity, status, "
+                " source, created_at, updated_at) "
+                "VALUES (:p, 'BUG_001', :t, 'Major', 'Open', "
+                "'manual', :now, :now)"),
+                {"p": project_id, "t": title, "now": now})
+
+    def test_the_index_goes_on_over_a_repaired_collision(self, prod_copy,
+                                                         monkeypatch):
+        engine, ids, _fp, _backend = prod_copy
+        self._make_a_collision(engine, ids["alpha"], "The duplicate filing")
+        _boot(monkeypatch)
+
+        names = {ix["name"] for ix in
+                 inspect(_db.get_engine()).get_indexes("bug_report")}
+        assert "ux_bug_report_project_external_id" in names, (
+            "the unique index was not created, so two testers filing at the "
+            "same moment can still produce two BUG-004s")
+
+    def test_both_findings_survive_with_different_ids(self, prod_copy,
+                                                      monkeypatch):
+        """Repair, not removal — a bug report is somebody's finding."""
+        engine, ids, _fp, _backend = prod_copy
+        self._make_a_collision(engine, ids["alpha"], "The duplicate filing")
+        _boot(monkeypatch)
+
+        bugs = _db.list_bugs(ids["alpha"])
+        assert len(bugs) == 2, [b["title"] for b in bugs]
+        assert {"The basket count is stale after removal",
+                "The duplicate filing"} == {b["title"] for b in bugs}
+        minted = [b["external_id"] for b in bugs]
+        assert len(set(minted)) == 2, minted
+
+    def test_the_row_that_was_there_first_keeps_its_id(self, prod_copy,
+                                                       monkeypatch):
+        """The one most likely to be cited already keeps the citation.
+
+        "Reopening BUG_001" has to keep meaning the bug it meant when
+        somebody wrote it down.
+        """
+        engine, ids, _fp, _backend = prod_copy
+        self._make_a_collision(engine, ids["alpha"], "The duplicate filing")
+        _boot(monkeypatch)
+
+        by_title = {b["title"]: b["external_id"]
+                    for b in _db.list_bugs(ids["alpha"])}
+        assert by_title["The basket count is stale after removal"] == "BUG_001"
+        assert by_title["The duplicate filing"] != "BUG_001"
+
+    def test_the_renumbered_id_keeps_its_prefix(self, prod_copy, monkeypatch):
+        """A renumbered bug must still look like a bug.
+
+        Switching ``BUG_002`` to ``ITEM_002`` would make the row look like a
+        different kind of artefact in every export that carries it.
+        """
+        engine, ids, _fp, _backend = prod_copy
+        self._make_a_collision(engine, ids["alpha"], "The duplicate filing")
+        _boot(monkeypatch)
+
+        by_title = {b["title"]: b["external_id"]
+                    for b in _db.list_bugs(ids["alpha"])}
+        assert by_title["The duplicate filing"].startswith("BUG_")
+
+    def test_a_bug_with_no_project_is_left_alone(self, prod_copy,
+                                                 monkeypatch):
+        """Tedgie files before a project is chosen, and that is allowed.
+
+        A unique index over ``(project_id, external_id)`` does not constrain
+        rows whose ``project_id`` is NULL — both engines allow repeated
+        NULLs — so renumbering them would rewrite ids to satisfy a
+        constraint that was never going to apply. Two project-less bugs
+        sharing an id is the state this asserts stays untouched.
+        """
+        engine, ids, _fp, _backend = prod_copy
+        self._make_a_collision(engine, None, "Filed before a project")
+        self._make_a_collision(engine, None, "Also before a project")
+        _boot(monkeypatch)
+
+        orphans = {b["title"]: b["external_id"] for b in _db.list_bugs(None)
+                   if b["title"] in ("Filed before a project",
+                                     "Also before a project")}
+        assert orphans == {"Filed before a project": "BUG_001",
+                           "Also before a project": "BUG_001"}

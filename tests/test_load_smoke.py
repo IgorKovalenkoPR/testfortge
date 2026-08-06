@@ -373,29 +373,34 @@ class TestPublicIdsUnderConcurrency:
     means the citation names two findings and the reader cannot tell
     which. E4.4a made exactly that impossible for test cases and
     checklist items: a unique ``(project_id, external_id)`` index, and a
-    retry in ``editable.create`` that takes the next number when the
-    index refuses. **Bug reports were never brought under it.**
+    retry that takes the next number when the index refuses. Bug reports
+    were brought under the same machinery afterwards, because this file
+    is what showed there was nothing holding them.
 
     ``create_bug_report`` still mints "one past the highest" by reading
     the project's bugs and then writing, with nothing between the read
-    and the write. Nothing in the schema prevents the collision; what
-    prevents it today is timing.
+    and the write — the index and ``save_bug``'s retry are what turn that
+    into a renumber instead of a collision.
 
-    So this is measured rather than reasoned about. Ten filings released
-    from one barrier, seven runs on 2026-08-06: **no collision, ever** —
-    SQLite's single writer plus per-request overhead staggers ten
-    filings enough, at ten. That is a fact about this engine at this
-    scale, not a property of the code, which is why the assertion stays:
-    if a faster engine, a bigger team or a cheaper request path ever
-    closes the gap, this is what says so instead of a client noticing
-    two BUG-004s in a report.
+    **Read ``external_id``, not ``id``.** ``list_bugs`` returns the row
+    as stored, so ``id`` is the auto-increment primary key and is
+    distinct by construction: the first version of this test asserted on
+    it and could not have failed. That is the passes-for-the-wrong-reason
+    shape the strategy names, found here by writing a second test that
+    needed the same value — and the moment it was fixed, this file earned
+    its keep twice over. It showed that ``save_bug``'s first retry bound,
+    three attempts copied from ``editable.create``, drops one filing in
+    ten under this load: the failure is a herd rather than a coin flip,
+    each successful insert drains only one writer, and the exhausted one
+    is swallowed by a best-effort ``except`` while the page still reports
+    success. The bound is sized for the concurrency now.
     """
 
     def test_ten_simultaneous_filings_get_ten_distinct_ids(self, measured,
                                                            capsys):
         crowd = measured["crowd"]
-        minted = [b["id"] for b in _db.list_bugs(crowd["project"])
-                  if b.get("id")]
+        minted = [b["external_id"] for b in _db.list_bugs(crowd["project"])
+                  if b.get("external_id")]
         duplicates = len(minted) - len(set(minted))
         with capsys.disabled():
             print(f"    {'public ids':<16} {len(minted)} filed, "

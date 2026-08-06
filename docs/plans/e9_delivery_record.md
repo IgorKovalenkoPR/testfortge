@@ -122,9 +122,25 @@ The load budget is 3000 ms — about nine times the measured p95. The multiple i
 - **No soak, no ramp, no second organisation.** E9.7 measures ten concurrent users in one organisation and nothing else.
 - **Chromium only.** A browser matrix triples the cost of every run and is a decision for whoever needs it.
 
-## One finding left open on purpose
+## The finding that was left open, and then was not
 
-`create_bug_report` mints public ids "one past the highest" by reading the project's bugs and then writing, with nothing in between and no unique index behind it — the exact shape E4.4a closed for test cases and checklist items and never extended to bug reports. Ten simultaneous filings produced ten distinct ids in seven runs, which is a fact about SQLite's single writer at this scale rather than a property of the code. The assertion stays in `test_load_smoke.py` so a faster engine or a bigger team says so here, instead of a client finding two `BUG-004`s in a report. Extending E4.4a's index and retry is its own change.
+E9.7 noticed that `create_bug_report` mints public ids "one past the highest" by reading the project's bugs and then writing, with nothing in between and no unique index behind it — the exact shape E4.4a closed for test cases and checklist items and never extended to bug reports. It was recorded as guarded-not-fixed, because ten simultaneous filings produced ten distinct ids in seven runs.
+
+**That reading was wrong, and the test that produced it was wrong.** `list_bugs` returns the row as stored, so `id` is the auto-increment primary key and `external_id` is the public id. The assertion read `id`, which is distinct by construction: it could not have failed. It was found by writing a second test that needed the same value — the passes-for-the-wrong-reason shape the strategy names, caught this time by the practice rather than by a customer.
+
+So the work was done rather than deferred:
+
+- `bug_report` joins `_renumber_duplicate_public_ids` and `_ensure_public_id_unique_indexes`. Its `project_id` is nullable — Tedgie files before a project is chosen — and a unique index over `(project_id, external_id)` does not constrain rows whose `project_id` is NULL on either engine, so those are excluded from the repair rather than renumbered to satisfy a rule that never reaches them.
+- `save_bug` retries past a collision, keeping the caller's prefix and taking one past the highest number already using it: `BUG-001` filed into a project holding `BUG-001` and `BUG-009` becomes `BUG-010`, not `BUG-002`, because a new finding landing in a gap somebody deleted a bug out of reads as the deleted one coming back. The retry lives in `save_bug` rather than in each of the five callers, because that is where the write is.
+- An empty `id` is stored as NULL. Otherwise every id-less bug in a project would be one unresolvable collision, and the second such filing would invent an id for a bug nobody gave one.
+
+### And the retry bound was wrong too
+
+Three attempts, copied from `editable.create`. The failure is a herd rather than a coin flip: ten testers all read the same highest number, and each successful insert drains only one of them, so a given writer can lose up to nine races in a row. With three attempts E9.7 measured **one filing in ten dropped** — and dropped *silently*, because `routes/bugs._persist_bug` treats a write failure as best-effort and the page still says "Bug report created successfully".
+
+The bound is sized for the concurrency the organisation model invites, and exhaustion is now a `log.warning` that says the report was not saved. The swallow itself is still there; `test_load_smoke.py` counts the rows, which is what turns it from a silent failure into a red build.
+
+Twelve simultaneous filings now get twelve contiguous ids, `BUG-001` to `BUG-012`, and none is dropped.
 
 ## Also in here
 
