@@ -3003,6 +3003,51 @@ def adopt_orphan_projects(org_id: str, *, only_when_sole_org: bool = True) -> in
         return len(rows)
 
 
+#: How many orphan names :func:`orphan_project_survey` carries back.
+#:
+#: The count is the number that matters; the names are there so an admin
+#: can recognise the work before signing for it, and so the refusal below
+#: names what has to be dealt with project by project. Bounded because a
+#: deployment with three hundred pre-flag projects would otherwise render
+#: three hundred rows into a settings page.
+ORPHAN_PREVIEW_LIMIT = 25
+
+
+def orphan_project_survey() -> dict:
+    """What :func:`adopt_orphan_projects` would do, before it does it.
+
+    Exists because that function answers ``0`` to two different questions —
+    "there was nothing to adopt" and "I refuse to guess between several
+    organisations" — and a screen that renders both as a silent zero tells
+    an admin their projects are gone rather than that a decision is
+    waiting for them. The sweep's return value is deliberately unchanged;
+    this reads the same two facts up front instead.
+
+    Keys: ``count`` of unassigned projects, ``names`` (at most
+    :data:`ORPHAN_PREVIEW_LIMIT` of them, newest first), ``organisations``
+    in existence, and ``ambiguous`` — true when the sweep will refuse.
+    """
+    with session_scope() as sess:
+        count = sess.execute(
+            select(func.count()).select_from(Project)
+            .where(Project.org_id.is_(None))
+        ).scalar() or 0
+        names = list(sess.execute(
+            select(Project.name).where(Project.org_id.is_(None))
+            .order_by(Project.updated_at.desc())
+            .limit(ORPHAN_PREVIEW_LIMIT)
+        ).scalars().all())
+        orgs = sess.execute(
+            select(func.count()).select_from(Organization)
+        ).scalar() or 0
+    return {
+        "count": int(count),
+        "names": names,
+        "organisations": int(orgs),
+        "ambiguous": int(orgs) > 1,
+    }
+
+
 def list_projects(owner_sid: str | None = None,
                   org_id: str | None = None) -> list[dict]:
     """Projects, newest first, with per-project artefact counts.
@@ -5137,6 +5182,9 @@ __all__ = [
     # projects
     "upsert_project", "update_project", "list_projects", "get_project",
     "delete_project", "move_artifacts",
+    # the pre-ORG_MODE migration and the preview of it (E1.6)
+    "adopt_orphan_projects", "orphan_project_survey",
+    "ORPHAN_PREVIEW_LIMIT",
     # test cases
     "save_test_cases", "load_test_cases", "create_test_case",
     # Optimistic concurrency on pack writes (E3.5).

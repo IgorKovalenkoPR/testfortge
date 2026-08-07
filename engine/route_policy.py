@@ -103,6 +103,12 @@ POLICY: dict[str, str] = {
     "db_rename_project": "admin",
     "delete_project": "admin",
     "db_move_artifacts": "admin",     # restructures where work lives
+    # Claiming the projects that predate ORG_MODE transfers ownership of
+    # every unassigned one at once (E1.6). Self-enforcing via
+    # @require_role("admin"), and listed anyway so the table shows what the
+    # deployment's most consequential one-off action needs — the same
+    # reason manual_run_assign is listed below.
+    "org_settings_adopt_projects": "admin",
     # …but picking which existing project you are working in is not.
     "db_select_project": "user",
     "load_project": "user",

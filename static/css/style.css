@@ -2397,6 +2397,20 @@ input[type="text"]:focus, textarea:focus, select:focus {
     border-color: var(--warning);
 }
 
+/* The projects waiting to be claimed (E1.6). Scrolls rather than grows:
+   the list is bounded in the template, but 25 names is still taller than
+   the button they belong to, and the button is the point. */
+.settings-orphan-list {
+    margin: 0 0 1rem;
+    padding: .6rem .9rem .6rem 2rem;
+    max-height: 11rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: .875rem;
+    line-height: 1.6;
+}
+
 /* Spend against the monthly allowance. A meter rather than a number
    because "how close are we" is the question people actually have. */
 .settings-meter { margin: 1rem 0; }

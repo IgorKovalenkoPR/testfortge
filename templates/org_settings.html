@@ -41,6 +41,61 @@
   {% endif %}
 </div>
 
+{# ── Legacy projects (E1.6) ───────────────────────────────────────
+     Only rendered when there is something to say. A permanent empty card
+     reading "0 projects to claim" would train an admin to skip the one
+     screen that explains where their pre-ORG_MODE work went. #}
+{% if is_admin and orphans and orphans.count %}
+<div class="card">
+  <h2>Projects with no team</h2>
+  <p class="text-muted">
+    {{ orphans.count }} project{{ '' if orphans.count == 1 else 's' }} on
+    this server {{ 'belongs' if orphans.count == 1 else 'belong' }} to no
+    team. {{ 'It was' if orphans.count == 1 else 'They were' }} created
+    before teams existed, so {{ 'it does' if orphans.count == 1 else 'they do' }}
+    not appear in any project list — including for whoever created
+    {{ 'it' if orphans.count == 1 else 'them' }}.
+  </p>
+
+  <ul class="settings-orphan-list">
+    {% for name in orphans.names %}
+    <li>{{ name }}</li>
+    {% endfor %}
+    {% if orphans.count > orphans.names|length %}
+    <li class="text-muted">
+      …and {{ orphans.count - orphans.names|length }} more.
+    </li>
+    {% endif %}
+  </ul>
+
+  {% if orphans.ambiguous %}
+    {# The refusal, in advance and in words. The sweep declines this case
+       and returns 0 — a button that looked live and then did nothing
+       would read as a broken feature rather than a deliberate answer. #}
+    <p class="settings-status settings-status-warn">
+      There are {{ orphans.organisations }} teams on this server, so
+      claiming in bulk is refused: nothing here records which team these
+      projects belonged to, and guessing would hand one team's work to
+      another. Whoever runs the server has to assign them individually.
+    </p>
+  {% else %}
+    <form method="post" action="{{ url_for('org_settings_adopt_projects') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">
+        Claim {{ orphans.count }} project{{ '' if orphans.count == 1 else 's' }}
+        for {{ org.name }}
+      </button>
+      <p class="text-muted settings-note">
+        {{ 'It becomes' if orphans.count == 1 else 'They become' }} visible
+        to every member of {{ org.name }}, and the change is recorded in the
+        audit trail. There is no undo button — an admin would have to move
+        {{ 'it' if orphans.count == 1 else 'them' }} back individually.
+      </p>
+    </form>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ── LLM spend ────────────────────────────────────────────────── #}
 <div class="card">
   <h2>AI usage and cost</h2>
