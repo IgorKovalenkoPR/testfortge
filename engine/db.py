@@ -35,7 +35,8 @@ from typing import Any, Iterable
 
 from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, String,
                         Text, UniqueConstraint,
-                        create_engine, event, func, select, text, update)
+                        create_engine, delete, event, func, select, text,
+                        update)
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import (DeclarativeBase, Mapped, Session, declared_attr,
@@ -186,6 +187,7 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     _ensure_walkthrough_columns(engine)
     _ensure_project_org_column(engine)
+    _ensure_invite_emailed_column(engine)
     _ensure_case_result_source_column(engine)
     _ensure_pack_version_columns(engine)
     _ensure_editable_columns(engine)
@@ -726,6 +728,36 @@ def _ensure_project_org_column(engine: Engine) -> None:
                 "ALTER TABLE project ADD COLUMN org_id VARCHAR(32)"))
     except SQLAlchemyError as exc:  # pragma: no cover — best-effort
         log.warning("tenancy migration ALTER failed: %s", exc)
+
+
+def _ensure_invite_emailed_column(engine: Engine) -> None:
+    """Idempotent ``ALTER TABLE invite ADD COLUMN emailed_at`` — E0.4.
+
+    Nullable with no default, and NULL is the correct reading for every
+    invitation that already exists: they were all handed over by hand,
+    because until this epic there was nothing to send them with. So the
+    column says something true about history rather than backfilling a
+    delivery that never happened — which matters, because it is what
+    decides whether an invited address counts as proven.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        existing = {c["name"] for c in _inspect(engine).get_columns("invite")}
+    except SQLAlchemyError as exc:
+        # No invite table yet — fresh install, create_all made it complete.
+        log.debug("invite.emailed_at probe skipped: %s", exc)
+        return
+
+    if "emailed_at" in existing:
+        return
+
+    try:
+        with engine.begin() as conn:
+            log.info("email migration: adding invite.emailed_at")
+            conn.execute(text(
+                "ALTER TABLE invite ADD COLUMN emailed_at TIMESTAMP"))
+    except SQLAlchemyError as exc:  # pragma: no cover — best-effort
+        log.warning("email migration ALTER failed: %s", exc)
 
 
 def get_engine() -> Engine:
@@ -1610,6 +1642,74 @@ class Invite(Base):
         DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    #: When this invitation was actually delivered by email (E0.4).
+    #:
+    #: NULL means it was not — either no provider is configured or the send
+    #: failed — and the admin handed the link over some other way. That is
+    #: not bookkeeping: it decides whether the address is *proven*. An
+    #: invitation that arrived in the inbox can only have been opened by
+    #: whoever reads that inbox; a link pasted into a chat proves nothing
+    #: about the address at all, and marking such an account
+    #: ``email_verified`` would be recording an assumption as a fact.
+    #: See :func:`consume_invite`'s caller in ``routes/auth.py``.
+    emailed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+#: Purposes a one-time token can serve (E1.3).
+AUTH_TOKEN_PURPOSES = ("reset", "verify")
+
+#: How long a password-reset link lives, in minutes.
+#:
+#: One hour. Short because the link *is* the credential — anyone holding it
+#: can take the account — and long enough to survive somebody starting the
+#: flow, being interrupted, and coming back to their inbox.
+RESET_TTL_MINUTES = 60
+
+#: How long an address-confirmation link lives, in minutes.
+#:
+#: A day. Longer than a reset because it grants nothing: the holder can
+#: confirm an address they already control and nothing else.
+VERIFY_TTL_MINUTES = 24 * 60
+
+
+class AuthToken(Base):
+    """A single-use, expiring token for resetting a password or proving an
+    address (E1.3).
+
+    Separate from :class:`Invite` on purpose, though the shape is close.
+    An invite carries an organisation and a role and creates a membership;
+    these carry neither and act on an account that already exists. Folding
+    them together would mean a nullable ``org_id`` and a ``role`` that is
+    meaningless for two of the three purposes, and every query would have
+    to remember which kind of row it was looking at.
+
+    ``sent_at`` is what makes "one email per token" enforceable rather than
+    hoped for — see :func:`claim_auth_token_send`.
+    """
+    __tablename__ = "auth_token"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False,
+                                         index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    #: The address this token was issued for. Held separately from the
+    #: user's current address because a ``verify`` token proves *this*
+    #: address, and honouring it after the account's address has changed
+    #: would confirm something nobody asked about.
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
 
 class OrgSecret(Base):
@@ -1779,12 +1879,26 @@ def set_password_hash(user_id: str, password_hash: str) -> bool:
         return True
 
 
-def mark_email_verified(user_id: str) -> bool:
+def mark_email_verified(user_id: str, email: str | None = None) -> bool:
+    """Record that this account's address is proven.
+
+    *email* is an optional guard, and the reason it exists is E1.3: a
+    ``verify`` token proves the address it was **issued for**. If the
+    account's address has changed since the link was sent, honouring the
+    link would mark the new, unproven address as confirmed — the one thing
+    the flag must never say falsely. Mismatch refuses rather than confirming
+    the wrong thing.
+    """
     if not user_id:
         return False
     with session_scope() as sess:
         row = sess.get(User, user_id)
         if row is None:
+            return False
+        if email is not None and \
+                normalize_email(row.email) != normalize_email(email):
+            log.info("verify refused for %s: the address changed since the "
+                     "link was issued", user_id[:8])
             return False
         row.email_verified = True
         return True
@@ -2195,6 +2309,192 @@ def create_invite(org_id: str, email: str, role: str, token: str, *,
         return True
 
 
+def mark_invite_emailed(token: str) -> bool:
+    """Record that this invitation was actually delivered by email (E0.4).
+
+    Called only after the provider accepted the message. The column is what
+    decides whether the invited address counts as *proven* when the account
+    is created — see ``Invite.emailed_at``.
+    """
+    if not token:
+        return False
+    with session_scope() as sess:
+        claimed = sess.execute(
+            update(Invite)
+            .where(Invite.token == token, Invite.emailed_at.is_(None))
+            .values(emailed_at=_utcnow())
+            .execution_options(synchronize_session=False))
+        return bool(claimed.rowcount)
+
+
+# ── One-time tokens for reset and verify (E1.3) ────────────────────
+
+def create_auth_token(purpose: str, user_id: str, email: str, token: str, *,
+                      ttl_minutes: int | None = None) -> bool:
+    """Issue a one-time token, revoking any live one of the same purpose.
+
+    *token* is minted by the caller (``secrets.token_urlsafe(32)``), the
+    same arrangement :func:`create_invite` uses: the secret never comes from
+    the database's random source and never has to be read back out.
+
+    Revoke-first is what makes "one live reset link per person" true, and it
+    matters more here than for invites. Asking for a reset twice is what
+    people do when the first message is slow, and leaving both links armed
+    means the older one — the one more likely to be sitting in a forwarded
+    mail or a shared inbox — still opens the account.
+    """
+    email = normalize_email(email)
+    if purpose not in AUTH_TOKEN_PURPOSES or not (user_id and email and token):
+        return False
+    now = _utcnow()
+    default_ttl = (RESET_TTL_MINUTES if purpose == "reset"
+                   else VERIFY_TTL_MINUTES)
+    with session_scope() as sess:
+        if sess.get(User, user_id) is None:
+            return False
+        sess.execute(
+            update(AuthToken)
+            .where(AuthToken.user_id == user_id,
+                   AuthToken.purpose == purpose,
+                   AuthToken.used_at.is_(None),
+                   AuthToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+            .execution_options(synchronize_session=False))
+        ttl = timedelta(minutes=max(1, ttl_minutes or default_ttl))
+        sess.add(AuthToken(token=token, purpose=purpose, user_id=user_id,
+                           email=email, created_at=now,
+                           expires_at=now + ttl))
+        try:
+            sess.flush()
+        except IntegrityError:
+            sess.rollback()
+            return False
+        return True
+
+
+def get_auth_token(token: str, purpose: str | None = None) -> dict | None:
+    """The token's row if it is claimable **right now**, else ``None``.
+
+    One answer for never-existed, already-used, revoked and expired. A
+    caller cannot tell them apart because there is nothing useful to do
+    with the difference and plenty to do with it if you are guessing tokens
+    at the endpoint: "expired" confirms the token was real, and a real
+    token means a real account.
+    """
+    if not token:
+        return None
+    now = _utcnow()
+    with session_scope() as sess:
+        row = sess.get(AuthToken, token)
+        if row is None:
+            return None
+        if purpose is not None and row.purpose != purpose:
+            return None
+        if row.used_at is not None or row.revoked_at is not None:
+            return None
+        expires = row.expires_at
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires is not None and expires <= now:
+            return None
+        return _row_to_dict(row)
+
+
+def claim_auth_token_send(token: str) -> bool:
+    """Take the right to send this token's one email. ``False`` if taken.
+
+    The acceptance criterion for E1.3 is that a message is never sent twice
+    for one token, and a double-submitted form is the ordinary way that
+    happens — somebody clicks "email me a link", nothing appears to move, so
+    they click again. Reading ``sent_at`` and then setting it would let both
+    requests through under Postgres's READ COMMITTED, where each reads NULL
+    before either writes; one conditional UPDATE cannot be interleaved.
+
+    Claimed *before* the provider is called, not after, and the ordering is
+    deliberate: a send that happens twice has spent two of a hundred daily
+    messages and put a second live credential in an inbox, while a claim
+    that is never followed by a send costs the user one retry.
+    """
+    if not token:
+        return False
+    with session_scope() as sess:
+        claimed = sess.execute(
+            update(AuthToken)
+            .where(AuthToken.token == token, AuthToken.sent_at.is_(None))
+            .values(sent_at=_utcnow())
+            .execution_options(synchronize_session=False))
+        return bool(claimed.rowcount)
+
+
+def consume_auth_token(token: str, purpose: str) -> dict | None:
+    """Redeem a one-time token. Returns its row, or ``None`` if unclaimable.
+
+    **Claimed by one conditional UPDATE**, the same shape
+    :func:`consume_invite` uses and for the same reason: a link that travels
+    by email is a link two people can open at the same moment, and a
+    read-then-write hands the account to both of them. ``rowcount == 0``
+    means somebody else got there first, which is indistinguishable — on
+    purpose — from expired and from never having existed.
+    """
+    if not (token and purpose in AUTH_TOKEN_PURPOSES):
+        return None
+    now = _utcnow()
+    with session_scope() as sess:
+        row = sess.get(AuthToken, token)
+        if row is None or row.purpose != purpose:
+            return None
+        claimed = sess.execute(
+            update(AuthToken)
+            .where(AuthToken.token == token,
+                   AuthToken.purpose == purpose,
+                   AuthToken.used_at.is_(None),
+                   AuthToken.revoked_at.is_(None),
+                   AuthToken.expires_at > now)
+            .values(used_at=now)
+            .execution_options(synchronize_session=False))
+        if not claimed.rowcount:
+            return None
+        return {"token": row.token, "purpose": row.purpose,
+                "user_id": row.user_id, "email": row.email}
+
+
+def revoke_auth_tokens(user_id: str, purpose: str | None = None) -> int:
+    """Kill this person's live tokens. Returns how many.
+
+    Called when a password changes: any reset link still in flight was
+    issued to whoever asked, and after a successful reset the account is
+    already in someone's hands. Leaving a spare key under the mat because
+    it was cut before the lock changed is not a thing to do.
+    """
+    if not user_id:
+        return 0
+    with session_scope() as sess:
+        stmt = (update(AuthToken)
+                .where(AuthToken.user_id == user_id,
+                       AuthToken.used_at.is_(None),
+                       AuthToken.revoked_at.is_(None)))
+        if purpose is not None:
+            stmt = stmt.where(AuthToken.purpose == purpose)
+        result = sess.execute(
+            stmt.values(revoked_at=_utcnow())
+            .execution_options(synchronize_session=False))
+        return int(result.rowcount or 0)
+
+
+def purge_expired_auth_tokens(*, older_than_hours: int = 24 * 30) -> int:
+    """Delete tokens long past use. Returns how many rows went.
+
+    Kept for a month after expiry rather than deleted on expiry, so that
+    "this link stopped working" can still be answered from the audit trail
+    while the row is small and the table stays bounded.
+    """
+    cutoff = _utcnow() - timedelta(hours=max(1, older_than_hours))
+    with session_scope() as sess:
+        result = sess.execute(
+            delete(AuthToken).where(AuthToken.expires_at < cutoff))
+        return int(result.rowcount or 0)
+
+
 def get_invite(token: str) -> dict | None:
     """Return a *claimable* invite, or ``None``.
 
@@ -2557,6 +2857,24 @@ def list_audit(*, org_id: str | None = None, project_id: str | None = None,
             q = q.filter(AuditLog.entity_id == str(entity_id))
         rows = q.order_by(AuditLog.at.desc()).limit(limit).all()
         return [_row_to_dict(r) for r in rows]
+
+
+def count_audit_since(*, entity: str, action: str, since: datetime) -> int:
+    """How many matching events were recorded after *since*.
+
+    Exists for ``engine.mailer``'s daily quota (E0.4). The audit trail is
+    the meter as well as the record: a second table counting the same
+    events would be one more thing to migrate and one more place for the
+    two numbers to disagree, and ``AuditLog.at`` is already indexed.
+    """
+    if not (entity and action):
+        return 0
+    with session_scope() as sess:
+        return int(sess.execute(
+            select(func.count()).select_from(AuditLog)
+            .where(AuditLog.entity == entity, AuditLog.action == action,
+                   AuditLog.at >= since)
+        ).scalar() or 0)
 
 
 # ── Server-side session store (E0.2) ───────────────────────────────
@@ -5242,7 +5560,14 @@ __all__ = [
     "set_project_org", "list_projects_for_org",
     "create_invite", "get_invite", "consume_invite", "revoke_invite",
     "revoke_invites_for_email", "list_pending_invites",
-    "append_audit", "list_audit",
+    "mark_invite_emailed",
+    # one-time tokens for reset / verify (E1.3)
+    "AuthToken", "AUTH_TOKEN_PURPOSES",
+    "RESET_TTL_MINUTES", "VERIFY_TTL_MINUTES",
+    "create_auth_token", "get_auth_token", "consume_auth_token",
+    "claim_auth_token_send", "revoke_auth_tokens",
+    "purge_expired_auth_tokens",
+    "append_audit", "list_audit", "count_audit_since",
     "session_load", "session_save", "session_delete",
     "delete_sessions_for_user", "purge_expired_sessions",
     # aggregates

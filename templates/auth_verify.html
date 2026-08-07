@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ t.verify_title }} — TestForTge{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+{% if confirmed %}
+  <h1>{{ t.verify_done_title }}</h1>
+  <p class="auth-sub">{{ t.verify_done_body|format(email) }}</p>
+  <p class="auth-note">
+    <a href="{{ url_for('index') }}">{{ t.verify_continue }}</a>
+  </p>
+{% else %}
+  <h1>{{ t.verify_dead_title }}</h1>
+  {# Same page for expired, already-used and never-existed — and also for a
+     link whose address no longer matches the account, which from the
+     holder's side is the same situation: this link cannot confirm
+     anything. See routes/auth.py::auth_verify. #}
+  <p class="auth-sub">{{ t.verify_dead_body }}</p>
+  <p class="auth-note">
+    <a href="{{ url_for('index') }}">{{ t.verify_continue }}</a>
+  </p>
+{% endif %}
+</div>
+{% endblock %}

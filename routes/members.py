@@ -9,11 +9,20 @@
 With registration invite-only, this page is the **only** door into the
 platform, which makes two things load-bearing rather than nice:
 
-**The invite URL is shown on screen.** Email delivery is E0.4 and is not
-built yet, and the free tier it will use allows 100 messages a day. The
-identity spike called a copy-and-paste fallback acceptable for shipping,
-and it stays the primary mechanism until E0.4 lands — so the admin always
-gets a link they can send however they like.
+**The invite URL is shown on screen — even when the email went out.**
+E0.4 sends the invitation now, but the link stays visible on every path.
+Two reasons, and neither is caution for its own sake: an admin who watched
+the address get typed wrong needs to forward it themselves, and a message
+the provider accepted can still bounce. The free tier also allows only 100
+a day, so "it was not emailed" is an ordinary outcome rather than a fault
+— see ``_UNDELIVERED``.
+
+**Whether it was emailed is recorded**, in ``Invite.emailed_at``, and that
+is not bookkeeping. An invitation that arrived in an inbox can only have
+been opened by whoever reads that inbox, so the address is proven; a link
+pasted into a chat proves nothing. ``routes/auth.py`` reads the column to
+decide whether the new account's address counts as verified, rather than
+assuming it does.
 
 **The last-admin guard covers both doors.** Removing the only admin and
 demoting the only admin reach the same unrecoverable state: nobody can
@@ -30,6 +39,7 @@ from __future__ import annotations
 from flask import (Flask, flash, redirect, render_template, request, url_for)
 
 from engine import db as _db
+from engine import mailer as _mailer
 from engine import permissions as _perm
 from engine.log import get_logger
 
@@ -40,6 +50,33 @@ log = get_logger(__name__)
 
 def _members_redirect():
     return redirect(url_for("org_members"))
+
+
+def org_name(org_id: str) -> str:
+    return (_db.get_organization(org_id) or {}).get("name") or "your team"
+
+
+#: Why an invitation was not emailed, in a sentence an admin can act on.
+#:
+#: Mapped rather than echoing ``delivery.reason``, which is a code for the
+#: log. "daily_cap" tells an operator something; it tells a QA lead nothing,
+#: and the useful part is what to do next — which for every one of these is
+#: "send the link yourself", already in the message that follows.
+_UNDELIVERED = {
+    "not_configured": "This instance cannot send email yet, so it was not "
+                      "emailed.",
+    "sending_disabled": "Sending is switched off on this instance, so it "
+                        "was not emailed.",
+    "daily_cap": "Today's email allowance is used up, so it was not "
+                 "emailed.",
+    "invalid_address": "That address could not be emailed.",
+}
+
+
+def _undelivered(delivery) -> str:
+    return _UNDELIVERED.get(
+        delivery.reason,
+        "The email could not be delivered just now.")
 
 
 def register(app: Flask) -> None:
@@ -106,12 +143,44 @@ def register(app: Flask) -> None:
                          diff={"email": email, "role": role})
 
         link = url_for("auth_accept_invite", token=token, _external=True)
-        # Flashed as the link itself, not "an email has been sent": saying
-        # the latter while E0.4 is unbuilt would be a lie, and the admin
-        # would wait for a message that never arrives.
-        flash(f"Invitation created for {email} as {role}. Send them this "
-              f"link — it is valid for 7 days and is cancelled if you "
-              f"invite the same address again: {link}", "success")
+
+        # E0.4: try to send it. Synchronous, unlike the password-reset
+        # dispatch — there is no address to protect here (the admin typed it
+        # and is entitled to know what happened to it), and the outcome
+        # decides what the flash says. Waiting a moment for a definite
+        # answer beats "probably sent".
+        delivery = _mailer.send(
+            to=email, kind="invite",
+            user_id=_perm.current_user_id(), org_id=org_id,
+            subject=f"You have been invited to {org_name(org_id)} "
+                    f"on TestForTge",
+            text=(
+                f"You have been invited to join {org_name(org_id)} on "
+                f"TestForTge as {role}.\n\n"
+                f"Open this link to set up your account:\n\n{link}\n\n"
+                f"The invitation is valid for 7 days.\n"
+            ))
+
+        if delivery.sent:
+            _db.mark_invite_emailed(token)
+            # The link is *still* shown. An admin who watched the address
+            # get typed wrong needs to be able to forward it themselves, and
+            # a delivery that Resend accepted can still bounce.
+            flash(f"Invitation sent to {email} as {role}. If it does not "
+                  f"arrive, this link works too — it is valid for 7 days "
+                  f"and is cancelled if you invite the same address again: "
+                  f"{link}", "success")
+        else:
+            # The pre-E0.4 behaviour, kept as the fallback rather than
+            # replaced by it: say what happened and hand over the link.
+            # Claiming a message was sent would leave the admin waiting for
+            # one that never arrives — and would make the invited address
+            # count as proven when nothing proved it.
+            flash(f"Invitation created for {email} as {role}. "
+                  f"{_undelivered(delivery)} Send them this link — it is "
+                  f"valid for 7 days and is cancelled if you invite the "
+                  f"same address again: {link}", "success")
+
         return _members_redirect()
 
     @app.route("/org/members/<user_id>/role", methods=["POST"])

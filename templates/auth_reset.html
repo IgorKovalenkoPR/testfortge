@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ t.reset_new_title }} — TestForTge{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+{% if invalid %}
+  <h1>{{ t.reset_dead_title }}</h1>
+  {# One page for expired, already-used, revoked and never-existed. The
+     difference is not useful to the holder and is useful to somebody
+     guessing tokens: "expired" confirms the token was real. #}
+  <p class="auth-sub">{{ t.reset_dead_body }}</p>
+  <p class="auth-note">
+    <a href="{{ url_for('auth_forgot') }}">{{ t.reset_ask_again }}</a>
+  </p>
+{% else %}
+  <h1>{{ t.reset_new_title }}</h1>
+  <p class="auth-sub">{{ t.reset_new_intro }}</p>
+
+  <form method="post" action="{{ url_for('auth_reset', token=token) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="password">{{ t.reset_new_label }}</label>
+    <input type="password" id="password" name="password"
+           autocomplete="new-password" required autofocus
+           minlength="{{ min_password_len }}">
+    <p class="auth-hint">{{ t.reset_length_hint|format(min_password_len) }}</p>
+
+    <label for="password_confirm">{{ t.reset_confirm_label }}</label>
+    <input type="password" id="password_confirm" name="password_confirm"
+           autocomplete="new-password" required
+           minlength="{{ min_password_len }}">
+
+    <button type="submit" class="btn btn-primary">{{ t.reset_new_submit }}</button>
+  </form>
+
+  <p class="auth-note">{{ t.reset_will_sign_out }}</p>
+{% endif %}
+</div>
+{% endblock %}

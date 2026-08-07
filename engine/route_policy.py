@@ -53,6 +53,13 @@ OPEN: dict[str, str] = {
     "auth_login": "you cannot require a session to create one",
     "auth_logout": "must work even from a session already half gone",
     "auth_accept_invite": "the invitation IS the credential",
+    "auth_forgot": "somebody who cannot sign in is the only caller this "
+                   "route has",
+    "auth_reset": "the reset token IS the credential; requiring a session "
+                  "would mean only people who can already sign in could "
+                  "recover an account",
+    "auth_verify": "the confirmation token IS the credential, and it is "
+                   "opened from a mail client that carries no session",
     "auth_google_start": "starts the flow that produces the session",
     "auth_google_callback": "finishes that flow; Authlib's state and nonce "
                             "are what authenticate this request, not a "
@@ -97,6 +104,10 @@ POLICY: dict[str, str] = {
     "dashboard_layout": "login",
     "dashboard_export_csv": "login",
     "guide_page": "login",
+    # Asking for a confirmation link for your own address. Self-enforcing
+    # via @require_login and listed anyway: the fail-closed table is where
+    # somebody looks to find out what a route needs.
+    "auth_verify_request": "login",
 
     # ── Projects: creating and reconfiguring is admin work ────────
     "db_create_project": "admin",

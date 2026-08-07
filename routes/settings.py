@@ -7,6 +7,8 @@
   * POST /org/settings/budget           — admin: monthly LLM allowance
   * POST /org/settings/adopt-projects   — admin: claim pre-ORG_MODE projects
 
+Also the read-only surface for whether this instance can send email (E0.4).
+
 This is where the machinery built in E0.7–E0.9 finally has a surface. Until
 now the per-org Anthropic key, the monthly budget and the usage meter were
 reachable only from a Python shell, which is a strange thing to ask of a QA
@@ -53,6 +55,7 @@ from engine import features as _features
 from engine import llm_cost as _llm_cost
 from engine import llm_keys as _llm_keys
 from engine import llm_models as _llm_models
+from engine import mailer as _mailer
 from engine import permissions as _perm
 from engine.log import get_logger
 
@@ -140,6 +143,13 @@ def register(app: Flask) -> None:
             micros_per_usd=_llm_cost.MICROS_PER_USD,
             # ── Model routing, for transparency ──
             models=_llm_models.snapshot(),
+            # ── Email (E0.4) ──
+            # Shown to every member, like the LLM meter above and for the
+            # same reason: somebody whose invitation never arrived needs to
+            # be able to find out whether that is a missing key, a used-up
+            # daily allowance, or something else — rather than filing it as
+            # a bug against the invite form.
+            mail=_mailer.state(),
             # ── Legacy projects waiting to be claimed (E1.6) ──
             # Surveyed for admins only. A plain user cannot run the sweep,
             # and a count of projects they have never been able to see is

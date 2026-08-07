@@ -272,6 +272,40 @@
   </p>
 </div>
 
+{# ── Email (E0.4). Read-only for everyone: it is set on the server,
+     and knowing it explains why an invitation did not arrive. ────── #}
+<div class="card">
+  <h2>Email</h2>
+  {% if mail.configured %}
+    <p class="settings-status settings-status-ok">
+      Invitations and password-reset links are sent from
+      <code>{{ mail.sender }}</code>.
+    </p>
+    <p class="text-muted settings-note">
+      {# The number, not just the limit: "is the allowance the problem" is
+         the question somebody actually has when mail stops arriving. #}
+      {{ mail.sent_today }} of {{ mail.daily_limit }} messages sent in the
+      last 24 hours.
+      {% if not mail.remaining_today %}
+      The allowance is used up, so invitations are not being emailed until
+      it frees up — the invite page hands out a link to send by hand
+      instead.
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="settings-status settings-status-warn">
+      This instance cannot send email, so nothing is emailed automatically.
+      Invitations still work: the admin gets a link to pass on. Password
+      reset does not, because the link has nowhere to go — an admin has to
+      set the password for whoever is locked out.
+    </p>
+    <p class="text-muted settings-note">
+      Whoever runs the server can switch it on by setting
+      <code>RESEND_API_KEY</code> and <code>MAIL_FROM</code>.
+    </p>
+  {% endif %}
+</div>
+
 {# ── Storage. Declared here rather than omitted, so the screen tells
      the truth about what exists. ────────────────────────────────── #}
 <div class="card">

@@ -35,6 +35,15 @@
     <button type="submit" class="btn btn-primary">Sign in</button>
   </form>
 
+  {# E1.7. A plain link, and it has to be here rather than only in a help
+     page: somebody who cannot sign in is looking at this screen and no
+     other. The rest of this page is still hard-coded English (it predates
+     the i18n pass on the auth flow); this string is translated because it
+     is new. #}
+  <p class="auth-note auth-forgot">
+    <a href="{{ url_for('auth_forgot') }}">{{ t.reset_forgot_link }}</a>
+  </p>
+
   {% if google_enabled %}
   <div class="auth-divider"><span>or</span></div>
   {# A link, not a form: the OAuth flow starts with a GET redirect and

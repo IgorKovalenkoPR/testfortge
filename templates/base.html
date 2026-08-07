@@ -144,6 +144,30 @@
         {% endif %}
         {% endwith %}
 
+        {#- ── Unconfirmed address (E1.3) ──────────────────────────
+            The caller the verify flow would otherwise not have. An account
+            whose invitation was handed over by hand rather than emailed has
+            an address nobody has proved (see Invite.emailed_at), and this
+            is where its owner finds out and can do something about it.
+
+            Not shown on the auth pages themselves: it is scoped to a
+            signed-in user, and nobody is signed in there. A form rather
+            than a link because it sends a message. -#}
+        {% if current_user and not current_user.email_verified %}
+        <div class="alert alert-info verify-banner">
+          <div>
+            <strong>{{ t.verify_banner }}</strong>
+            <span class="text-muted">{{ t.verify_banner_why }}</span>
+          </div>
+          <form method="post" action="{{ url_for('auth_verify_request') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm">
+              {{ t.verify_banner_send }}
+            </button>
+          </form>
+        </div>
+        {% endif %}
+
         {% block content %}{% endblock %}
     </main>
 

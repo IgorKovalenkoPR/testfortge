@@ -363,15 +363,42 @@ class TestInviteAcceptance:
         # choosing a password is friction with no security value.
         assert client.get("/auth/me").get_json()["authenticated"] is True
 
-    def test_the_invited_address_is_treated_as_proven(self, client):
-        # Only the link's holder could have opened it, and the free email
-        # tier is capped at 100 messages a day — a second confirmation
-        # would be ceremony with a cost.
+    def test_an_emailed_invitation_proves_the_address(self, client):
+        """Only the inbox's reader could have opened the link, and the free
+        email tier is capped at 100 a day — a second confirmation would be
+        ceremony with a cost.
+
+        Rewritten in E0.4. This test used to assert that *every* accepted
+        invitation proved its address, which was the code's assumption at
+        the time and was false whenever the admin pasted the link into a
+        chat — that is, every time, since nothing could send email. The
+        property is now conditional on delivery, so the test says which
+        condition it is testing. See ``Invite.emailed_at``.
+        """
         _, email, token = self._invited()
+        assert _db.mark_invite_emailed(token)
+
         client.post(f"/auth/accept/{token}",
                     data={"password": GOOD_PASSWORD,
                           "password_confirm": GOOD_PASSWORD})
+
         assert _db.get_user_by_email(email)["email_verified"] is True
+
+    def test_a_hand_delivered_invitation_proves_nothing(self, client):
+        """The other half, and the one that was silently wrong before.
+
+        No provider, or a send that failed: the admin passed the link on
+        some other way and nothing has established that the address belongs
+        to whoever used it.
+        """
+        _, email, token = self._invited()
+        assert _db.get_invite(token)["emailed_at"] is None
+
+        client.post(f"/auth/accept/{token}",
+                    data={"password": GOOD_PASSWORD,
+                          "password_confirm": GOOD_PASSWORD})
+
+        assert _db.get_user_by_email(email)["email_verified"] is False
 
     def test_mismatched_confirmation_is_refused(self, client):
         _, email, token = self._invited()

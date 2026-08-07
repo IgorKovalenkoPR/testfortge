@@ -237,6 +237,31 @@ services:
         sync: false
       - key: TESTFORTGE_BASIC_PASSWORD
         sync: false
+      # ── Email (E0.4, engine/mailer.py) ────────────────────────────
+      #
+      # Resend. `sync: false` so the key stays a dashboard secret and never
+      # reaches this repo. Both of the next two are required together: a key
+      # with no verified sender address produces a 403 on every send, which
+      # reads as a broken integration rather than a missing setting.
+      #
+      # With either unset the app does not pretend. Invitations still work —
+      # the admin gets the link to forward, exactly as before this epic —
+      # and password reset says plainly that the link will not arrive.
+      # Nothing here is required for the product to run.
+      - key: RESEND_API_KEY
+        sync: false
+      # The From address. Must be on a domain verified with Resend; the free
+      # tier allows one domain.
+      - key: MAIL_FROM
+        sync: false
+      # Messages per rolling 24 hours. The free tier's real ceiling is 100 a
+      # day (3,000 a month) — declared here at that number so the limit is
+      # visible to whoever operates the service rather than discovered when
+      # mail stops arriving. Past the cap, sends are refused with a reason
+      # and the copy-the-link fallback takes over. 0 switches sending off
+      # without removing the key.
+      - key: MAIL_DAILY_LIMIT
+        value: "100"
       # Anthropic API key — REQUIRED for Tedgie chat AND for the
       # /estimation Mockups vision pipeline (engine/mockup_vision.py).
       # Without it the mockup tab returns "Vision analysis returned no

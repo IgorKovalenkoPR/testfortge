@@ -634,4 +634,50 @@ TRANSLATIONS = {
     'te_live_resume': 'Resume',
     'te_live_open_tab': 'Open frame in new tab',
     'te_watch_live': 'Watch live (opens in new tab)',
+    # ── Password reset and address confirmation (E1.7) ─────────────
+    #
+    # Every string on the "forgot" page is deliberately independent of
+    # whether the address has an account. Wording that varies with what was
+    # found is the enumeration leak engine/auth.py closes on the sign-in
+    # page — closing it there and reopening it in a translation would be a
+    # strange way to lose it.
+    'reset_title': 'Reset your password',
+    'reset_intro': "Enter the address you sign in with and we will send you "
+                   "a link to choose a new password.",
+    'reset_email_label': 'Email',
+    'reset_submit': 'Send me a link',
+    'reset_sent': "If that address has an account, a reset link is on its "
+                  "way. It works once and expires in an hour.",
+    'reset_no_provider': "This instance cannot send email yet, so the link "
+                         "will not arrive — ask whoever runs the server to "
+                         "reset your password for you.",
+    'reset_back': 'Back to sign in',
+    'reset_new_title': 'Choose a new password',
+    'reset_new_intro': 'Pick something you have not used here before.',
+    'reset_new_label': 'New password',
+    'reset_confirm_label': 'New password again',
+    'reset_length_hint': 'At least %d characters. A short phrase of a few '
+                         'words works well and is easier to remember than a '
+                         'scrambled word.',
+    'reset_new_submit': 'Save the new password',
+    'reset_will_sign_out': "Saving this signs you out everywhere else and "
+                           "cancels any other reset link.",
+    'reset_dead_title': 'That link no longer works',
+    'reset_dead_body': "Reset links work once and expire after an hour. "
+                       "Asking for a new one also cancels the old one.",
+    'reset_ask_again': 'Ask for a new link',
+    'reset_forgot_link': 'Forgot your password?',
+
+    'verify_title': 'Confirm your address',
+    'verify_done_title': 'Address confirmed',
+    'verify_done_body': '%s is confirmed. Thank you.',
+    'verify_continue': 'Continue to TestForTge',
+    'verify_dead_title': 'That link no longer works',
+    'verify_dead_body': "Confirmation links work once and expire after a "
+                        "day. You can ask for a new one from any page while "
+                        "signed in.",
+    'verify_banner': "Your email address is not confirmed yet.",
+    'verify_banner_why': "It was not us who delivered your invitation, so "
+                         "nothing has proved this address belongs to you.",
+    'verify_banner_send': 'Send me a confirmation link',
 }

@@ -2240,6 +2240,22 @@ input[type="text"]:focus, textarea:focus, select:focus {
     line-height: 1.5;
 }
 
+.auth-forgot { margin-top: .75rem; }
+
+/* The unconfirmed-address banner (E1.3). The button sits beside the text on
+   a wide screen and under it on a narrow one — a wrapping flex row rather
+   than a media query, because the only thing that has to change is where
+   the button goes. */
+.verify-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+}
+.verify-banner form { margin: 0; }
+.verify-banner .text-muted { display: block; font-size: .85rem; }
+
 /* Why the sign-in page is on screen — a timeout, or a session the server
    could not find (E1.5). Informational, not an error: nobody did anything
    wrong, and styling it red would say they had. */
