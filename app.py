@@ -42,6 +42,7 @@ from engine import basic_auth
 from engine import db as _db
 from engine import features
 from engine import server_session
+from engine import session_timeout
 from engine.i18n import get_lang
 from engine.log import get_logger
 from routes import register_all
@@ -160,6 +161,21 @@ Session(app)
 # The filesystem store it displaces loses every session whenever the dyno
 # restarts, which on the free tier is several times a day.
 server_session.install(app)
+
+# Idle and absolute session timeouts (E1.5). Registered here, and this
+# early, for two ordering reasons — ``before_request`` hooks run in the
+# order they were registered:
+#
+#   * before the cold-start hook further down, which writes
+#     ``_session_active_since`` into the session. Once that has run, a
+#     session that arrived empty is indistinguishable from one holding a
+#     single framework key — and telling those apart is how the sign-in
+#     page knows to say "we lost your session" rather than "you were
+#     idle". On the free plan the first is the common case.
+#   * before the route-policy hook (registered from ``routes/__init__.py``,
+#     much later), so an expired session reads as anonymous by the time
+#     the policy decides whether the caller may be where they are.
+session_timeout.install(app)
 
 # A flag that is set but neutered by a missing prerequisite is the one
 # failure mode nobody can see from the outside: the dashboard says ON and

@@ -160,6 +160,7 @@ jobs:
         run: >-
           python -m pytest tests/ -q --tb=short -p no:cacheprovider
           --cov=engine.permissions --cov=engine.auth --cov=engine.route_policy
+          --cov=engine.session_timeout
           --cov=engine.editable --cov=engine.run_limits --cov=engine.mentoring
           --cov=engine.manual_run --cov=engine.dashboard_config
           --cov=engine.dashboard_metrics --cov=engine.tedgie_eval

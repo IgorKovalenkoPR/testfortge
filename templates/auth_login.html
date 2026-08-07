@@ -7,6 +7,15 @@
   <p class="auth-sub">TestForTge — QA documentation, execution and metrics
     for your team.</p>
 
+  {# Why this page is on screen (E1.5). Absent for a first visit and for a
+     deliberate sign-out: a page that invents a reason for those is worse
+     than a silent one. The three arrivals it does distinguish, and why
+     they must not be collapsed, are in routes/auth.py::_why_you_are_here.
+     Not a flash — a timeout has no session left to flash into. #}
+  {% if returning %}
+  <p class="auth-returning" role="status">{{ returning }}</p>
+  {% endif %}
+
   <form method="post" action="{{ url_for('auth_login') }}" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {# Carried through the POST so the redirect lands where the user was

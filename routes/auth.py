@@ -20,6 +20,12 @@ The timing is equalised in ``engine.auth.verify_login``.
 **The ``next`` parameter.** A sign-in page is the most attractive place in
 any application for an open redirect — the user has just been asked to
 trust it. ``_safe_next`` allows same-origin paths only.
+
+**Why the page is on screen.** A timeout, a session the server could not
+find, and a first visit are three different arrivals, and this page says a
+different thing for each — see :func:`_why_you_are_here`. On the free plan
+the middle one is the common case, so treating them alike would routinely
+blame a user for the platform's own nap.
 """
 from __future__ import annotations
 
@@ -63,6 +69,43 @@ def _safe_next(raw: str | None, default_endpoint: str = "index") -> str:
     return value
 
 
+def _why_you_are_here() -> str | None:
+    """The sentence explaining why the sign-in page is on screen (E1.5).
+
+    Three arrivals reach this page needing three different answers, and
+    collapsing them is the specific dishonesty this exists to avoid:
+
+    * a **timeout** — the session had clocks and one of them ran out.
+      ``engine.session_timeout`` puts the reason in the query string on its
+      way out, because by then there is no session left to flash into;
+    * a **vanished store** — the browser presented a session cookie and
+      the server had nothing under it. On the free plan this is the common
+      case, not an edge one: the service sleeps after ~15 idle minutes and
+      ``SESSION_TYPE=filesystem`` is on an ephemeral disk. Telling that
+      person "you were inactive too long" would blame them for the
+      platform's own nap;
+    * a **first visit**, or a deliberate sign-out — nothing to explain,
+      and a page that invents a reason for it is worse than a silent one.
+
+    The vanished-store test is "a cookie arrived and the session was
+    completely empty", which only the timeout hook is early enough to see —
+    see ``session_timeout.session_was_lost``. An anonymous visitor who has
+    been here before carries at least ``lang``, so they do not trip it.
+    """
+    from engine import session_timeout as _timeout
+
+    reason = _timeout.valid_reason(request.args.get(_timeout.REASON_PARAM))
+    if reason:
+        return _timeout.explain(reason)
+
+    if _timeout.session_was_lost():
+        return ("We could not find your session, so you will need to sign "
+                "in again. On this plan the service sleeps when idle and "
+                "sessions are not kept across a restart — nothing is wrong "
+                "with your account, and your saved work is untouched.")
+    return None
+
+
 def _first_org_for(user_id: str) -> str | None:
     """Pick the organisation to activate on sign-in.
 
@@ -98,7 +141,8 @@ def register(app: Flask) -> None:
         if request.method == "GET":
             return render_template("auth_login.html",
                                    next_url=request.args.get("next", ""),
-                                   google_enabled=oauth is not None)
+                                   google_enabled=oauth is not None,
+                                   returning=_why_you_are_here())
 
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""

@@ -148,6 +148,25 @@ services:
       # one dashboard edit and the rollback is the same edit back.
       - key: SESSION_BACKEND
         value: "filesystem"
+      # Session timeouts (E1.5, engine/session_timeout.py). Two clocks,
+      # because they answer different questions: idle bounds an unattended
+      # browser, absolute bounds a stolen cookie — an attacker's own
+      # requests keep the idle clock fresh forever, so one without the
+      # other is a half-measure.
+      #
+      # Declared here at their code defaults rather than left unset, for
+      # the reason the flags above are: an env var that exists only in code
+      # is invisible to whoever operates the service, and these two decide
+      # when people get signed out. Both are ignored while AUTH_ENABLED=0.
+      #
+      # Note what actually bites today: with SESSION_BACKEND=filesystem the
+      # dyno's disk is wiped every time it sleeps (~15 idle minutes), which
+      # is far tighter than four hours. The idle clock starts mattering
+      # under SESSION_BACKEND=db, where rows survive restarts.
+      - key: SESSION_IDLE_MINUTES
+        value: "240"
+      - key: SESSION_ABSOLUTE_HOURS
+        value: "24"
       # ── LLM cost controls (docs/plans/cost_model.md) ──────────────
       #
       # Monthly ceiling, in USD, on what one organisation may spend on the

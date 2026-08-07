@@ -56,7 +56,7 @@
 
 | | Вимога | Стан | Що лишилось |
 |---|---|---|---|
-| R1 | Sign In / Sign Up + Google | 🟡 | E0.4 (пошта) і залежні від неї E1.3 / частина E1.7 · таймаути сесій (E1.5) · зняти Basic-шлюз (E1.8). ~~claim legacy без роута (E1.6)~~ — закрито 2026-08-07 |
+| R1 | Sign In / Sign Up + Google | 🟡 | E0.4 (пошта) і залежні від неї E1.3 / частина E1.7 · зняти Basic-шлюз (E1.8, тільки після них). ~~claim legacy без роута (E1.6)~~, ~~таймаути сесій (E1.5)~~, ~~E1.9 timing/enumeration~~ — закриті 2026-08-07. Лишилась **одна** причина, чому R1 не 🟢: пошта |
 | R2 | Ролі Admin / User | 🟢 | — |
 | R3 | Сховище для проєктів | 🔴 | **увесь E8** — жодної задачі не почато |
 | R4 | Редагування Estimation | 🟢 | — |
@@ -75,12 +75,21 @@ env проти `render.yaml` · E0.11 keep-alive · E0.12 квоти. **E0.1′ 
 доступність, бо сервіс не піднімається при протермінованій БД.
 
 **Місця, де код є, а вимога не виконана** — знайдені звіркою 2026-08-06,
-однакової форми «функція без викликача»:
+однакової форми «функція без викликача». **Обидва закриті 2026-08-07:**
 
-* ~~`db.adopt_orphan_projects` (E1.6) не кличе жоден роут~~ — закрито
-  2026-08-07: `POST /org/settings/adopt-projects` і картка в налаштуваннях;
-* idle / absolute timeout (E1.5) немає, хоча ротація сесії та «вийти на
-  всіх пристроях» є, тож область виглядає закритою.
+* ~~`db.adopt_orphan_projects` (E1.6) не кличе жоден роут~~ →
+  `POST /org/settings/adopt-projects` і картка в налаштуваннях;
+* ~~idle / absolute timeout (E1.5) немає, хоча ротація сесії та «вийти на
+  всіх пристроях» є, тож область виглядає закритою~~ →
+  `engine/session_timeout.py`.
+
+Третя форма того самого, знайдена при закритті E1.9 і варта окремої
+згадки, бо вона дорожча за перші дві: **тест, який не перевіряє того, що
+обіцяє його назва**. `test_an_unknown_address_returns_the_identical_body`
+не порівнював тіла сторінок, а `test_one_message_covers_both_failure_modes`
+дивився на константу і не виконував жодної з двох гілок. Обидва були
+зелені, обидва були названі правильно — і саме тому їхня відсутність
+покриття не була видима ані з бэклогу, ані зі списку тестів.
 
 ### R1. Sign In / Sign Up, у т.ч. Google — 🔴
 
@@ -319,11 +328,11 @@ ALTER TABLE test_case ADD COLUMN row_version   INTEGER NOT NULL DEFAULT 1,
 | E1.2 ✅ | Пароль-авт: register / login / logout, Argon2id, rate-limit, lockout, захист від enumeration | L (16) | Sr | E1.1 | однакова відповідь для «нема юзера» і «невірний пароль»; 5 фейлів → lockout |
 | E1.3 | Верифікація email + скидання пароля (одноразові токени з TTL) | M (12) | Mid | E1.2, E0.4 | токен одноразовий, протермінований відхиляється, reset інвалідує всі сесії |
 | E1.4 ✅ | Google OIDC (Auth Code + PKCE, Authlib), зв’язування по верифікованому email, `state`/`nonce` | L (14) | Sr | E1.1 | не верифікований Google-email не лінкується до існуючого акаунта |
-| E1.5 🟡 | Хардненінг сесій: ротація ID при логіні, idle + absolute timeout, «вийти на всіх пристроях» | M (8) | Sr | E0.2, E1.2 | **Зроблено:** ротація в `permissions.login_user`, `logout_user(everywhere=True)`, тест на fixation (`test_access_control_branches.py`). **Не зроблено:** idle + absolute timeout — у коді немає нічого; `_session_active_since` в `app.py` це маркер холодного старту, не таймаут |
+| E1.5 ✅ | Хардненінг сесій: ротація ID при логіні, idle + absolute timeout, «вийти на всіх пристроях» | M (8) | Sr | E0.2, E1.2 | Ротація в `permissions.login_user`, `logout_user(everywhere=True)`, тест на fixation. Таймаути закриті 2026-08-07: `engine/session_timeout.py` — два годинники (idle 4 год, absolute 24 год, обидва через env), `classify()` чиста функція, тому **жоден тест не спить**. Прострочена сесія читається як анонімна ще до гейта політики, серверний рядок видаляється, fetch отримує `session_expired` замість `auth_required`. Сесія БЕЗ штампів не викидається — інакше деплой цієї фічі вигнав би всіх наявних користувачів |
 | E1.6 ✅ | Міграція legacy: claim анонімних `owner_sid`-проєктів у реальний акаунт | M (12) | Sr | E1.2, E2.1 | Викликач з'явився: `POST /org/settings/adopt-projects` (admin-only) + картка в `org_settings.html`. Кількість і назви показані **перед** дією, відмова «організацій більше однієї» сформульована словами замість тихого нуля (`db.orphan_project_survey()` читає обидва факти наперед, бо сам sweep віддає `0` на два різні питання). Передача власності йде в аудит з назвами. 21 тест у `test_adopt_legacy_projects.py`, на власній БД з рівно однією організацією — на спільній БД набору sweep завжди брав би гілку відмови |
 | E1.7 🟡 | UI: sign-in / sign-up / reset / verify + кнопка Google, i18n EN+UA | M (12) | Mid (FE) | E1.2, E1.4 | `auth_login.html` і `auth_invite.html` є (вхід + прийняття інвайту, кнопка Google). Сторінок reset / verify немає — і не буде, поки немає E0.4 |
 | E1.8 | Зняти HTTP Basic-шлюз під флагом після виходу E1 | S (3) | Jr | E1.2 | `AUTH_ENABLED=1` → Basic вимкнений; rollback флагом |
-| E1.9 🟡 | Безпековий набір тестів авт: CSRF, session fixation, open redirect `next=`, timing, enumeration, brute-force | M (12) | Sec + QA-A | E1.2–E1.5 | **Покрито:** CSRF (`test_csrf_on_every_post.py`, з URL-мапи, fail-closed), fixation, open redirect `next=`, brute-force через lockout. **Без названого тесту:** timing і user enumeration |
+| E1.9 ✅ | Безпековий набір тестів авт: CSRF, session fixation, open redirect `next=`, timing, enumeration, brute-force | M (12) | Sec + QA-A | E1.2–E1.5 | Усі шість мають названий негативний тест, і мапа «вектор → тест» тепер сама перевіряється (`test_auth_security_vectors.py::TestTheSixVectorsAreAllCovered`) — видалити покривний тест в іншому файлі стало червоним, а не тихим. Timing міряється **роботою, не часом**: кожна відмова витрачає рівно одну Argon2-верифікацію. Enumeration порівнює сторінки цілком, а не підрядок |
 
 ### E2 — Оренда й ролі (R2) · 100 год
 

@@ -25,7 +25,9 @@ a long-lived branch, which is worse.
 
 Session keys owned by this module — ``_user_id`` and ``org_id``. Nothing
 else may write them; ``engine.server_session`` reads ``_user_id`` to
-attribute a session row to a user, and that is the only other consumer.
+attribute a session row to a user, and ``engine.session_timeout`` reads it
+to decide whether there is a session worth expiring. Those are the only
+other consumers. The timeout clocks are that module's keys, not these.
 """
 from __future__ import annotations
 
@@ -207,6 +209,13 @@ def login_user(user_id: str, *, org_id: str | None = None) -> None:
     session[SESSION_USER_KEY] = user_id
     if org_id:
         session[SESSION_ORG_KEY] = org_id
+    # Start the idle and absolute clocks (E1.5). Here rather than in each
+    # of the four sign-in paths — password, invite, Google, invite-via-
+    # Google — for the reason this module has one resolver at all: a
+    # per-path stamp is a per-path chance to forget one, and a session
+    # with no stamp is a session with no timeout.
+    from engine import session_timeout as _timeout
+    _timeout.stamp(session)
     session.modified = True
     _db.touch_last_login(user_id)
 
