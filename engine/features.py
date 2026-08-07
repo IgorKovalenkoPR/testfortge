@@ -93,6 +93,19 @@ FLAGS: dict[str, Flag] = {
             "videos, uploads, export bundles) are stored. While off, "
             "everything goes to the local filesystem.",
         ),
+        Flag(
+            # The only flag here that defaults **on**, and the polarity is
+            # the point: an operator who never touches it keeps the gate.
+            # A `DROP_BASIC_GATE` spelled the other way would read as
+            # ``if not is_enabled(...)`` at the call site, and a double
+            # negative on the perimeter is a bad place to be clever.
+            "BASIC_GATE_ENABLED", True, "E1",
+            "The shared HTTP Basic password in front of the whole app. "
+            "Set to 0 once AUTH_ENABLED is on and real accounts have "
+            "replaced it (E1.8). Refuses to stand down while "
+            "AUTH_ENABLED is off — see engine/basic_auth.py — because "
+            "that combination has nothing behind it.",
+        ),
     )
 }
 

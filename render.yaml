@@ -140,6 +140,19 @@ services:
         value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
         value: "0"
+      # The shared HTTP Basic password in front of the whole app (E1.8).
+      #
+      # "1" while it is still the perimeter. Once AUTH_ENABLED is "1" and
+      # real accounts have replaced it, set this to "0" — one edit, and the
+      # rollback is the same edit back, which is why it is a flag rather
+      # than "delete the two secrets below and retype them if it goes
+      # wrong".
+      #
+      # Setting it to "0" while AUTH_ENABLED is "0" is refused: the gate
+      # stays up and the boot log says so, because that pair asks for no
+      # shared password and no accounts either. See engine/basic_auth.py.
+      - key: BASIC_GATE_ENABLED
+        value: "1"
       # Where Flask sessions live. "filesystem" is the legacy behaviour
       # and loses every session when the dyno restarts — which on the free
       # plan is several times a day, and today the session is where a

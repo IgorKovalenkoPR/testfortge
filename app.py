@@ -195,9 +195,18 @@ SESSION_DIR = app.config["SESSION_FILE_DIR"]
 # TESTFORTGE_BASIC_PASSWORD are both set in the environment, in which
 # case the gate is registered as the very first ``before_request`` hook
 # so unauthenticated visitors never reach the session / i18n machinery.
+#
+# Whether it actually guards anything is decided per request, from
+# BASIC_GATE_ENABLED (E1.8) — so retiring the shared password is a
+# dashboard edit rather than a deploy. The line below always says which of
+# the four states this instance is in, including the one where the gate was
+# asked to stand down and refused because nothing would be left behind it.
 basic_auth.install(app)
-if basic_auth.is_enabled():
-    log.info("HTTP Basic Auth gate is active.")
+log.info("%s", basic_auth.status())
+if basic_auth.standing_down_refused():
+    # Louder than info: the operator asked for something and did not get
+    # it, and the reason is a second setting they have to change first.
+    log.error("%s", basic_auth.status())
 
 
 # ── /metrics exposure warning (Sprint 4 task 4.5) ─────────────────

@@ -19,11 +19,40 @@ class TestDeclaredFlags:
         with pytest.raises(features.UnknownFlag):
             features.is_enabled("EDITOR_ENABLED")
 
-    def test_every_flag_defaults_off(self):
-        # Nothing in this programme ships on by default; each epic flips
-        # its own flag when its acceptance criteria are met.
+    #: Flags that default **on**, each with the reason it has to.
+    #:
+    #: The rule below is about *new* behaviour: shipping a feature on by
+    #: default is how something half-built reaches users. A flag that
+    #: retires something already live runs the opposite risk — defaulting it
+    #: off means the next deploy removes a control nobody asked to remove.
+    #:
+    #: Named individually so a second one cannot arrive by accident: adding
+    #: to this dict is a deliberate edit with a sentence attached.
+    DEFAULTS_ON = {
+        "BASIC_GATE_ENABLED":
+            "retires the shared HTTP Basic password, which is a live "
+            "perimeter (E1.8). Defaulting it off would drop that perimeter "
+            "on the next deploy of any instance that never set it.",
+    }
+
+    def test_every_flag_defaults_off_unless_it_retires_something_live(self):
+        # Nothing *new* in this programme ships on by default; each epic
+        # flips its own flag when its acceptance criteria are met.
         for name, flag in features.FLAGS.items():
-            assert flag.default is False, f"{name} defaults on"
+            if name in self.DEFAULTS_ON:
+                assert flag.default is True, (
+                    f"{name} is listed as defaulting on but does not")
+                continue
+            assert flag.default is False, (
+                f"{name} defaults on. If that is deliberate, add it to "
+                f"DEFAULTS_ON with the reason — a feature that ships on "
+                f"before its epic is finished is what this test is for.")
+
+    def test_the_on_by_default_list_has_no_stale_entries(self):
+        # An entry for a flag that no longer exists is an exemption nobody
+        # can see the shape of.
+        stale = sorted(set(self.DEFAULTS_ON) - set(features.FLAGS))
+        assert not stale, f"DEFAULTS_ON names flags that are gone: {stale}"
 
     def test_every_flag_names_its_epic_and_purpose(self):
         # A flag nobody can date is a flag nobody deletes.

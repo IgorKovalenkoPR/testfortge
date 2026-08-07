@@ -88,6 +88,42 @@ OPEN: dict[str, str] = {
 }
 
 
+#: Callers that authenticate themselves and have no browser (E1.8).
+#:
+#: These already appear in :data:`OPEN` above, which exempts them from the
+#: *session* policy. This set exempts them from the **HTTP Basic gate**,
+#: which is a different gate with a different list — and that difference
+#: was a live defect. ``engine.basic_auth`` maintained its own allowlist in
+#: an env var defaulting to ``/healthz,/readyz``, so with the gate up on
+#: production every one of these answered 401 from the perimeter before its
+#: own token was ever looked at: the Chrome extension could not start a
+#: recording and CI could not post an Allure bundle. Measured, not guessed
+#: — see ``tests/test_basic_gate.py``.
+#:
+#: Derived here rather than duplicated there because two hand-maintained
+#: allowlists for one question is the shape this module exists to avoid:
+#: the entry that is missing from one of them looks exactly like the
+#: entries that are present in both.
+#:
+#: The **auth surface is deliberately absent.** While the gate is up it is
+#: the outer perimeter, and letting an anonymous visitor reach the sign-in
+#: page through it would be dropping the gate by accident. ``metrics`` is
+#: absent for a sharper reason: its own token is *optional*
+#: (``OPS_ENDPOINTS_TOKEN``), so exempting it would publish operator
+#: telemetry on any instance that never set one.
+MACHINE: frozenset[str] = frozenset({
+    "healthz",
+    "readyz",
+    "api_recorder_session_start",
+    "api_recorder_session_finish",
+    "api_browser_poll",
+    "api_browser_result",
+    "automation_allure_results",
+    "test_cases_review_session",
+    "test_cases_review_session_save",
+})
+
+
 #: endpoint → minimum role.
 #:
 #: The split follows the owner's wording: an admin creates projects and
@@ -247,6 +283,13 @@ def validate() -> list[str]:
                 f"{endpoint} requires {role!r}, which is not a role "
                 f"({', '.join(sorted(allowed))})."
             )
+    stray = sorted(MACHINE - set(OPEN))
+    if stray:
+        problems.append(
+            f"MACHINE names endpoints that are not open: {stray}. The Basic "
+            f"gate would let them through while the session gate still "
+            f"refuses them, which is a 403 nobody can explain."
+        )
     return problems
 
 
