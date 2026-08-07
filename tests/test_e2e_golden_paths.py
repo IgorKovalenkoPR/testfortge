@@ -198,6 +198,34 @@ def team():
 
 
 @pytest.fixture
+def editors_on():
+    """Inline editing, for one test, then off again.
+
+    Through ``os.environ`` for the same reason ``live_server`` uses it: the
+    server runs in a thread of this process and reads the flags per call, so
+    a monkeypatch would be invisible to the request-handling thread. Scoped
+    to one test rather than added to ``live_server`` because turning the
+    editors on changes what every page in this file renders, and the other
+    fourteen tests describe the product with them off.
+    """
+    previous = {k: os.environ.get(k)
+                for k in ("WORKSPACE_DB_FIRST", "EDITORS_ENABLED")}
+    # Both: ``features._REQUIRES`` makes EDITORS_ENABLED a no-op without the
+    # DB-first workspace, and a flag that is set but neutered renders a
+    # read-only page that looks like a broken editor.
+    os.environ["WORKSPACE_DB_FIRST"] = "1"
+    os.environ["EDITORS_ENABLED"] = "1"
+    try:
+        yield True
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@pytest.fixture
 def actors(browser, live_server):
     """``actors(email)`` — a browser for that address, closed afterwards."""
     made: list[Actor] = []
@@ -524,6 +552,79 @@ class TestTwoPeopleInOneTeam:
         filed = _db.list_bugs(project_id)
         assert len(filed) == 1
         admin.sees(filed[0]["title"])
+
+    def test_a_conflict_keeps_the_losers_words_on_screen(self, actors, team,
+                                                        editors_on):
+        """E3.7 in a browser — the part with no server-side equivalent.
+
+        ``tests/test_parallel_edits.py`` pins what the two requests do: the
+        second is refused, the loser's text reaches no row, the provenance
+        names the winner. None of that can see the three properties that
+        only exist on a rendered page, and all three are deliberate choices
+        in ``static/js/inline-edit.js``:
+
+        * the editor **stays open**;
+        * what the loser typed is **still in it** — somebody who has just
+          written three sentences of test steps has to be able to copy them
+          before reloading, and throwing them away to show a cleaner error
+          would be a worse bug than the conflict;
+        * a **Reload** button is offered, so "reload and make your change
+          again" is something they can do rather than something they are
+          told.
+
+        Until now that behaviour was verified by hand during E4.2 — the
+        component's own test file says so — and the conflict path is the
+        one worth pinning, because it is the one where a mistake loses
+        somebody's writing.
+        """
+        admin = actors(team["admin"]["email"]).sign_in()
+        name = f"Contested {team['tag']}"
+        _create_project(admin, name)
+        _upload_pack(admin)
+        project_id = _project_id(team["org"], name)
+
+        tester = actors(team["tester"]["email"]).sign_in()
+        tester.page.click(f'form[action*="/projects/db/select/{project_id}"] '
+                          f'button[type="submit"]')
+        tester.page.wait_for_load_state("domcontentloaded", timeout=WAIT)
+
+        field = ('span.ie[data-ie-id="TC-001"][data-ie-field="suite"]'
+                 ':not([data-ie-readonly])')
+        for person in (admin, tester):
+            person.go("/test-cases?lang=en")
+            # Asserted rather than assumed: a field that rendered read-only
+            # would make every step below time out on a selector, and "no
+            # element found" is a far worse error than this sentence.
+            person.page.wait_for_selector(field, timeout=WAIT)
+
+        def _type(person, text: str):
+            person.page.click(field)
+            control = person.page.wait_for_selector(
+                f"{field}.ie-editing input", timeout=WAIT)
+            control.fill(text)
+            return control
+
+        # Both have the row open, so both hold the same row_version.
+        admin_control = _type(admin, "Smoke")
+        tester_control = _type(tester, "Regression")
+
+        admin_control.press("Enter")
+        admin.sees("Saved")
+
+        tester_control.press("Enter")
+
+        note = tester.page.wait_for_selector(
+            ".ie-message.ie-message-error", timeout=WAIT)
+        assert "reload" in (note.inner_text() or "").lower(), \
+            note.inner_text()
+        tester.page.wait_for_selector("button.ie-reload", timeout=WAIT)
+        assert tester_control.input_value() == "Regression", (
+            "the conflict discarded what the loser had typed, which is the "
+            "one thing the component promises not to do")
+
+        # And the winner's value is what the row actually holds.
+        rows = {r["id"]: r for r in _db.load_test_cases(project_id)}
+        assert rows["TC-001"]["suite"] == "Smoke"
 
     def test_a_member_of_another_team_cannot_reach_the_project(self, actors,
                                                                team):

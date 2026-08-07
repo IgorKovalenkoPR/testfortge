@@ -390,6 +390,50 @@ def _row_to_public(config: Entity, row) -> dict:
     return out
 
 
+def _version_now(sess, config: Entity, pk) -> int:
+    """The row's current ``row_version`` straight from the database."""
+    from sqlalchemy import func, select
+
+    model = _model(config)
+    value = sess.execute(
+        select(func.coalesce(model.row_version, 1)).where(model.id == pk)
+    ).scalar()
+    return int(value or 1)
+
+
+def _claim_row(sess, config: Entity, pk, expected: int) -> bool:
+    """Move ``row_version`` from *expected* to *expected + 1*, atomically.
+
+    ``False`` when somebody else got there first — nothing was written.
+
+    One conditional UPDATE, for the reason ``db._claim_pack_write`` gives
+    for the pack counter: the check and the bump have to be the same
+    statement, or another writer interleaves between them. A read-then-
+    compare in Python is wrong exactly when it matters, and it is wrong
+    quietly — every racing writer passes the comparison, every one of them
+    is told it saved, and the last write wins.
+
+    Measured, not theorised. The row-level guard *was* a read-then-compare,
+    and the eight-thread test in ``tests/test_parallel_edits.py`` reported
+    five winners out of eight — but only under the full suite, where a
+    busier database widens the window. In isolation it passed.
+
+    ``coalesce`` because rows that predate E4.1 carry NULL here and
+    ``int(row.row_version or 1)`` reads that as 1; the predicate has to
+    agree with that reading or such a row could never be claimed at all.
+    """
+    from sqlalchemy import func, update
+
+    model = _model(config)
+    result = sess.execute(
+        update(model)
+        .where(model.id == pk,
+               func.coalesce(model.row_version, 1) == int(expected))
+        .values(row_version=int(expected) + 1)
+    )
+    return bool(result.rowcount)
+
+
 def _one(sess, config: Entity, project_id: str, entity_id: str):
     """The single row with this public id, or None. Raises if there are two.
 
@@ -482,16 +526,26 @@ def patch(entity_name: str, project_id: str, entity_id: str, changes: dict,
             if guard is not None:
                 guard(old_value, new_value, role_oracle)
 
-        diff = {}
-        for name, (old_value, new_value) in changed.items():
-            diff[name] = [old_value, new_value]
-            setattr(row, name, new_value)
+        diff = {name: [old_value, new_value]
+                for name, (old_value, new_value) in changed.items()}
 
         if not diff:
             # A no-op is not a write: bumping the version here would
             # manufacture a conflict for a colleague, and auditing it would
             # bury the real edits.
             return _row_to_public(config, row)
+
+        # The claim comes *before* the fields are applied, and after the
+        # guards. Before, so a refused write has written nothing; after, so
+        # a guard that refuses has not already consumed a version and
+        # manufactured a conflict for a colleague who did nothing wrong.
+        if expected_version is not None:
+            if not _claim_row(sess, config, row.id, current):
+                raise _db.WriteConflict(entity_name, int(expected_version),
+                                        _version_now(sess, config, row.id))
+
+        for name, new_value in ((n, v[1]) for n, v in diff.items()):
+            setattr(row, name, new_value)
 
         row.row_version = current + 1
         row.ai_generated = False
@@ -771,7 +825,29 @@ def remove(entity_name: str, project_id: str, entity_id: str,
             raise _db.WriteConflict(entity_name, int(expected_version),
                                     current)
         removed = _row_to_public(config, row)
-        sess.delete(row)
+        if expected_version is None:
+            sess.delete(row)
+        else:
+            # A conditional DELETE, for the same reason :func:`_claim_row`
+            # exists: between the check above and the delete, a colleague's
+            # edit can land, and destroying work newer than what the deleter
+            # was looking at is precisely the case this guard is for. One
+            # statement, so there is no between.
+            from sqlalchemy import delete as _delete
+            from sqlalchemy import func as _func
+
+            model = _model(config)
+            result = sess.execute(
+                _delete(model).where(
+                    model.id == row.id,
+                    _func.coalesce(model.row_version, 1)
+                    == int(expected_version)))
+            if not result.rowcount:
+                raise _db.WriteConflict(entity_name, int(expected_version),
+                                        _version_now(sess, config, row.id))
+            # The row is gone in the database; drop the ORM's copy so the
+            # commit does not try to reconcile a deleted object.
+            sess.expunge(row)
 
     _db.append_audit(entity=config.audit_name(), action="delete",
                      entity_id=entity_id, project_id=project_id,
