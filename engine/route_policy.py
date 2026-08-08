@@ -82,6 +82,9 @@ OPEN: dict[str, str] = {
     "api_browser_poll": "extension short-poll, token auth",
     "api_browser_result": "extension result post, token auth",
     "automation_allure_results": "CI posts with AUTOMATION_INGEST_TOKEN",
+    "api_backup_run": "the scheduled backup job posts with BACKUP_TOKEN; it "
+                      "has no session and refuses outright when the token "
+                      "is unset",
     "test_cases_review_session": "reached by a one-time token in the URL, "
                                  "from a browser that may never sign in",
     "test_cases_review_session_save": "same one-time token",
@@ -119,6 +122,7 @@ MACHINE: frozenset[str] = frozenset({
     "api_browser_poll",
     "api_browser_result",
     "automation_allure_results",
+    "api_backup_run",
     "test_cases_review_session",
     "test_cases_review_session_save",
 })
@@ -154,6 +158,10 @@ POLICY: dict[str, str] = {
     # project in one file, and "read access to a page" is not the same
     # permission as "hand me the lot" (E8.5).
     "export_project": "admin",
+    # Backups (E8.4). Writing one costs storage the organisation pays for;
+    # restoring one creates a project. Both are admin work.
+    "backup_project": "admin",
+    "restore_project": "admin",
     "db_move_artifacts": "admin",     # restructures where work lives
     # Claiming the projects that predate ORG_MODE transfers ownership of
     # every unassigned one at once (E1.6). Self-enforcing via

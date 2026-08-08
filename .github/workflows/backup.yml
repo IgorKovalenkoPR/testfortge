@@ -1,0 +1,102 @@
+name: backup
+
+# E8.4 — the scheduled half of "backups + restore".
+#
+# ── Why a workflow and not a thread in the app ───────────────────────
+#
+# The free web service sleeps after ~15 idle minutes, so an in-process
+# timer fires only when somebody happens to be using the product — which
+# is precisely the period a backup is least needed and least likely to
+# find a quiet moment. Render's own cron is a paid feature. Actions
+# minutes are free on a public repository, and this repo already schedules
+# keepalive.yml and playwright.yml here for the same reason.
+#
+# ── What it does ─────────────────────────────────────────────────────
+#
+# POSTs to /api/backup/run with BACKUP_TOKEN. That endpoint walks every
+# project, writes a bundle of each to the configured storage (ADR 0002)
+# and prunes to the newest BACKUP_KEEP. It answers 500 if **any** project
+# failed, so a green run here means every project was backed up and not
+# that the request was delivered.
+#
+# ── Switching it off ─────────────────────────────────────────────────
+#
+# Leave BACKUP_URL unset. The job then no-ops rather than failing, so a
+# fork or a checkout with no deployment does not show a red workflow —
+# the same argument keepalive.yml makes.
+#
+# ── What this does NOT give you ──────────────────────────────────────
+#
+# A tested restore. The bundle format, the checksum verification and the
+# restore path are covered by tests/test_backup_restore.py against the
+# local storage backend; whether *your* bucket returns the bytes it was
+# given is E8.7's question and needs credentials. Restore one bundle by
+# hand after the first scheduled run. A backup nobody has restored from
+# is a hypothesis.
+
+on:
+  schedule:
+    # 03:17 UTC on Sundays. Off-peak, and deliberately not on the hour:
+    # scheduled workflows are best-effort and the top of the hour is when
+    # GitHub's queue is deepest.
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: back up every project
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Post to the backup endpoint
+        env:
+          # Repository *variable* — a public URL, same as KEEPALIVE_URL.
+          # Settings → Secrets and variables → Actions → Variables.
+          BACKUP_URL: ${{ vars.BACKUP_URL }}
+          # Repository *secret*. This one authenticates a job that writes
+          # to storage on every project, so it is not a variable.
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          set -u
+          if [ -z "${BACKUP_URL}" ]; then
+            echo "BACKUP_URL is not set — nothing to back up."
+            echo "Set it to e.g. https://<your-app>.onrender.com/api/backup/run"
+            exit 0
+          fi
+          if [ -z "${BACKUP_TOKEN}" ]; then
+            echo "::error::BACKUP_URL is set but BACKUP_TOKEN is not. The \
+          endpoint refuses without one, so this would fail every week."
+            exit 1
+          fi
+
+          # --max-time is generous on purpose: the first request of the
+          # week wakes a sleeping dyno, and then the job zips and uploads
+          # one bundle per project.
+          body=$(mktemp)
+          code=$(curl --silent --show-error --location \
+                      --max-time 900 \
+                      --retry 2 --retry-delay 30 --retry-all-errors \
+                      --header "X-TFG-Token: ${BACKUP_TOKEN}" \
+                      --request POST \
+                      --output "${body}" --write-out '%{http_code}' \
+                      "${BACKUP_URL}") || true
+
+          echo "HTTP ${code}"
+          # Printed whatever the outcome: the per-project results are the
+          # useful part, and a failure that hides them costs an hour.
+          cat "${body}" || true
+          echo
+
+          if [ "${code}" != "200" ]; then
+            echo "::error::backup run returned HTTP ${code} — some or all \
+          projects were not backed up. The response above says which."
+            exit 1
+          fi

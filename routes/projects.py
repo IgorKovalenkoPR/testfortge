@@ -17,11 +17,14 @@ removed; everything now lives in the relational schema declared in
 
 from __future__ import annotations
 
+import hmac
+import os
 import re
 
-from flask import (Flask, Response, abort, flash, redirect, request, session,
-                   url_for)
+from flask import (Flask, Response, abort, flash, jsonify, redirect, request,
+                   session, url_for)
 
+from engine import backup as _backup
 from engine import db as _db
 from engine import permissions as _perm
 from engine import retention as _retention
@@ -315,6 +318,76 @@ def register(app: Flask) -> None:
         if session.get("project_id") == project_id:
             session.pop("project_id", None)
             (session.get("project_setup") or {}).pop("project_name", None)
+        flash(report.summary(), "success")
+        return redirect(url_for("index"))
+
+    # ── Backups (E8.4) ───────────────────────────────────────────────
+
+    @app.route("/projects/<project_id>/backup", methods=["POST"])
+    def backup_project(project_id):
+        """Write a bundle of this project to the configured storage.
+
+        Distinct from Export, which downloads. This one goes *to the
+        storage the organisation chose* (ADR 0002) and stays there, which
+        is what makes it something a scheduled job can also do.
+        """
+        meta = _require_project_owner(project_id)
+        if not meta:
+            flash("That project no longer exists.", "error")
+            return redirect(url_for("index"))
+
+        try:
+            bundle = _backup.create(project_id,
+                                    org_id=_perm.current_org_id(),
+                                    user_id=_perm.current_user_id())
+        except Exception as exc:
+            # Loud. A backup button that reports success over a failed
+            # write is the canonical version of the problem backups have.
+            log.warning("backup of %s failed: %s", project_id[:8], exc)
+            flash("That backup could not be written. Nothing was stored — "
+                  "check Settings → Storage.", "error")
+            return redirect(url_for("index"))
+
+        flash(f"Backed up '{meta.get('name') or project_id}' "
+              f"({bundle.bytes // 1024} KB). Keeping the newest "
+              f"{_backup.keep_count()}.", "success")
+        return redirect(url_for("index"))
+
+    @app.route("/projects/<project_id>/restore", methods=["POST"])
+    def restore_project(project_id):
+        """Rebuild a bundle into a **new** project.
+
+        Never in place. Somebody restoring has just lost something, and an
+        in-place restore that goes wrong in that moment destroys the only
+        other copy they have.
+        """
+        if not _require_project_owner(project_id):
+            flash("That project no longer exists.", "error")
+            return redirect(url_for("index"))
+
+        key = (request.form.get("key") or "").strip()
+        org_id = _perm.current_org_id()
+        # Checked against what this project actually owns rather than
+        # trusted from the form: a key is a path, and a path from a browser
+        # is an instruction to read an arbitrary object otherwise.
+        allowed = {b.key for b in _backup.list_bundles(project_id,
+                                                       org_id=org_id)}
+        if key not in allowed:
+            flash("That backup does not belong to this project.", "error")
+            return redirect(url_for("index"))
+
+        try:
+            raw = _backup.read(key, org_id=org_id)
+        except Exception as exc:
+            log.warning("could not read bundle %s: %s", key, exc)
+            flash("That backup could not be read from storage.", "error")
+            return redirect(url_for("index"))
+
+        report = _backup.restore(raw, org_id=org_id,
+                                 user_id=_perm.current_user_id())
+        if not report.ok:
+            flash(report.problem, "error")
+            return redirect(url_for("index"))
         flash(report.summary(), "success")
         return redirect(url_for("index"))
 
@@ -616,6 +689,68 @@ def register(app: Flask) -> None:
                           "estimation_result"):
                     session.pop(k, None)
         return redirect(url_for("index"))
+
+    # ── The scheduled run (E8.4) ─────────────────────────────────────
+
+    @app.route("/api/backup/run", methods=["POST"])
+    def api_backup_run():
+        """Back up every project, for a caller with a token and no browser.
+
+        Token-authenticated, like the Allure ingest and the recorder
+        endpoints, and for the same reason: the caller is a scheduled job
+        with no session and no cookie. **Disabled outright when no token is
+        configured** — an open endpoint that walks every project and writes
+        to storage is a way to fill somebody's bucket for them.
+
+        Answers with a per-project result rather than a count, because
+        "37 backed up" over a run where four failed is the shape of report
+        that gets believed.
+        """
+        expected = (os.environ.get("BACKUP_TOKEN") or "").strip()
+        if not expected:
+            return jsonify({
+                "error": "backup_disabled",
+                "message": ("Set BACKUP_TOKEN on the service to enable "
+                            "scheduled backups."),
+            }), 403
+        supplied = (request.headers.get("X-TFG-Token")
+                    or request.form.get("token") or "")
+        if not hmac.compare_digest(supplied.encode(), expected.encode()):
+            return jsonify({"error": "bad_token"}), 401
+
+        results, failed = [], 0
+        for row in _db.list_projects():
+            pid = row.get("id") or row.get("folder")
+            if not pid:
+                continue
+            org_id = row.get("org_id") or None
+            try:
+                bundle = _backup.create(pid, org_id=org_id)
+                results.append({"project_id": pid, "ok": True,
+                                "key": bundle.key, "bytes": bundle.bytes})
+            except Exception as exc:
+                failed += 1
+                log.warning("scheduled backup of %s failed: %s", pid[:8], exc)
+                results.append({"project_id": pid, "ok": False,
+                                "error": str(exc)[:200]})
+
+        # 500 when anything failed, so a cron that only checks the status
+        # code cannot report a green run over a broken backup.
+        status = 500 if failed else 200
+        return jsonify({"backed_up": len(results) - failed,
+                        "failed": failed, "results": results}), status
+
+    # Same reasoning as the Allure ingest: the caller is a CI job with no
+    # TestForTge session and no csrf_token, so the global CSRFProtect gate
+    # cannot apply. Exempted explicitly, and tests/test_backup_restore.py
+    # flips WTF_CSRF_ENABLED back on to prove the exemption is real —
+    # without that the endpoint passes every test and 400s in production.
+    _ext = app.extensions.get("csrf") if hasattr(app, "extensions") else None
+    if _ext is not None:
+        try:
+            _ext.exempt(api_backup_run)
+        except Exception as exc:  # pragma: no cover — defensive
+            log.debug("backup csrf.exempt skipped: %s", exc)
 
 
 __all__ = ["register"]

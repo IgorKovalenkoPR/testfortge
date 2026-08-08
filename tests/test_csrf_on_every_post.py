@@ -52,6 +52,10 @@ EXEMPT: dict[str, str] = {
     "automation_allure_results":
         "CI posts results with AUTOMATION_INGEST_TOKEN; there is no "
         "browser and no origin to forge from",
+    "api_backup_run":
+        "the scheduled backup job (E8.4) posts with BACKUP_TOKEN from a "
+        "GitHub Actions runner — no browser, no session, and the endpoint "
+        "refuses outright when the token is unset",
     "debug_walkthrough_dispatch":
         "a local one-line curl diagnostic, and registered only when the "
         "debug routes are",

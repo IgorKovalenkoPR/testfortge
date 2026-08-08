@@ -191,6 +191,7 @@ class DeletionReport:
     project_name: str = ""
     rows: dict[str, int] = field(default_factory=dict)
     blobs: int = 0
+    bundles: int = 0
     blob_prefix: str = ""
     ok: bool = True
     problem: str = ""
@@ -205,9 +206,12 @@ class DeletionReport:
         parts = [f"{count} {label}"
                  for label, count in sorted(self.rows.items()) if count]
         rows = ", ".join(parts) if parts else "no stored rows"
+        bundles = (f", and {self.bundles} "
+                   f"backup{'' if self.bundles == 1 else 's'}"
+                   if self.bundles else "")
         return (f"Deleted {self.project_name or self.project_id}: {rows}, "
                 f"and {self.blobs} file{'' if self.blobs == 1 else 's'} "
-                f"from storage.")
+                f"from storage{bundles}.")
 
 
 def _models():
@@ -238,6 +242,12 @@ def survey(project_id: str, org_id: str | None = None) -> DeletionReport:
                 continue
             report.rows[label] = sess.query(model).filter(
                 model.project_id == project_id).count()
+
+    try:
+        from engine import backup as _backup
+        report.bundles = len(_backup.list_bundles(project_id, org_id=org_id))
+    except Exception as exc:            # pragma: no cover — bucket down
+        log.warning("could not survey backups for %s: %s", project_id[:8], exc)
 
     used = None
     try:
@@ -272,9 +282,20 @@ def delete_project_data(project_id: str, *, org_id: str | None = None,
         return report
 
     # 1. Blobs. First, because this is the failure worth stopping on.
+    #
+    # Backups go in the same step and before the rows, for the same reason.
+    # E8.4 stores them under the *organisation*, outside this project's
+    # prefix, so that deleting a project by accident does not take the
+    # backup with it — which means a deletion that skipped them would leave
+    # a complete, restorable copy of everything it just claimed to remove.
+    # The two modules have to agree about this; the test that keeps them
+    # honest asserts a deleted project leaves no bundle behind.
     try:
-        report.blobs = storage.backend_for(org_id).delete_prefix(
-            report.blob_prefix + "/")
+        backend = storage.backend_for(org_id)
+        report.blobs = backend.delete_prefix(report.blob_prefix + "/")
+        from engine import backup as _backup
+        report.bundles = _backup.delete_for_project(project_id,
+                                                    org_id=org_id)
     except storage.StorageError as exc:
         log.error("refusing to delete project %s: storage said %s",
                   project_id[:8], exc)
@@ -314,7 +335,8 @@ def delete_project_data(project_id: str, *, org_id: str | None = None,
                      entity_id=project_id,
                      diff={"name": report.project_name,
                            "rows": report.rows,
-                           "blobs": report.blobs})
+                           "blobs": report.blobs,
+                           "bundles": report.bundles})
     log.info("deleted project %s: %d rows, %d blobs", project_id[:8],
              report.row_total, report.blobs)
     return report

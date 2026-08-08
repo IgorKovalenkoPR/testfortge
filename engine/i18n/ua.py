@@ -398,6 +398,8 @@ TRANSLATIONS = {
                        "Це незворотно. Спершу експортуйте, якщо потрібна "
                        "копія."),
     "export_project": "Експорт",
+    "backup_project": "Бекап",
+    "backup_project_title": "Записати бандл проєкту в обране сховище",
     "export_project_title": "Завантажити все, що містить проєкт, одним zip",
 
     # Сторінка User Stories

@@ -175,10 +175,26 @@ docker compose run --rm storage-init \
   mc mirror --overwrite local/testfortge /backup
 ```
 
-> Scheduled backups and a tested restore are **E8.4 and are not built**. The
-> two commands above are what you have today; nothing in the product runs
-> them for you, and a backup nobody has restored from is a hypothesis. Test
-> yours.
+The application also backs itself up (E8.4). Set `BACKUP_TOKEN` in `.env`,
+then either press **Back up** next to a project or POST to
+`/api/backup/run` with that token — `.github/workflows/backup.yml` does the
+latter weekly if you set `BACKUP_URL` and the same token as repository
+secrets. Each bundle is a zip with a `manifest.json` of SHA-256 checksums,
+and **Restore** rebuilds it into a *new* project rather than overwriting
+anything.
+
+Two limits worth knowing before you rely on it:
+
+* **a backup does not survive deleting its project.** Deleting a project
+  deletes its bundles, because a deletion that leaves a restorable copy is
+  not a deletion. For "somebody removed the wrong project", the answer is
+  the **Export** button, whose zip is held by whoever downloaded it;
+* **run history is in the bundle and is not restored** — test cases,
+  checklist, estimation, bugs and files come back; execution and automation
+  runs do not. The restore says so when it finishes.
+
+The `pg_dump` above is still worth taking: bundles cover a project, not the
+users, teams and audit trail around them.
 
 ---
 
@@ -244,6 +260,8 @@ read if you want the full set. These are the ones a self-hoster changes:
 | `TESTFORTGE_BROWSER_ENABLED` | `1` | Real Chromium runs. Turn off on a small box |
 | `SESSION_BACKEND` | `db` | `filesystem` loses sessions on restart |
 | `STORAGE_BACKEND_CONFIGURABLE` | `0` | Lets each team pick its own bucket. Untested against a live bucket (E8.7) — leave it off |
+| `BACKUP_TOKEN` | unset | Enables `POST /api/backup/run`. Unset means the endpoint refuses outright |
+| `BACKUP_KEEP` | `7` | Bundles kept per project; older ones are pruned on each new backup |
 
 Changes to any of these need `docker compose up -d` to take effect, because
 they are container environment. Inside a running process the app re-reads
@@ -295,8 +313,13 @@ part. Either raise `TESTFORTGE_MEMORY_LIMIT` (default `2g`) or set
 Stated because a runbook that only lists what works is a runbook that gets
 believed:
 
-- **No scheduled backups and no tested restore.** E8.4. §5 gives you the two
-  commands; running them is yours.
+- **Backups are per project, and never verified against your bucket.** The
+  bundle format and the restore path are tested end to end (a project is
+  built, backed up, destroyed and restored, and a restored screenshot is
+  fetched), but against local disk — whether *your* S3 returns the bytes it
+  was given is E8.7 and needs credentials. Restore one bundle by hand after
+  the first scheduled run. A backup nobody has restored from is a
+  hypothesis.
 - **No per-team storage choice.** The flag exists and the code behind it is
   written, but it has never run against a real bucket (E8.7), so it stays
   off.

@@ -734,6 +734,19 @@
                         <i data-lucide="download" class="icon-sm"></i>
                         {{ t.get('export_project', 'Export') }}
                     </a>
+                    {# Back up to the storage the team chose (E8.4), as
+                       opposed to Export, which downloads. Both are here
+                       because they answer different questions: "keep a
+                       copy where I can reach it" and "keep a copy where
+                       the deployment can reach it". #}
+                    <form method="POST" action="{{ url_for('backup_project', project_id=p.folder) }}" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-xs"
+                                title="{{ t.get('backup_project_title', 'Write a bundle of this project to the configured storage') }}">
+                            <i data-lucide="archive" class="icon-sm"></i>
+                            {{ t.get('backup_project', 'Back up') }}
+                        </button>
+                    </form>
                     <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

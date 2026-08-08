@@ -356,6 +356,9 @@ TRANSLATIONS = {
                        "file? This cannot be undone. Export first if you "
                        "want a copy."),
     "export_project": "Export",
+    "backup_project": "Back up",
+    "backup_project_title": ("Write a bundle of this project to the "
+                             "configured storage"),
     "export_project_title": "Download everything this project holds, as a zip",
 
     # User stories page

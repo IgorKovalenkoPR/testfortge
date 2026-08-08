@@ -347,11 +347,20 @@ class TestTheRunbookIsHonest:
 
     def test_it_names_what_the_deployment_does_not_give_you(self,
                                                             runbook_flat):
-        """E8.4 is not built and E8.7 has not run. A runbook that lists only
-        what works is a runbook that gets believed."""
+        """A runbook that lists only what works is a runbook that gets
+        believed.
+
+        Named as **E8.7** and not as a list of every unfinished epic: E8.4
+        landed and this assertion went red for the right reason, which is
+        the useful behaviour. What has to stay true is that the closing
+        section names the storage work that has never run against a real
+        bucket, and is honest about what backups do not cover.
+        """
         tail = runbook_flat[-2500:]
-        assert "E8.4" in tail and "E8.7" in tail
+        assert "E8.7" in tail, "the untested-against-a-bucket gap is missing"
         assert "backup" in tail.lower()
+        assert "hypothesis" in tail.lower(), (
+            "the section stopped telling the reader to restore one by hand")
 
     def test_the_flag_order_that_locks_everyone_out_is_called_out(
             self, runbook):
