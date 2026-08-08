@@ -31,14 +31,23 @@ and the gallery got a **404**. A broken image where the evidence should be,
 and nothing reported it, because the save and the read are different
 requests. ``TestTheChatUploadIsActuallyServable`` is that regression.
 
-Storage: local disk, deliberately
----------------------------------
-E8.2 (the storage abstraction) is blocked on ADR 0002, which is Proposed and
-waiting on the owner. The prompt for E4.5a offered the choice — wait, or
-limit to local disk and say so in a test — and this is the second branch.
-``TestTheLocalDiskLimitation`` states it: on the free plan that disk is
-ephemeral, so a restart takes the file. Written as a test rather than a
-comment so that the day it stops being true, something goes red.
+Storage: local disk, still — but now by configuration
+-----------------------------------------------------
+E4.5a shipped local-only because E8.2 was blocked on ADR 0002. The ADR was
+accepted on 2026-08-08 and E8.2 landed the same day, which changed two
+things here and left the third alone:
+
+* the key gained its ``org/<org_id>`` segment (ADR §4.2), so anything that
+  builds a prefix has to know which organisation it is in — see
+  :func:`_org_of`, and note that it makes several tests mode-dependent;
+* :func:`engine.blobs.save` now hands the file to ``engine.storage``, which
+  is where the choice of local disk or a bucket is made;
+* the **default is unchanged**. ``STORAGE_BACKEND`` is ``local``, so
+  ``TestTheLocalDiskLimitation`` still describes what a deployment does out
+  of the box, and it now fails if that default moves.
+
+E8.2's own behaviour — the switch, the per-org override, the failure modes —
+is ``tests/test_storage_backend.py``.
 """
 from __future__ import annotations
 
@@ -113,6 +122,26 @@ def _client(project_id: str):
     with client.session_transaction() as sess:
         sess["project_id"] = project_id
     return client
+
+
+def _org_of(test_client) -> str | None:
+    """The organisation this client is signed into, or ``None``.
+
+    Needed because the key gained an ``org/<org_id>`` segment with E8.2, so
+    a prefix built without it matches nothing — and a delete that matches
+    nothing removes nothing and reports nothing, which is precisely the
+    failure the segment exists to make impossible.
+
+    So this is a **mode-dependent** helper and it says so: with
+    ``AUTH_ENABLED``/``ORG_MODE`` off it returns ``None`` and the keys read
+    ``org/_none/…``; with them on it returns the real id and they read
+    ``org/<id>/…``. Reading it out of the session is what the route itself
+    does (``engine.permissions.current_org_id``), so a test that guessed
+    instead would be asserting against its own guess.
+    """
+    from engine import permissions as _perm
+    with test_client.session_transaction() as sess:
+        return sess.get(_perm.SESSION_ORG_KEY) or None
 
 
 @pytest.fixture(autouse=True)
@@ -234,10 +263,13 @@ class TestTheTwoAttachmentFieldsStayApart:
         """Named so the distinction is findable. The column is free text
         that round-trips through import/export; the list holds keys that
         ``automation_asset`` can resolve."""
-        _upload(_client(project), bug["db_id"])
+        client = _client(project)
+        _upload(client, bug["db_id"])
         key = _attachments(project, bug["db_id"])[0]
 
-        assert key.startswith("project/"), key
+        org = _org_of(client)
+        assert key.startswith(
+            f"org/{org or _blobs.ORG_NONE}/project/"), key
         assert _blobs.exists(key)
         # And the column is untouched by any of it.
         assert not _bug_row(project, bug["db_id"]).get("attachment")
@@ -355,8 +387,8 @@ class TestRefusals:
 # ── The key scheme ───────────────────────────────────────────────────
 
 class TestTheKey:
-    """Project-scoped, per ADR 0002 §4.2 — minus the org segment, which is
-    E8.2's to add."""
+    """Org- and project-scoped, per ADR 0002 §4.2 — the org segment landed
+    with E8.2."""
 
     def test_the_same_filename_in_two_projects_does_not_collide(self):
         """The defect this scheme removes rather than fixes:
@@ -365,8 +397,8 @@ class TestTheKey:
         first = _blobs.key_for("proj-aaa", "bug", "7", "shot.png")
         second = _blobs.key_for("proj-bbb", "bug", "7", "shot.png")
         assert first != second
-        assert first.startswith("project/proj-aaa/bug/7/")
-        assert second.startswith("project/proj-bbb/bug/7/")
+        assert first.startswith(f"org/{_blobs.ORG_NONE}/project/proj-aaa/bug/7/")
+        assert second.startswith(f"org/{_blobs.ORG_NONE}/project/proj-bbb/bug/7/")
 
     def test_the_same_file_twice_keeps_both(self, project, bug):
         """Attaching ``before.png`` and then a corrected ``before.png`` is
@@ -412,7 +444,7 @@ class TestTheKey:
         assert _blobs.exists("../../etc/passwd") is False
 
     def test_deleting_a_prefix_that_is_not_there_is_zero(self):
-        assert _blobs.delete_prefix("project/never-existed") == 0
+        assert _blobs.delete_prefix(_blobs.prefix_for("never-existed")) == 0
 
     def test_the_key_is_servable_by_the_asset_route(self):
         """A key the asset route's regex rejects is not a key — the file
@@ -426,11 +458,13 @@ class TestTheKey:
         """The claim that makes a blob-index table unnecessary for E8.5.
         Asserted rather than assumed, because a scheme whose central
         property is never exercised is one nobody can rely on."""
-        _upload(_client(project), bug["db_id"])
+        client = _client(project)
+        _upload(client, bug["db_id"])
         key = _attachments(project, bug["db_id"])[0]
         assert _blobs.exists(key)
 
-        removed = _blobs.delete_prefix(f"project/{project}")
+        removed = _blobs.delete_prefix(
+            _blobs.prefix_for(project, org_id=_org_of(client)))
 
         assert removed == 1
         assert not _blobs.exists(key)
@@ -439,12 +473,17 @@ class TestTheKey:
 # ── The limitation, stated on purpose ────────────────────────────────
 
 class TestTheLocalDiskLimitation:
-    """E4.5a ships on local disk **deliberately**, because E8.2 is blocked
-    on ADR 0002 being approved.
+    """Local disk is the **default**, and it is ephemeral.
 
-    These tests exist so the limitation is a recorded decision rather than
-    something a reader has to infer — and so that when E8.2 lands, the
-    things that stop being true fail here first.
+    E4.5a shipped local-only because E8.2 was blocked on ADR 0002. E8.2 has
+    since landed (``engine/storage.py``), and it changed the default not at
+    all: with ``STORAGE_BACKEND`` unset every artefact still lands on this
+    dyno's disk, and a restart still takes it. So this class did not become
+    obsolete — it became the description of what the shipped default costs,
+    which is exactly what an operator needs before deciding whether to point
+    ``STORAGE_BACKEND`` at a bucket.
+
+    It fails the day someone changes the *default*, which is the point.
     """
 
     def test_the_bytes_are_on_this_machine_s_disk(self, project, bug):
@@ -453,9 +492,9 @@ class TestTheLocalDiskLimitation:
 
         on_disk = os.path.join(STORAGE_ROOT, *key.split("/"))
         assert os.path.isfile(on_disk), (
-            "E4.5a stores locally by design; if this now fails because the "
-            "bytes went to object storage, E8.2 has landed and this class "
-            "is what needs rewriting")
+            "the default backend is local disk; if this fails because the "
+            "bytes went to a bucket, STORAGE_BACKEND's default changed and "
+            "this class is what needs rewriting")
 
     def test_losing_the_disk_loses_the_file_and_the_row_still_points_at_it(
             self, project, bug):
@@ -463,15 +502,19 @@ class TestTheLocalDiskLimitation:
 
         A restart on Render free takes the directory with it. The row keeps
         the key, so the page keeps rendering a gallery entry — and the
-        entry 404s. That is the state E8.2 exists to end, and pretending
-        otherwise here would be the same "assumption recorded as a fact"
-        this programme has now met four times.
+        entry 404s. E8.2 gives an operator the way out — point
+        ``STORAGE_BACKEND`` at a bucket — but does not take it for them, so
+        this is still what the default does, and pretending otherwise here
+        would be the same "assumption recorded as a fact" this programme has
+        now met four times.
         """
-        _upload(_client(project), bug["db_id"])
+        client = _client(project)
+        _upload(client, bug["db_id"])
         key = _attachments(project, bug["db_id"])[0]
 
         # Simulate the restart: the disk goes, the database does not.
-        _blobs.delete_prefix(f"project/{project}")
+        _blobs.delete_prefix(
+            _blobs.prefix_for(project, org_id=_org_of(client)))
 
         assert _attachments(project, bug["db_id"]) == [key], (
             "the row should still name the attachment — that is the point")
@@ -479,8 +522,11 @@ class TestTheLocalDiskLimitation:
             f"/automation/asset/{key}").status_code == 404
 
     def test_there_is_no_storage_backend_choice_yet(self):
-        """``STORAGE_BACKEND_CONFIGURABLE`` stays off until E8.2/E8.7, or
-        the Admin UI offers a choice with nothing behind it."""
+        """``STORAGE_BACKEND_CONFIGURABLE`` stays off until E8.3 builds the
+        Admin UI and E8.7 tests it against a real bucket. E8.2 built what
+        sits behind the flag; the flag is what decides whether an org admin
+        is offered the choice, and offering it before it is tested is how a
+        setting becomes a support ticket."""
         from engine import features
         assert features.is_enabled("STORAGE_BACKEND_CONFIGURABLE") is False
 
@@ -602,6 +648,6 @@ def _sweep_evidence():
         return
     for name in os.listdir(root):
         try:
-            _blobs.delete_prefix(f"project/{name}")
+            _blobs.delete_prefix(_blobs.prefix_for(name))
         except Exception:      # pragma: no cover — best effort
             pass

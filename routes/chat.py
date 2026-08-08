@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 
 from engine import blobs as _blobs
 from engine import db as _db
+from engine import permissions as _perm
 
 from ._shared import (ensure_active_project, mirror_pack, pack_bugs,
                       resolve_active_project)
@@ -382,7 +383,8 @@ def register(app: Flask) -> None:
             try:
                 attachment_name = _blobs.save(
                     upload, project_id=(resolve_active_project() or "none"),
-                    kind="bug", entity_id="chat")
+                    kind="bug", entity_id="chat",
+                    org_id=_perm.current_org_id())
             except Exception as exc:
                 # Unlike the bug page's own upload, this one does not refuse
                 # the whole submission: the file is one optional field on a

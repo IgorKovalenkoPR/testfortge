@@ -422,18 +422,36 @@
   {% endif %}
 </div>
 
-{# ── Storage. Declared here rather than omitted, so the screen tells
-     the truth about what exists. ────────────────────────────────── #}
+{# ── Storage. Two facts, not one: where files go *now*, and whether
+     this team may change it. The second is E8.3; the first is E8.2 and
+     an operator can flip it with one environment variable, so the page
+     reads it rather than asserting it. ──────────────────────────────── #}
 <div class="card">
   <h2>Storage</h2>
-  {% if storage_configurable %}
-  <p class="text-muted">Choose where screenshots, videos and export
-    bundles are stored.</p>
+  {% if storage_state and storage_state.backend == 's3' %}
+  <p class="settings-status">
+    Screenshots, videos and export bundles go to object storage
+    (<code>{{ storage_state.bucket }}</code>{% if storage_state.endpoint %}
+    at {{ storage_state.endpoint }}{% endif %}). They survive a restart.
+  </p>
   {% else %}
   <p class="settings-status">
-    Screenshots, videos and export bundles are stored on the server.
-    Choosing your own storage — S3-compatible, Azure Blob, or a local
-    disk — is not available on this instance yet.
+    Screenshots, videos and export bundles are stored on the server's own
+    disk. <strong>That disk is temporary</strong> — a restart takes the
+    files with it, and the bug or run that references them keeps the link,
+    which then leads nowhere.
+  </p>
+  <p class="text-muted settings-note">
+    Whoever runs the server can point this at S3-compatible storage
+    (Cloudflare R2, AWS S3, Backblaze B2, Wasabi, MinIO) by setting
+    <code>STORAGE_BACKEND=s3</code> and the <code>STORAGE_S3_*</code>
+    values. No new deploy is needed.
+  </p>
+  {% endif %}
+  {% if not storage_configurable %}
+  <p class="text-muted settings-note">
+    Choosing storage per team, from this page, is not available on this
+    instance yet.
   </p>
   {% endif %}
 </div>

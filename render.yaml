@@ -140,6 +140,39 @@ services:
         value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
         value: "0"
+      # Where artefacts go (E8.2, ADR 0002). "local" is this dyno's disk,
+      # which is ephemeral — a restart takes every screenshot with it. "s3"
+      # is any S3-compatible bucket: Cloudflare R2 (the free-tier choice),
+      # AWS S3, Backblaze B2, Wasabi, MinIO.
+      #
+      # Declared with its default rather than left out, for the reason
+      # tests/test_render_blueprint.py gives about every other flag here: a
+      # Manual Sync deletes undeclared vars, and an operator who had
+      # switched this to "s3" in the dashboard would find uploads silently
+      # back on an ephemeral disk with no error anywhere.
+      #
+      # Flipping it needs the four STORAGE_S3_* values below set first.
+      # engine/storage.py falls back to local disk and logs an error if
+      # they are incomplete — it does not refuse to boot, because a typo in
+      # a storage setting should not be an outage.
+      - key: STORAGE_BACKEND
+        value: "local"
+      # The bucket's credentials. Blank here on purpose: E0.5 (create the
+      # bucket) is an owner action, and the secret is set in the dashboard,
+      # never in this file. `sync: false` is what stops a Manual Sync
+      # overwriting a value the dashboard holds and this file does not.
+      - key: STORAGE_S3_ENDPOINT
+        sync: false
+      - key: STORAGE_S3_BUCKET
+        sync: false
+      - key: STORAGE_S3_ACCESS_KEY
+        sync: false
+      - key: STORAGE_S3_SECRET_KEY
+        sync: false
+      # R2 wants an empty region; AWS wants a real one. Left unset rather
+      # than guessed.
+      - key: STORAGE_S3_REGION
+        sync: false
       # The shared HTTP Basic password in front of the whole app (E1.8).
       #
       # "1" while it is still the perimeter. Once AUTH_ENABLED is "1" and

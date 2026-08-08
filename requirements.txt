@@ -47,3 +47,17 @@ argon2-cffi>=23.1.0
 # signature / issuer / audience / expiry checks; hand-rolling any of those
 # is how an OIDC integration acquires a silent authentication bypass.
 Authlib>=1.3.0
+# S3-compatible object storage — Cloudflare R2, AWS S3, Backblaze B2,
+# Wasabi, MinIO (engine/storage.py — E8.2, ADR 0002 §4.5). One client for
+# all five, and it signs SigV4 itself; hand-rolling request signing is how
+# a storage integration acquires an intermittent 403 that lives for months.
+#
+# `minio` and not `boto3`, decided by measurement rather than by taste:
+# boto3 + botocore is a 15.2 MB wheel against minio's 91 KB (~1.9 MB new
+# to this project once shared dependencies are discounted). On a free dyno
+# the image size is deploy time and cold-start time. The ADR proposed
+# boto3; the measurement reversed it, and §4.5 records that.
+#
+# Imported lazily inside the S3 backend, so a deployment on the default
+# local-disk backend never loads it.
+minio>=7.2.0

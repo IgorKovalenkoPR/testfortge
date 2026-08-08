@@ -61,6 +61,7 @@ from engine import llm_keys as _llm_keys
 from engine import llm_models as _llm_models
 from engine import mailer as _mailer
 from engine import permissions as _perm
+from engine import storage as _storage
 from engine.log import get_logger
 
 log = get_logger(__name__)
@@ -171,9 +172,21 @@ def register(app: Flask) -> None:
             # and a count of projects they have never been able to see is
             # not information — it is a puzzle.
             orphans=_db.orphan_project_survey() if is_admin else None,
-            # ── Not built yet, shown so the screen is honest ──
+            # ── Storage (E8.2) ──
+            # Two different facts, and the screen needs both.
+            #
+            # ``storage_configurable`` is whether an admin may *choose*,
+            # which stays off until E8.3 builds the picker and E8.7 tests it
+            # against a real bucket. ``storage_state`` is where files
+            # actually go right now — which an operator can change with one
+            # environment variable, and which the page used to state as
+            # "on the server" whatever the truth was. That sentence would
+            # have quietly become false the day someone set
+            # ``STORAGE_BACKEND=s3``: the same "assumption recorded as a
+            # fact" this programme keeps finding.
             storage_configurable=_features.is_enabled(
                 "STORAGE_BACKEND_CONFIGURABLE"),
+            storage_state=_storage.describe(org_id),
         )
 
     @app.route("/org/settings/general", methods=["POST"])

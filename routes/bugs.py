@@ -389,11 +389,13 @@ def register(app: Flask) -> None:
         So they stay separate, and this docstring exists because "attachment
         vs attachments" is otherwise a coin toss for whoever reads it next.
 
-        Storage is **local disk only**, deliberately. ADR 0002 is Proposed
-        and E8.2 has not been built, so the file lands under ``STORAGE_ROOT``
-        via ``engine.blobs`` — which on the free plan is an ephemeral disk.
-        ``tests/test_bug_attachments.py`` states that limitation as a test
-        rather than leaving it to be discovered after a restart.
+        Where the file lands is no longer this route's business: E8.2 put
+        ``engine.storage`` behind ``engine.blobs``, so it is local disk or
+        the organisation's bucket depending on configuration, and this
+        handler passes the organisation and nothing else. On the free plan
+        with the default backend that disk is ephemeral, which
+        ``tests/test_bug_attachments.py`` states as a test rather than
+        leaving it to be discovered after a restart.
         """
         pid = ensure_active_project()
         if not pid:
@@ -411,9 +413,10 @@ def register(app: Flask) -> None:
                   "error")
             return redirect(url_for("bug_reports_page"))
 
+        org_id = _perm.current_org_id()
         try:
             key = _blobs.save(upload, project_id=pid, kind="bug",
-                              entity_id=str(db_id))
+                              entity_id=str(db_id), org_id=org_id)
         except _blobs.UploadRefused as exc:
             # Loud, and nothing recorded. ADR 0002 §4.6: the person who
             # chose the file is standing here, and saying "attached" over a
@@ -431,7 +434,9 @@ def register(app: Flask) -> None:
             # The bug is not in this project, or is gone. The file is on
             # disk with nothing pointing at it, so take it back out rather
             # than leaving an orphan the retention sweep has to guess about.
-            _blobs.delete_prefix(f"project/{pid}/bug/{db_id}")
+            _blobs.delete_prefix(
+                _blobs.prefix_for(pid, "bug", str(db_id), org_id=org_id),
+                org_id=org_id)
             flash(g.t.get("bug_attach_missing",
                           "That bug is not in this project."), "error")
             return redirect(url_for("bug_reports_page"))

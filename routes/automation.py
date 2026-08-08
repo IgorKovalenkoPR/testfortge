@@ -37,6 +37,8 @@ from engine.job_queue import get_queue, DONE, FAILED
 from engine.automation_paths import STORAGE_ROOT  # re-exported below
 
 from engine import allure_ingest
+from engine import permissions as _perm
+from engine import storage as _storage
 from engine import automation_codegen as codegen
 from engine import db as _db
 from engine import gherkin
@@ -383,6 +385,24 @@ def register(app: Flask) -> None:
 
     @app.route("/automation/asset/<path:path>")
     def automation_asset(path):
+        """Serve one artefact by key — from this disk, or from the bucket.
+
+        Local disk is tried **first**, and that ordering is the point rather
+        than an optimisation. Two kinds of thing answer to this route: keys
+        minted by ``engine.blobs`` (uploads, which go wherever E8.2's backend
+        says) and paths the Playwright runner wrote straight to
+        ``STORAGE_ROOT/automation_runs/...`` while a run was in progress. The
+        second kind is on this disk whatever the configured backend is, so
+        checking the disk first keeps run screenshots working on the day an
+        organisation switches to R2 — the alternative is a page of broken
+        images for artefacts that are sitting right there.
+
+        When it is not on disk, the backend is asked where it is. Under S3
+        that is a **presigned URL and a redirect**, not a proxy: ADR 0002
+        §4.4 — R2's egress is free only while the bytes do not pass through
+        this process, and a 512 MB dyno is the wrong thing to put in front
+        of every thumbnail.
+        """
         # Reject traversal / NUL / absolute paths outright.
         if (".." in path.split("/") or ".." in path.split("\\")
                 or "\x00" in path or not SAFE_ASSET_RE.fullmatch(path)):
@@ -392,7 +412,23 @@ def register(app: Flask) -> None:
         target = os.path.realpath(os.path.join(asset_root, path))
         if not target.startswith(asset_root + os.sep):
             abort(400)
-        return send_from_directory(STORAGE_ROOT, path)
+        if os.path.isfile(target):
+            return send_from_directory(STORAGE_ROOT, path)
+
+        backend = _storage.backend_for(_perm.current_org_id())
+        if backend.name == "local":
+            # Nothing else to try, and send_from_directory's own 404 is the
+            # honest answer — on the free plan the usual cause is that the
+            # dyno restarted and took the ephemeral disk with it.
+            return send_from_directory(STORAGE_ROOT, path)
+        try:
+            location = backend.locate(path)
+        except _storage.StorageError as exc:
+            log.info("no signed URL for %s: %s", path[:80], exc)
+            abort(404)
+        if not location.url:      # pragma: no cover — a local Location here
+            abort(404)
+        return redirect(location.url)
 
     # The ingest endpoint carries its own token auth and is called by a CI
     # job from another origin — there is no TestForTge session cookie and

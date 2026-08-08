@@ -210,6 +210,43 @@ def get_org_key(org_id: str | None) -> str | None:
         return None
 
 
+#: ── The encryption itself, for other per-org secrets (E8.2) ──────────
+#:
+#: This module owns the Fernet because it was the first thing that needed
+#: one (E0.9, the BYOK API key). ``engine.storage`` needs the same treatment
+#: for an organisation's S3 credentials — same class of data, same threat,
+#: same key — so it borrows the primitive rather than deriving a second
+#: Fernet from the same environment variable. Two derivations of one secret
+#: is one place too many for a rotation to go half-done.
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypt an arbitrary per-org secret. Raises :class:`BYOKUnavailable`
+    when this instance has no encryption key — refusing is the point, since
+    the alternative is storing a customer credential in the clear."""
+    if not plaintext:
+        raise ValueError("nothing to encrypt")
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
+
+
+def decrypt_secret(token: str | None) -> str | None:
+    """Decrypt what :func:`encrypt_secret` stored, or ``None``.
+
+    ``None`` for every failure, like :func:`get_org_key`: no token,
+    encryption not configured, ciphertext unreadable. A decryption failure
+    is logged loudly because it usually means the encryption key was rotated
+    without re-entering what it protected.
+    """
+    if not token or not is_configured():
+        return None
+    try:
+        return _fernet().decrypt(token.encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        log.error("a stored org secret could not be decrypted (%s). If %s "
+                  "was rotated, it must be re-entered.",
+                  type(exc).__name__, ENCRYPTION_KEY_ENV)
+        return None
+
+
 def platform_key() -> str | None:
     """The operator's own key, or ``None``."""
     return (os.environ.get("ANTHROPIC_API_KEY") or "").strip() or None
@@ -245,6 +282,7 @@ def redact(api_key: str | None) -> str:
 
 __all__ = [
     "ENCRYPTION_KEY_ENV", "BYOKUnavailable",
+    "encrypt_secret", "decrypt_secret",
     "is_configured", "validate_key_shape",
     "set_org_key", "clear_org_key", "get_org_key",
     "platform_key", "resolve_key", "redact",
