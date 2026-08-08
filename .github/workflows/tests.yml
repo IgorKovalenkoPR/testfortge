@@ -164,6 +164,7 @@ jobs:
           --cov=engine.mailer
           --cov=engine.basic_auth
           --cov=engine.blobs
+          --cov=engine.project_facts
           --cov=engine.editable --cov=engine.run_limits --cov=engine.mentoring
           --cov=engine.manual_run --cov=engine.dashboard_config
           --cov=engine.dashboard_metrics --cov=engine.tedgie_eval

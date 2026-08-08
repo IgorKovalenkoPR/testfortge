@@ -134,7 +134,13 @@ def register(app: Flask) -> None:
                 "follow_up": [],
             }), 413
 
-        reply = _chatbot_respond(message, lang)
+        # The active project, so "how many open bugs do I have" can be
+        # answered with a number rather than with advice (E6.6). Resolved
+        # here rather than read from the session inside the engine: that
+        # module is importable without Flask, and the eval harness and the
+        # MCP tool call it with no request at all.
+        reply = _chatbot_respond(message, lang,
+                                 project_id=resolve_active_project())
 
         history = session.get("chat_history", [])
         history.append({"role": "user", "text": message})

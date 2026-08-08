@@ -374,14 +374,23 @@ def run_rule_layer(items: Iterable[Item] | None = None) -> Report:
     No LLM, no network, no API key — which is what makes this runnable in
     CI on every push.
 
-    Both halves of the deterministic chain are exercised, in the order
-    ``respond()`` uses them when no API key is present: ``try_fast_path``
-    first, then ``rule_based_fallback``. Measuring only the fast path was a
-    real mistake in the first version of this harness — eight of the twelve
-    product-help items failed, and the reason was not that Tedgie cannot
-    answer them but that module help lives in the fallback. A harness that
-    measures half the chain reports defects that are not there, which is
-    worse than measuring nothing.
+    Every deterministic layer is exercised, **in the order ``respond()``
+    uses them** when no API key is present: ``try_fast_path``, then the
+    project-facts layer (E6.6), then ``rule_based_fallback``. Measuring
+    only the fast path was a real mistake in the first version of this
+    harness — eight of the twelve product-help items failed, and the reason
+    was not that Tedgie cannot answer them but that module help lives in
+    the fallback. A harness that measures half the chain reports defects
+    that are not there, which is worse than measuring nothing.
+
+    The project-facts layer is called with **no project**, which is what
+    every caller of this harness has. It therefore declines on every item
+    that is not asking about somebody's own artefacts — and that is the
+    point of including it. Left out, this file would keep grading a chain
+    the product no longer runs, and a future layer that quietly took a
+    pack's questions would score 100% here while answering wrongly in the
+    app. That gap was real for exactly as long as it took to notice: the
+    docstring already claimed this order before the layer existed.
     """
     from engine import chatbot  # imported here so loading this module stays cheap
 
@@ -390,6 +399,9 @@ def run_rule_layer(items: Iterable[Item] | None = None) -> Report:
         lang = "ua" if item.lang == "uk" else item.lang
         try:
             reply = chatbot.try_fast_path(item.question, lang)
+            if reply is None:
+                reply = chatbot._project_facts_reply(item.question, lang,
+                                                     None)
             if reply is None:
                 reply = chatbot.rule_based_fallback(item.question, lang)
         except Exception:  # pragma: no cover — a crash is a failure, not an error

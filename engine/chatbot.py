@@ -1888,20 +1888,56 @@ def rule_based_fallback(message: str, lang: str = "en") -> ChatReply:
     return _clarify_requirement(lang, raw)
 
 
-def respond(message: str, lang: str = "en") -> ChatReply:
+def _project_facts_reply(message: str, lang: str,
+                         project_id: str | None) -> ChatReply | None:
+    """Answer "how many open bugs do I have" with a number — E6.6.
+
+    Placed **after** the fast path and **before** the model, and both
+    positions are deliberate. Before the model, because the model does not
+    have these numbers and will produce a plausible sentence without them —
+    which is the worst possible answer to a counting question. After the
+    fast path, because a greeting is still a greeting.
+
+    It runs after ``mentoring`` inside the rule-based chain too (see
+    ``rule_based_fallback``); the layer declines unless the message carries
+    both a quantity cue and a first-person one, so the packs keep every
+    question they own. The golden set gates that at 100%.
+    """
+    try:
+        from . import project_facts
+        text = project_facts.answer(message, lang, project_id=project_id)
+    except Exception as exc:      # pragma: no cover — never fail a reply
+        _logger.warning("project facts lookup failed: %s", exc)
+        return None
+    if not text:
+        return None
+    return ChatReply(text=text, intent="project_facts")
+
+
+def respond(message: str, lang: str = "en", *,
+            project_id: str | None = None) -> ChatReply:
     """Produce a :class:`ChatReply` for ``message``.
 
     Dispatch order:
       1. Empty / greeting / gratitude — cheap fast path.
       2. Explicit bug-report trigger words — open the bug form.
-      3. Anthropic Claude (when ANTHROPIC_API_KEY is set).
-      4. Rule-based dispatcher (troubleshoot / module help / clarify).
+      3. Facts about the active project (E6.6) — counts, not advice.
+      4. Anthropic Claude (when ANTHROPIC_API_KEY is set).
+      5. Rule-based dispatcher (troubleshoot / module help / clarify).
+
+    ``project_id`` is what lets step 3 exist at all. It is optional and
+    defaults to None so every existing caller — the eval harness, the MCP
+    tool, the tests — keeps working and simply never reaches that step.
     """
     raw = (message or "").strip()
 
     fast = try_fast_path(raw, lang)
     if fast is not None:
         return fast
+
+    facts = _project_facts_reply(raw, lang, project_id)
+    if facts is not None:
+        return facts
 
     # AI-backed reply (Anthropic Claude). Falls through to rule-based on
     # any failure.
@@ -1912,9 +1948,10 @@ def respond(message: str, lang: str = "en") -> ChatReply:
     return rule_based_fallback(raw, lang)
 
 
-def respond_dict(message: str, lang: str = "en") -> dict:
+def respond_dict(message: str, lang: str = "en", *,
+                 project_id: str | None = None) -> dict:
     """JSON-ready wrapper used by the Flask route."""
-    r = respond(message, lang)
+    r = respond(message, lang, project_id=project_id)
     return {
         "text": r.text,
         "intent": r.intent,
