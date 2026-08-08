@@ -263,7 +263,11 @@ def save(upload, *, project_id: str, kind: str, entity_id: str,
         raise UploadRefused("That file was empty.")
 
     key = key_for(project_id, kind, entity_id, filename, org_id=org_id)
-    backend = storage.backend_for(org_id)
+    # Bounded: somebody is watching a spinner. E8.7 measured an upload
+    # against a bucket that was not there taking nineteen seconds to fail,
+    # which on a small dyno means an outage holds a worker per upload rather
+    # than failing them.
+    backend = storage.impatient(storage.backend_for(org_id))
     try:
         backend.put(key, upload)
     except storage.StorageError as exc:

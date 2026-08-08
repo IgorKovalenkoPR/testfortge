@@ -107,6 +107,19 @@ CHECK_SEGMENT = "_storage-check"
 #: network needs.
 CHECK_TIMEOUT_SECONDS = 5.0
 
+#: Seconds a single connect or read may take on a path a person is waiting on.
+#:
+#: Measured in E8.7, against a bucket that was simply not there: one upload
+#: took **nineteen seconds** to fail, because the client's default schedule is
+#: five attempts with backoff. That is right for a flaky network and wrong for
+#: a request with somebody in front of it — on a 512 MB dyno it means a
+#: storage outage does not fail uploads, it holds a worker per upload until
+#: the request times out, and the rest of the product goes down with it.
+#:
+#: Longer than :data:`CHECK_TIMEOUT_SECONDS` because this one carries real
+#: bytes over a real connection, and a slow network is not an outage.
+INTERACTIVE_TIMEOUT_SECONDS = 10.0
+
 #: The ``org`` segment for a caller who is not in an organisation.
 #:
 #: Lives here rather than in ``engine.blobs`` because both modules build the
@@ -874,6 +887,21 @@ def backend_for(org_id: str | None = None) -> Backend:
         return LocalBackend()
 
 
+def impatient(backend: Backend) -> Backend:
+    """The same backend, bounded, for a path with a person waiting on it.
+
+    A separate function rather than a parameter on :func:`backend_for`
+    because that resolver is monkeypatched all over the suite with plain
+    one-argument lambdas, and a new keyword would break every one of them —
+    turning a latency improvement into a hundred unrelated failures. This
+    composes instead: a local backend is returned untouched, since there is
+    no network to wait on.
+    """
+    if not isinstance(backend, S3Backend):
+        return backend
+    return S3Backend(backend.config, timeout=INTERACTIVE_TIMEOUT_SECONDS)
+
+
 def describe(org_id: str | None = None) -> dict:
     """What an operator needs to know about where artefacts are going."""
     backend = backend_for(org_id)
@@ -930,5 +958,5 @@ __all__ = [
     "Backend", "LocalBackend", "S3Backend", "S3Config",
     "org_prefix", "instance_config", "instance_backend_name",
     "org_config", "set_org_config", "clear_org_config",
-    "backend_for", "describe", "check", "usage_for",
+    "backend_for", "impatient", "describe", "check", "usage_for",
 ]

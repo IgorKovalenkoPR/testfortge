@@ -77,6 +77,11 @@ jobs:
           # builds the web image, and a coverage plugin has no business in a
           # production dyno's site-packages.
           pip install pytest-cov
+          # E8.7: a real S3 server over HTTP, so the storage adapter is
+          # exercised on the wire and not against a stub. Test-only and
+          # deliberately NOT in requirements.txt — it pulls in boto3, the
+          # 15 MB package ADR 0002 §4.5 measured and rejected for the image.
+          pip install "moto[server]"
           # MCP server tests import `mcp_server.server` which pulls in
           # the `mcp` package + (for the HTTP entrypoint) `uvicorn`.
           # These are listed separately because they're not needed by
@@ -131,6 +136,16 @@ jobs:
       # logs endpoint refuses an unauthenticated caller, so a red build is
       # unreadable to anyone without a token. This was measured the hard
       # way while diagnosing this very run.
+      # Guard against the S3 leg silently skipping, for the same reason the
+      # Postgres step above exists: tests/test_storage_failures.py is the
+      # only place the S3 adapter touches a socket, and it importorskips on
+      # moto. A skipped file nobody looks at is the same as no coverage.
+      - name: Verify the S3 leg actually runs
+        run: >-
+          python -m pytest tests/test_storage_failures.py -q
+          --no-header -p no:cacheprovider | tee /tmp/s3.txt;
+          grep -qE "[1-9][0-9]* passed" /tmp/s3.txt
+
       - name: Run test suite
         run: |
           set -o pipefail

@@ -296,6 +296,15 @@ created, and `app` waits for that on purpose. Check
 `docker compose logs storage-init`; the usual cause is MinIO credentials
 containing characters your shell ate on the way into `.env` — quote them.
 
+**Before you trust a bucket, verify it.** `python scripts/verify_storage.py`
+reads the same `STORAGE_S3_*` variables the app does and runs the operations
+the product performs — write, read back byte for byte, stat, fetch a
+presigned URL over the network, list by prefix, and delete. It cleans up
+after itself and exits non-zero on the first thing that is not true. Run it
+after creating the bucket and again after any bucket-policy change; a key
+that can write but not delete passes every casual check and then makes
+"delete this project's data" a promise you cannot keep.
+
 **Uploads fail with "the storage could not write".** The app is up but
 cannot reach the bucket. With `AUTH_ENABLED=1` there is a **Test connection**
 button under *Settings → Storage* that writes a file, reads it back and
@@ -313,6 +322,11 @@ part. Either raise `TESTFORTGE_MEMORY_LIMIT` (default `2g`) or set
 Stated because a runbook that only lists what works is a runbook that gets
 believed:
 
+- **The S3 adapter is tested against a mock, not against your provider.**
+  The suite runs it over real HTTP against `moto`, which implements S3
+  semantics but does not enforce signatures and has no bucket policies. Run
+  `scripts/verify_storage.py` against your own bucket — that is the check
+  that covers the difference.
 - **Backups are per project, and never verified against your bucket.** The
   bundle format and the restore path are tested end to end (a project is
   built, backed up, destroyed and restored, and a restored screenshot is
