@@ -1,39 +1,195 @@
-# TestFortge — local / staging compose topology.
+# TestForTge — self-hosted topology (E8.6).
 #
-# Usage:
-#   cp .env.example .env              # edit SECRET_KEY at minimum
+#   cp .env.example .env      # then fill the four values it refuses to guess
 #   docker compose up -d --build
 #   curl http://localhost:5000/healthz
 #
-# The service is a single Flask+gunicorn container. Stateful directories
-# (sessions, generated artefacts, uploads) live on named volumes so the
-# container can be rebuilt without losing user data.
+# Three services, because the application alone is not a deployment:
+#
+#   db        PostgreSQL. Not optional — see the note on the app service.
+#   storage   MinIO, S3-compatible. This is what ADR 0002 §4.1 means by
+#             "one adapter, five providers": self-hosting needs no separate
+#             code path, only a different endpoint.
+#   app       Flask + gunicorn + Playwright.
+#
+# WHAT CHANGED AND WHY (E8.6)
+# ---------------------------
+# The previous version of this file was a single container with
+# FLASK_DEBUG=0 and no database. That combination cannot start: with no
+# DATABASE_URL the app falls back to SQLite, and engine/db.py refuses
+# SQLite outside debug mode on purpose — concurrent writes from gunicorn
+# workers plus the detached runner_worker deadlock on a single file.
+#
+# So the three commands in this file's own header produced a container
+# that died at boot with a RuntimeError. Measured by running the app with
+# exactly the environment this file set, which is the only way that class
+# of defect gets found: it is invisible to anyone reading the file and
+# unmissable to the first person who follows it.
+#
+# docs/runbooks/self-hosting.md is the long form. This file is the short.
+
 services:
-  testfortge:
+  db:
+    image: postgres:16-alpine
+    container_name: testfortge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-testfortge}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-testfortge}"
+    volumes:
+      - testfortge-db:/var/lib/postgresql/data
+    # No ports: published. The application reaches it over the compose
+    # network; publishing 5432 to the host is how a database ends up on
+    # the internet with a password somebody typed in a hurry. Uncomment
+    # only to attach a client, and prefer `docker compose exec db psql`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-testfortge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  storage:
+    image: minio/minio:latest
+    container_name: testfortge-storage
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${STORAGE_S3_ACCESS_KEY:?STORAGE_S3_ACCESS_KEY must be set in .env}"
+      MINIO_ROOT_PASSWORD: "${STORAGE_S3_SECRET_KEY:?STORAGE_S3_SECRET_KEY must be set in .env}"
+    volumes:
+      - testfortge-objects:/data
+    ports:
+      # The console, on localhost only, for looking at what is stored.
+      # Bound to 127.0.0.1 and not 0.0.0.0 so it is reachable over an SSH
+      # tunnel and not from the internet. The S3 API (9000) is not
+      # published at all: the app reaches it over the compose network.
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+  # Creates the bucket and exits. Without it the first upload fails with
+  # "no bucket called testfortge" and the instructions would have to say
+  # "now open the console and make one" — a manual step between `up` and
+  # a working instance is a step people skip and then file a bug about.
+  storage-init:
+    image: minio/mc:latest
+    container_name: testfortge-storage-init
+    depends_on:
+      storage:
+        condition: service_healthy
+    entrypoint: >-
+      /bin/sh -c "
+      mc alias set local http://storage:9000
+      \"$${STORAGE_S3_ACCESS_KEY}\" \"$${STORAGE_S3_SECRET_KEY}\" &&
+      mc mb --ignore-existing \"local/$${STORAGE_S3_BUCKET}\" &&
+      echo 'bucket ready'"
+    environment:
+      STORAGE_S3_ACCESS_KEY: "${STORAGE_S3_ACCESS_KEY}"
+      STORAGE_S3_SECRET_KEY: "${STORAGE_S3_SECRET_KEY}"
+      STORAGE_S3_BUCKET: "${STORAGE_S3_BUCKET:-testfortge}"
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  app:
     build:
       context: .
       dockerfile: Dockerfile
     image: testfortge:latest
     container_name: testfortge
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     ports:
       - "${TESTFORTGE_PORT:-5000}:5000"
     environment:
-      # Required — set in .env (NEVER commit a real value).
+      # ── The four the deployment cannot invent ──────────────────────
+      # `:?` fails the run with a named error instead of starting a
+      # container that half-works. A missing SECRET_KEY used to mean
+      # "sessions silently do not survive a restart", which looks like a
+      # bug in the product.
       SECRET_KEY: "${SECRET_KEY:?SECRET_KEY must be set in .env}"
-      # Logging
+      # Postgres, assembled here rather than asked for as a URL so there
+      # is one place the password lives.
+      DATABASE_URL: "postgresql+psycopg2://${POSTGRES_USER:-testfortge}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-testfortge}"
+      # Encrypts per-organisation secrets at rest: BYOK API keys (E0.9)
+      # and storage credentials (E8.3). Without it the app still runs and
+      # refuses to store either, which is the correct refusal and a
+      # confusing first impression.
+      TESTFORTGE_ENCRYPTION_KEY: "${TESTFORTGE_ENCRYPTION_KEY:?TESTFORTGE_ENCRYPTION_KEY must be set in .env}"
+
+      # ── Storage (ADR 0002) ────────────────────────────────────────
+      # Pointed at the MinIO service above, so a self-hosted instance is
+      # durable out of the box. Setting STORAGE_BACKEND=local instead is
+      # supported and means artefacts live in the container's own volume.
+      STORAGE_BACKEND: "${STORAGE_BACKEND:-s3}"
+      STORAGE_S3_ENDPOINT: "${STORAGE_S3_ENDPOINT:-http://storage:9000}"
+      STORAGE_S3_BUCKET: "${STORAGE_S3_BUCKET:-testfortge}"
+      STORAGE_S3_ACCESS_KEY: "${STORAGE_S3_ACCESS_KEY}"
+      STORAGE_S3_SECRET_KEY: "${STORAGE_S3_SECRET_KEY}"
+      # MinIO on the compose network speaks plain HTTP. The endpoint above
+      # already says so and the scheme wins over this flag (E8.3), but it
+      # is stated rather than left to be inferred.
+      STORAGE_S3_SECURE: "${STORAGE_S3_SECURE:-0}"
+
+      # ── Who gets in ───────────────────────────────────────────────
+      # Off by default, which means the HTTP Basic gate below is the only
+      # perimeter. Turn both on to use real accounts (E1), then set
+      # BASIC_GATE_ENABLED=0. Doing it in the other order locks everyone
+      # out, and engine/basic_auth.py refuses that combination for you.
+      AUTH_ENABLED: "${AUTH_ENABLED:-0}"
+      ORG_MODE: "${ORG_MODE:-0}"
+      BASIC_GATE_ENABLED: "${BASIC_GATE_ENABLED:-1}"
+      TESTFORTGE_BASIC_USER: "${TESTFORTGE_BASIC_USER:-}"
+      TESTFORTGE_BASIC_PASSWORD: "${TESTFORTGE_BASIC_PASSWORD:-}"
+
+      # ── Sessions ──────────────────────────────────────────────────
+      # "db" keeps sign-ins across a container restart. The filesystem
+      # backend is the legacy default and loses every session when the
+      # container is replaced, which on a self-host is every upgrade.
+      SESSION_BACKEND: "${SESSION_BACKEND:-db}"
+
+      # ── The rest ──────────────────────────────────────────────────
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       LOG_FORMAT: "${LOG_FORMAT:-json}"
-      # Security flags — flip BEHIND_HTTPS=1 when terminating TLS upstream.
+      # Set to 1 when something upstream terminates TLS. It is what makes
+      # the session cookie Secure; leaving it at 0 behind a proxy means
+      # the cookie travels without that flag.
       BEHIND_HTTPS: "${BEHIND_HTTPS:-0}"
       FLASK_DEBUG: "0"
-      # Job queue tuning
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       JOB_QUEUE_WORKERS: "${JOB_QUEUE_WORKERS:-2}"
       JOB_RETENTION_SECONDS: "${JOB_RETENTION_SECONDS:-3600}"
+      # Real browser runs are heavy. Left on for self-host — unlike the
+      # 512 MB free dyno this was turned off for, a self-hosted box can
+      # usually afford Chromium.
+      TESTFORTGE_BROWSER_ENABLED: "${TESTFORTGE_BROWSER_ENABLED:-1}"
     volumes:
+      # Uploads and generated artefacts. Still volumes even with S3
+      # configured: the Playwright runner writes screenshots to local disk
+      # while a run is in progress and only the finished artefacts become
+      # blobs (routes/automation.py serves local first for that reason).
       - testfortge-storage:/app/storage
-      - testfortge-sessions:/app/flask_session
       - testfortge-uploads:/app/uploads
+      # Only used when SESSION_BACKEND=filesystem. A volume anyway, so
+      # that overriding the default does not silently mean "everyone is
+      # signed out on every upgrade".
+      - testfortge-sessions:/app/flask_session
     healthcheck:
       test:
         - "CMD"
@@ -43,11 +199,23 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
-    # Playwright's chromium sandbox needs a bit of shared memory headroom.
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    # Playwright's chromium sandbox needs shared-memory headroom; without
+    # this Chromium crashes on pages with many tabs or large screenshots.
     shm_size: "1gb"
+    # A ceiling, so one runaway run cannot take the host down with it.
+    # Chromium plus gunicorn wants roughly 1.5 GB in practice; 2 GB leaves
+    # room without pretending the limit is free.
+    deploy:
+      resources:
+        limits:
+          memory: "${TESTFORTGE_MEMORY_LIMIT:-2g}"
 
 volumes:
+  testfortge-db:
+  testfortge-objects:
   testfortge-storage:
-  testfortge-sessions:
   testfortge-uploads:
+  testfortge-sessions:

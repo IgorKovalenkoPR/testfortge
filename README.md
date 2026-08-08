@@ -16,6 +16,11 @@ FLASK_DEBUG=1 python app.py
 
 ## Deployment
 
+**Self-hosting with Docker:** [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md)
+is the from-scratch instruction — Postgres, MinIO and the app, with what to
+back up, how to put it behind TLS, and what the deployment does not give you.
+`docker-compose.yml` is the short form of the same thing.
+
 Postgres is required in production. SQLite + WAL is fine for local dev
 and unit tests, but concurrent writes from gunicorn workers plus the
 detached `runner_worker` will deadlock under load on a single-file DB.
