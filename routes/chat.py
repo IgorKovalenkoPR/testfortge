@@ -18,9 +18,11 @@ from datetime import datetime
 from flask import Flask, Response, jsonify, request, session, stream_with_context
 from werkzeug.utils import secure_filename
 
+from engine import blobs as _blobs
 from engine import db as _db
 
-from ._shared import ensure_active_project, mirror_pack, pack_bugs
+from ._shared import (ensure_active_project, mirror_pack, pack_bugs,
+                      resolve_active_project)
 
 from engine import chatbot as _chatbot_mod
 from engine.chatbot import respond_dict as _chatbot_respond
@@ -358,26 +360,32 @@ def register(app: Flask) -> None:
                 "message": f"Missing required field(s): {', '.join(missing)}",
             }), 400
 
-        # Optional attachment — store under UPLOAD_FOLDER/chat_bug_attachments/.
+        # Optional attachment. Stored through ``engine.blobs`` so it lands
+        # where ``automation_asset`` serves from — E4.5a.
+        #
+        # It used to be written to ``UPLOAD_FOLDER/chat_bug_attachments/``
+        # while the bug page renders attachments out of ``STORAGE_ROOT``,
+        # which are two different directories. Measured before the fix: the
+        # upload succeeded, the row recorded the bare filename, and the
+        # gallery got a **404** — a broken image where the evidence should
+        # be. Nothing reported it, because a save that works and a read that
+        # fails are in different requests.
         attachment_name = ""
-        attachment_path = ""
         upload = request.files.get("attachment")
         if upload and upload.filename:
-            upload_root = app.config.get("UPLOAD_FOLDER", "./uploads")
-            target_dir = os.path.join(upload_root, "chat_bug_attachments")
-            os.makedirs(target_dir, exist_ok=True)
-            safe_name = secure_filename(upload.filename)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            attachment_name = f"{ts}_{safe_name}"
-            attachment_path = os.path.join(target_dir, attachment_name)
             try:
-                upload.save(attachment_path)
-            except Exception:
-                # Don't fail the whole bug just because the attachment
-                # didn't persist — log via the standard request flow and
-                # continue with an empty attachment.
+                attachment_name = _blobs.save(
+                    upload, project_id=(resolve_active_project() or "none"),
+                    kind="bug", entity_id="chat")
+            except Exception as exc:
+                # Unlike the bug page's own upload, this one does not refuse
+                # the whole submission: the file is one optional field on a
+                # form whose point is the bug report, and losing the report
+                # to save the screenshot is the wrong trade. Logged, and the
+                # response says the attachment was dropped.
+                _logger.warning(
+                    "chat bug attachment not stored: %s", exc)
                 attachment_name = ""
-                attachment_path = ""
 
         note = f.get("note", "").strip()
 

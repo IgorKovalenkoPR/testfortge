@@ -345,27 +345,37 @@ class TestPage:
         assert "Sign-in fails with a valid password" in body
 
 
-class TestAttachmentsAreOutOfScope:
-    """Deliberately not built here, and the reason is not "no time".
+class TestAttachmentsAreNotThisEditorsJob:
+    """Uploading evidence exists now — it is just not part of E4.5.
 
-    An attachment needs somewhere to live. Today ``bug_report.attachment``
-    holds a path to a run artefact on the local filesystem, which on the free
-    plan is wiped on every restart — so an uploaded screenshot would vanish
-    without telling anybody, which is worse than not offering the upload.
-    Blob storage is E0.5 and needs the owner's dashboard action; the follow-up
-    is recorded as E4.5a in the plan.
+    This class used to assert the page offered **no** upload control at all,
+    on the reasoning that an attachment had nowhere durable to live. E4.5a
+    built it anyway, deliberately on local disk, with the ephemerality
+    written down as a test rather than left to be discovered — see
+    ``tests/test_bug_attachments.py::TestTheLocalDiskLimitation``. So the
+    old assertion is gone; what replaces it is the boundary that still
+    holds.
 
-    What is pinned here is that nothing pretends otherwise.
+    The inline editor edits **fields**. An upload is a separate POST to a
+    separate route with its own refusals, and folding it into the editing
+    substrate would mean ``patch`` had to take a file — which is how a
+    validated-field mechanism grows a second, unvalidated one.
     """
 
     def test_attachment_is_not_an_editable_field(self):
+        """``bug_report.attachment`` is the spreadsheet's evidence *link*
+        and stays free text; the uploaded-file list is ``attachments``, in
+        ``extra``, written only by the upload route."""
         assert "attachment" not in editable.entity("bug").fields
+        assert "attachments" not in editable.entity("bug").fields
 
-    def test_the_page_offers_no_upload_control(self, client, project,
-                                              editing_on):
+    def test_the_upload_is_its_own_route_not_a_patch(self, client, project,
+                                                     editing_on):
         body = _render(client, project)
-        assert 'type="file"' not in body.split(
-            'class="bug-card', 1)[-1], "no upload inside a bug card"
+        assert "/attach" in body, (
+            "E4.5a's upload form should be on the page")
+        # …and it posts somewhere other than the editing substrate.
+        assert "/api/edit/bug" not in body.split('name="attachment"', 1)[0][-400:]
 
     def test_existing_attachments_still_render(self, client, project,
                                               editing_on):

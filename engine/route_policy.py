@@ -237,6 +237,9 @@ POLICY: dict[str, str] = {
     # admin on that one action — see routes/bugs.py. Splitting it into two
     # endpoints would change a URL the toolbar posts to for no gain.
     "bugs_bulk": "user",
+    # Attaching evidence is ordinary triage — the same level as filing the
+    # bug it hangs off (E4.5a).
+    "bug_attach": "user",
     "bugs_reset": "admin",            # wipes every bug on the project
     "export_bug_reports": "user",
     "export_bug_reports_csv": "user",

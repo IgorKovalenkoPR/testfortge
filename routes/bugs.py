@@ -2,6 +2,7 @@
 
   * POST /create-bug-report   — create a single bug entry
   * GET  /bug-reports         — list bugs (DB-first, session fallback)
+  * POST /bug-reports/<id>/attach — attach evidence by hand (E4.5a)
   * POST /bugs/bulk           — bulk-update / delete bugs
   * GET  /export-bug-reports  — markdown export
 
@@ -28,6 +29,7 @@ from engine.bug_report import (
     export_bug_report_markdown,
 )
 
+from engine import blobs as _blobs
 from engine import db as _db
 from engine import bug_areas as _bug_areas
 from engine import bug_workflow as _bug_workflow
@@ -364,6 +366,82 @@ def register(app: Flask) -> None:
                                area_counts=area_counts,
                                area_filter=area_filter,
                                project_bug_total=project_bug_total)
+
+    @app.route("/bug-reports/<int:db_id>/attach", methods=["POST"])
+    def bug_attach(db_id):
+        """Attach a screenshot, video or log to a bug by hand — E4.5a.
+
+        **Which of the two "attachment" fields this writes, and why.** The
+        bug row has both, and the names differ by one letter:
+
+        * ``bug_report.attachment`` — one ``VARCHAR(500)``. It is the
+          evidence **link** the team's own bug spreadsheet puts on every
+          row, and it round-trips through import/export as text. It is not
+          a file and never was.
+        * ``attachments`` — a list of **storage keys** in the ``extra``
+          JSON, rendered as a gallery by ``bug_reports.html`` through
+          ``automation_asset``. Run screenshots and videos already arrive
+          this way.
+
+        An uploaded file is the second kind. Merging the two would either
+        turn a spreadsheet column into a file list — breaking the import
+        this product is built around — or flatten a gallery into one slot.
+        So they stay separate, and this docstring exists because "attachment
+        vs attachments" is otherwise a coin toss for whoever reads it next.
+
+        Storage is **local disk only**, deliberately. ADR 0002 is Proposed
+        and E8.2 has not been built, so the file lands under ``STORAGE_ROOT``
+        via ``engine.blobs`` — which on the free plan is an ephemeral disk.
+        ``tests/test_bug_attachments.py`` states that limitation as a test
+        rather than leaving it to be discovered after a restart.
+        """
+        pid = ensure_active_project()
+        if not pid:
+            flash(g.t.get("bug_attach_no_project",
+                          "Pick or create a project first."), "error")
+            return redirect(url_for("bug_reports_page"))
+        if _require_project_owner(pid) is None:
+            flash(g.t.get("bug_attach_no_project", "Project not found."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+
+        upload = request.files.get("attachment")
+        if not (upload and upload.filename):
+            flash(g.t.get("bug_attach_none", "Choose a file to attach."),
+                  "error")
+            return redirect(url_for("bug_reports_page"))
+
+        try:
+            key = _blobs.save(upload, project_id=pid, kind="bug",
+                              entity_id=str(db_id))
+        except _blobs.UploadRefused as exc:
+            # Loud, and nothing recorded. ADR 0002 §4.6: the person who
+            # chose the file is standing here, and saying "attached" over a
+            # file we did not store is an assumption recorded as a fact.
+            flash(str(exc), "error")
+            return redirect(url_for("bug_reports_page"))
+        except Exception as exc:      # pragma: no cover — disk full, EACCES
+            log.warning("attachment save failed for bug %s: %s", db_id, exc)
+            flash(g.t.get("bug_attach_failed",
+                          "That file could not be saved. Nothing was "
+                          "attached."), "error")
+            return redirect(url_for("bug_reports_page"))
+
+        if not _db.append_bug_attachment(pid, db_id, key):
+            # The bug is not in this project, or is gone. The file is on
+            # disk with nothing pointing at it, so take it back out rather
+            # than leaving an orphan the retention sweep has to guess about.
+            _blobs.delete_prefix(f"project/{pid}/bug/{db_id}")
+            flash(g.t.get("bug_attach_missing",
+                          "That bug is not in this project."), "error")
+            return redirect(url_for("bug_reports_page"))
+
+        _db.append_audit(entity="bug", action="attach", entity_id=str(db_id),
+                         project_id=pid, user_id=_perm.current_user_id(),
+                         diff={"key": key})
+        flash(g.t.get("bug_attach_ok", "Attached to the bug report."),
+              "success")
+        return redirect(url_for("bug_reports_page"))
 
     @app.route("/bugs/bulk", methods=["POST"])
     def bugs_bulk():

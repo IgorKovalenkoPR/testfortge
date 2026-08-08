@@ -382,6 +382,44 @@
                     </a>
                 </div>
                 {% endif %}
+
+                {# E4.5a — attach evidence by hand. Rendered in both branches
+                   above: the case that needs it most is the one where the run
+                   captured nothing, and a tester who has a screenshot on their
+                   desktop should not have to re-run to attach it.
+
+                   Only when the bug has a db_id: a session-only bug (the
+                   pre-project flow) has nothing for the route to address, and
+                   an upload control that 404s is worse than none. #}
+                {% if bug.db_id %}
+                {#- The controls are here; the <form> they belong to is at the
+                    bottom of the page, outside #bug-bulk-form, and they are
+                    tied to it by the HTML5 ``form`` attribute.
+
+                    Not a flourish. Every bug card on this page is already
+                    inside one big <form action="/bugs/bulk">, and a <form>
+                    nested in a <form> is invalid HTML: the parser drops the
+                    inner one, its controls are adopted by the outer one, and
+                    the Attach button posts the file to /bugs/bulk instead.
+                    The template looked right and the server-side test — which
+                    greps the HTML source — passed. A real browser is what
+                    showed the form missing from the DOM. -#}
+                <div class="bug-attach-form">
+                    <label class="sr-only" for="attach-{{ bug.db_id }}">
+                        {{ t.get('bug_attach_label', 'Attach evidence') }}
+                    </label>
+                    <input type="file" id="attach-{{ bug.db_id }}" name="attachment"
+                           form="bug-attach-{{ bug.db_id }}"
+                           accept="image/*,video/*,.pdf,.txt,.log" required>
+                    <button type="submit" form="bug-attach-{{ bug.db_id }}"
+                            class="btn btn-secondary btn-sm">
+                        {{ t.get('bug_attach_submit', 'Attach') }}
+                    </button>
+                    <span class="bug-attach-note">
+                        {{ t.get('bug_attach_hint', 'Screenshot, video, PDF or log.') }}
+                    </span>
+                </div>
+                {% endif %}
             </td></tr>
             {% if bug.reporter %}
             <tr><td class="label">{{ t.get('bug_reporter', 'Reporter') }}</td><td>{{ bug.reporter }}</td></tr>
@@ -442,6 +480,25 @@
     <button type="button" id="bulk-clear" class="btn btn-secondary">{{ t.get('bug_bulk_clear', 'Clear') }}</button>
 </div>
 </form>
+
+{#- One upload form per bug, deliberately **after** </form> above.
+
+    They cannot live inside the bug cards, because those are inside
+    #bug-bulk-form and a nested <form> is dropped by every HTML parser.
+    Declared here and wired back to the controls in each card by the
+    ``form="bug-attach-<id>"`` attribute, which is what that attribute is
+    for. Each carries only its CSRF token; the file input lives in the card
+    and is submitted with this form.
+
+    tests/test_bug_attachments.py::TestTheUploadFormIsRealHtml asserts the
+    nesting stays gone. -#}
+{% for bug in bugs %}{% if bug.db_id %}
+<form id="bug-attach-{{ bug.db_id }}" method="post"
+      enctype="multipart/form-data"
+      action="{{ url_for('bug_attach', db_id=bug.db_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{% endif %}{% endfor %}
 
 {% else %}
 <div class="card">

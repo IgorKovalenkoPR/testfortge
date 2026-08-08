@@ -680,4 +680,13 @@ TRANSLATIONS = {
     'verify_banner_why': "It was not us who delivered your invitation, so "
                          "nothing has proved this address belongs to you.",
     'verify_banner_send': 'Send me a confirmation link',
+    # ── Attaching evidence to a bug by hand (E4.5a) ────────────────
+    'bug_attach_label': 'Attach evidence',
+    'bug_attach_submit': 'Attach',
+    'bug_attach_hint': 'Screenshot, video, PDF or log.',
+    'bug_attach_ok': 'Attached to the bug report.',
+    'bug_attach_none': 'Choose a file to attach.',
+    'bug_attach_no_project': 'Pick or create a project first.',
+    'bug_attach_missing': 'That bug is not in this project.',
+    'bug_attach_failed': 'That file could not be saved. Nothing was attached.',
 }

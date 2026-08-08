@@ -2242,6 +2242,26 @@ input[type="text"]:focus, textarea:focus, select:focus {
 
 .auth-forgot { margin-top: .75rem; }
 
+/* Attaching evidence to a bug by hand (E4.5a). Sits under the gallery in
+   both states — the case that needs it most is the run that captured
+   nothing, and a tester with a screenshot already on their desktop should
+   not have to re-run to attach it. */
+.bug-attach-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem .75rem;
+    align-items: center;
+    margin-top: .75rem;
+}
+.bug-attach-form input[type="file"] {
+    font-size: .8rem;
+    max-width: 100%;
+}
+.bug-attach-note {
+    font-size: .75rem;
+    color: var(--text-muted);
+}
+
 /* The unconfirmed-address banner (E1.3). The button sits beside the text on
    a wide screen and under it on a narrow one — a wrapping flex row rather
    than a media query, because the only thing that has to change is where

@@ -4467,6 +4467,42 @@ def _append_audit(prev: str | None, actor: str, msg: str) -> str:
     return f"{base}\n{line}" if base else line
 
 
+def append_bug_attachment(project_id: str, bug_id: int, key: str) -> bool:
+    """Add one storage key to a bug's ``attachments`` list (E4.5a).
+
+    Scoped by ``project_id`` for the reason :func:`bulk_update_bugs` gives:
+    a bug id from another project must not be addressable, and applying the
+    filter in the query is what makes that true rather than remembered.
+
+    ``attachments`` lives in the ``extra`` JSON blob and is a **list of
+    storage keys** — not to be confused with the ``attachment`` column,
+    which is a single free-text evidence *link* carried over from the team's
+    bug spreadsheet. Two mechanisms, names one letter apart; see
+    ``routes/bugs.py::bug_attach`` for why they stay separate.
+
+    The whole dict is reassigned rather than mutated in place: SQLAlchemy
+    does not track mutation inside a JSON column, so ``extra["attachments"]
+    .append(...)`` writes nothing and reports success.
+    """
+    if not (project_id and bug_id and key):
+        return False
+    with session_scope() as sess:
+        row = sess.query(BugReport).filter(
+            BugReport.project_id == project_id,
+            BugReport.id == int(bug_id),
+        ).one_or_none()
+        if row is None:
+            return False
+        extra = dict(row.extra or {})
+        attachments = list(extra.get("attachments") or [])
+        if key in attachments:
+            return True
+        attachments.append(key)
+        extra["attachments"] = attachments
+        row.extra = extra
+        return True
+
+
 def bulk_update_bugs(project_id: str, bug_ids: list[int], *,
                      action: str, value: str | None,
                      actor: str) -> int:
