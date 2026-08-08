@@ -23,6 +23,7 @@ of what an epic actually found once it was carried out.
 | [e9_test_strategy.md](e9_test_strategy.md) | E9.1 | Test strategy for the programme, written *after* E1–E7 rather than before: coverage targets, the risk matrix, and the two rules the defects produced | — |
 | [e9_security_pass.md](e9_security_pass.md) | E9.8 | OWASP ASVS-lite on auth / RBAC / upload / storage — one High found and closed (SSRF stopped at the first hop) | — |
 | [e9_delivery_record.md](e9_delivery_record.md) | E9.3–E9.7 | What the integration, functional, browser and load legs were and what they found: two Postgres-only migration defects, an invitation redeemable twice, and a failed Chromium launch that poisoned the whole process | — |
+| [e10_confirmation.md](e10_confirmation.md) | E10 | **Confirmation + full regression, run 2026-08-08**: the R1–R10 traceability matrix with verdicts, the perimeter regression, and the go/no-go — **NO-GO**, because R3 is unbuilt and there is no staging, with a partial confirmation issued for the other nine | — |
 | [next_session_prompts.md](next_session_prompts.md) | **Що далі** | Ten self-contained prompts for the remaining work, each stating what already exists (with file:line), what is missing, the acceptance criterion and the measured trap. Written to be pasted into a fresh session without it having to re-derive the state | — |
 
 ## Recommended sequencing
