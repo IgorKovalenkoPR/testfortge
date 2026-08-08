@@ -149,6 +149,11 @@ POLICY: dict[str, str] = {
     "db_create_project": "admin",
     "db_rename_project": "admin",
     "delete_project": "admin",
+    # Downloading everything a project holds — every bug's wording, every
+    # screenshot. Admin, for the same reason deletion is: it is the whole
+    # project in one file, and "read access to a page" is not the same
+    # permission as "hand me the lot" (E8.5).
+    "export_project": "admin",
     "db_move_artifacts": "admin",     # restructures where work lives
     # Claiming the projects that predate ORG_MODE transfers ownership of
     # every unassigned one at once (E1.6). Self-enforcing via

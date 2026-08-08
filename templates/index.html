@@ -723,8 +723,17 @@
                     </form>
                     {% endif %}
                     <a href="{{ url_for('load_project', project_id=p.folder) }}" class="btn btn-xs">{{ t.load }}</a>
-                    {# Deleting a project is admin work. #}
+                    {# Deleting a project is admin work. So is exporting
+                       it: the zip is every bug's wording and every
+                       screenshot in one file (E8.5). Export sits before
+                       Delete on purpose — it is the answer to the pause
+                       the confirmation is meant to cause. #}
                     {% if is_admin %}
+                    <a href="{{ url_for('export_project', project_id=p.folder) }}"
+                       class="btn btn-xs" title="{{ t.get('export_project_title', 'Download everything this project holds, as a zip') }}">
+                        <i data-lucide="download" class="icon-sm"></i>
+                        {{ t.get('export_project', 'Export') }}
+                    </a>
                     <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

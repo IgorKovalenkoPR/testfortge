@@ -165,6 +165,7 @@ jobs:
           --cov=engine.basic_auth
           --cov=engine.blobs
           --cov=engine.storage
+          --cov=engine.retention
           --cov=engine.project_facts
           --cov=engine.capacity
           --cov=engine.editable --cov=engine.run_limits --cov=engine.mentoring

@@ -17,9 +17,14 @@ removed; everything now lives in the relational schema declared in
 
 from __future__ import annotations
 
-from flask import Flask, abort, flash, redirect, request, session, url_for
+import re
+
+from flask import (Flask, Response, abort, flash, redirect, request, session,
+                   url_for)
 
 from engine import db as _db
+from engine import permissions as _perm
+from engine import retention as _retention
 from engine import workspace as _workspace
 from engine.log import get_logger
 
@@ -268,18 +273,92 @@ def register(app: Flask) -> None:
 
     @app.route("/delete-project/<project_id>", methods=["POST"])
     def delete_project(project_id):
+        """Delete a project — its rows **and** its files (E8.5).
+
+        This used to be ``_db.delete_project(project_id)`` and a flash. What
+        that actually did, measured on a clean database rather than inferred
+        from the schema:
+
+        * test cases, checklist items and runs went, via ``ON DELETE
+          CASCADE``;
+        * **bug reports stayed.** Their foreign key is ``SET NULL``, which is
+          right for the column — a bug filed through the chat widget has no
+          project — and wrong as a deletion behaviour. Every bug the project
+          held remained in the database, detached, with its title, its steps,
+          its actual and expected results and the storage keys of its
+          attachments. ``tedgie_submission`` behaved the same way;
+        * no file was touched anywhere;
+        * nothing was recorded.
+
+        So the button said "Project deleted" over an action that deleted some
+        of it. ``engine.retention`` now does the whole thing and reports what
+        it did; this handler's job is the session pointer and the message.
+        """
         meta = _require_project_owner(project_id)
         if not meta:
             # Idempotent: deleting a missing project is a noop.
             flash("Project deleted.", "success")
             return redirect(url_for("index"))
-        _db.delete_project(project_id)
+
+        report = _retention.delete_project_data(
+            project_id, org_id=_perm.current_org_id(),
+            user_id=_perm.current_user_id())
+        if not report.ok:
+            # Nothing was deleted — the storage step refused and the rows
+            # were left alone deliberately. Saying "deleted" here would be
+            # the defect this route was just fixed for, in the other
+            # direction.
+            flash(report.problem, "error")
+            return redirect(url_for("index"))
+
         # If the active project was just deleted, clear the pointer too.
         if session.get("project_id") == project_id:
             session.pop("project_id", None)
             (session.get("project_setup") or {}).pop("project_name", None)
-        flash("Project deleted.", "success")
+        flash(report.summary(), "success")
         return redirect(url_for("index"))
+
+    @app.route("/projects/<project_id>/export", methods=["GET"])
+    def export_project(project_id):
+        """Download everything this project holds, as a zip.
+
+        Offered next to the delete button on purpose. A deletion that cannot
+        be preceded by an export is one people are right to hesitate over,
+        and hesitating over deletion is how a free-tier database fills with
+        projects nobody wants.
+        """
+        meta = _require_project_owner(project_id)
+        if not meta:
+            flash("That project no longer exists.", "error")
+            return redirect(url_for("index"))
+
+        try:
+            blob, notes = _retention.export_project_data(
+                project_id, org_id=_perm.current_org_id())
+        except Exception as exc:      # pragma: no cover — defensive
+            log.warning("export of %s failed: %s", project_id[:8], exc)
+            flash("That export could not be built. Nothing was changed.",
+                  "error")
+            return redirect(url_for("index"))
+
+        _db.append_audit(entity="project", action="export",
+                         user_id=_perm.current_user_id(),
+                         org_id=_perm.current_org_id(),
+                         project_id=project_id, entity_id=project_id,
+                         diff={"bytes": len(blob),
+                               "truncated": bool(notes.get("truncated"))})
+
+        safe = re.sub(r"[^A-Za-z0-9_\-]", "-",
+                      (meta.get("name") or "project"))[:60] or "project"
+        return Response(
+            blob, mimetype="application/zip",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="{safe}-export.zip"',
+                # The archive is complete or it says so inside; the header
+                # cannot, so nothing here implies completeness either.
+                "Content-Length": str(len(blob)),
+            })
 
     # ── Explicit project-picker actions ────────────────────────────
 

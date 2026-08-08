@@ -71,6 +71,7 @@ from engine.automation_qa import AutomationScript, tc_to_script
 from engine.automation_runner import (
     AUTOMATION_RUN_MAX_KEPT,
     AUTOMATION_RUN_RETENTION_DAYS,
+    retention_numbers as _retention_numbers,
     AutomationRunner,
     RunReport,
     ScriptResult,
@@ -532,11 +533,8 @@ class LiveExecutor:
         os.makedirs(run_dir, exist_ok=True)
 
         try:
-            _purge_old_automation_runs(
-                runs_root,
-                AUTOMATION_RUN_RETENTION_DAYS,
-                AUTOMATION_RUN_MAX_KEPT,
-            )
+            _days, _kept = _retention_numbers()
+            _purge_old_automation_runs(runs_root, _days, _kept)
         except Exception as exc:
             _logger.debug("retention purge skipped: %s", exc)
 

@@ -31,8 +31,51 @@ _logger = get_logger(__name__)
 # 502 Bad Gateway after a handful of runs because gunicorn workers OOM'd
 # trying to evict cached assets. Default is now 1 day plus a hard cap on
 # the retained run count.
+#
+# **These are now the floor, not the policy** (E8.5). They are what an
+# ephemeral disk forces, and ``engine.retention.policy_for()`` returns them
+# unchanged while the backend *is* that disk. Once artefacts go to durable
+# storage the same function returns a real window — 30 days rather than one
+# — because "we delete your evidence tomorrow" stopped being a constraint
+# and became a choice the moment E8.2 landed. ADR 0002 §1.1 predicted
+# exactly this and left the change to E8.5.
+#
+# Kept as module constants because two modules import them by name and an
+# explicit override in the environment must still win.
 AUTOMATION_RUN_RETENTION_DAYS = int(os.environ.get("AUTOMATION_RUN_RETENTION_DAYS", "1"))
 AUTOMATION_RUN_MAX_KEPT = int(os.environ.get("AUTOMATION_RUN_MAX_KEPT", "5"))
+
+
+def retention_numbers(org_id: str | None = None) -> tuple[int, int]:
+    """``(days, max_runs)`` for a purge happening right now.
+
+    An explicit ``AUTOMATION_RUN_*`` in the environment wins — an operator
+    who set a number meant it. Otherwise the policy decides, which is what
+    makes durable storage actually change how long evidence lives instead
+    of merely making it possible.
+    """
+    def _explicit(name: str) -> int | None:
+        # Read now, not at import. The module constants above are captured
+        # once, so an operator raising the window in a dashboard would not
+        # see it take effect until a redeploy — the exact thing
+        # engine/features.py and engine/storage.py both refuse to do.
+        raw = (os.environ.get(name) or "").strip()
+        try:
+            return int(raw) if raw else None
+        except ValueError:
+            _logger.warning("%s=%r is not a number — ignoring.", name, raw)
+            return None
+
+    explicit_days, explicit_kept = (_explicit("AUTOMATION_RUN_RETENTION_DAYS"),
+                                    _explicit("AUTOMATION_RUN_MAX_KEPT"))
+    try:
+        from engine import retention as _retention
+        policy = _retention.policy_for(org_id)
+        return (explicit_days if explicit_days is not None else policy.days,
+                explicit_kept if explicit_kept is not None else policy.max_runs)
+    except Exception as exc:      # pragma: no cover — never block a run
+        _logger.debug("retention policy unavailable (%s); using defaults", exc)
+        return AUTOMATION_RUN_RETENTION_DAYS, AUTOMATION_RUN_MAX_KEPT
 
 # Module-level handle to the currently-active Playwright browser. The
 # runner_worker SIGTERM/SIGINT handler grabs this so it can force-close
@@ -461,11 +504,8 @@ class AutomationRunner:
 
         # Retention cleanup (fire-and-forget; never blocks the run on error).
         try:
-            _purge_old_automation_runs(
-                runs_root,
-                AUTOMATION_RUN_RETENTION_DAYS,
-                AUTOMATION_RUN_MAX_KEPT,
-            )
+            _days, _kept = retention_numbers()
+            _purge_old_automation_runs(runs_root, _days, _kept)
         except Exception as exc:
             _logger.debug("retention purge skipped: %s", exc)
 

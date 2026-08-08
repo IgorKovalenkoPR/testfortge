@@ -347,7 +347,16 @@ TRANSLATIONS = {
     "sr_next_steps_placeholder": "One step per line",
 
     # Delete confirm
-    "delete_confirm": "Delete project?",
+    # E8.5. The old text was "Delete project?", which asks about the
+    # project and not about the data — and the data is what goes: every
+    # bug's wording, every screenshot, permanently. A confirmation that
+    # understates what it destroys is a confirmation nobody reads twice.
+    "delete_confirm": ("Delete this project and everything in it — test "
+                       "cases, checklist, bugs, runs and every uploaded "
+                       "file? This cannot be undone. Export first if you "
+                       "want a copy."),
+    "export_project": "Export",
+    "export_project_title": "Download everything this project holds, as a zip",
 
     # User stories page
     "us_id": "ID",
