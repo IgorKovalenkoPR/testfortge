@@ -49,6 +49,7 @@ quietly land somewhere else are bytes the next read cannot find.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -77,6 +78,43 @@ ORG_SECRET_NAME = "storage_config"
 #: a referrer log is dead before it is useful.
 PRESIGN_TTL_SECONDS = 600
 
+#: How many objects :func:`Backend.usage` will enumerate before it stops.
+#:
+#: There is no cheap "size of this prefix" in the S3 protocol — the answer is
+#: a listing, and a listing over a large prefix is many round trips on a page
+#: an admin opens casually. So it is capped, and the cap is **reported**
+#: (:class:`Usage` carries ``truncated``) rather than silently turning a
+#: partial sum into a total. A number that says "at least" is useful; a
+#: number that quietly means "the first five thousand" is worse than none.
+USAGE_SCAN_LIMIT = 5000
+
+#: Last path segment before the throw-away object a connection check writes.
+#:
+#: The check writes under the **organisation's own prefix** on purpose: a
+#: bucket policy scoped to ``org/<id>/*`` is a sensible thing for an admin to
+#: write, and a check that probed the bucket root would fail against a
+#: correctly-configured bucket — which is a check that reports a problem it
+#: created.
+CHECK_SEGMENT = "_storage-check"
+
+#: Seconds a single connect or read may take during "Test connection".
+#:
+#: Bounded because a person is watching. A wrong port against a firewalled
+#: host answers nothing at all, and the client's default retry schedule turns
+#: that into a request that can outlive the dyno's own timeout — at which
+#: point the admin gets a blank page instead of the diagnosis this feature
+#: exists to give. Not applied to uploads, where retries are what a flaky
+#: network needs.
+CHECK_TIMEOUT_SECONDS = 5.0
+
+#: The ``org`` segment for a caller who is not in an organisation.
+#:
+#: Lives here rather than in ``engine.blobs`` because both modules build the
+#: same prefix — ``blobs`` for real keys, this one for the check probe — and
+#: two spellings of ``_none`` would be two answers to one question. ``blobs``
+#: re-exports it; :func:`org_prefix` is the only place either builds it.
+ORG_NONE = "_none"
+
 
 class StorageError(RuntimeError):
     """A storage operation failed. The message is safe to log, not to show."""
@@ -84,6 +122,57 @@ class StorageError(RuntimeError):
 
 class StorageUnavailable(StorageError):
     """The backend is configured but cannot be reached or built."""
+
+
+@dataclass(frozen=True)
+class Usage:
+    """How much of a prefix is in use.
+
+    ``truncated`` is not a detail. See :data:`USAGE_SCAN_LIMIT`.
+    """
+
+    objects: int = 0
+    bytes: int = 0
+    truncated: bool = False
+
+    @property
+    def human(self) -> str:
+        size = float(self.bytes)
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "GB":
+                shown = f"{size:.0f} {unit}" if unit == "B" \
+                    else f"{size:.1f} {unit}"
+                break
+            size /= 1024
+        return f"at least {shown}" if self.truncated else shown
+
+
+#: The steps a connection check goes through, in order.
+#:
+#: Named because "it failed" is not an answer an admin can act on, and the
+#: five failures below want five different next moves: fix the address, fix
+#: the key, fix the bucket name, widen the policy, widen it further.
+CHECK_STEPS = ("reach", "authenticate", "bucket", "write", "read", "delete")
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """The outcome of "test this connection", written for a person.
+
+    E8.3's acceptance criterion is one sentence — *wrong credentials produce
+    a comprehensible error at the verification step* — so ``message`` is the
+    product here, not a side effect. ``detail`` carries the underlying
+    exception for the log and is never rendered.
+    """
+
+    ok: bool
+    step: str = "reach"
+    message: str = ""
+    detail: str = ""
+
+    @property
+    def failed_at(self) -> str:
+        return "" if self.ok else self.step
 
 
 @dataclass(frozen=True)
@@ -106,11 +195,17 @@ class Location:
 # ── The interface ────────────────────────────────────────────────────
 
 class Backend(ABC):
-    """What every backend must do. Four verbs, and each has a caller.
+    """What every backend must do. Six verbs, and each has a caller.
 
-    Deliberately small. ``list``, ``copy`` and ``move`` are absent because
-    nothing needs them yet, and an interface with methods no caller uses is
-    the shape this programme has met five times.
+    Five abstract, one concrete. ``usage`` arrived with E8.3, which needed
+    "how much is this team using" on the settings page; :meth:`check` is
+    concrete because the round trip it performs is the same on every backend
+    and only the *diagnosis* of a failure differs — which is
+    :meth:`_diagnose`'s job.
+
+    Still deliberately small. ``copy`` and ``move`` are absent because
+    nothing needs them, and an interface with methods no caller uses is the
+    shape this programme has met five times.
     """
 
     name: str = "?"
@@ -140,9 +235,67 @@ class Backend(ABC):
         scheme starts with the organisation and the project — ADR §4.2.
         """
 
+    @abstractmethod
+    def usage(self, prefix: str) -> Usage:
+        """How many objects live under *prefix*, and how many bytes.
+
+        Capped at :data:`USAGE_SCAN_LIMIT`, and the cap is reported.
+        """
+
     def describe(self) -> dict:
         """What an operator needs to see. Never includes a secret."""
         return {"backend": self.name}
+
+    # ── "test this connection" ───────────────────────────────────────
+
+    def check(self, org_id: str | None = None) -> CheckResult:
+        """Write a small object, read it back, delete it. Report what broke.
+
+        **A round trip and not a HEAD on the bucket**, which is the whole
+        value of the method. A key with `s3:ListBucket` and nothing else
+        passes any check built out of "can I see the bucket", and then every
+        upload fails hours later, in a different request, to a different
+        person. The credentials that matter are the ones an upload uses, so
+        the check uses them.
+
+        Runs in the order of :data:`CHECK_STEPS` and stops at the first
+        failure, so ``step`` says which capability is missing rather than
+        that "something went wrong".
+        """
+        import secrets as _secrets
+        key = "/".join((org_prefix(org_id), CHECK_SEGMENT,
+                        f"{_secrets.token_hex(8)}.txt"))
+        payload = b"testfortge storage check"
+
+        try:
+            self.put(key, io.BytesIO(payload))
+        except Exception as exc:
+            return self._diagnose(exc, "write")
+        try:
+            if self.get_bytes(key) != payload:
+                return CheckResult(
+                    False, "read",
+                    "The file was written but came back different. That "
+                    "usually means the bucket name is shared with something "
+                    "else writing to the same keys.")
+        except Exception as exc:
+            return self._diagnose(exc, "read")
+        try:
+            self.delete_prefix(key)
+        except Exception as exc:
+            # Reported rather than swallowed: without delete, E8.5 ("remove
+            # this project's data") cannot do what it promises, and finding
+            # that out during a deletion request is too late.
+            return self._diagnose(exc, "delete")
+
+        return CheckResult(True, "delete",
+                           "Wrote a test file, read it back and removed it.")
+
+    def _diagnose(self, exc: Exception, step: str) -> CheckResult:
+        """Turn an exception into something an admin can act on."""
+        return CheckResult(False, step,
+                           f"The storage could not {step} a test file.",
+                           detail=f"{type(exc).__name__}: {exc}")
 
 
 # ── Local disk ───────────────────────────────────────────────────────
@@ -201,6 +354,22 @@ class LocalBackend(Backend):
             root = self._absolute(prefix)
         except StorageError:
             return 0
+        if os.path.isfile(root):
+            # A prefix that names one object exactly. On S3 that deletes
+            # that object, because a key is a prefix of itself; here it used
+            # to match nothing, since a file is not a directory.
+            #
+            # Not a theoretical divergence: `Backend.check` deletes its
+            # probe by passing the probe's own key, so every "Test
+            # connection" on the default backend left a file behind and
+            # reported success. Caught by asserting the disk was clean
+            # afterwards, not by reading either method.
+            try:
+                os.remove(root)
+                return 1
+            except OSError as exc:      # pragma: no cover — best effort
+                log.warning("could not delete %s: %s", prefix, exc)
+                return 0
         if not os.path.isdir(root):
             return 0
         removed = 0
@@ -217,6 +386,48 @@ class LocalBackend(Backend):
                 pass
         return removed
 
+    def usage(self, prefix: str) -> Usage:
+        try:
+            root = self._absolute(prefix)
+        except StorageError:
+            return Usage()
+        if not os.path.isdir(root):
+            return Usage()
+        objects = total = 0
+        for current, _dirs, files in os.walk(root):
+            for name in files:
+                if objects >= USAGE_SCAN_LIMIT:
+                    return Usage(objects, total, truncated=True)
+                try:
+                    total += os.path.getsize(os.path.join(current, name))
+                except OSError:          # pragma: no cover — vanished mid-walk
+                    continue
+                objects += 1
+        return Usage(objects, total)
+
+    def _diagnose(self, exc: Exception, step: str) -> CheckResult:
+        """The default backend's failures are a disk's failures."""
+        detail = f"{type(exc).__name__}: {exc}"
+        if isinstance(exc, StorageError) and exc.__cause__ is not None:
+            exc = exc.__cause__
+        errno = getattr(exc, "errno", None)
+        import errno as _errno
+        if errno == _errno.EACCES:
+            return CheckResult(
+                False, step,
+                f"The server cannot write to {self.root} — a permissions "
+                f"problem on the machine, not a configuration one.", detail)
+        if errno == _errno.ENOSPC:
+            return CheckResult(
+                False, step,
+                "The server's disk is full. Uploads will fail until space "
+                "is freed, which on this plan usually means a restart.",
+                detail)
+        return CheckResult(
+            False, step,
+            f"The server could not {step} a test file under {self.root}.",
+            detail)
+
     def describe(self) -> dict:
         return {"backend": self.name, "root": self.root, "durable": False}
 
@@ -232,6 +443,38 @@ class S3Config:
     region: str = ""
     secure: bool = True
 
+    def __post_init__(self):
+        """Split an explicit scheme off the endpoint, and let it decide TLS.
+
+        ``minio`` wants a host, not a URL, and takes the scheme from its
+        ``secure=`` argument — so ``https://host`` with ``secure`` unticked
+        connects in plaintext to port 80. Nothing warns; the admin typed
+        "https" and believed it.
+
+        Found by smoke-testing the settings form, where the checkbox is
+        unticked by default in the browser's model of an absent value. An
+        explicit scheme now wins, and the checkbox only decides for an
+        endpoint given without one — which is the self-hosted MinIO case it
+        exists for.
+
+        Normalised here rather than in the client so that what is stored,
+        what is displayed and what is used are the same three things.
+        """
+        raw = (self.endpoint or "").strip()
+        for scheme, secure in (("https://", True), ("http://", False)):
+            if raw.lower().startswith(scheme):
+                object.__setattr__(self, "endpoint", raw[len(scheme):])
+                object.__setattr__(self, "secure", secure)
+                return
+        object.__setattr__(self, "endpoint", raw)
+
+    @property
+    def url(self) -> str:
+        """The endpoint as a person would write it, for a message or a page."""
+        if not self.endpoint:
+            return ""
+        return f"{'https' if self.secure else 'http'}://{self.endpoint}"
+
     @property
     def complete(self) -> bool:
         return bool(self.endpoint and self.bucket and self.access_key
@@ -242,7 +485,7 @@ class S3Config:
         ``routes/settings.py`` gives about the BYOK key: a credential that
         can be revealed is a credential that ends up in a screenshot."""
         return {
-            "endpoint": self.endpoint,
+            "endpoint": self.url,
             "bucket": self.bucket,
             "region": self.region,
             "access_key_hint": (f"…{self.access_key[-4:]}"
@@ -260,12 +503,33 @@ class S3Backend(Backend):
 
     name = "s3"
 
-    def __init__(self, config: S3Config):
+    def __init__(self, config: S3Config, *, timeout: float | None = None):
+        """*timeout* bounds one interactive check (E8.3).
+
+        Left ``None`` on the upload path, where the library's own retries
+        are what a flaky network needs. Set for "Test connection", which is
+        a person waiting on a page: a firewalled host answers nothing, and
+        the default five retries with backoff turn "wrong port" into a
+        request that outlives the dyno's own timeout. A check that hangs
+        reports nothing, which is worse than a check that fails.
+        """
         if not config.complete:
             raise StorageUnavailable(
                 "the S3 backend needs an endpoint, a bucket and a key pair")
         self.config = config
+        self.timeout = timeout
         self._client = None
+
+    def _http_client(self):
+        """A urllib3 pool that gives up quickly. ``None`` for the default."""
+        if self.timeout is None:
+            return None
+        import urllib3
+        return urllib3.PoolManager(
+            timeout=urllib3.util.Timeout(connect=self.timeout,
+                                         read=self.timeout),
+            retries=urllib3.Retry(total=1, backoff_factor=0.2,
+                                  status_forcelist=[500, 502, 503, 504]))
 
     def _minio(self):
         if self._client is not None:
@@ -279,17 +543,16 @@ class S3Backend(Backend):
             raise StorageUnavailable(
                 "the s3 backend needs the 'minio' package installed"
             ) from exc
-        host = self.config.endpoint
-        for scheme in ("https://", "http://"):
-            if host.startswith(scheme):
-                host = host[len(scheme):]
-                break
+        # No scheme stripping here: S3Config.__post_init__ already did it,
+        # and did it in the one place where `secure` can be corrected to
+        # match. Two strippers would be two answers to one question.
         try:
             self._client = Minio(
-                host, access_key=self.config.access_key,
+                self.config.endpoint, access_key=self.config.access_key,
                 secret_key=self.config.secret_key,
                 secure=self.config.secure,
-                region=self.config.region or None)
+                region=self.config.region or None,
+                http_client=self._http_client())
         except Exception as exc:
             raise StorageUnavailable(f"could not build an S3 client: {exc}") \
                 from exc
@@ -365,9 +628,118 @@ class S3Backend(Backend):
             raise StorageError(f"cannot clear {prefix}: {exc}") from exc
         return removed
 
+    def usage(self, prefix: str) -> Usage:
+        objects = total = 0
+        try:
+            for obj in self._minio().list_objects(
+                    self.config.bucket, prefix=prefix, recursive=True):
+                if objects >= USAGE_SCAN_LIMIT:
+                    return Usage(objects, total, truncated=True)
+                total += int(obj.size or 0)
+                objects += 1
+        except Exception as exc:
+            # Not an error the caller can do anything with — this is a
+            # number on a settings page, not a decision. Logged, and the
+            # page shows nothing rather than a zero, which would read as
+            # "you are using no storage".
+            log.warning("could not size %s: %s", prefix, exc)
+            raise StorageError(f"cannot size {prefix}: {exc}") from exc
+        return Usage(objects, total)
+
+    def _diagnose(self, exc: Exception, step: str) -> CheckResult:
+        """Map a provider error onto a sentence and a next move.
+
+        This method **is** E8.3's acceptance criterion. "Wrong credentials
+        produce a comprehensible error at the verification step" is not
+        satisfied by surfacing ``S3Error: An error occurred (403)`` — an
+        admin reading that cannot tell a mistyped secret from a bucket
+        policy that omits ``s3:PutObject``, and those have different fixes.
+        """
+        detail = f"{type(exc).__name__}: {exc}"
+        # The four verbs wrap everything in StorageError so callers have one
+        # thing to catch. That is right for them and wrong here: the code
+        # this method dispatches on lives on the provider's exception, which
+        # is now the ``__cause__``. Unwrapped rather than un-wrapped at the
+        # source, because a route catching a bare S3Error would be worse.
+        if isinstance(exc, StorageError) and exc.__cause__ is not None:
+            exc = exc.__cause__
+        code = str(getattr(exc, "code", "") or "")
+        endpoint = self.config.url or "the endpoint"
+        bucket = self.config.bucket or "the bucket"
+
+        if code in ("InvalidAccessKeyId", "SignatureDoesNotMatch",
+                    "InvalidSecurity", "AuthorizationHeaderMalformed"):
+            return CheckResult(
+                False, "authenticate",
+                f"{endpoint} rejected the credentials. Check the access key "
+                f"and the secret — a secret is easy to truncate on copy, and "
+                f"most providers show it only once.", detail)
+        if code in ("NoSuchBucket", "NoSuchKey"):
+            return CheckResult(
+                False, "bucket",
+                f"The credentials worked, but there is no bucket called "
+                f"'{bucket}' at {endpoint}. Check the name and the account "
+                f"the key belongs to.", detail)
+        if code in ("AccessDenied", "AllAccessDisabled"):
+            missing = {"write": "s3:PutObject", "read": "s3:GetObject",
+                       "delete": "s3:DeleteObject"}.get(step, "access")
+            return CheckResult(
+                False, step,
+                f"The credentials are valid and '{bucket}' exists, but this "
+                f"key is not allowed to {step}. Grant it {missing} on "
+                f"'{bucket}'.", detail)
+        if code in ("RequestTimeTooSkewed",):
+            return CheckResult(
+                False, "authenticate",
+                "The server's clock is too far from the storage provider's, "
+                "so every signature is rejected. This is a server problem, "
+                "not a credentials problem.", detail)
+        if isinstance(exc, StorageUnavailable):
+            return CheckResult(False, "reach", str(exc), detail)
+        if code:
+            return CheckResult(
+                False, step,
+                f"{endpoint} refused the request ({code}).", detail)
+        if isinstance(exc, ValueError):
+            # The client rejected the input before any request went out —
+            # `minio` validates bucket names itself. Found by smoke-testing
+            # this method: a bucket called "b" produced "could not reach
+            # the endpoint", which sends an admin to check DNS over a typo
+            # in a field three rows up.
+            text = str(exc)
+            if "bucket" in text.lower():
+                return CheckResult(
+                    False, "bucket",
+                    f"'{bucket}' is not a valid bucket name ({text}). Bucket "
+                    f"names are 3–63 characters, lower case, and may not "
+                    f"look like an IP address.", detail)
+            return CheckResult(False, step, text, detail)
+        # No S3 error code at all: the request never reached a bucket. DNS,
+        # a wrong port, http where https was meant, a firewall.
+        return CheckResult(
+            False, "reach",
+            f"Could not reach {endpoint}. Check the address, the port, and "
+            f"whether it should be http rather than https.", detail)
+
     def describe(self) -> dict:
         return {"backend": self.name, "durable": True,
                 **self.config.redacted()}
+
+
+# ── Keys ──────────────────────────────────────────────────────────────
+
+def org_prefix(org_id: str | None) -> str:
+    """``org/<org_id>`` — the first two segments of every key (ADR §4.2).
+
+    Always two segments, never zero: see ``engine.blobs``'s docstring on why
+    a conditional org segment would put one project's files under two
+    prefixes, and E8.5 deletes by prefix.
+    """
+    import re
+    if not org_id:
+        return f"org/{ORG_NONE}"
+    cleaned = re.sub(r"[^A-Za-z0-9_\-]", "-", str(org_id).strip())[:80]
+    return f"org/{cleaned or ORG_NONE}"
 
 
 # ── Resolving which one to use, per call ──────────────────────────────
@@ -511,11 +883,52 @@ def describe(org_id: str | None = None) -> dict:
     return info
 
 
+def check(config: S3Config | None = None,
+          org_id: str | None = None) -> CheckResult:
+    """Test a configuration — a candidate one, or the one in force.
+
+    Passing *config* is what makes the settings form's "Test connection"
+    honest: it checks **what the admin just typed**, before anything is
+    stored. Without it the button could only confirm that the previously
+    saved settings still work, which is not the question being asked.
+    """
+    if config is None:
+        return backend_for(org_id).check(org_id)
+    if not config.complete:
+        return CheckResult(
+            False, "reach",
+            "An endpoint, a bucket, an access key and a secret are all "
+            "required before a connection can be tested.")
+    try:
+        backend: Backend = S3Backend(config, timeout=CHECK_TIMEOUT_SECONDS)
+    except StorageUnavailable as exc:
+        return CheckResult(False, "reach", str(exc), detail=str(exc))
+    return backend.check(org_id)
+
+
+def usage_for(org_id: str | None = None) -> Usage | None:
+    """How much storage this organisation is using, or ``None``.
+
+    ``None`` and not ``Usage()`` when the backend cannot answer: zero is a
+    measurement and "we could not measure" is not, and a settings page that
+    renders a failed scan as "0 B" tells an admin their evidence is gone.
+    """
+    try:
+        return backend_for(org_id).usage(org_prefix(org_id) + "/")
+    except StorageError as exc:
+        log.warning("storage usage unavailable for %s: %s",
+                    (org_id or "instance")[:8], exc)
+        return None
+
+
 __all__ = [
-    "ORG_SECRET_NAME", "PRESIGN_TTL_SECONDS",
-    "StorageError", "StorageUnavailable", "Location",
+    "ORG_SECRET_NAME", "PRESIGN_TTL_SECONDS", "USAGE_SCAN_LIMIT",
+    "CHECK_SEGMENT", "CHECK_STEPS", "CHECK_TIMEOUT_SECONDS",
+    "ORG_NONE",
+    "StorageError", "StorageUnavailable",
+    "Location", "Usage", "CheckResult",
     "Backend", "LocalBackend", "S3Backend", "S3Config",
-    "instance_config", "instance_backend_name",
+    "org_prefix", "instance_config", "instance_backend_name",
     "org_config", "set_org_config", "clear_org_config",
-    "backend_for", "describe",
+    "backend_for", "describe", "check", "usage_for",
 ]

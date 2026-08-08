@@ -106,15 +106,24 @@ class _FakeMinio:
         return f"https://signed.example/{bucket}/{key}?exp={expires}"
 
     def list_objects(self, bucket, prefix="", recursive=False):
+        self._maybe_fail("list")
         for name in list(self.objects):
             if name.startswith(prefix):
-                yield type("Obj", (), {"object_name": name})()
+                yield type("Obj", (), {"object_name": name,
+                                       "size": len(name)})()
 
     def remove_objects(self, bucket, targets):
         for target in targets:
             self.removed.append(target._name if hasattr(target, "_name")
                                 else getattr(target, "name", ""))
         return []
+
+
+def _coded(code: str, message: str = "refused") -> Exception:
+    """An exception shaped like ``minio.error.S3Error``: it carries a code."""
+    exc = RuntimeError(message)
+    exc.code = code                  # type: ignore[attr-defined]
+    return exc
 
 
 def _s3(fake: _FakeMinio | None = None, **overrides) -> storage.S3Backend:
@@ -659,6 +668,31 @@ class TestTheInterfaceIsTheSameShapeOnBoth:
     def test_delete_prefix_matching_nothing_is_zero_not_an_error(self):
         assert _s3().delete_prefix("org/nobody/") == 0
 
+    def test_a_prefix_that_names_one_object_deletes_that_object(self,
+                                                                tmp_path):
+        """A key is a prefix of itself. Both backends have to agree on that.
+
+        They did not: on S3 ``delete_prefix("a/b.png")`` removes ``a/b.png``,
+        while ``LocalBackend`` checked ``isdir`` and matched nothing — so it
+        returned 0 and deleted nothing, quietly.
+
+        Found by E8.3, not by reading either method: ``Backend.check`` cleans
+        up its probe by passing the probe's own key, so every "Test
+        connection" on the default backend left a file in ``STORAGE_ROOT``
+        and reported success. E8.5 deletes a project's data through this same
+        method.
+        """
+        local = storage.LocalBackend(root=str(tmp_path))
+        local.put("org/a/project/p/bug/1/only.png", io.BytesIO(b"bytes"))
+
+        assert local.delete_prefix("org/a/project/p/bug/1/only.png") == 1
+        assert not local.exists("org/a/project/p/bug/1/only.png")
+
+        fake = _FakeMinio()
+        fake.objects.append("org/a/project/p/bug/1/only.png")
+        assert _s3(fake).delete_prefix(
+            "org/a/project/p/bug/1/only.png") == 1
+
     def test_a_delete_that_cannot_run_says_so(self):
         fake = _FakeMinio()
         fake.objects.append("org/a/x.png")
@@ -698,6 +732,7 @@ class TestTheInterfaceIsTheSameShapeOnBoth:
             def exists(self, key): ...
             def locate(self, key): ...
             def delete_prefix(self, prefix): ...
+            def usage(self, prefix): ...
 
         assert _Minimal().describe() == {"backend": "minimal"}
 
@@ -793,6 +828,187 @@ class TestTheOrgConfigLifecycle:
         assert info["durable"] is False
         assert info["org_configured"] is False
         assert info["instance_default"] == "local"
+
+
+# ── the check, on the default backend ────────────────────────────────
+
+class TestCheckingLocalDisk:
+    """The default backend is checkable too, and its failures are a disk's.
+
+    Worth its own class because "test connection" on a deployment that has
+    never configured a bucket is a real thing an admin will click, and an
+    answer of "storage error" over a full disk or a read-only mount is the
+    same unhelpfulness the S3 half of this file exists to prevent.
+    """
+
+    def test_a_working_disk_round_trips_and_cleans_up(self, tmp_path):
+        backend = storage.LocalBackend(root=str(tmp_path))
+
+        result = backend.check("org-a")
+
+        assert result.ok and result.failed_at == ""
+        assert "read it back" in result.message
+        assert backend.usage("").objects == 0, "the probe was left behind"
+
+    def test_the_probe_goes_under_the_org_prefix(self, tmp_path):
+        backend = storage.LocalBackend(root=str(tmp_path))
+        written: list[str] = []
+        backend.put = lambda key, source: written.append(key)
+
+        backend.check("org-a")
+
+        assert written[0].startswith(storage.org_prefix("org-a") + "/")
+
+    def test_a_read_only_disk_says_it_is_the_machine(self, tmp_path):
+        import errno as _errno
+        backend = storage.LocalBackend(root=str(tmp_path))
+
+        def _denied(key, source):
+            raise PermissionError(_errno.EACCES, "Permission denied")
+
+        backend.put = _denied
+        result = backend.check()
+
+        assert not result.ok and result.step == "write"
+        assert "permissions problem on the machine" in result.message
+
+    def test_a_full_disk_says_so(self, tmp_path):
+        import errno as _errno
+        backend = storage.LocalBackend(root=str(tmp_path))
+
+        def _full(key, source):
+            raise OSError(_errno.ENOSPC, "No space left on device")
+
+        backend.put = _full
+        result = backend.check()
+
+        assert "disk is full" in result.message
+
+    def test_an_unexplained_failure_still_names_the_step(self, tmp_path):
+        backend = storage.LocalBackend(root=str(tmp_path))
+        backend.get_bytes = lambda key: (_ for _ in ()).throw(
+            RuntimeError("something odd"))
+
+        result = backend.check()
+
+        assert result.step == "read"
+        assert str(tmp_path.resolve()) in result.message
+
+    def test_the_base_diagnosis_is_used_by_a_backend_that_adds_none(self):
+        """A future adapter that implements the five verbs and no
+        ``_diagnose`` still produces a sentence naming the step, rather than
+        a traceback reaching a settings page."""
+        class _Broken(storage.LocalBackend):
+            _diagnose = storage.Backend._diagnose
+
+            def put(self, key, source):
+                raise RuntimeError("nope")
+
+        result = _Broken().check()
+
+        assert not result.ok and result.step == "write"
+        assert "could not write" in result.message
+        assert "RuntimeError" in result.detail
+
+    def test_usage_of_a_prefix_that_escapes_the_root_is_empty(self,
+                                                              tmp_path):
+        backend = storage.LocalBackend(root=str(tmp_path))
+        assert backend.usage("../../..") == storage.Usage()
+        assert backend.usage("never/created") == storage.Usage()
+
+
+class TestTheFacade:
+    """``storage.check`` and ``storage.usage_for`` — what a route calls."""
+
+    def test_no_config_checks_the_backend_in_force(self, clean_env):
+        result = storage.check()
+        assert result.ok, "the default local backend should pass its own check"
+
+    def test_an_incomplete_config_is_refused_without_a_request(self,
+                                                               clean_env):
+        result = storage.check(storage.S3Config(endpoint="https://e"))
+
+        assert not result.ok
+        assert "required" in result.message.lower()
+
+    def test_a_config_that_cannot_build_a_client_reports_reach(
+            self, clean_env, monkeypatch):
+        monkeypatch.setattr(storage, "S3Backend", lambda *a, **k: (
+            _ for _ in ()).throw(storage.StorageUnavailable("no minio here")))
+
+        result = storage.check(storage.S3Config(
+            endpoint="https://e", bucket="b", access_key="k", secret_key="s"))
+
+        assert not result.ok and result.step == "reach"
+        assert "no minio here" in result.message
+
+    def test_a_provider_error_with_only_a_code_still_says_something(self):
+        """Nothing in the mapping matched, but the provider named a code.
+        Better than "could not reach the endpoint", which would be wrong —
+        the request plainly arrived."""
+        backend = _s3()
+        result = backend._diagnose(_coded("InvalidBucketState"), "write")
+
+        assert "InvalidBucketState" in result.message
+        assert result.step == "write"
+
+    def test_a_client_side_value_error_that_is_not_about_a_bucket(self):
+        backend = _s3()
+        result = backend._diagnose(ValueError("region must be a string"),
+                                   "write")
+
+        assert result.message == "region must be a string"
+
+    def test_a_missing_dependency_is_reported_as_reach_not_as_a_write(self):
+        backend = _s3()
+        result = backend._diagnose(
+            storage.StorageUnavailable("the s3 backend needs 'minio'"),
+            "write")
+
+        assert result.step == "reach"
+        assert "minio" in result.message
+
+    def test_usage_for_scopes_to_the_org_and_survives_a_failure(
+            self, clean_env, monkeypatch):
+        asked: list[str] = []
+        monkeypatch.setattr(storage.LocalBackend, "usage",
+                            lambda self, prefix: asked.append(prefix)
+                            or storage.Usage(2, 20))
+
+        assert storage.usage_for("org-a") == storage.Usage(2, 20)
+        assert asked == ["org/org-a/"]
+
+        monkeypatch.setattr(storage.LocalBackend, "usage",
+                            lambda self, prefix: (_ for _ in ()).throw(
+                                storage.StorageError("bucket unreachable")))
+        assert storage.usage_for("org-a") is None
+
+    def test_s3_usage_sums_sizes_and_reports_a_failure(self):
+        fake = _FakeMinio()
+        fake.objects += ["org/a/x.png", "org/a/y.png"]
+        backend = _s3(fake)
+
+        result = backend.usage("org/a/")
+        assert result.objects == 2 and result.bytes > 0
+
+        fake.fail_on.add("list")
+        with pytest.raises(storage.StorageError):
+            backend.usage("org/a/")
+
+
+class TestReadableNumbers:
+
+    @pytest.mark.parametrize("size,expected", [
+        (0, "0 B"), (999, "999 B"), (2048, "2.0 KB"),
+        (5 * 1024 * 1024, "5.0 MB"), (3 * 1024 ** 3, "3.0 GB"),
+        (9 * 1024 ** 4, "9216.0 GB"),
+    ])
+    def test_bytes_are_rendered_for_a_person(self, size, expected):
+        assert storage.Usage(1, size).human == expected
+
+    def test_a_capped_count_says_at_least(self):
+        assert storage.Usage(5000, 2048, truncated=True).human == \
+            "at least 2.0 KB"
 
 
 # ── what the settings page says ──────────────────────────────────────

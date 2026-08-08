@@ -120,7 +120,13 @@ KINDS = frozenset({"bug", "run", "upload", "export"})
 #: The org segment for a caller who is not in an organisation — ORG_MODE off,
 #: or a machine caller. See the module docstring on why this is a literal
 #: rather than an omitted segment.
-ORG_NONE = "_none"
+#:
+#: Defined in :mod:`engine.storage` and re-exported here. Both modules build
+#: this prefix — this one for real keys, ``storage`` for the probe object a
+#: connection check writes — and two spellings of it would be two answers to
+#: one question, which is the defect E8.2 already removed once from
+#: ``routes/bugs.py``.
+ORG_NONE = storage.ORG_NONE
 
 #: Mirrors ``routes._shared.SAFE_ASSET_RE``. A key this does not match
 #: cannot be served by ``automation_asset``, so a key that fails it is not a
@@ -158,8 +164,7 @@ def prefix_for(project_id: str, kind: str | None = None,
     if kind is not None and kind not in KINDS:
         raise UploadRefused(f"Unknown attachment kind: {kind}.")
 
-    parts = ["org", _segment(org_id) if org_id else ORG_NONE,
-             "project", _segment(project_id)]
+    parts = [storage.org_prefix(org_id), "project", _segment(project_id)]
     if kind is not None:
         parts.append(kind)
     if entity_id is not None:

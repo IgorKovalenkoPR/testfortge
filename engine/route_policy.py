@@ -156,6 +156,14 @@ POLICY: dict[str, str] = {
     # deployment's most consequential one-off action needs — the same
     # reason manual_run_assign is listed below.
     "org_settings_adopt_projects": "admin",
+    # Where this team's evidence is written, and the credentials for it
+    # (E8.3). Self-enforcing via @require_role("admin") and listed for the
+    # same reason as the sweep above: the table is where somebody looks to
+    # find out what a route needs, and "who can redirect every upload this
+    # team makes" is a question that should be answerable from here.
+    "org_settings_storage": "admin",
+    "org_settings_storage_test": "admin",
+    "org_settings_storage_clear": "admin",
     # …but picking which existing project you are working in is not.
     "db_select_project": "user",
     "load_project": "user",

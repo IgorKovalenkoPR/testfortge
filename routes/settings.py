@@ -187,6 +187,16 @@ def register(app: Flask) -> None:
             storage_configurable=_features.is_enabled(
                 "STORAGE_BACKEND_CONFIGURABLE"),
             storage_state=_storage.describe(org_id),
+            # The form's current values (E8.3). Never the secret — there is
+            # no way to read one back, which is the same rule the API-key
+            # field states on the page: a credential that can be revealed is
+            # a credential that ends up in a screenshot.
+            storage_own=(_storage.org_config(org_id)
+                         if _features.is_enabled(
+                             "STORAGE_BACKEND_CONFIGURABLE") else None),
+            # ``None`` when the backend could not be scanned. The template
+            # must not render that as "0 B" — see storage.usage_for.
+            storage_usage=_storage.usage_for(org_id),
         )
 
     @app.route("/org/settings/general", methods=["POST"])
@@ -215,6 +225,161 @@ def register(app: Flask) -> None:
                          user_id=_perm.current_user_id(), org_id=org_id,
                          diff={"name": [before, name]})
         flash("Team name updated.", "success")
+        return _settings_redirect()
+
+    # ── Storage (E8.3) ───────────────────────────────────────────────
+    #
+    # Three routes, and the middle one is the point. E8.3's acceptance
+    # criterion is "wrong credentials produce a comprehensible error at the
+    # verification step", so there is a verification step, it runs a real
+    # round trip, and it says which of the five things is wrong.
+
+    def _storage_form() -> _storage.S3Config:
+        """The S3 settings out of the submitted form.
+
+        A blank secret means "keep the stored one". Not a convenience: a
+        form that demanded the secret again to change the *bucket* would
+        train an admin to keep the secret somewhere they can copy it from,
+        and the thing this page exists to protect is exactly that value.
+        """
+        form = request.form
+        secret = (form.get("secret_key") or "").strip()
+        if not secret:
+            existing = _storage.org_config(_perm.current_org_id())
+            secret = existing.secret_key if existing else ""
+        return _storage.S3Config(
+            endpoint=(form.get("endpoint") or "").strip(),
+            bucket=(form.get("bucket") or "").strip(),
+            access_key=(form.get("access_key") or "").strip(),
+            secret_key=secret,
+            region=(form.get("region") or "").strip(),
+            secure=(form.get("secure") or "").strip().lower()
+            not in {"0", "false", "no", "off", ""},
+        )
+
+    def _storage_available() -> bool:
+        return _features.is_enabled("STORAGE_BACKEND_CONFIGURABLE")
+
+    def _flash_check(result) -> None:
+        """One place that turns a :class:`CheckResult` into a flash.
+
+        Shared by "test" and "save" so the two cannot describe the same
+        failure differently — which they would, written twice, and an admin
+        comparing them would reasonably conclude the two buttons do
+        different things.
+        """
+        if result.ok:
+            flash(f"Connection works. {result.message}", "success")
+            return
+        # The message alone, not "Could not <step>: <message>". Every
+        # message already names what failed, and prefixing produced
+        # "Could not reach. Could not reach https://…" on the first smoke
+        # run — a sentence that reads like a bug and buries the advice
+        # after it.
+        #
+        # `step` and `detail` go to the log instead. `detail` is the
+        # provider's own wording and can carry a host or a bucket name we
+        # have no business putting on a screen someone can look over.
+        log.warning("storage check failed at %s: %s", result.step,
+                    result.detail)
+        flash(result.message, "error")
+
+    @app.route("/org/settings/storage", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_settings_storage():
+        """Save this team's own object storage — after proving it works.
+
+        **The save verifies, and refuses a configuration that fails.** The
+        alternative is a green "Saved" over settings that send every upload
+        to the fallback: ``storage.backend_for`` degrades to local disk when
+        a configuration is unusable, and on the free plan local disk is
+        ephemeral. An admin would be told their evidence is in their bucket
+        while it was quietly being deleted on the next restart — the
+        "assumption recorded as a fact" defect, with data loss attached.
+        """
+        org_id = _perm.current_org_id()
+        if not (org_id and _require_admin_or_flash()):
+            return _settings_redirect()
+        if not _storage_available():
+            flash("Choosing storage is not available on this instance.",
+                  "error")
+            return _settings_redirect()
+
+        config = _storage_form()
+        if not config.complete:
+            flash("An endpoint, a bucket, an access key and a secret are "
+                  "all required.", "error")
+            return _settings_redirect()
+
+        result = _storage.check(config, org_id=org_id)
+        if not result.ok:
+            _flash_check(result)
+            flash("Nothing was saved — this team is still using the "
+                  "server's default storage.", "info")
+            return _settings_redirect()
+
+        try:
+            _storage.set_org_config(org_id, config)
+        except _llm_keys.BYOKUnavailable:
+            # Same refusal as BYOK, for the same reason: these are customer
+            # credentials and there is no encryption key on this instance.
+            flash("This instance cannot store storage credentials yet — "
+                  "TESTFORTGE_ENCRYPTION_KEY is not set. Ask whoever runs "
+                  "the server.", "error")
+            return _settings_redirect()
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return _settings_redirect()
+
+        _db.append_audit(entity="organization", action="set_storage",
+                         user_id=_perm.current_user_id(), org_id=org_id,
+                         # Endpoint and bucket, never the key pair. An audit
+                         # trail is read by more people than this form is.
+                         diff=config.redacted())
+        flash(f"Storage saved. New screenshots, videos and exports for this "
+              f"team go to {config.bucket}.", "success")
+        return _settings_redirect()
+
+    @app.route("/org/settings/storage/test", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_settings_storage_test():
+        """Check the settings **as typed**, storing nothing.
+
+        Checking what is already stored would answer a question nobody
+        asked: the admin is looking at a form they have just filled in and
+        wants to know whether it will work.
+        """
+        org_id = _perm.current_org_id()
+        if not (org_id and _require_admin_or_flash()):
+            return _settings_redirect()
+        if not _storage_available():
+            flash("Choosing storage is not available on this instance.",
+                  "error")
+            return _settings_redirect()
+
+        _flash_check(_storage.check(_storage_form(), org_id=org_id))
+        return _settings_redirect()
+
+    @app.route("/org/settings/storage/clear", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_settings_storage_clear():
+        org_id = _perm.current_org_id()
+        if not (org_id and _require_admin_or_flash()):
+            return _settings_redirect()
+
+        if _storage.clear_org_config(org_id):
+            _db.append_audit(entity="organization", action="clear_storage",
+                             user_id=_perm.current_user_id(), org_id=org_id)
+            # Said plainly, because it is the surprising half: the files
+            # already in the bucket stay there and stop being reachable
+            # from this application. Nothing is deleted, and nothing is
+            # moved — moving them would be a migration, and ADR 0002 does
+            # not have one.
+            flash("This team is back on the server's default storage. Files "
+                  "already in your bucket stay there, but the pages that "
+                  "referenced them will no longer find them.", "success")
+        else:
+            flash("This team had no storage of its own configured.", "info")
         return _settings_redirect()
 
     @app.route("/org/settings/llm-key", methods=["POST"])

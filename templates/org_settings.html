@@ -448,11 +448,123 @@
     values. No new deploy is needed.
   </p>
   {% endif %}
+  {% if storage_usage %}
+  <p class="text-muted settings-note">
+    This team is using {{ storage_usage.human }} across
+    {{ storage_usage.objects }} file{{ '' if storage_usage.objects == 1 else 's' }}.
+    {%- if storage_usage.truncated %}
+    Counting stopped after the first {{ storage_usage.objects }} — the real
+    figure is higher.
+    {%- endif %}
+  </p>
+  {% else %}
+  {# Deliberately not "0 B". A scan that failed and a bucket that is empty
+     are different facts, and rendering the first as the second tells an
+     admin their evidence is gone. #}
+  <p class="text-muted settings-note">
+    How much is in use could not be measured just now.
+  </p>
+  {% endif %}
+
   {% if not storage_configurable %}
   <p class="text-muted settings-note">
     Choosing storage per team, from this page, is not available on this
     instance yet.
   </p>
+  {% else %}
+
+  <h3>Your own storage</h3>
+  <p class="text-muted">
+    Point this team at an S3-compatible bucket you control — Cloudflare R2,
+    AWS S3, Backblaze B2, Wasabi or MinIO. New screenshots, videos and
+    export bundles go there instead of to the server. The secret is
+    encrypted before it is stored and is never shown again.
+  </p>
+
+  {% if storage_own %}
+  <p class="settings-status">
+    Configured: <code>{{ storage_own.bucket }}</code> at
+    {{ storage_own.url }}, access key ending
+    {{ storage_own.redacted().access_key_hint }}.
+  </p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('org_settings_storage') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="settings-row">
+      <label for="storage-endpoint">Endpoint</label>
+      {# type=text and not type=url: a self-hosted MinIO is reached as
+         "minio.internal:9000" with no scheme, which type=url refuses in
+         the browser — a client-side rule rejecting a value the server
+         accepts. The backend strips a scheme if one is given. #}
+      <input type="text" id="storage-endpoint" name="endpoint"
+             value="{{ storage_own.url if storage_own else '' }}"
+             placeholder="https://<account>.r2.cloudflarestorage.com"
+             autocomplete="off" required>
+    </div>
+    <div class="settings-row">
+      <label for="storage-bucket">Bucket</label>
+      <input type="text" id="storage-bucket" name="bucket"
+             value="{{ storage_own.bucket if storage_own else '' }}"
+             autocomplete="off" required>
+    </div>
+    <div class="settings-row">
+      <label for="storage-region">Region</label>
+      <input type="text" id="storage-region" name="region"
+             value="{{ storage_own.region if storage_own else '' }}"
+             placeholder="leave empty for Cloudflare R2" autocomplete="off">
+    </div>
+    <div class="settings-row">
+      <label for="storage-access-key">Access key</label>
+      <input type="text" id="storage-access-key" name="access_key"
+             value="{{ storage_own.access_key if storage_own else '' }}"
+             autocomplete="off" required>
+    </div>
+    <div class="settings-row">
+      {# type=password and autocomplete=off, for the reason the API-key
+         field gives: a browser offering to remember this is not a
+         feature. #}
+      <label for="storage-secret-key">
+        {% if storage_own %}Replace secret{% else %}Secret key{% endif %}
+      </label>
+      <input type="password" id="storage-secret-key" name="secret_key"
+             autocomplete="off"
+             {% if not storage_own %}required{% endif %}>
+    </div>
+    <div class="settings-row">
+      <label for="storage-secure">Use HTTPS</label>
+      <input type="checkbox" id="storage-secure" name="secure" value="1"
+             {% if not storage_own or storage_own.secure %}checked{% endif %}>
+    </div>
+    <div class="settings-row">
+      <button type="submit" class="btn btn-primary">Save storage</button>
+      <button type="submit" class="btn btn-secondary"
+              formaction="{{ url_for('org_settings_storage_test') }}">
+        Test connection
+      </button>
+    </div>
+    <p class="text-muted settings-note">
+      Both buttons write a small file, read it back and delete it — a check
+      that only asked whether the bucket exists would pass for a key that
+      cannot upload. <strong>Save refuses settings that fail the test</strong>,
+      because storing them would send this team's files to the server's
+      temporary disk while the page said otherwise.
+      {% if storage_own %}
+      Leave the secret blank to keep the one already stored.
+      {% endif %}
+    </p>
+  </form>
+
+  {% if storage_own %}
+  <form method="post" action="{{ url_for('org_settings_storage_clear') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary">Use the server's storage</button>
+    <span class="text-muted settings-note">
+      Files already in your bucket stay there. Nothing is moved or deleted,
+      so pages referencing them will stop finding them.
+    </span>
+  </form>
+  {% endif %}
   {% endif %}
 </div>
 
