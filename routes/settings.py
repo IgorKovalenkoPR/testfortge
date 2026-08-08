@@ -7,7 +7,10 @@
   * POST /org/settings/budget           — admin: monthly LLM allowance
   * POST /org/settings/adopt-projects   — admin: claim pre-ORG_MODE projects
 
-Also the read-only surface for whether this instance can send email (E0.4).
+Also the read-only surface for three things the product cannot otherwise
+tell anyone: whether this instance can send email (E0.4), how much of the
+free plan's 0.5 GB is left and what this team is holding (E0.12), and how
+often the service has cold-started (E0.11).
 
 This is where the machinery built in E0.7–E0.9 finally has a surface. Until
 now the per-org Anthropic key, the monthly budget and the usage meter were
@@ -50,6 +53,7 @@ from __future__ import annotations
 
 from flask import (Flask, flash, redirect, render_template, request, url_for)
 
+from engine import capacity as _capacity
 from engine import db as _db
 from engine import features as _features
 from engine import llm_cost as _llm_cost
@@ -143,6 +147,18 @@ def register(app: Flask) -> None:
             micros_per_usd=_llm_cost.MICROS_PER_USD,
             # ── Model routing, for transparency ──
             models=_llm_models.snapshot(),
+            # ── Capacity and availability (E0.11 / E0.12) ──
+            # Shown to every member, like the LLM meter: a plain user whose
+            # generation quietly stopped, or who waited a minute for the
+            # first page, needs somewhere that says why. Both are read
+            # best-effort — an unreadable figure renders as "unknown"
+            # rather than taking the page down.
+            capacity_db=_capacity.database_usage(),
+            capacity_org=_capacity.org_usage(org_id),
+            capacity_limit=_capacity.human_bytes(
+                _capacity.FREE_DB_LIMIT_BYTES),
+            availability=_capacity.availability(),
+            human_bytes=_capacity.human_bytes,
             # ── Email (E0.4) ──
             # Shown to every member, like the LLM meter above and for the
             # same reason: somebody whose invitation never arrived needs to

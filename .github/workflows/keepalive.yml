@@ -1,0 +1,113 @@
+name: keepalive
+
+# E0.11 — keep the free web service awake during working hours, and only
+# then.
+#
+# ── The problem, measured ────────────────────────────────────────────
+#
+# Render's free web service sleeps after ~15 idle minutes. Measured on
+# production 2026-08-06: `curl /readyz` answered 200 after **45 seconds**.
+# The first visitor of the morning waits nearly a minute at a blank tab,
+# and nothing can be rendered to explain it — the process that would
+# render it is the process that is starting.
+#
+# ── Why this is not a ping every five minutes, forever ───────────────
+#
+# Because that would take the service down, which is the opposite of the
+# point. The free tier allows **750 instance-hours a month per account**,
+# and a service kept awake around the clock burns ~730 of them — 97% of
+# the allowance, for one service, with no margin and nothing left for a
+# second. Run out and the service is suspended for the rest of the month.
+#
+# The window below is Mon–Fri, 06:00–17:59 UTC (09:00–20:59 Kyiv in
+# summer, 08:00–19:59 in winter):
+#
+#     12 hours × ~22 weekdays ≈ 264 instance-hours a month
+#
+# — about a third of the allowance, leaving room for real traffic outside
+# the window and for the service to be restarted by deploys. Outside it the
+# service sleeps, and the first visitor pays the cold start. That is the
+# trade being made deliberately: a free plan buys either availability or
+# headroom, not both.
+#
+# To widen or narrow it, edit the cron below. To switch it off entirely,
+# leave `KEEPALIVE_URL` unset — the job then no-ops instead of failing, so
+# a fork or a checkout with no deployment does not show a red workflow.
+#
+# ── Why GitHub Actions rather than Render Cron ───────────────────────
+#
+# Render's cron jobs are a paid feature. Actions minutes are free on a
+# public repository, and this repo already runs Playwright here for the
+# same reason (see playwright.yml).
+#
+# Two caveats worth knowing rather than discovering:
+#   * scheduled workflows are disabled after 60 days with no repository
+#     activity, and GitHub emails the owner before that happens;
+#   * `schedule` is best-effort — a run can be delayed by several minutes
+#     under load, which is why the interval is 10 minutes and not 14.
+
+on:
+  schedule:
+    # Every 10 minutes, weekdays, 06:00–17:59 UTC. The service sleeps after
+    # 15 idle minutes, so 10 leaves margin for a delayed run.
+    - cron: "*/10 6-17 * * 1-5"
+  workflow_dispatch:
+
+# Never more than one in flight; a queued backlog would ping a service that
+# is already awake.
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: wake the service
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping
+        env:
+          # Repository *variable*, not a secret: it is the public URL of a
+          # public deployment, and a secret here would only make it harder
+          # to see what the job is doing. Set it under
+          # Settings → Secrets and variables → Actions → Variables.
+          #
+          # Point it at /healthz, which wakes the web process without
+          # touching the database. /readyz also warms the database — worth
+          # it on Render's free Postgres, and a bad idea on any metered
+          # plan (Neon free bills 100 compute-hours a month, and a 12-hour
+          # window would spend them by the 9th).
+          KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
+        run: |
+          set -u
+          if [ -z "${KEEPALIVE_URL}" ]; then
+            echo "KEEPALIVE_URL is not set — nothing to keep alive."
+            echo "Set it to e.g. https://<your-app>.onrender.com/healthz"
+            exit 0
+          fi
+
+          # --max-time, not just a connect timeout: a cold start IS the
+          # slow case, so the request has to be allowed to take the 45
+          # seconds it was measured taking. Retries cover the case where
+          # the platform drops the first connection while starting.
+          code=$(curl --silent --show-error --location \
+                      --max-time 90 \
+                      --retry 3 --retry-delay 10 --retry-all-errors \
+                      --output /dev/null --write-out '%{http_code}' \
+                      "${KEEPALIVE_URL}") || true
+
+          echo "HTTP ${code} from ${KEEPALIVE_URL}"
+
+          # 200 is awake. Anything else is worth a red run: a keep-alive
+          # that silently pings a 404 for a month is a keep-alive nobody
+          # has.
+          if [ "${code}" != "200" ]; then
+            echo "::error::keepalive got HTTP ${code} — the service is not \
+          answering. Check the URL and whether the free plan's monthly \
+          instance-hours have run out."
+            exit 1
+          fi

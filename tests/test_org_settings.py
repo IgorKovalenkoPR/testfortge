@@ -361,7 +361,16 @@ class TestUsageReport:
         # month" directly under the paragraph saying the allowance does not
         # apply — the page contradicted itself and the test did not notice,
         # because it only looked for the words.
-        assert b"settings-meter-fill" not in body
+        # Scoped to the *allowance* meter. The page grew a second meter
+        # in E0.12 (database capacity), which is shown to everyone and has
+        # nothing to do with whose API key is paying — so the bare class
+        # name stopped identifying the thing this test is about.
+        assert b"capacity-meter-fill" in body, (
+            "the capacity meter should be on the page regardless of BYOK")
+        llm_card = body.split(b"AI usage and cost", 1)[1].split(b"<h2", 1)[0]
+        assert b"settings-meter-fill" not in llm_card, (
+            "a BYOK team is uncapped, so the allowance meter must not "
+            "render against their spend")
         # …while the spend stays visible in the breakdown, as history.
         assert b"authoring" in body
 

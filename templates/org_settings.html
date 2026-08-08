@@ -272,6 +272,122 @@
   </p>
 </div>
 
+{# ── Capacity and availability (E0.11 / E0.12) ────────────────────
+     Read-only for everyone. Two ceilings decide whether this deployment
+     keeps working, and neither is visible from anywhere else in the
+     product.
+
+     Deliberately NOT phrased as "upgrade" or "migrate": the owner decided
+     on 2026-08-06 that the database stays on Render free, so the job of
+     this card is to let a team stay under the ceiling, not to argue for a
+     bigger one. #}
+<div class="card">
+  <h2>Capacity</h2>
+
+  {# ── The database, instance-wide ── #}
+  {% if capacity_db.bytes_used %}
+  {# Its own class as well as the shared one: the page now has two meters,
+     and a test that wants to say "the LLM allowance meter is hidden for a
+     BYOK team" needs to be able to name which. #}
+  <div class="settings-meter capacity-meter">
+    <div class="settings-meter-label">
+      <span>{{ capacity_db.readable }} of {{ capacity_limit }} used on this server</span>
+      {% if capacity_db.over_warn %}
+      <span class="pill pill-danger">getting full</span>
+      {% endif %}
+    </div>
+    <div class="settings-meter-track">
+      <div class="settings-meter-fill capacity-meter-fill{% if capacity_db.over_warn %} is-over{% endif %}"
+           style="width: {{ [capacity_db.ratio * 100, 100]|min|round|int }}%"></div>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-muted settings-note">
+    The database size could not be read just now.
+  </p>
+  {% endif %}
+
+  {# ── This team's share ── #}
+  {% if capacity_org %}
+  <h3>What this team is holding</h3>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Artefact</th><th>Rows</th></tr></thead>
+      <tbody>
+        {% for kind, count in capacity_org.counts|dictsort %}
+        <tr>
+          <td>{{ kind|replace('_', ' ')|capitalize }}</td>
+          <td>{{ '{:,}'.format(count) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Total</th>
+          <th>{{ '{:,}'.format(capacity_org.rows) }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <p class="text-muted settings-note">
+    {# "About" is load-bearing. Postgres can size a table and cannot size
+       one organisation's share of it, so this is row counts times the
+       per-row sizes measured in cost_model.md — an estimate, and labelled
+       as one rather than dressed up as a measurement. #}
+    That is about {{ human_bytes(capacity_org.estimated_bytes) }} —
+    an estimate from row counts, since a shared table cannot report one
+    team's share exactly.
+    {% if capacity_org.over_quota %}
+    <strong>This team is past its {{ '{:,}'.format(capacity_org.quota_rows) }}-row
+    guideline.</strong>
+    {% elif capacity_org.over_warn %}
+    That is over {{ (capacity_org.ratio * 100)|round|int }}% of the
+    {{ '{:,}'.format(capacity_org.quota_rows) }}-row guideline.
+    {% endif %}
+  </p>
+
+  {% if capacity_org.over_warn and capacity_org.biggest %}
+  <p class="settings-status settings-status-warn">
+    {# Points at the artefact worth tidying rather than saying "you are
+       full": one of these is nearly always the whole number. #}
+    The largest part of that is
+    <strong>{{ capacity_org.biggest|replace('_', ' ') }}</strong>. Old
+    execution results and closed bug reports from finished releases are
+    usually the cheapest thing to remove, and deleting a project you have
+    finished with takes its artefacts with it.
+  </p>
+  {% endif %}
+  {% endif %}
+
+  {# ── Cold starts ── #}
+  <h3>Waking up</h3>
+  {% if availability.cold_starts_24h is not none %}
+  <p class="text-muted settings-note">
+    This service went to sleep and had to start again
+    <strong>{{ availability.cold_starts_24h }}</strong>
+    time{{ '' if availability.cold_starts_24h == 1 else 's' }} in the last
+    24 hours. It sleeps after about
+    {{ availability.sleeps_after_minutes }} minutes with no visitors, and
+    the first request after that waits
+    {{ availability.cold_start_seconds }} seconds while it starts.
+    {% if availability.noticeable %}
+    At that rate somebody is waiting most times they open it.
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="text-muted settings-note">
+    How often this service restarts could not be read just now.
+  </p>
+  {% endif %}
+  <p class="text-muted settings-note">
+    Whoever runs the server can shorten that wait during working hours by
+    setting <code>KEEPALIVE_URL</code> in the repository's Actions
+    variables — see <code>.github/workflows/keepalive.yml</code>, which
+    also explains why it is not simply pinged around the clock.
+  </p>
+</div>
+
 {# ── Email (E0.4). Read-only for everyone: it is set on the server,
      and knowing it explains why an invitation did not arrive. ────── #}
 <div class="card">

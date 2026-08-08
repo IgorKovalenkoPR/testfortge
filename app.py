@@ -39,6 +39,7 @@ from flask_compress import Compress
 
 import config as _config
 from engine import basic_auth
+from engine import capacity
 from engine import db as _db
 from engine import features
 from engine import server_session
@@ -659,6 +660,18 @@ def before_request():
 # ── Route registration ───────────────────────────────────────────
 
 register_all(app)
+
+
+# One audit row per process start (E0.11). On the free plan the service
+# sleeps after ~15 idle minutes, so the count over a day is the number of
+# times somebody waited 30–60 seconds at a blank tab — which is the figure
+# that decides whether keep-alive is worth setting up, and the only one the
+# application can measure about its own availability.
+#
+# After register_all so a failure here cannot stop routes being wired, and
+# it swallows its own errors anyway: a service that will not boot because
+# it could not write a note about booting would be a poor trade.
+capacity.record_boot()
 
 
 if __name__ == "__main__":
