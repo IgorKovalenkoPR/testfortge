@@ -29,17 +29,26 @@ are. The endpoint tells the application *which* R2 account to talk to.
 ## 1. Turn on R2
 
 1. Go to <https://dash.cloudflare.com> and sign in.
-2. In the left sidebar, click **R2** (sometimes under "R2 Object Storage").
-3. If it asks you to enable R2, do so.
+2. **R2 is not a top-level item.** In the current dashboard it lives under
+   **Storage & databases → R2 → Overview**. Looking for "R2" in the root
+   sidebar and not finding it is the normal first experience, and it is
+   what prompted this section.
 
-> **The one real gotcha.** Cloudflare asks for a payment method to enable
-> R2 **even for the free tier**. The free allowance is 10 GB of storage,
-> 1 million writes a month and — the reason this project chose R2 —
-> **$0 egress**, which is what makes serving screenshots from a bucket free
-> rather than metered. Nothing is charged inside those limits, but the card
-> is required to get past this screen. If that is a blocker, say so and we
-> will pick a different provider; the application speaks plain S3 and does
-> not care which one.
+   The direct URL is faster:
+   `https://dash.cloudflare.com/<your-account-id>/r2/overview` — the
+   account id is the long hex string already in your dashboard URL.
+3. R2 has to be **subscribed to** before it appears as usable: Cloudflare
+   runs a short checkout flow to add the R2 subscription to the account.
+   The free allowance is 10 GB of storage, 1 million writes a month and —
+   the reason this project chose R2 — **$0 egress**, which is what makes
+   serving screenshots straight from the bucket free rather than metered.
+
+> Whether that checkout requires a card on file is not something this
+> runbook can state from the documentation, and it is the step people get
+> stuck on. If it asks for one and that is a blocker, say so: the
+> application speaks plain S3 and does not care which provider answers.
+> Backblaze B2, Wasabi, AWS S3 and a self-hosted MinIO all work with the
+> same five values.
 
 ## 2. Create the bucket
 
@@ -57,11 +66,14 @@ to find; you chose it.
 
 Still in R2:
 
-1. Look for **Manage R2 API Tokens** — usually a link on the right of the
-   R2 overview page, or under an **API** dropdown near the top.
+1. On the R2 overview page find **Account details**, and next to
+   **API Tokens** click **Manage**. (Older guides call this "Manage R2 API
+   Tokens" and put it on the right-hand side.)
 2. Click **Create API token** (may be called "Create Account API token").
 3. **Token name:** anything, e.g. `testfortge-render`.
-4. **Permissions:** choose **Object Read & Write**.
+4. **Permissions:** choose **Object Read & Write** — the level that can
+   write and delete objects over the S3 API, scoped to buckets you pick.
+   (*Admin Read & Write* also works and grants more than this needs.)
    *Read-only is not enough* — the application uploads, and the
    verification in §5 will fail on the write step and tell you so.
 5. **Specify bucket** (if offered): scope it to the bucket from §2. This is
