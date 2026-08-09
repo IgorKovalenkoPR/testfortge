@@ -115,6 +115,17 @@ services:
       # already exists.
       - key: TESTFORTGE_BROWSER_ENABLED
         value: "0"
+      # The OOM guard's ceiling for a browser pass (E5.2). Declared
+      # explicitly rather than left to the cgroup-derived default, because
+      # on this plan the number is load-bearing and worth reading in one
+      # place: 512 MB limit minus the 130 MB a single page step was
+      # measured to add between two polls.
+      #
+      # The guard now counts Chromium. Until E5.2 measured it, it watched
+      # the Python process alone — 36 MB while the tree reached 393 — so
+      # it never fired and the kernel did the stopping.
+      - key: MEMORY_BUDGET_MB
+        value: "380"
       # ── Programme feature flags (docs/plans/team_platform_architecture.md)
       #
       # All five declared at "0" from the start rather than added one per

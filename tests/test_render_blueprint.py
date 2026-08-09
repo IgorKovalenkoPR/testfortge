@@ -580,3 +580,36 @@ class TestThePerimeterAllowlistStaysNarrow:
         assert "/" not in entries, (
             "'/' matches every request — the gate would be off for the "
             "whole application while still looking configured")
+
+
+class TestTheBrowserMemoryBudgetFitsThePlan:
+    """``MEMORY_BUDGET_MB`` is load-bearing on a 512 MB container.
+
+    Declared rather than derived here because the number is worth reading
+    in one place, and asserted because a declaration nobody checks is a
+    number that drifts. E5.2 measured the arithmetic: the largest jump a
+    single page step made between two polls was 122 MB, so the budget has
+    to sit at least that far below the ceiling or the guard can be
+    overtaken inside one step.
+    """
+
+    FREE_PLAN_MB = 512
+
+    def test_it_is_declared(self, web_service):
+        assert "MEMORY_BUDGET_MB" in _env_map(web_service)
+
+    def test_it_leaves_room_for_the_worst_single_step(self, web_service):
+        from engine.live_executor import STEP_HEADROOM_MB
+        budget = int(_env_map(web_service)["MEMORY_BUDGET_MB"])
+        assert budget + STEP_HEADROOM_MB <= self.FREE_PLAN_MB, (
+            f"a {budget} MB budget plus the {STEP_HEADROOM_MB} MB a single "
+            f"step was measured to add exceeds the {self.FREE_PLAN_MB} MB "
+            f"container. The guard would fire after the kernel, which is a "
+            f"guard that only writes the epitaph.")
+
+    def test_it_is_not_so_small_the_browser_cannot_start(self, web_service):
+        budget = int(_env_map(web_service)["MEMORY_BUDGET_MB"])
+        assert budget >= 200, (
+            f"{budget} MB is below what Chromium needs to open one page "
+            f"(measured: 267 MB tree at new_page), so every run would exit "
+            f"before doing anything")

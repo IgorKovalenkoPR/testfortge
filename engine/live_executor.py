@@ -32,12 +32,24 @@ Live executor combines both:
      matches the URL
    * ``trigger="manual"``   — never runs from the walkthrough (only
      fires from the existing user-button surface)
-4. An :class:`OomGuard` polls ``psutil.Process().memory_info().rss``
-   once per TC; if the RSS crosses ``MEMORY_BUDGET_MB`` (default 400)
-   the executor writes a ``status="oom_exit"`` partial result and
-   shuts down the browser cleanly. The 512 MB Render free-tier
-   ceiling makes this the difference between "graceful early exit"
-   and "SIGKILL with a half-written result.json".
+4. An :class:`OomGuard` polls the resident size of **this process and
+   every child** once per page and once per TC; if it crosses the budget
+   the executor writes a ``status="oom_exit"`` partial result and shuts
+   down the browser cleanly. The 512 MB Render free-tier ceiling makes
+   this the difference between "graceful early exit" and "SIGKILL with a
+   half-written result.json".
+
+   **The children are the point** (E5.2). Until it was measured, this
+   polled ``psutil.Process().memory_info().rss`` — the Python process
+   alone — while Playwright ran Chromium in a separate tree. On a real
+   pass Python never moved off 36 MB as the tree reached 393 MB, so a
+   400 MB budget never fired and the guard was watching the one
+   participant that does not grow.
+
+   The budget is derived from the container's own cgroup limit minus
+   :data:`STEP_HEADROOM_MB`, because the same code runs on a 512 MB dyno
+   and on a 16 GB Actions runner and one constant is wrong on one of
+   them by construction.
 
 Live-feed contract
 ------------------
@@ -102,11 +114,81 @@ _logger = get_logger(__name__)
 
 # ── Defaults ───────────────────────────────────────────────────────
 
-# Render free tier OOM-kills at ~480 MB resident (512 MB ceiling minus
-# kernel + Chromium tail). 400 leaves a 80 MB cushion for the partial-
-# result flush. Operator can override via the ``memory_budget_mb`` ctor
-# arg OR the ``MEMORY_BUDGET_MB`` env var.
-DEFAULT_MEMORY_BUDGET_MB = int(os.environ.get("MEMORY_BUDGET_MB", "400"))
+# How much a single step can add before the guard gets to look again.
+#
+# **Measured**, on a real Chromium against real pages (E5.2). The guard is
+# polled between pages and between test cases, never inside one, so the
+# budget has to leave room for the largest jump a single step can make:
+#
+#     after chromium.launch      145 MB      (+109 over a 36 MB baseline)
+#     after new_page             267 MB      (+122)   <- the worst step
+#     after example.com          284 MB      (+17)
+#     after python.org           362 MB      (+78)
+#     after a wikipedia article  393 MB      (+31)
+#
+# 130 MB covers the worst observed step with a little over. A budget that
+# ignores this fires after the kernel has already killed the container,
+# which is a guard that only writes the epitaph.
+STEP_HEADROOM_MB = 130
+
+# Fallback when the container's own limit cannot be read. Kept at the
+# historical number so a machine with no cgroup behaves as before.
+FALLBACK_MEMORY_BUDGET_MB = 400
+
+
+def container_memory_limit_mb() -> int | None:
+    """The memory ceiling this process is actually running under, or None.
+
+    cgroup v2 first, then v1, then the machine's own RAM. Render, Docker
+    and GitHub Actions all impose the limit through cgroups, and the number
+    that matters is the container's — not the host's, which on a 16 GB
+    runner is off by two orders of magnitude.
+    """
+    for path in ("/sys/fs/cgroup/memory.max",
+                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = open(path).read().strip()
+        except OSError:
+            continue
+        if raw == "max":
+            break                    # unlimited: fall through to host RAM
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        # cgroup v1 reports a sentinel near 2**63 for "no limit".
+        if 0 < value < 2 ** 62:
+            return value // (1024 * 1024)
+    try:
+        import psutil as _ps
+        return int(_ps.virtual_memory().total // (1024 * 1024))
+    except Exception:               # pragma: no cover — psutil absent
+        return None
+
+
+def _default_budget_mb() -> int:
+    """The budget to use when nobody passed one.
+
+    Derived from the ceiling rather than hard-coded, because the same code
+    runs on a 512 MB dyno and on a 16 GB Actions runner, and a constant is
+    wrong on one of them by design. An explicit ``MEMORY_BUDGET_MB`` always
+    wins — an operator who set a number meant it.
+    """
+    raw = (os.environ.get("MEMORY_BUDGET_MB") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            _logger.warning("MEMORY_BUDGET_MB=%r is not a number", raw)
+    limit = container_memory_limit_mb()
+    if not limit:
+        return FALLBACK_MEMORY_BUDGET_MB
+    # Everything else in the container — Python, Flask, the DB client —
+    # sits under the same ceiling, so the guard cannot have all of it.
+    return max(128, limit - STEP_HEADROOM_MB)
+
+
+DEFAULT_MEMORY_BUDGET_MB = _default_budget_mb()
 
 # Per-page link discovery cap. Higher means more thorough coverage but
 # more wall-clock; 20 matches what a human walkthrough would notice in
@@ -187,7 +269,49 @@ class OomGuard:
     def active(self) -> bool:
         return self._psutil is not None and self.budget_mb > 0
 
+    def _tree_rss(self) -> int:
+        """Resident bytes for this process **and every child**.
+
+        The whole point, and the bug this replaced. Playwright runs
+        Chromium as a separate process tree, so ``Process().memory_info()``
+        watches the one participant that does not grow. Measured on a real
+        pass (E5.2):
+
+            python=36 MB  tree=145 MB   after chromium.launch
+            python=36 MB  tree=393 MB   after three real pages
+
+        Python never moved off 36 MB. Against a 400 MB budget the old
+        guard reported 36 and never fired, while the container climbed
+        toward its 512 MB ceiling and the kernel did the stopping —
+        which is exactly the symptom render.yaml records as "the worker
+        was OOM-killed ~110 s into a generation".
+
+        Costs ~7.8 ms against ~13 µs for the single process, measured. At
+        one poll per page that is not a cost; it would be at one per step.
+        """
+        proc = self._psutil.Process()
+        total = proc.memory_info().rss
+        for child in proc.children(recursive=True):
+            try:
+                total += child.memory_info().rss
+            except Exception:
+                # Gone between listing and reading, or not ours to read.
+                continue
+        return total
+
     def rss_mb(self) -> int:
+        if not self._psutil:
+            return 0
+        try:
+            return int(self._tree_rss() / (1024 * 1024))
+        except Exception:
+            return 0
+
+    def own_rss_mb(self) -> int:
+        """This process alone. Diagnostic only — kept because the gap
+        between it and :meth:`rss_mb` is the whole finding, and a future
+        reader deserves to see both numbers rather than trust this
+        docstring."""
         if not self._psutil:
             return 0
         try:
@@ -201,8 +325,7 @@ class OomGuard:
         if not self.active:
             return False
         try:
-            rss = self._psutil.Process().memory_info().rss
-            return rss > self.budget_bytes
+            return self._tree_rss() > self.budget_bytes
         except Exception:
             # Permission denied on locked-down dynos / Windows AppContainers.
             # Treat as "guard inactive for this sample" rather than failing

@@ -73,19 +73,140 @@ class TestOomGuard:
         # Real budget is well above the current RSS — over_budget False.
         assert g.over_budget() is False
 
+    @staticmethod
+    def _fake_process(own_mb: int, child_mb: tuple[int, ...] = ()):
+        """A process tree with a known shape.
+
+        Children are modelled because Chromium **is** the children — a
+        fake with none describes the one world in which the old guard
+        looked correct, which is how it stayed wrong.
+        """
+        def _mem(mb):
+            return type("Mem", (), {"rss": mb * 1024 * 1024})()
+
+        class _Child:
+            def __init__(self, mb):
+                self._mb = mb
+
+            def memory_info(self):
+                return _mem(self._mb)
+
+        class _Proc:
+            def memory_info(self):
+                return _mem(own_mb)
+
+            def children(self, recursive=False):
+                return [_Child(mb) for mb in child_mb]
+
+        return _Proc
+
     def test_over_budget_true_when_rss_exceeds(self, monkeypatch):
         from engine.live_executor import OomGuard
         g = OomGuard(1)  # 1 MB budget — the test process is bigger
-        # Don't trust the live RSS to definitely exceed 1 MB — patch
-        # psutil's Process to return a big number deterministically.
-        class _FakeMem:
-            rss = 200 * 1024 * 1024
-        class _FakeProc:
-            def memory_info(self):
-                return _FakeMem()
-        monkeypatch.setattr(g._psutil, "Process", lambda: _FakeProc())
+        monkeypatch.setattr(g._psutil, "Process",
+                            self._fake_process(200))
         assert g.over_budget() is True
         assert g.rss_mb() == 200
+
+    def test_it_counts_the_browser_and_not_just_python(self, monkeypatch):
+        """The regression. Playwright runs Chromium as a separate process
+        tree, so ``Process().memory_info()`` watches the one participant
+        that does not grow.
+
+        Measured on a real pass before the fix: python stayed at 36 MB
+        while the tree reached 393 MB, so a 400 MB budget never fired and
+        the kernel did the stopping instead — the symptom render.yaml
+        records as "OOM-killed ~110 s into a generation".
+        """
+        from engine.live_executor import OomGuard
+        g = OomGuard(300)
+        # A 36 MB Python process with 360 MB of Chromium under it.
+        monkeypatch.setattr(g._psutil, "Process",
+                            self._fake_process(36, (200, 120, 40)))
+
+        assert g.own_rss_mb() == 36, "the diagnostic view is the old number"
+        assert g.rss_mb() == 396, "the guard must see the whole tree"
+        assert g.over_budget() is True, (
+            "396 MB against a 300 MB budget must fire; watching Python "
+            "alone would report 36 and let the container die")
+
+    def test_a_child_that_vanishes_mid_poll_does_not_break_it(self,
+                                                              monkeypatch):
+        """Chromium exits between listing and reading all the time."""
+        from engine.live_executor import OomGuard
+        g = OomGuard(300)
+
+        class _Gone:
+            def memory_info(self):
+                raise RuntimeError("no such process")
+
+        class _Proc:
+            def memory_info(self):
+                return type("M", (), {"rss": 50 * 1024 * 1024})()
+
+            def children(self, recursive=False):
+                return [_Gone()]
+
+        monkeypatch.setattr(g._psutil, "Process", lambda: _Proc())
+        assert g.rss_mb() == 50
+        assert g.over_budget() is False
+
+    def test_the_budget_is_derived_from_the_container_limit(self,
+                                                            monkeypatch):
+        """One constant cannot be right on both a 512 MB dyno and a 16 GB
+        Actions runner, so the budget is the ceiling minus the worst
+        single step a poll can miss."""
+        from engine import live_executor as le
+        monkeypatch.delenv("MEMORY_BUDGET_MB", raising=False)
+        monkeypatch.setattr(le, "container_memory_limit_mb", lambda: 512)
+
+        assert le._default_budget_mb() == 512 - le.STEP_HEADROOM_MB
+
+        monkeypatch.setattr(le, "container_memory_limit_mb", lambda: 16000)
+        assert le._default_budget_mb() == 16000 - le.STEP_HEADROOM_MB
+
+    def test_the_headroom_covers_the_worst_measured_step(self):
+        """+122 MB for ``new_page()`` was the largest jump between two
+        polls in the E5.2 measurement. A headroom below it means the guard
+        can be overtaken inside one step."""
+        from engine.live_executor import STEP_HEADROOM_MB
+        assert STEP_HEADROOM_MB >= 122
+
+    def test_an_explicit_setting_wins_over_the_derivation(self,
+                                                          monkeypatch):
+        from engine import live_executor as le
+        monkeypatch.setenv("MEMORY_BUDGET_MB", "250")
+        monkeypatch.setattr(le, "container_memory_limit_mb", lambda: 512)
+        assert le._default_budget_mb() == 250
+
+    def test_an_unreadable_limit_falls_back_rather_than_crashing(
+            self, monkeypatch):
+        from engine import live_executor as le
+        monkeypatch.delenv("MEMORY_BUDGET_MB", raising=False)
+        monkeypatch.setattr(le, "container_memory_limit_mb", lambda: None)
+        assert le._default_budget_mb() == le.FALLBACK_MEMORY_BUDGET_MB
+
+    def test_the_limit_reader_ignores_the_no_limit_sentinel(self,
+                                                            monkeypatch):
+        """cgroup v1 reports a number near 2**63 for "unlimited", and
+        v2 reports the string "max". Neither is a ceiling."""
+        from engine import live_executor as le
+        import builtins
+        real_open = builtins.open
+
+        def _fake_open(path, *a, **kw):
+            if str(path).startswith("/sys/fs/cgroup"):
+                return type("F", (), {
+                    "read": lambda self: "max",
+                    "__enter__": lambda self: self,
+                    "__exit__": lambda self, *e: False})()
+            return real_open(path, *a, **kw)
+
+        monkeypatch.setattr(builtins, "open", _fake_open)
+        value = le.container_memory_limit_mb()
+        # Falls through to host RAM, which is a real number and not the
+        # sentinel.
+        assert value is None or value > 0
 
     def test_inactive_when_psutil_missing(self, monkeypatch):
         """With psutil swapped out the guard is functionally a no-op."""
