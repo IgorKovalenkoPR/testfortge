@@ -95,10 +95,26 @@ PROGRAMME_COLUMNS: tuple[tuple[str, str, object], ...] = (
 #: hand-written SQL. Listed anyway: the assertion worth making is that
 #: adding them to a populated database leaves the artefacts alone, and
 #: that the app can then create an account and adopt the existing work.
+#: Tables this programme added, dropped to simulate the schema a live
+#: instance had before it. Hand-maintained, and that is what went wrong:
+#: E1.3 added ``auth_token`` with a foreign key into ``app_user`` and did
+#: not add it here, so ``drop_all`` tried to remove ``app_user`` while a
+#: table still referenced it. SQLite tolerated that; Postgres answered
+#: ``DependentObjectsStillExist: cannot drop table app_user because other
+#: objects depend on it`` and the whole CI matrix went red for four days
+#: while every local run stayed green — there is no Postgres on the
+#: development machine, so the only leg that could see it was the one
+#: nobody could run.
+#:
+#: ``test_no_new_table_is_missing_from_this_list`` below now derives the
+#: answer instead of trusting the list, so the next omission fails on
+#: SQLite too, in a test that names the table.
 PROGRAMME_TABLES: tuple[str, ...] = (
     "app_user", "identity", "organization", "org_member", "invite",
     "org_secret", "llm_usage", "audit_log", "user_setting",
     "server_session",
+    # E1.3 — one-time tokens for password reset and email confirmation.
+    "auth_token",
 )
 
 PROGRAMME_INDEXES: tuple[str, ...] = (
@@ -745,3 +761,46 @@ class TestDuplicateBugIdsInTheCopy:
                                      "Also before a project")}
         assert orphans == {"Filed before a project": "BUG_001",
                            "Also before a project": "BUG_001"}
+
+
+class TestTheListCannotGoStaleSilently:
+    """The guard for :data:`PROGRAMME_TABLES`.
+
+    It went stale once and the cost was disproportionate: a table added in
+    E1.3 was left off the list, so ``_regress_schema`` tried to drop
+    ``app_user`` while ``auth_token`` still pointed at it. SQLite let that
+    pass. Postgres did not, and because the development machine has no
+    Postgres, every local run was green while the whole CI matrix was red —
+    for four days and sixty commits, none of which touched the cause.
+
+    So this derives the answer rather than restating the list, and it runs
+    on **every** backend, which is the point: the omission is now caught by
+    the leg that anybody can run.
+    """
+
+    def test_no_new_table_is_missing_from_this_list(self):
+        listed = set(PROGRAMME_TABLES)
+        blockers = []
+        for name, table in _db.Base.metadata.tables.items():
+            if name in listed:
+                continue
+            for column in table.columns:
+                for fk in column.foreign_keys:
+                    target = str(fk.column).split(".")[0]
+                    if target in listed:
+                        blockers.append(f"{name}.{column.name} -> {target}")
+
+        assert not blockers, (
+            f"these tables reference a table PROGRAMME_TABLES drops, and are "
+            f"not themselves in the list: {blockers}. Postgres will refuse "
+            f"the drop with DependentObjectsStillExist. Add the table above "
+            f"if this programme created it, or the reference is telling you "
+            f"the table predates the programme and the list is wrong.")
+
+    def test_every_listed_table_actually_exists(self):
+        """A stale name in the other direction is quieter and still wrong:
+        ``checkfirst=True`` skips it, so the regression silently stops
+        simulating part of what it claims to."""
+        unknown = [t for t in PROGRAMME_TABLES
+                   if t not in _db.Base.metadata.tables]
+        assert not unknown, unknown
