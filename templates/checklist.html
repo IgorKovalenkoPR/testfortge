@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+{% from "_inline_edit.html" import editable, edited_marker, editable_assets with context %}
 {#- Imported *with context*: this macro reads the translations and the
     session, and a macro imported without it sees neither — the same
     trap E4.2 hit with `editors_enabled`. -#}

@@ -1,64 +1,61 @@
 {% extends "base.html" %}
-{% block title %}Accept invitation — TestForTge{% endblock %}
+{% block title %}{{ t.invite_page_title }} — TestForTge{% endblock %}
 
 {% block content %}
 <div class="auth-card">
 {% if invalid %}
-  <h1>This invitation has expired</h1>
+  <h1>{{ t.invite_expired_title }}</h1>
   <p class="auth-sub">
-    Invitation links are valid for seven days, and are cancelled when a
-    newer one is sent to the same address.
+    {{ t.invite_expired_body }}
   </p>
   <p class="auth-note">
-    Ask an admin on your team to send a new invitation.
-    <a href="{{ url_for('auth_login') }}">Already have an account? Sign in.</a>
+    {{ t.invite_expired_ask }}
+    <a href="{{ url_for('auth_login') }}">{{ t.invite_have_account }}</a>
   </p>
 {% else %}
-  <h1>Join {{ org_name }}</h1>
+  <h1>{{ t.invite_join_title|format(org_name) }}</h1>
   <p class="auth-sub">
-    You were invited as <strong>{{ invite.email }}</strong>
-    with the <strong>{{ invite.role }}</strong> role.
+    {{ t.invite_role_intro }} <strong>{{ invite.email }}</strong>
+    {{ t.invite_role_with }} <strong>{{ invite.role }}</strong>
+    {{ t.invite_role_suffix }}
   </p>
 
   <form method="post" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-    <label for="display_name">Your name</label>
+    <label for="display_name">{{ t.invite_name_label }}</label>
     <input type="text" id="display_name" name="display_name"
            value="{{ display_name or '' }}" autocomplete="name"
-           placeholder="How your name appears on test cases and bugs">
+           placeholder="{{ t.invite_name_placeholder }}">
 
-    <label for="password">Choose a password</label>
+    <label for="password">{{ t.invite_password_label }}</label>
     <input type="password" id="password" name="password"
            autocomplete="new-password" required
            minlength="{{ min_password_len }}">
     <p class="auth-hint">
-      At least {{ min_password_len }} characters. A short phrase of a few
-      words is stronger than a scrambled word, and easier to remember —
-      there are no symbol or digit requirements.
+      {{ t.invite_password_hint|format(min_password_len) }}
     </p>
 
-    <label for="password_confirm">Confirm password</label>
+    <label for="password_confirm">{{ t.invite_confirm_label }}</label>
     <input type="password" id="password_confirm" name="password_confirm"
            autocomplete="new-password" required
            minlength="{{ min_password_len }}">
 
-    <button type="submit" class="btn btn-primary">Create account and join</button>
+    <button type="submit" class="btn btn-primary">{{ t.invite_submit }}</button>
   </form>
 
   {% if google_enabled %}
-  <div class="auth-divider"><span>or</span></div>
+  <div class="auth-divider"><span>{{ t.login_or }}</span></div>
   {# The invite token rides along so the callback can consume it. Google
      must assert the *same* verified address the invite was issued to —
      engine/oauth.decide refuses a mismatch, otherwise anyone holding the
      link could join as whoever they liked. #}
   <a class="btn btn-secondary auth-google"
      href="{{ url_for('auth_google_start', invite=invite.token) }}">
-    Join with Google instead
+    {{ t.invite_google }}
   </a>
   <p class="auth-hint">
-    Use the Google account for {{ invite.email }} — the invitation is tied
-    to that address.
+    {{ t.invite_google_hint|format(invite.email) }}
   </p>
   {% endif %}
 {% endif %}

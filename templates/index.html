@@ -87,8 +87,7 @@
     <p style="margin:10px 0 0 0;font-size:0.82em;color:#64748b;">
         {{ t.get('recent_projects_more', 'Showing the 5 most recent — ') }}
         <a href="#all-projects">
-            {{ t.get('recent_projects_more_link',
-                projects|length ~ ' projects total in your workspace') }}
+            {{ t.recent_projects_more_link|format(projects|length) }}
         </a>
     </p>
     {% endif %}

@@ -56,8 +56,8 @@
   {#- Shown only inside an element carrying data-ie-edited. Visible before
       a user clicks Generate, because that is when knowing which rows a
       regeneration will skip (E4.7) actually helps. -#}
-  <span class="ie-edited-marker pill" title="Changed by a person — a
-        regeneration will not overwrite it">{{ text }}</span>
+  <span class="ie-edited-marker pill"
+        title="{{ t.ie_edited_title }}">{{ text }}</span>
 {%- endmacro %}
 
 

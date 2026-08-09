@@ -1,39 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Settings — TestForTge{% endblock %}
+{% block title %}{{ t.os_page_title }} — TestForTge{% endblock %}
 
 {% block content %}
 {% if not org %}
   <div class="card">
-    <h1>No team selected</h1>
+    <h1>{{ t.os_no_team_title }}</h1>
     <p class="text-muted">
-      Settings belong to a team. Ask an admin to invite you to one.
+      {{ t.os_no_team_body }}
     </p>
   </div>
 {% else %}
 
 <div class="page-head">
-  <h1>Settings</h1>
+  <h1>{{ t.os_heading }}</h1>
   <p class="text-muted">
     {% if is_admin %}
-      Configuration for {{ org.name }}.
+      {{ t.os_config_for|format(org.name) }}
     {% else %}
-      Configuration for {{ org.name }}. Only admins can change these —
-      you are seeing them so you know how the team is set up.
+      {{ t.os_config_for_member|format(org.name) }}
     {% endif %}
   </p>
 </div>
 
 {# ── Team name ────────────────────────────────────────────────── #}
 <div class="card">
-  <h2>Team</h2>
+  <h2>{{ t.os_team_heading }}</h2>
   {% if is_admin %}
   <form method="post" action="{{ url_for('org_settings_general') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-row">
-      <label for="org-name">Name</label>
+      <label for="org-name">{{ t.os_team_name_label }}</label>
       <input type="text" id="org-name" name="name" value="{{ org.name }}"
              maxlength="160" required>
-      <button type="submit" class="btn btn-secondary">Save</button>
+      <button type="submit" class="btn btn-secondary">{{ t.os_save }}</button>
     </div>
   </form>
   {% else %}
@@ -44,17 +43,18 @@
 {# ── Legacy projects (E1.6) ───────────────────────────────────────
      Only rendered when there is something to say. A permanent empty card
      reading "0 projects to claim" would train an admin to skip the one
-     screen that explains where their pre-ORG_MODE work went. #}
+     screen that explains where their pre-ORG_MODE work went.
+
+     The body is a whole sentence per plural form rather than the five
+     inline conditionals it used to be: "project/projects", "belongs/
+     belong", "It was/They were" is a shape English has and Ukrainian
+     does not, and a translator handed those fragments cannot build a
+     sentence out of them (M-2). #}
 {% if is_admin and orphans and orphans.count %}
 <div class="card">
-  <h2>Projects with no team</h2>
+  <h2>{{ t.os_orphans_heading }}</h2>
   <p class="text-muted">
-    {{ orphans.count }} project{{ '' if orphans.count == 1 else 's' }} on
-    this server {{ 'belongs' if orphans.count == 1 else 'belong' }} to no
-    team. {{ 'It was' if orphans.count == 1 else 'They were' }} created
-    before teams existed, so {{ 'it does' if orphans.count == 1 else 'they do' }}
-    not appear in any project list — including for whoever created
-    {{ 'it' if orphans.count == 1 else 'them' }}.
+    {{ plural(orphans.count, 'os_orphans_body')|format(orphans.count) }}
   </p>
 
   <ul class="settings-orphan-list">
@@ -63,7 +63,7 @@
     {% endfor %}
     {% if orphans.count > orphans.names|length %}
     <li class="text-muted">
-      …and {{ orphans.count - orphans.names|length }} more.
+      {{ t.os_orphans_more|format(orphans.count - orphans.names|length) }}
     </li>
     {% endif %}
   </ul>
@@ -73,23 +73,16 @@
        and returns 0 — a button that looked live and then did nothing
        would read as a broken feature rather than a deliberate answer. #}
     <p class="settings-status settings-status-warn">
-      There are {{ orphans.organisations }} teams on this server, so
-      claiming in bulk is refused: nothing here records which team these
-      projects belonged to, and guessing would hand one team's work to
-      another. Whoever runs the server has to assign them individually.
+      {{ t.os_orphans_ambiguous|format(orphans.organisations) }}
     </p>
   {% else %}
     <form method="post" action="{{ url_for('org_settings_adopt_projects') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">
-        Claim {{ orphans.count }} project{{ '' if orphans.count == 1 else 's' }}
-        for {{ org.name }}
+        {{ plural(orphans.count, 'os_orphans_claim')|format(orphans.count, org.name) }}
       </button>
       <p class="text-muted settings-note">
-        {{ 'It becomes' if orphans.count == 1 else 'They become' }} visible
-        to every member of {{ org.name }}, and the change is recorded in the
-        audit trail. There is no undo button — an admin would have to move
-        {{ 'it' if orphans.count == 1 else 'them' }} back individually.
+        {{ plural(orphans.count, 'os_orphans_after')|format(org.name) }}
       </p>
     </form>
   {% endif %}
@@ -98,27 +91,22 @@
 
 {# ── LLM spend ────────────────────────────────────────────────── #}
 <div class="card">
-  <h2>AI usage and cost</h2>
+  <h2>{{ t.os_ai_heading }}</h2>
 
   {% if byok_configured %}
     <p class="settings-status settings-status-ok">
-      This team uses its own Anthropic API key{% if byok_hint %}
-      (ending {{ byok_hint }}){% endif %}. Generation bills to your own
-      account, and the platform allowance below does not apply.
+      {{ t.os_ai_byok }}{% if byok_hint %}
+      {{ t.os_ai_byok_hint|format(byok_hint) }}{% endif %}{{ t.os_ai_byok_tail }}
     </p>
   {% elif platform_key_present %}
     <p class="settings-status">
-      This team uses the platform's shared API key, capped by the monthly
-      allowance below.
+      {{ t.os_ai_platform_key }}
     </p>
   {% else %}
     <p class="settings-status settings-status-warn">
-      No API key is configured anywhere, so AI generation is unavailable.
       {# Worth saying plainly: a large part of the product needs no LLM at
          all, and a blank screen would suggest otherwise. #}
-      Test cases, checklists and estimation still work from the built-in
-      rule engines and the ISTQB knowledge base — they are just not
-      LLM-assisted.
+      {{ t.os_ai_no_key }}
     </p>
   {% endif %}
 
@@ -128,9 +116,9 @@
   {% if budget.limit_micros %}
   <div class="settings-meter">
     <div class="settings-meter-label">
-      <span>{{ budget_spent }} of {{ budget_limit }} used this month</span>
+      <span>{{ t.os_ai_meter|format(budget_spent, budget_limit) }}</span>
       {% if budget.over %}
-      <span class="pill pill-danger">allowance reached</span>
+      <span class="pill pill-danger">{{ t.os_ai_over_pill }}</span>
       {% endif %}
     </div>
     <div class="settings-meter-track">
@@ -142,41 +130,37 @@
     </div>
     {% if budget.over %}
     <p class="text-muted settings-note">
-      AI generation is falling back to the built-in rule engines until the
-      allowance resets or an admin raises it. Nothing is failing — the
-      output is just not LLM-assisted.
+      {{ t.os_ai_over_note }}
     </p>
     {% endif %}
   </div>
   {% elif not byok_configured %}
-  <p class="text-muted settings-note">No monthly allowance is set, so
-    generation is not capped.</p>
+  <p class="text-muted settings-note">{{ t.os_ai_no_cap }}</p>
   {% endif %}
 
   {% if is_admin %}
   <form method="post" action="{{ url_for('org_settings_budget') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-row">
-      <label for="budget">Monthly allowance (USD)</label>
+      <label for="budget">{{ t.os_ai_budget_label }}</label>
       <input type="number" id="budget" name="budget_usd" step="0.50"
              min="0" max="{{ max_budget_usd }}"
              value="{{ '%.2f'|format(budget_limit_usd) }}">
-      <button type="submit" class="btn btn-secondary">Save</button>
+      <button type="submit" class="btn btn-secondary">{{ t.os_save }}</button>
     </div>
     <p class="text-muted settings-note">
-      0 removes the cap. Applies only to spend on the platform's shared
-      key — a team using its own key is never capped.
+      {{ t.os_ai_budget_note }}
     </p>
   </form>
   {% endif %}
 
   {# ── What was actually spent on ────────────────────────────── #}
   {% if usage.calls %}
-  <h3>This month</h3>
+  <h3>{{ t.os_ai_this_month }}</h3>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
-        <tr><th>Feature</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr>
+        <tr><th>{{ t.os_col_feature }}</th><th>{{ t.os_col_calls }}</th><th>{{ t.os_col_input }}</th><th>{{ t.os_col_output }}</th><th>{{ t.os_col_cost }}</th></tr>
       </thead>
       <tbody>
         {% for kind, k in usage.by_kind|dictsort %}
@@ -191,14 +175,14 @@
       </tbody>
       <tfoot>
         <tr>
-          <th>Total</th><th>{{ usage.calls }}</th><th></th><th></th>
+          <th>{{ t.os_col_total }}</th><th>{{ usage.calls }}</th><th></th><th></th>
           <th>{{ usage_total }}</th>
         </tr>
       </tfoot>
     </table>
   </div>
   {% else %}
-  <p class="text-muted settings-note">No AI calls recorded this month.</p>
+  <p class="text-muted settings-note">{{ t.os_ai_no_calls }}</p>
   {% endif %}
 </div>
 
@@ -206,45 +190,39 @@
      management surface, not information a member needs. ─────────── #}
 {% if is_admin %}
 <div class="card">
-  <h2>Your own Anthropic API key</h2>
+  <h2>{{ t.os_byok_heading }}</h2>
   <p class="text-muted">
-    Supplying a key means your team's AI usage bills to your own Anthropic
-    account instead of the platform's, and stops counting against the
-    allowance above. It is encrypted before it is stored and is never shown
-    again afterwards.
+    {{ t.os_byok_intro }}
   </p>
 
   {% if not byok_available %}
     <p class="settings-status settings-status-warn">
-      This instance cannot store API keys — the server has no encryption
-      key configured (<code>TESTFORTGE_ENCRYPTION_KEY</code>). Rather than
-      keep your key in plain text, saving is refused.
+      {{ t.os_byok_unavailable|safe }}
     </p>
   {% else %}
     <form method="post" action="{{ url_for('org_settings_set_llm_key') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="settings-row">
         <label for="api-key">
-          {% if byok_configured %}Replace key{% else %}API key{% endif %}
+          {% if byok_configured %}{{ t.os_byok_replace }}{% else %}{{ t.os_byok_label }}{% endif %}
         </label>
         {# type=password and autocomplete=off: a browser offering to
            remember an API key is not a feature. #}
         <input type="password" id="api-key" name="api_key"
                placeholder="sk-ant-…" autocomplete="off" required>
-        <button type="submit" class="btn btn-primary">Save key</button>
+        <button type="submit" class="btn btn-primary">{{ t.os_byok_save }}</button>
       </div>
       <p class="text-muted settings-note">
-        From console.anthropic.com → API keys. There is no way to reveal a
-        stored key — to change it, paste a new one.
+        {{ t.os_byok_where }}
       </p>
     </form>
 
     {% if byok_configured %}
     <form method="post" action="{{ url_for('org_settings_clear_llm_key') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-secondary">Remove key</button>
+      <button type="submit" class="btn btn-secondary">{{ t.os_byok_remove }}</button>
       <span class="text-muted settings-note">
-        Generation goes back to the platform key and its allowance.
+        {{ t.os_byok_removed_note }}
       </span>
     </form>
     {% endif %}
@@ -255,10 +233,10 @@
 {# ── Which model does what. Read-only for everyone: it is set by the
      server, and knowing it explains cost differences between features. #}
 <div class="card">
-  <h2>Models</h2>
+  <h2>{{ t.os_models_heading }}</h2>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Feature</th><th>Model</th></tr></thead>
+      <thead><tr><th>{{ t.os_col_feature }}</th><th>{{ t.os_col_model }}</th></tr></thead>
       <tbody>
         {% for kind, model in models|dictsort %}
         <tr><td>{{ kind }}</td><td><code>{{ model }}</code></td></tr>
@@ -267,8 +245,7 @@
     </table>
   </div>
   <p class="text-muted settings-note">
-    Set on the server, not per team. Cheaper models handle work whose
-    output can be checked automatically.
+    {{ t.os_models_note }}
   </p>
 </div>
 
@@ -282,7 +259,7 @@
      this card is to let a team stay under the ceiling, not to argue for a
      bigger one. #}
 <div class="card">
-  <h2>Capacity</h2>
+  <h2>{{ t.os_capacity_heading }}</h2>
 
   {# ── The database, instance-wide ── #}
   {% if capacity_db.bytes_used %}
@@ -291,9 +268,9 @@
      BYOK team" needs to be able to name which. #}
   <div class="settings-meter capacity-meter">
     <div class="settings-meter-label">
-      <span>{{ capacity_db.readable }} of {{ capacity_limit }} used on this server</span>
+      <span>{{ t.os_capacity_meter|format(capacity_db.readable, capacity_limit) }}</span>
       {% if capacity_db.over_warn %}
-      <span class="pill pill-danger">getting full</span>
+      <span class="pill pill-danger">{{ t.os_capacity_pill }}</span>
       {% endif %}
     </div>
     <div class="settings-meter-track">
@@ -303,16 +280,16 @@
   </div>
   {% else %}
   <p class="text-muted settings-note">
-    The database size could not be read just now.
+    {{ t.os_capacity_unreadable }}
   </p>
   {% endif %}
 
   {# ── This team's share ── #}
   {% if capacity_org %}
-  <h3>What this team is holding</h3>
+  <h3>{{ t.os_capacity_team_heading }}</h3>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Artefact</th><th>Rows</th></tr></thead>
+      <thead><tr><th>{{ t.os_col_artefact }}</th><th>{{ t.os_col_rows }}</th></tr></thead>
       <tbody>
         {% for kind, count in capacity_org.counts|dictsort %}
         <tr>
@@ -323,7 +300,7 @@
       </tbody>
       <tfoot>
         <tr>
-          <th>Total</th>
+          <th>{{ t.os_col_total }}</th>
           <th>{{ '{:,}'.format(capacity_org.rows) }}</th>
         </tr>
       </tfoot>
@@ -335,15 +312,12 @@
        one organisation's share of it, so this is row counts times the
        per-row sizes measured in cost_model.md — an estimate, and labelled
        as one rather than dressed up as a measurement. #}
-    That is about {{ human_bytes(capacity_org.estimated_bytes) }} —
-    an estimate from row counts, since a shared table cannot report one
-    team's share exactly.
+    {{ t.os_capacity_estimate|format(human_bytes(capacity_org.estimated_bytes)) }}
     {% if capacity_org.over_quota %}
-    <strong>This team is past its {{ '{:,}'.format(capacity_org.quota_rows) }}-row
-    guideline.</strong>
+    <strong>{{ t.os_capacity_over_quota|format('{:,}'.format(capacity_org.quota_rows)) }}</strong>
     {% elif capacity_org.over_warn %}
-    That is over {{ (capacity_org.ratio * 100)|round|int }}% of the
-    {{ '{:,}'.format(capacity_org.quota_rows) }}-row guideline.
+    {{ t.os_capacity_over_warn|format((capacity_org.ratio * 100)|round|int,
+                                      '{:,}'.format(capacity_org.quota_rows)) }}
     {% endif %}
   </p>
 
@@ -351,73 +325,57 @@
   <p class="settings-status settings-status-warn">
     {# Points at the artefact worth tidying rather than saying "you are
        full": one of these is nearly always the whole number. #}
-    The largest part of that is
-    <strong>{{ capacity_org.biggest|replace('_', ' ') }}</strong>. Old
-    execution results and closed bug reports from finished releases are
-    usually the cheapest thing to remove, and deleting a project you have
-    finished with takes its artefacts with it.
+    {{ t.os_capacity_biggest_pre }}
+    <strong>{{ capacity_org.biggest|replace('_', ' ') }}</strong>{{ t.os_capacity_biggest_post }}
   </p>
   {% endif %}
   {% endif %}
 
   {# ── Cold starts ── #}
-  <h3>Waking up</h3>
+  <h3>{{ t.os_waking_heading }}</h3>
   {% if availability.cold_starts_24h is not none %}
   <p class="text-muted settings-note">
-    This service went to sleep and had to start again
-    <strong>{{ availability.cold_starts_24h }}</strong>
-    time{{ '' if availability.cold_starts_24h == 1 else 's' }} in the last
-    24 hours. It sleeps after about
-    {{ availability.sleeps_after_minutes }} minutes with no visitors, and
-    the first request after that waits
-    {{ availability.cold_start_seconds }} seconds while it starts.
+    {{ plural(availability.cold_starts_24h, 'os_waking_body')|format(
+         n=availability.cold_starts_24h,
+         idle=availability.sleeps_after_minutes,
+         wait=availability.cold_start_seconds)|safe }}
     {% if availability.noticeable %}
-    At that rate somebody is waiting most times they open it.
+    {{ t.os_waking_noticeable }}
     {% endif %}
   </p>
   {% else %}
   <p class="text-muted settings-note">
-    How often this service restarts could not be read just now.
+    {{ t.os_waking_unreadable }}
   </p>
   {% endif %}
   <p class="text-muted settings-note">
-    Whoever runs the server can shorten that wait during working hours by
-    setting <code>KEEPALIVE_URL</code> in the repository's Actions
-    variables — see <code>.github/workflows/keepalive.yml</code>, which
-    also explains why it is not simply pinged around the clock.
+    {{ t.os_waking_keepalive|safe }}
   </p>
 </div>
 
 {# ── Email (E0.4). Read-only for everyone: it is set on the server,
      and knowing it explains why an invitation did not arrive. ────── #}
 <div class="card">
-  <h2>Email</h2>
+  <h2>{{ t.os_mail_heading }}</h2>
   {% if mail.configured %}
     <p class="settings-status settings-status-ok">
-      Invitations and password-reset links are sent from
+      {{ t.os_mail_from }}
       <code>{{ mail.sender }}</code>.
     </p>
     <p class="text-muted settings-note">
       {# The number, not just the limit: "is the allowance the problem" is
          the question somebody actually has when mail stops arriving. #}
-      {{ mail.sent_today }} of {{ mail.daily_limit }} messages sent in the
-      last 24 hours.
+      {{ t.os_mail_sent|format(mail.sent_today, mail.daily_limit) }}
       {% if not mail.remaining_today %}
-      The allowance is used up, so invitations are not being emailed until
-      it frees up — the invite page hands out a link to send by hand
-      instead.
+      {{ t.os_mail_used_up }}
       {% endif %}
     </p>
   {% else %}
     <p class="settings-status settings-status-warn">
-      This instance cannot send email, so nothing is emailed automatically.
-      Invitations still work: the admin gets a link to pass on. Password
-      reset does not, because the link has nowhere to go — an admin has to
-      set the password for whoever is locked out.
+      {{ t.os_mail_none }}
     </p>
     <p class="text-muted settings-note">
-      Whoever runs the server can switch it on by setting
-      <code>RESEND_API_KEY</code> and <code>MAIL_FROM</code>.
+      {{ t.os_mail_how|safe }}
     </p>
   {% endif %}
 </div>
@@ -427,34 +385,27 @@
      an operator can flip it with one environment variable, so the page
      reads it rather than asserting it. ──────────────────────────────── #}
 <div class="card">
-  <h2>Storage</h2>
+  <h2>{{ t.os_storage_heading }}</h2>
   {% if storage_state and storage_state.backend == 's3' %}
   <p class="settings-status">
-    Screenshots, videos and export bundles go to object storage
+    {{ t.os_storage_s3_pre }}
     (<code>{{ storage_state.bucket }}</code>{% if storage_state.endpoint %}
-    at {{ storage_state.endpoint }}{% endif %}). They survive a restart.
+    {{ t.os_storage_s3_at|format(storage_state.endpoint) }}{% endif %}){{ t.os_storage_s3_post }}
   </p>
   {% else %}
   <p class="settings-status">
-    Screenshots, videos and export bundles are stored on the server's own
-    disk. <strong>That disk is temporary</strong> — a restart takes the
-    files with it, and the bug or run that references them keeps the link,
-    which then leads nowhere.
+    {{ t.os_storage_local|safe }}
   </p>
   <p class="text-muted settings-note">
-    Whoever runs the server can point this at S3-compatible storage
-    (Cloudflare R2, AWS S3, Backblaze B2, Wasabi, MinIO) by setting
-    <code>STORAGE_BACKEND=s3</code> and the <code>STORAGE_S3_*</code>
-    values. No new deploy is needed.
+    {{ t.os_storage_how|safe }}
   </p>
   {% endif %}
   {% if storage_usage %}
   <p class="text-muted settings-note">
-    This team is using {{ storage_usage.human }} across
-    {{ storage_usage.objects }} file{{ '' if storage_usage.objects == 1 else 's' }}.
+    {{ plural(storage_usage.objects, 'os_storage_usage')|format(
+         size=storage_usage.human, n=storage_usage.objects) }}
     {%- if storage_usage.truncated %}
-    Counting stopped after the first {{ storage_usage.objects }} — the real
-    figure is higher.
+    {{ t.os_storage_truncated|format(storage_usage.objects) }}
     {%- endif %}
   </p>
   {% else %}
@@ -462,37 +413,33 @@
      are different facts, and rendering the first as the second tells an
      admin their evidence is gone. #}
   <p class="text-muted settings-note">
-    How much is in use could not be measured just now.
+    {{ t.os_storage_unmeasured }}
   </p>
   {% endif %}
 
   {% if not storage_configurable %}
   <p class="text-muted settings-note">
-    Choosing storage per team, from this page, is not available on this
-    instance yet.
+    {{ t.os_storage_not_configurable }}
   </p>
   {% else %}
 
-  <h3>Your own storage</h3>
+  <h3>{{ t.os_storage_own_heading }}</h3>
   <p class="text-muted">
-    Point this team at an S3-compatible bucket you control — Cloudflare R2,
-    AWS S3, Backblaze B2, Wasabi or MinIO. New screenshots, videos and
-    export bundles go there instead of to the server. The secret is
-    encrypted before it is stored and is never shown again.
+    {{ t.os_storage_own_intro }}
   </p>
 
   {% if storage_own %}
   <p class="settings-status">
-    Configured: <code>{{ storage_own.bucket }}</code> at
-    {{ storage_own.url }}, access key ending
-    {{ storage_own.redacted().access_key_hint }}.
+    {{ t.os_storage_configured|format(
+         bucket=storage_own.bucket, url=storage_own.url,
+         hint=storage_own.redacted().access_key_hint) }}
   </p>
   {% endif %}
 
   <form method="post" action="{{ url_for('org_settings_storage') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-row">
-      <label for="storage-endpoint">Endpoint</label>
+      <label for="storage-endpoint">{{ t.os_storage_endpoint }}</label>
       {# type=text and not type=url: a self-hosted MinIO is reached as
          "minio.internal:9000" with no scheme, which type=url refuses in
          the browser — a client-side rule rejecting a value the server
@@ -503,19 +450,19 @@
              autocomplete="off" required>
     </div>
     <div class="settings-row">
-      <label for="storage-bucket">Bucket</label>
+      <label for="storage-bucket">{{ t.os_storage_bucket }}</label>
       <input type="text" id="storage-bucket" name="bucket"
              value="{{ storage_own.bucket if storage_own else '' }}"
              autocomplete="off" required>
     </div>
     <div class="settings-row">
-      <label for="storage-region">Region</label>
+      <label for="storage-region">{{ t.os_storage_region }}</label>
       <input type="text" id="storage-region" name="region"
              value="{{ storage_own.region if storage_own else '' }}"
-             placeholder="leave empty for Cloudflare R2" autocomplete="off">
+             placeholder="{{ t.os_storage_region_hint }}" autocomplete="off">
     </div>
     <div class="settings-row">
-      <label for="storage-access-key">Access key</label>
+      <label for="storage-access-key">{{ t.os_storage_access_key }}</label>
       <input type="text" id="storage-access-key" name="access_key"
              value="{{ storage_own.access_key if storage_own else '' }}"
              autocomplete="off" required>
@@ -525,32 +472,28 @@
          field gives: a browser offering to remember this is not a
          feature. #}
       <label for="storage-secret-key">
-        {% if storage_own %}Replace secret{% else %}Secret key{% endif %}
+        {% if storage_own %}{{ t.os_storage_replace_secret }}{% else %}{{ t.os_storage_secret }}{% endif %}
       </label>
       <input type="password" id="storage-secret-key" name="secret_key"
              autocomplete="off"
              {% if not storage_own %}required{% endif %}>
     </div>
     <div class="settings-row">
-      <label for="storage-secure">Use HTTPS</label>
+      <label for="storage-secure">{{ t.os_storage_https }}</label>
       <input type="checkbox" id="storage-secure" name="secure" value="1"
              {% if not storage_own or storage_own.secure %}checked{% endif %}>
     </div>
     <div class="settings-row">
-      <button type="submit" class="btn btn-primary">Save storage</button>
+      <button type="submit" class="btn btn-primary">{{ t.os_storage_save }}</button>
       <button type="submit" class="btn btn-secondary"
               formaction="{{ url_for('org_settings_storage_test') }}">
-        Test connection
+        {{ t.os_storage_test }}
       </button>
     </div>
     <p class="text-muted settings-note">
-      Both buttons write a small file, read it back and delete it — a check
-      that only asked whether the bucket exists would pass for a key that
-      cannot upload. <strong>Save refuses settings that fail the test</strong>,
-      because storing them would send this team's files to the server's
-      temporary disk while the page said otherwise.
+      {{ t.os_storage_note|safe }}
       {% if storage_own %}
-      Leave the secret blank to keep the one already stored.
+      {{ t.os_storage_keep_secret }}
       {% endif %}
     </p>
   </form>
@@ -558,10 +501,9 @@
   {% if storage_own %}
   <form method="post" action="{{ url_for('org_settings_storage_clear') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-secondary">Use the server's storage</button>
+    <button type="submit" class="btn btn-secondary">{{ t.os_storage_use_server }}</button>
     <span class="text-muted settings-note">
-      Files already in your bucket stay there. Nothing is moved or deleted,
-      so pages referencing them will stop finding them.
+      {{ t.os_storage_use_server_note }}
     </span>
   </form>
   {% endif %}

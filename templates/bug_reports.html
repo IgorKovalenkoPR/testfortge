@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_inline_edit.html" import editable, edited_marker, editable_assets %}
+{% from "_inline_edit.html" import editable, edited_marker, editable_assets with context %}
 
 {#- E4.5: the bug body is editable in place when EDITORS_ENABLED is on.
     ``bug_edit`` maps public id -> {row_version, ai_generated, ...}; a report

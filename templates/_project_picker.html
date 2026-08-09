@@ -48,9 +48,9 @@
                   {% if active_project_id and p.id == active_project_id %}selected{% endif %}>
             {{ p.name }}
             {% if p.test_cases_count or p.checklist_count or p.bug_count %}
-              ({{ p.test_cases_count or 0 }} TC ·
-               {{ p.checklist_count or 0 }} CL ·
-               {{ p.bug_count or 0 }} bugs)
+              {{ t.pp_counts|format(tc=p.test_cases_count or 0,
+                                     cl=p.checklist_count or 0,
+                                     bugs=p.bug_count or 0) }}
             {% endif %}
           </option>
           {% endfor %}

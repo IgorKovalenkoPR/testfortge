@@ -45,6 +45,7 @@ from engine import features
 from engine import server_session
 from engine import session_timeout
 from engine.i18n import get_lang
+from engine.i18n import plural as _plural
 from engine.log import get_logger
 from routes import register_all
 from routes._shared import GENERATED_KEYS, SERVER_START_TIME
@@ -429,7 +430,10 @@ def inject_globals():
             except Exception:
                 pending_drafts = []
     return {"t": g.t, "lang": g.lang, "recorder_enabled": recorder_enabled,
-            "pending_drafts": pending_drafts}
+            "pending_drafts": pending_drafts,
+            # Bound to this request's language so a template asks only the
+            # question it has: "which form goes with this number".
+            "plural": lambda count, key: _plural(g.lang, count, key)}
 
 
 @app.template_filter('fromjson')

@@ -1,24 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Not allowed — TestForTge{% endblock %}
+{% block title %}{{ t.forbidden_page_title }} — TestForTge{% endblock %}
 
 {% block content %}
 <div class="auth-card">
-  <h1>You do not have access to this</h1>
+  <h1>{{ t.forbidden_title }}</h1>
   <p class="auth-sub">
     {% if required_role == 'admin' %}
-      Creating projects and changing settings is limited to admins on your
-      team.
+      {{ t.forbidden_admin_only }}
     {% else %}
-      This action needs the <strong>{{ required_role }}</strong> role.
+      {{ t.forbidden_needs_role_pre }} <strong>{{ required_role }}</strong> {{ t.forbidden_needs_role_post }}
     {% endif %}
   </p>
   <p class="auth-note">
     {# Naming the way out matters more than naming the rule: a 403 that
        only says "forbidden" turns into a support message, and the answer
        is almost always "ask the admin who invited you". #}
-    Ask an admin on your team to change your role, or to do this for you.
+    {{ t.forbidden_ask }}
     <br>
-    <a href="{{ url_for('index') }}">Back to the dashboard</a>
+    <a href="{{ url_for('index') }}">{{ t.forbidden_back }}</a>
   </p>
 </div>
 {% endblock %}

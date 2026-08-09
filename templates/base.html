@@ -10,7 +10,7 @@
 </head>
 <body>
     <nav class="sidebar">
-        <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — Testfort + Forge">
+        <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — {{ t.brand_aria }}">
             <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
                  alt="" class="brand-icon" width="44" height="44">
             {# Split wordmark: TestFor + sword-T + ge so both "Testfort" and
@@ -190,7 +190,7 @@
             <img src="{{ url_for('static', filename='img/tedgie.svg') }}"
                  alt="" class="qa-chat-mascot-img" width="66" height="84">
         </button>
-        <div class="qa-chat-panel" role="dialog" aria-label="Tedgie — Testfort QA Assistant">
+        <div class="qa-chat-panel" role="dialog" aria-label="Tedgie — {{ t.chat_aria }}">
             <div class="qa-chat-head">
                 <div class="qa-chat-headline">
                     <img src="{{ url_for('static', filename='img/tedgie.svg') }}"

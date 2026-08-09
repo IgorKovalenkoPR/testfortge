@@ -349,53 +349,59 @@ class TestItDoesNotArgueForABiggerPlan:
     quota surface that lobbies for a bigger plan re-opens a closed
     decision, so the wording is checked rather than trusted."""
 
-    #: Read from the template rather than a rendered page, so the check
+    #: Read from the dictionaries rather than a rendered page, so the check
     #: covers every branch — including the "getting full" copy that only
     #: appears on an instance nobody wants to reproduce in a test.
-    TEMPLATE = "templates/org_settings.html"
+    #:
+    #: It used to read ``templates/org_settings.html`` and slice between
+    #: two English ``<h2>`` literals. M-2 moved this card's words into
+    #: ``engine/i18n``, which broke the slice — and made the check better:
+    #: the rule is about **what the product says**, so it now applies to
+    #: every language rather than to whichever one happened to be in the
+    #: markup. A Ukrainian string offering a paid plan would have sailed
+    #: past the old version.
+    FORBIDDEN_EN = ("upgrade", "migrate", "paid plan", "bigger plan",
+                    "move to neon", "upgrading")
+    FORBIDDEN_UA = ("оновіть план", "платний план", "більший план",
+                    "мігруйте", "міграція на", "перейдіть на neon")
+    FORBIDDEN = FORBIDDEN_EN
 
-    FORBIDDEN = ("upgrade", "migrate", "paid plan", "bigger plan",
-                 "move to neon", "upgrading")
+    #: Every key the capacity card renders.
+    PREFIXES = ("os_capacity_", "os_waking_")
+
+    @classmethod
+    def _card_strings(cls, lang: str) -> str:
+        from engine.i18n import get_lang
+        table = get_lang(lang)
+        return " ".join(str(v) for k, v in table.items()
+                        if k.startswith(cls.PREFIXES)).lower()
 
     @classmethod
     def _visible_card(cls) -> str:
-        """The capacity card's user-visible text, comments removed.
-
-        ``{# … #}`` is stripped first, and that is not a convenience: the
-        card's own comment *explains* why it avoids the word "upgrade", so
-        a naive substring search finds the word in the sentence forbidding
-        it and fails.
-
-        And it is stripped from the **whole file before slicing**, then
-        located by a heading the reader can see. Slicing first put the
-        start of the range inside a comment, whose opening ``{#`` was then
-        outside it — so nothing matched and the comment survived. Exactly
-        the mistake the ``<script>`` stripping in ``test_bug_attachments``
-        made, one file later.
-        """
-        import pathlib
-        text = pathlib.Path(cls.TEMPLATE).read_text(encoding="utf-8")
-        visible = re.sub(r"\{#.*?#\}", "", text, flags=re.S)
-        start = visible.index("<h2>Capacity</h2>")
-        return visible[start:visible.index("<h2>Email</h2>", start)].lower()
+        return cls._card_strings("en")
 
     def test_the_capacity_card_suggests_tidying_not_upgrading(self):
-        card = self._visible_card()
-        for word in self.FORBIDDEN:
-            assert word not in card, (
-                f"the capacity card says {word!r} — the plan decision was "
-                f"made on 2026-08-06 and this surface must not re-open it")
+        for lang, forbidden in (("en", self.FORBIDDEN_EN),
+                                ("ua", self.FORBIDDEN_UA)):
+            card = self._card_strings(lang)
+            for word in forbidden:
+                assert word not in card, (
+                    f"the {lang} capacity card says {word!r} — the plan "
+                    f"decision was made on 2026-08-06 and this surface must "
+                    f"not re-open it")
 
     def test_it_says_what_to_delete_instead(self):
-        assert "delet" in self._visible_card(), (
+        assert "delet" in self._card_strings("en"), (
             "a full-database warning with no suggested action is an alarm "
             "without an answer")
+        assert "видал" in self._card_strings("ua"), (
+            "the Ukrainian card warns without naming the way out")
 
     def test_the_stripping_leaves_the_card_itself(self):
         """Guards the opposite failure: a regex so eager that the card
         matches because nothing is left of it."""
-        card = self._visible_card()
-        assert "capacity" in card and len(card) > 500
+        card = self._card_strings("en")
+        assert "row counts" in card and len(card) > 500
 
 
 # ── The keep-alive workflow ──────────────────────────────────────────

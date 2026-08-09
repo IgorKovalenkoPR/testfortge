@@ -406,6 +406,17 @@ class TestNoKeyAnywhere:
 
     def test_a_platform_key_is_reported_as_shared(self, client, team,
                                                   monkeypatch):
+        """Read as a person reads it, not as bytes.
+
+        M-2 moved this sentence into ``engine/i18n``, so it now arrives
+        through ``{{ }}`` and Jinja escapes the apostrophe: the page says
+        ``platform&#39;s``. Identical on screen, different in the buffer —
+        so the assertion unescapes first rather than pinning the encoding
+        of a punctuation mark.
+        """
+        import html as _html
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform")
         _as(client, team, "admin")
-        assert b"platform's shared API key" in client.get("/org/settings").data
+        page = _html.unescape(
+            client.get("/org/settings").get_data(as_text=True))
+        assert "platform's shared API key" in page

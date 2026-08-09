@@ -1,64 +1,61 @@
 {% extends "base.html" %}
-{% block title %}Team — TestForTge{% endblock %}
+{% block title %}{{ t.om_title }} — TestForTge{% endblock %}
 
 {% block content %}
 {% if not org %}
   <div class="card">
-    <h1>You are not on a team yet</h1>
+    <h1>{{ t.om_no_team_title }}</h1>
     <p class="text-muted">
-      Ask whoever set up TestForTge for your organisation to invite you,
-      or create an organisation from Settings.
+      {{ t.om_no_team_body }}
     </p>
   </div>
 {% else %}
 <div class="page-head">
   <h1>{{ org.name }}</h1>
   <p class="text-muted">
-    {{ members|length }} member{{ '' if members|length == 1 else 's' }}{% if is_admin and invites %},
-    {{ invites|length }} pending invitation{{ '' if invites|length == 1 else 's' }}{% endif %}.
+    {{ members|length }} {{ plural(members|length, 'om_member_word') }}{% if is_admin and invites %},
+    {{ invites|length }} {{ plural(invites|length, 'om_invite_word') }}{% endif %}.
   </p>
 </div>
 
 {% if is_admin %}
 <div class="card">
-  <h2>Invite someone</h2>
+  <h2>{{ t.om_invite_heading }}</h2>
   <form method="post" action="{{ url_for('org_invite') }}" class="invite-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="invite-row">
-      <label class="sr-only" for="invite_email">Email address</label>
+      <label class="sr-only" for="invite_email">{{ t.om_invite_email_label }}</label>
       <input type="email" id="invite_email" name="email" required
-             placeholder="colleague@company.com" autocomplete="off">
+             placeholder="{{ t.om_invite_email_placeholder }}" autocomplete="off">
 
-      <label class="sr-only" for="invite_role">Role</label>
+      <label class="sr-only" for="invite_role">{{ t.om_invite_role_label }}</label>
       <select id="invite_role" name="role">
-        <option value="user" selected>User — works with everything</option>
-        <option value="admin">Admin — also creates projects and changes settings</option>
+        <option value="user" selected>{{ t.om_role_user }}</option>
+        <option value="admin">{{ t.om_role_admin }}</option>
       </select>
 
-      <button type="submit" class="btn btn-primary">Create invitation</button>
+      <button type="submit" class="btn btn-primary">{{ t.om_invite_submit }}</button>
     </div>
   </form>
   <p class="text-muted invite-note">
     {# Honest about the mechanism: promising an email while delivery is
        unbuilt (E0.4) would leave the admin waiting for a message that
        never arrives. #}
-    You will get a link to send them yourself — TestForTge does not send
-    email on this plan. Links are valid for 7 days, and inviting the same
-    address again cancels the earlier link.
+    {{ t.om_invite_note }}
   </p>
 </div>
 {% endif %}
 
 <div class="card">
-  <h2>Members</h2>
+  <h2>{{ t.om_members_heading }}</h2>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Role</th>
-          {% if is_admin %}<th class="col-actions">Actions</th>{% endif %}
+          <th>{{ t.om_col_name }}</th>
+          <th>{{ t.om_col_email }}</th>
+          <th>{{ t.om_col_role }}</th>
+          {% if is_admin %}<th class="col-actions">{{ t.om_col_actions }}</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -66,8 +63,8 @@
         <tr>
           <td>
             {{ m.display_name or '—' }}
-            {% if m.user_id == me %}<span class="pill">you</span>{% endif %}
-            {% if not m.is_active %}<span class="pill pill-muted">deactivated</span>{% endif %}
+            {% if m.user_id == me %}<span class="pill">{{ t.om_you }}</span>{% endif %}
+            {% if not m.is_active %}<span class="pill pill-muted">{{ t.om_deactivated }}</span>{% endif %}
           </td>
           <td>{{ m.email }}</td>
           <td>
@@ -76,12 +73,12 @@
                   action="{{ url_for('org_change_role', user_id=m.user_id) }}"
                   class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <select name="role" aria-label="Role for {{ m.email }}">
+              <select name="role" aria-label="{{ t.om_role_for|format(m.email) }}">
                 {% for r in roles %}
                 <option value="{{ r }}" {% if r == m.role %}selected{% endif %}>{{ r }}</option>
                 {% endfor %}
               </select>
-              <button type="submit" class="btn btn-secondary btn-sm">Save</button>
+              <button type="submit" class="btn btn-secondary btn-sm">{{ t.om_save }}</button>
             </form>
             {% else %}
               {{ m.role }}
@@ -93,7 +90,7 @@
                   action="{{ url_for('org_remove_member', user_id=m.user_id) }}"
                   class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+              <button type="submit" class="btn btn-danger btn-sm">{{ t.om_remove }}</button>
             </form>
           </td>
           {% endif %}
@@ -105,20 +102,18 @@
   {% if is_admin and admin_count == 1 %}
   <p class="text-muted invite-note">
     {# Surfaced before they try, rather than as an error afterwards. #}
-    You are the only admin. Promote someone else before changing your own
-    role or removing yourself — otherwise nobody could create projects or
-    change settings.
+    {{ t.om_only_admin }}
   </p>
   {% endif %}
 </div>
 
 {% if is_admin and invites %}
 <div class="card">
-  <h2>Pending invitations</h2>
+  <h2>{{ t.om_pending_heading }}</h2>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
-        <tr><th>Email</th><th>Role</th><th>Expires</th><th class="col-actions"></th></tr>
+        <tr><th>{{ t.om_col_email }}</th><th>{{ t.om_col_role }}</th><th>{{ t.om_col_expires }}</th><th class="col-actions"></th></tr>
       </thead>
       <tbody>
         {% for inv in invites %}
@@ -134,7 +129,7 @@
                   class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="email" value="{{ inv.email }}">
-              <button type="submit" class="btn btn-secondary btn-sm">Cancel</button>
+              <button type="submit" class="btn btn-secondary btn-sm">{{ t.om_cancel }}</button>
             </form>
           </td>
         </tr>
