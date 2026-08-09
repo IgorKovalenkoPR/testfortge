@@ -653,9 +653,48 @@ class TestBugFactory:
 # ── 12. WALKTHROUGH_FLAG passes through runner_worker payload ─────
 
 
+@pytest.fixture
+def unbounded_memory(monkeypatch):
+    """Take the OOM guard out of the way for tests that assert on a payload.
+
+    ``OomGuard`` polls the **pytest process's** RSS against
+    ``DEFAULT_MEMORY_BUDGET_MB`` (400). Any test that runs the worker and
+    then reads its result therefore depends on how much memory the suite
+    happens to be holding when it gets there — which is not what these
+    tests are about, and is invisible until the suite grows.
+
+    It grew. Measured, from the failing run's own locals::
+
+        'early_exit_reason': 'oom_budget_exceeded (413 MB > 400 MB)'
+        bindings = []
+
+    The product was right: the guard preempted the run and wrote a partial
+    result, exactly as designed. The test was wrong — it read that partial
+    result and asserted on bindings the run never got to produce. It passed
+    for as long as the suite stayed under 400 MB and started failing when
+    it did not, first on CI's 3.12 and 3.13 while 3.11 and this machine
+    stayed green.
+
+    Pinned here rather than in ``conftest.py`` on purpose:
+    ``test_live_executor.py`` asserts the default **is** 400, and a global
+    override would leave that test asserting this fixture instead of the
+    product.
+
+    Set as the **environment variable**, which is what actually decides.
+    Patching ``live_executor.DEFAULT_MEMORY_BUDGET_MB`` looks like the
+    obvious lever and does nothing here: ``runner_worker`` reads
+    ``MEMORY_BUDGET_MB`` from the environment itself and passes the number
+    to the executor explicitly, so the module constant is never consulted
+    on this path. Written the obvious way first, and the full-suite
+    reproducer failed exactly as before — which is the only way that
+    difference shows up.
+    """
+    monkeypatch.setenv("MEMORY_BUDGET_MB", "100000")
+
+
 class TestRunnerWorkerWalkthroughPayload:
     def test_result_json_carries_findings_and_bindings(
-            self, monkeypatch, fake_pw, tmp_storage):
+            self, monkeypatch, fake_pw, tmp_storage, unbounded_memory):
         import json
         fake_pw()
         monkeypatch.setenv("WALKTHROUGH_MODE_ENABLED", "1")
@@ -689,6 +728,18 @@ class TestRunnerWorkerWalkthroughPayload:
         with open(os.path.join(tmp_storage, "automation_runs",
                                  "_pending", "cfg.result.json")) as f:
             result = json.load(f)
+        # Named before anything else, because a preempted run writes a
+        # *partial* result and every assertion below then fails on data
+        # the run never got to produce. Without this the symptom was a
+        # bare ``assert False`` on the bindings, four files away from the
+        # cause.
+        # The key is always present and empty on a clean run, so this
+        # tests the value, not the shape — written the other way first and
+        # caught immediately, which is the only reason it is worth saying.
+        assert not result.get("early_exit_reason"), (
+            f"the run was cut short ({result['early_exit_reason']}), so this "
+            f"payload is partial and nothing below is a real assertion")
+
         # Schema is now: report + walkthrough_findings +
         # walkthrough_findings_deduped + walkthrough_tc_bindings.
         assert "walkthrough_findings" in result
