@@ -82,10 +82,19 @@ EPHEMERAL_MAX_RUNS = 5
 
 #: Retention once artefacts are in durable storage.
 #:
-#: Thirty days and fifty runs, both overridable. Chosen to be long enough to
-#: cover "the regression we shipped three weeks ago" — which is the actual
-#: question run evidence gets asked — and short enough to sit inside R2's
-#: 10 GB free tier for a team running a few automated suites a day.
+#: Thirty days and fifty runs, both overridable. Thirty days is long enough
+#: to cover "the regression we shipped three weeks ago", which is the actual
+#: question run evidence gets asked.
+#:
+#: Fifty runs was chosen to "sit inside the 10 GB free tier", and E0.5 did
+#: the arithmetic that claim skipped: a run is 50–200 MB
+#: (``automation_runner.py:100``), so fifty runs is 2.5–**10** GB — the whole
+#: free allowance at the top of the range, before a single attachment or
+#: backup bundle. True at the low end, false at the high one, which is the
+#: least useful kind of number. So ``ARTEFACT_MAX_RUNS`` is set to 25 when a
+#: deployment switches to a bucket (ADR 0002 §4.7 and the storage runbook
+#: §6), and this default stays 50 for deployments whose runs are small or
+#: whose bucket is their own.
 DURABLE_DAYS = 30
 DURABLE_MAX_RUNS = 50
 

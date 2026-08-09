@@ -27,10 +27,11 @@ is.
 What moto is and is not
 -----------------------
 It is a real HTTP server implementing S3 semantics, which is a large step up
-from a stub. It is **not** Cloudflare R2: it does not enforce signatures, it
-has no bucket policies, and it has never been slow, rate-limited or
-regionally confused. So the happy path here proves the request shaping and
-the protocol, not that a particular provider will accept our signatures.
+from a stub. It is **not** the provider a deployment will use: it does not
+enforce signatures, it has no bucket policies, and it has never been slow,
+rate-limited or regionally confused. So the happy path here proves the
+request shaping and the protocol, not that a particular provider will accept
+our signatures.
 
 That last gap is closed by ``scripts/verify_storage.py``, which runs this
 same matrix against a real bucket with real credentials and prints a
@@ -599,7 +600,7 @@ class TestTheSuiteActuallyRanThis:
             "the adapter was never exercised over HTTP")
 
     def test_the_verification_script_for_a_real_bucket_exists(self):
-        """moto is not Cloudflare R2. The gap is closed by a script the
+        """moto is not a hosted provider. The gap is closed by a script the
         operator runs against a real bucket — and a runbook that promises
         one had better ship it."""
         import pathlib
@@ -610,4 +611,83 @@ class TestTheSuiteActuallyRanThis:
         assert "STORAGE_S3_ENDPOINT" in text
         assert "presigned" in text.lower(), (
             "a verification that skips the presigned URL skips the thing "
-            "R2 is chosen for")
+            "free egress is chosen for")
+
+
+# ── the one tool the owner runs by hand ──────────────────────────────
+
+class TestTheScriptTheOwnerWillRun:
+    """``scripts/verify_storage.py``, executed rather than read (E0.5).
+
+    Until this class existed the script had exactly one test: *the file is
+    on disk and mentions two words*. That is the shape of gate that
+    [[feedback_gate_measuring_wrong_chain]] is about — it would stay green
+    through any edit that broke the script outright, and the script is the
+    single artefact standing between "the owner created a bucket" and
+    "the deployment can use it". It is run once, by one person, usually
+    while doing five other things; a crash there costs a walk through a
+    provider's console, not a test run.
+
+    So: run it. Against the same moto server the rest of this file uses,
+    as a subprocess, exactly the way the runbook says to invoke it.
+    """
+
+    @staticmethod
+    def _run(bucket_name: str, box) -> tuple[int, str]:
+        import os
+        import pathlib
+        import subprocess
+        import sys
+        repo = pathlib.Path(__file__).resolve().parent.parent
+        env = dict(os.environ)
+        env.update({
+            "STORAGE_S3_ENDPOINT": f"http://{box.endpoint}",
+            "STORAGE_S3_BUCKET": bucket_name,
+            "STORAGE_S3_ACCESS_KEY": ACCESS_KEY,
+            "STORAGE_S3_SECRET_KEY": SECRET_KEY,
+            "STORAGE_S3_SECURE": "0",
+            "STORAGE_S3_REGION": "",
+            "NO_COLOR": "1",
+            # The script prints em dashes; a child inheriting a cp125x
+            # console encoding would die on its own output rather than on
+            # anything to do with storage.
+            "PYTHONIOENCODING": "utf-8",
+        })
+        done = subprocess.run(
+            [sys.executable, str(repo / "scripts" / "verify_storage.py")],
+            env=env, cwd=str(repo), capture_output=True, timeout=300)
+        return done.returncode, done.stdout.decode("utf-8", "replace")
+
+    def test_it_passes_every_check_against_a_real_s3_server(self, bucket):
+        code, out = self._run(bucket.name, bucket)
+        assert code == 0, f"the script the runbook tells the owner to run " \
+                          f"exited {code}:\n{out}"
+        assert "All checks passed." in out
+        assert out.count("[PASS]") == 7, (
+            f"the runbook promises seven checks; this printed "
+            f"{out.count('[PASS]')}:\n{out}")
+        assert "[FAIL]" not in out
+
+    def test_a_missing_bucket_is_diagnosed_rather_than_dumped(self, bucket):
+        """The failing step must say what to *do*, not what S3 *said*.
+
+        Measured 2026-08-09, before the fix: every step of this script
+        printed the provider's own string —
+
+            upload of _verify/…/probe.bin failed: S3 operation failed;
+            code: NoSuchBucket, message: The specified bucket does not exist
+
+        — while the runbook's failure table promised *"there is no bucket
+        called '<name>'"*. The sentence existed; only the Settings panel
+        called for it, and the write step returns before the panel's own
+        check is ever reached. Whoever walks a provider gets the first
+        message, so the first message is the one that has to be legible.
+        """
+        code, out = self._run("tfg-no-such-bucket-here", bucket)
+        assert code == 1
+        assert "there is no bucket called 'tfg-no-such-bucket-here'" in out, \
+            f"the owner gets an S3 error code instead of a next move:\n{out}"
+        assert "S3 operation failed" not in out, (
+            "the raw provider string is back — the diagnosis is not being "
+            "used, and the runbook now documents a message that is not "
+            "printed")

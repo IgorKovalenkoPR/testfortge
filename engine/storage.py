@@ -11,7 +11,7 @@ E8.2's acceptance criterion is one sentence and it shapes the whole module:
 
 So nothing here is decided at import. :func:`backend_for` resolves the
 backend on every call, from the environment and from the organisation's own
-settings, which means switching from local disk to R2 is a dashboard edit
+settings, which means switching from local disk to a bucket is a dashboard edit
 and switching back is the same edit. A module that read its config once, at
 import, would satisfy every test in this repo and fail that criterion — the
 operator would have to redeploy to change a setting, and a setting nobody
@@ -19,8 +19,9 @@ can change without a deploy is a constant with extra steps.
 
 Two backends, and why not four
 ------------------------------
-`local` and `s3`. The S3 adapter speaks one protocol and reaches Cloudflare
-R2 (the free-tier choice), AWS S3, Backblaze B2, Wasabi and MinIO — so
+`local` and `s3`. The S3 adapter speaks one protocol and reaches Backblaze
+B2 (the free-tier choice since E0.5; Cloudflare R2 was the first pick and
+turned out to demand a card), AWS S3, Cloudflare R2, Wasabi and MinIO — so
 self-host (E8.6) needs no separate code. Azure Blob is deferred, not
 rejected: it is a different API, and an adapter with no user and no
 credentials to test against is a maintenance promise rather than coverage.
@@ -611,7 +612,7 @@ class S3Backend(Backend):
     def locate(self, key: str) -> Location:
         """A presigned GET, not a proxy through this process.
 
-        ADR §4.4: R2's egress is free only while the bytes do not pass
+        ADR §4.4: free-tier egress is free only while the bytes do not pass
         through us, and a 512 MB dyno that also sleeps is the wrong thing to
         put in front of every thumbnail.
         """

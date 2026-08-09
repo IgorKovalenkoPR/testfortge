@@ -296,7 +296,7 @@ created, and `app` waits for that on purpose. Check
 `docker compose logs storage-init`; the usual cause is MinIO credentials
 containing characters your shell ate on the way into `.env` — quote them.
 
-**Setting up a hosted bucket instead of MinIO?** [object-storage-setup.md](object-storage-setup.md) walks Cloudflare R2 from zero, including where the two keys appear and the one screen that shows the secret once.
+**Setting up a hosted bucket instead of MinIO?** [object-storage-setup.md](object-storage-setup.md) walks Backblaze B2 from zero, including where the two keys appear and the one screen that shows the secret once. It used to walk Cloudflare R2; R2 turned out to require payment details to activate, which is why that runbook now leads with the rule "if a screen asks for a card, stop".
 
 **Before you trust a bucket, verify it.** `python scripts/verify_storage.py`
 reads the same `STORAGE_S3_*` variables the app does and runs the operations

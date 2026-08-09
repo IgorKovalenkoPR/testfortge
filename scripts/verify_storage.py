@@ -11,8 +11,9 @@ true.
 Why this exists
 ---------------
 The suite tests the S3 adapter against ``moto``, which is a real HTTP server
-implementing S3 semantics — a large step up from a stub, and still not
-Cloudflare R2. moto does not enforce signatures, has no bucket policies, and
+implementing S3 semantics — a large step up from a stub, and still not the
+provider you are about to use. moto does not enforce signatures, has no
+bucket policies, does not implement one provider's quirks over another's, and
 has never been slow or rate-limited. So the suite proves the request shaping
 and the protocol; it cannot prove that a particular provider accepts our
 signatures or that your key has the permissions an upload needs.
@@ -62,6 +63,28 @@ def _say(ok: bool, label: str, detail: str = "") -> None:
           + (f"{DIM}  — {detail}{RESET}" if detail else ""))
 
 
+def _why(backend, exc: Exception, step: str) -> str:
+    """The sentence the Settings page would show for this same failure.
+
+    Measured 2026-08-09 against a live S3 server: every failing step in this
+    script printed the provider's own string — ``S3 operation failed; code:
+    NoSuchBucket, message: The specified bucket does not exist`` — while the
+    runbook promised *"there is no bucket called '<name>'"*. The diagnosis
+    existed the whole time; only the Settings panel called it, and the first
+    step here returns before the panel's own check is ever reached.
+
+    That is backwards. The person running this script is the person who has
+    no other way to tell a mistyped secret from a bucket policy missing
+    ``s3:PutObject``, and those have different fixes. So the same method the
+    panel uses is called here — the same one, not a copy, so the script and
+    the page cannot come to disagree about one bucket.
+    """
+    try:
+        return backend._diagnose(exc, step).message or str(exc)[:200]
+    except Exception:                    # pragma: no cover — never mask the
+        return str(exc)[:200]            # original failure with a new one
+
+
 def main() -> int:
     config = storage.instance_config()
     if not config.complete:
@@ -86,7 +109,7 @@ def main() -> int:
             wrote = True
             _say(True, "write an object", "s3:PutObject")
         except Exception as exc:
-            _say(False, "write an object", str(exc)[:160])
+            _say(False, "write an object", _why(backend, exc, "write"))
             return 1
 
         # 2. Read it back, byte for byte. "It returned 200" is not the same
@@ -98,20 +121,21 @@ def main() -> int:
                  "s3:GetObject" if ok else "the bytes came back different")
             failures += 0 if ok else 1
         except Exception as exc:
-            _say(False, "read it back unchanged", str(exc)[:160])
+            _say(False, "read it back unchanged", _why(backend, exc, "read"))
             failures += 1
 
         # 3. Stat.
         try:
             _say(backend.exists(key), "stat the object", "s3:GetObject/Head")
         except Exception as exc:
-            _say(False, "stat the object", str(exc)[:160])
+            _say(False, "stat the object", _why(backend, exc, "read"))
             failures += 1
 
         # 4. Presigned GET, fetched over the network. This is the one that
-        #    matters most for the hosted deployment: ADR 0002 §4.4 chose R2
-        #    because egress is free *while the bytes do not pass through the
-        #    application*, and that is only true if this works.
+        #    matters most for the hosted deployment: ADR 0002 §4.4 serves
+        #    artefacts straight from the bucket because egress is free *while
+        #    the bytes do not pass through the application* — and that is
+        #    only true if this works.
         try:
             location = backend.locate(key)
             with urllib.request.urlopen(location.url, timeout=30) as fetched:
@@ -127,7 +151,7 @@ def main() -> int:
                  f"bucket blocks direct reads")
             failures += 1
         except Exception as exc:
-            _say(False, "fetch a presigned URL", str(exc)[:160])
+            _say(False, "fetch a presigned URL", _why(backend, exc, "read"))
             failures += 1
 
         # 5. List by prefix — what usage and deletion both depend on.
@@ -138,7 +162,7 @@ def main() -> int:
                  "s3:ListBucket" if ok else f"saw {used.objects} object(s)")
             failures += 0 if ok else 1
         except Exception as exc:
-            _say(False, "list a prefix", str(exc)[:160])
+            _say(False, "list a prefix", _why(backend, exc, "read"))
             failures += 1
 
         # 6. The application's own check, so this script and the Settings
@@ -166,7 +190,8 @@ def main() -> int:
                           f"'{key}' by hand")
                 failures += 0 if gone else 1
             except Exception as exc:
-                _say(False, "delete what it wrote", str(exc)[:160])
+                _say(False, "delete what it wrote", _why(backend, exc,
+                                                         "delete"))
                 print(f"\n  Left behind: {key}")
                 failures += 1
 
