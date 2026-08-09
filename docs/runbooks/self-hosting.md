@@ -296,6 +296,8 @@ created, and `app` waits for that on purpose. Check
 `docker compose logs storage-init`; the usual cause is MinIO credentials
 containing characters your shell ate on the way into `.env` — quote them.
 
+**Setting up a hosted bucket instead of MinIO?** [object-storage-setup.md](object-storage-setup.md) walks Cloudflare R2 from zero, including where the two keys appear and the one screen that shows the secret once.
+
 **Before you trust a bucket, verify it.** `python scripts/verify_storage.py`
 reads the same `STORAGE_S3_*` variables the app does and runs the operations
 the product performs — write, read back byte for byte, stat, fetch a

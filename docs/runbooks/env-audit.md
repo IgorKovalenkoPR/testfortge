@@ -106,7 +106,7 @@ work as intended until they are set in the dashboard:
 | Variable | Needed for |
 |---|---|
 | `RESEND_API_KEY`, `MAIL_FROM` | Password resets and invitations. Without them the app falls back to showing the link on screen |
-| `STORAGE_S3_*` (5) | Object storage. Until then artefacts are on the ephemeral disk (E0.5) |
+| `STORAGE_S3_*` (6) | Object storage. Until then artefacts are on the ephemeral disk (E0.5). **Step-by-step: [object-storage-setup.md](object-storage-setup.md)** |
 | `BACKUP_TOKEN` | The weekly backup workflow, with the same value as the repository secret |
 | `OPS_ENDPOINTS_TOKEN` | Closing `/metrics` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in |
