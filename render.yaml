@@ -341,6 +341,67 @@ services:
       - key: WALKTHROUGH_MODE_ENABLED
         value: "1"
 
+      # ── E0.6: declared because undeclared means "deleted on the next
+      #    Manual Sync", and for a value that lives in the dashboard that
+      #    is silent. Everything below gates behaviour or is a credential;
+      #    pure tuning knobs stay out on purpose — see
+      #    tests/test_render_blueprint.py for the rule and the reasons.
+
+      # Gates POST /api/backup/run (E8.4). The endpoint refuses outright
+      # when unset, so an absent value is safe — but a value set by hand
+      # and not declared here would vanish on a sync and the weekly job
+      # would start failing with 403 and no other symptom.
+      - key: BACKUP_TOKEN
+        sync: false
+      # Guards /metrics. **Optional by design and dangerous when unset**:
+      # engine/route_policy.py deliberately leaves `metrics` out of the
+      # machine-caller exemption for exactly this reason, so an instance
+      # with no token publishes operator telemetry to anyone who asks.
+      - key: OPS_ENDPOINTS_TOKEN
+        sync: false
+      # Plain HTTP to the object store. The endpoint's own scheme wins over
+      # this (engine/storage.py), and it is declared so the five
+      # STORAGE_S3_* keys are a complete set rather than four of five.
+      - key: STORAGE_S3_SECURE
+        sync: false
+
+      # The MCP-driven browser driver (PR-F). Off unless asked for.
+      - key: BROWSER_CONTROL_ENABLED
+        value: "0"
+      # The LLM authors for test cases and checklists. Default ON in code,
+      # so leaving these undeclared means a Manual Sync could not turn them
+      # off — and nobody reading the blueprint would know they exist.
+      - key: TC_AUTHOR_ENABLED
+        value: "1"
+      - key: CL_AUTHOR_ENABLED
+        value: "1"
+      # The daily metric-snapshot thread (default on in code).
+      - key: TESTFORTGE_SNAPSHOT_WORKER
+        value: "1"
+      # Stage-3 escape hatch: routes execution back to the pre-live runner.
+      # Declared at "0" so a hand-set "1" cannot survive quietly — the
+      # legacy path is kept for rollback, not for running on.
+      - key: LEGACY_EXECUTOR
+        value: "0"
+
+      # ── Two safety switches, declared so they are pinned OFF ────────
+      # Both are escape hatches that disable a guard. Declaring them means
+      # a Manual Sync **resets** them, which is the safe direction: the
+      # failure mode of a forgotten "1" here is an open SSRF surface or a
+      # production database on SQLite.
+      - key: SSRF_ALLOWLIST_BYPASS
+        value: "0"
+      - key: TESTFORTGE_ALLOW_SQLITE_PROD
+        value: "0"
+      # Paths that bypass the HTTP Basic perimeter. Pinned to the probes:
+      # this is an allowlist on the outer gate, and widening it by hand
+      # without a record is how a gate stops being one.
+      - key: TESTFORTGE_BASIC_PUBLIC_PATHS
+        value: "/healthz,/readyz"
+      # Per-organisation row quota (E0.12). Empty means no quota.
+      - key: ORG_QUOTA_ROWS
+        sync: false
+
   # ── MCP HTTP service ──────────────────────────────────────────────
   # Same container image as the Flask app (the Dockerfile installs both
   # the web reqs and mcp_server/requirements.txt), different start

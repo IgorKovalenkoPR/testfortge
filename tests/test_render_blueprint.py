@@ -20,6 +20,7 @@ scope — a default is fine there.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 import yaml
@@ -46,7 +47,93 @@ BEHAVIOUR_GATING_FLAGS = {
         "gate or trigger_test_execution(mode='walkthrough') reaches a "
         "runner that cannot handle it"
     ),
+    # ── Added by the E0.6 audit ──────────────────────────────────────
+    "BROWSER_CONTROL_ENABLED": (
+        "gates the MCP-driven browser driver (PR-F); code default is 0, "
+        "so an instance that turned it on in the dashboard would lose it"
+    ),
+    "TC_AUTHOR_ENABLED": (
+        "the LLM test-case author; code default is 1, so dropping it "
+        "cannot be used to turn the author off — the value has to exist "
+        "here for that to be possible at all"
+    ),
+    "CL_AUTHOR_ENABLED": "the same, for the checklist author",
+    "TESTFORTGE_SNAPSHOT_WORKER": (
+        "the daily metric-snapshot thread; code default is 1"
+    ),
+    "LEGACY_EXECUTOR": (
+        "routes execution back to the pre-Stage-3 runner. Pinned at 0 so "
+        "a hand-set 1 cannot survive a sync unnoticed — the legacy path "
+        "is kept for rollback, not for running on"
+    ),
+    "SSRF_ALLOWLIST_BYPASS": (
+        "disables the SSRF allowlist. Declared **so a sync resets it**: "
+        "the failure mode of a forgotten 1 is an open request surface"
+    ),
+    "TESTFORTGE_ALLOW_SQLITE_PROD": (
+        "downgrades the refuse-to-boot-on-SQLite guard to a warning. "
+        "Same argument: a forgotten 1 is a production database on SQLite"
+    ),
 }
+
+#: Not booleans, and still must be declared. Same reason, different shape:
+#: a Manual Sync deletes what the blueprint does not name, and for a token
+#: that lives in the dashboard the symptom is a 403 nobody expected.
+MUST_BE_DECLARED: dict[str, str] = {
+    "BACKUP_TOKEN": (
+        "gates POST /api/backup/run (E8.4). Set by hand in the dashboard, "
+        "so it is exactly the shape that disappears on a sync — and the "
+        "weekly workflow would then fail with 403 and no other symptom"
+    ),
+    "OPS_ENDPOINTS_TOKEN": (
+        "guards /metrics. Optional by design and dangerous when unset: "
+        "engine/route_policy.py leaves `metrics` out of the machine "
+        "exemption precisely because an instance with no token publishes "
+        "operator telemetry to anyone who asks"
+    ),
+    "ORG_QUOTA_ROWS": "the per-organisation row quota (E0.12)",
+    "TESTFORTGE_BASIC_PUBLIC_PATHS": (
+        "the allowlist on the outer HTTP Basic gate. Widening it by hand "
+        "with no record is how a perimeter stops being one"
+    ),
+    "STORAGE_S3_SECURE": (
+        "completes the STORAGE_S3_* set; four of five declared is the "
+        "shape where the fifth is the one that disappears"
+    ),
+}
+
+#: Switches that disable a guard, and the value they must carry.
+#:
+#: Declaring one is only half the job. Mutation testing made the point: with
+#: ``SSRF_ALLOWLIST_BYPASS`` flipped to ``"1"`` in the blueprint, every other
+#: check in this file still passed — the var was declared, carried an
+#: explicit boolean, and was read by the code. A declaration that accepts
+#: either value pins nothing, which is the opposite of why these two were
+#: added to render.yaml at all.
+PINNED_OFF: dict[str, str] = {
+    "SSRF_ALLOWLIST_BYPASS": (
+        "turns off the SSRF allowlist, so the engine will fetch RFC1918 "
+        "and metadata addresses on request. Useful against an operator's "
+        "own staging box, and never something a deploy should carry"
+    ),
+    "TESTFORTGE_ALLOW_SQLITE_PROD": (
+        "downgrades the refuse-to-boot-on-SQLite guard to a warning. The "
+        "guard exists because gunicorn workers plus the detached runner "
+        "deadlock on one file under load"
+    ),
+    "LEGACY_EXECUTOR": (
+        "routes execution back to the pre-Stage-3 runner. Kept for "
+        "rollback; running on it is not a state to arrive at by drift"
+    ),
+}
+
+#: Env-var names that read as a gate or a credential. Used to derive the
+#: check below rather than to restate a list.
+#:
+#: ``_TOKENS`` is deliberately not matched by ``_TOKEN`` — ``ANTHROPIC_MAX_TOKENS``
+#: is a size, not a secret.
+GATE_OR_SECRET = re.compile(
+    r"(_ENABLED|_TOKEN|_SECRET|_PASSWORD|_BYPASS)$|^(SECRET_KEY|MAIL_FROM)$")
 
 
 @pytest.fixture(scope="module")
@@ -237,3 +324,259 @@ class TestSecretsAreNotCommitted:
                 f"render.yaml ({svc['name']}); use sync: false or "
                 f"generateValue: true"
             )
+
+
+# ── E0.6: derived from the code, not from a list ─────────────────────
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+#: Where the application reads its environment. ``mcp_server`` is separated
+#: because it is a **different Render service** with its own env block, and
+#: a var declared on the wrong one is declared nowhere useful.
+_WEB_ROOTS = ("engine", "routes")
+_WEB_FILES = ("app.py", "config.py")
+_MCP_ROOT = "mcp_server"
+
+_ENV_READ = re.compile(
+    r'environ(?:\.get)?\(\s*["\']([A-Z][A-Z0-9_]{2,})["\']'
+    r'|environ\[\s*["\']([A-Z][A-Z0-9_]{2,})["\']')
+
+
+def _env_names(paths) -> dict[str, set[str]]:
+    """name -> the files that read it."""
+    out: dict[str, set[str]] = {}
+    for path in paths:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in _ENV_READ.finditer(text):
+            name = match.group(1) or match.group(2)
+            out.setdefault(name, set()).add(str(path.relative_to(REPO)))
+    return out
+
+
+def _web_env() -> dict[str, set[str]]:
+    paths = [p for root in _WEB_ROOTS for p in (REPO / root).rglob("*.py")]
+    paths += [REPO / f for f in _WEB_FILES]
+    return _env_names(paths)
+
+
+def _mcp_env() -> dict[str, set[str]]:
+    return _env_names((REPO / _MCP_ROOT).rglob("*.py"))
+
+
+class TestEveryGateOrCredentialIsDeclared:
+    """The check that would have caught this audit's own findings.
+
+    E0.6 swept every ``os.environ`` read in the tree against the blueprint
+    and found five that gate behaviour or carry a credential and were
+    declared nowhere: ``BACKUP_TOKEN``, ``OPS_ENDPOINTS_TOKEN``,
+    ``BROWSER_CONTROL_ENABLED``, ``TC_AUTHOR_ENABLED`` and
+    ``CL_AUTHOR_ENABLED`` — plus ``STORAGE_S3_SECURE``, which was left out
+    of a set of five added four days earlier.
+
+    So the rule is derived from the **names the code actually reads**
+    rather than from a list somebody remembers to extend. It is a
+    heuristic and it says so: it recognises the shapes
+    (``*_ENABLED``, ``*_TOKEN``, ``*_SECRET``, ``*_PASSWORD``, ``*_BYPASS``)
+    and cannot know that ``LEGACY_EXECUTOR`` is a gate. Those live in
+    :data:`BEHAVIOUR_GATING_FLAGS` above with their reasons, and the real
+    fix for that residue is for new gates to go in
+    ``engine/features.py``, which is derived completely.
+    """
+
+    def test_the_scanner_finds_something(self):
+        """A green run because the regex stopped matching would be the
+        least useful kind of green — the failure this file exists for."""
+        assert len(_web_env()) > 40, (
+            "the environment scan found almost nothing; the pattern has "
+            "probably stopped matching how the code reads os.environ")
+
+    def test_web_service_declares_every_gate_or_credential_it_reads(
+            self, web_service):
+        env = _env_map(web_service)
+        # SOMETHING is the example name in engine/features.py's docstring.
+        missing = sorted(
+            name for name in _web_env()
+            if GATE_OR_SECRET.search(name) and name != "SOMETHING"
+            and name not in env)
+        assert not missing, (
+            f"the web service reads {missing} and render.yaml does not "
+            f"declare them. A Manual Sync deletes what the blueprint does "
+            f"not name, so a value set in the dashboard disappears with no "
+            f"error anywhere. Declare each with a value, or with "
+            f"`sync: false` when the dashboard holds it.")
+
+    def test_mcp_service_declares_every_gate_or_credential_it_reads(
+            self, blueprint):
+        mcp = next(s for s in blueprint["services"]
+                   if s["name"] == "testfortge-mcp")
+        env = _env_map(mcp)
+        missing = sorted(
+            name for name in _mcp_env()
+            if GATE_OR_SECRET.search(name) and name not in env)
+        assert not missing, (
+            f"the MCP service reads {missing} and its own env block does "
+            f"not declare them. Declaring it on the web service does not "
+            f"help — they are separate services.")
+
+    def test_no_credential_carries_a_literal_value(self, blueprint):
+        """Derived, where ``TestSecretsAreNotCommitted`` names six by hand.
+
+        A secret added tomorrow is covered by this and not by that list.
+        """
+        offenders = []
+        for svc in blueprint["services"]:
+            for entry in svc.get("envVars") or []:
+                key = entry.get("key") or ""
+                if not re.search(r"(_TOKEN|_SECRET|_PASSWORD|_PAT|_KEY)$", key):
+                    continue
+                if key in ("STORAGE_S3_ACCESS_KEY",):
+                    # An access key id is not a secret on its own, and R2
+                    # shows it in its own console. Still `sync: false`
+                    # here; listed so the exception is visible.
+                    pass
+                if "value" in entry:
+                    offenders.append(f"{svc['name']}.{key}")
+        assert not offenders, (
+            f"{offenders} carry a literal value in render.yaml. Use "
+            f"`sync: false` (the dashboard holds it) or "
+            f"`generateValue: true` (Render mints it).")
+
+
+class TestTheDeclaredSetStaysHonest:
+    """The other direction: things declared that nothing reads.
+
+    A stale entry is quieter than a missing one and still costs — it is a
+    value an operator can set and nothing consults.
+
+    **The name is searched for anywhere in the source, not only inside an
+    ``os.environ`` call**, and that widening is the point rather than
+    laziness. Written the narrow way first, this failed on twelve entries
+    that are all read correctly: every ``engine.features`` flag reaches the
+    environment through ``is_enabled(name)``, ``TESTFORTGE_ENCRYPTION_KEY``
+    through the ``ENCRYPTION_KEY_ENV`` constant, and the session timeouts
+    through their own module constants. Indirection is how a well-factored
+    codebase reads configuration, so a scanner that only recognises the
+    literal call is a scanner that reports good code as dead.
+
+    That limitation is worth naming for the audit as a whole: the sweep
+    behind E0.6 can prove a declared var is *mentioned*, and cannot prove
+    an undeclared one is *unused*.
+    """
+
+    #: Consumed by the platform or the container, never by our source.
+    NOT_READ_BY_US = {
+        "PORT",              # Render injects it; the dockerCommand uses it
+        "PYTHON_VERSION", "POETRY_VERSION",
+    }
+
+    @staticmethod
+    def _all_source() -> str:
+        chunks = []
+        for root in (*_WEB_ROOTS, _MCP_ROOT):
+            for path in (REPO / root).rglob("*.py"):
+                chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+        for name in _WEB_FILES:
+            chunks.append((REPO / name).read_text(encoding="utf-8"))
+        return chr(10).join(chunks)
+
+    def test_every_declared_var_is_named_somewhere_in_the_code(self,
+                                                               blueprint):
+        source = self._all_source()
+        stale = []
+        for svc in blueprint["services"]:
+            for entry in svc.get("envVars") or []:
+                key = entry.get("key")
+                if not key or key in self.NOT_READ_BY_US:
+                    continue
+                if f'"{key}"' in source or f"'{key}'" in source:
+                    continue
+                stale.append(f"{svc['name']}.{key}")
+        assert not stale, (
+            f"{stale} are declared in render.yaml and the name appears "
+            f"nowhere in the code. Either the reader was removed and the "
+            f"declaration is stale, or the name is a typo — in which case "
+            f"the real one is undeclared and a sync will delete it.")
+
+
+class TestTheHandKeptListsAreThemselvesChecked:
+    """A list of things that must be declared is only useful if it is."""
+
+    @pytest.mark.parametrize("name", sorted(MUST_BE_DECLARED))
+    def test_it_is_declared(self, web_service, name):
+        assert name in _env_map(web_service), (
+            f"{name} must be declared: {MUST_BE_DECLARED[name]}")
+
+    @pytest.mark.parametrize("name", sorted(MUST_BE_DECLARED))
+    def test_it_carries_a_reason(self, name):
+        assert MUST_BE_DECLARED[name].strip()
+
+    def test_the_two_lists_do_not_overlap(self):
+        both = set(BEHAVIOUR_GATING_FLAGS) & set(MUST_BE_DECLARED)
+        assert not both, (
+            f"{both} are in both lists; the boolean one asserts a \"0\"/"
+            f"\"1\" value and the other does not, so an entry in both is "
+            f"one of them being ignored")
+
+
+class TestTheSafetySwitchesArePinnedOff:
+    """Declared **and** held at "0".
+
+    Found by mutation: flipping ``SSRF_ALLOWLIST_BYPASS`` to ``"1"`` in the
+    blueprint passed every other check in this file. Declaring a switch
+    that disables a guard, without asserting which way it points, buys the
+    visibility and none of the protection.
+
+    The value matters more here than for an ordinary flag, because the
+    direction of the mistake is asymmetric: a forgotten ``"1"`` is an open
+    request surface or a production database on SQLite, and neither
+    announces itself.
+    """
+
+    @pytest.mark.parametrize("name", sorted(PINNED_OFF))
+    def test_it_is_declared_and_off(self, web_service, name):
+        value = _env_map(web_service).get(name)
+        assert value == "0", (
+            f"{name} must be declared as \"0\" in render.yaml; got "
+            f"{value!r}. It {PINNED_OFF[name]}. Turning it on is an "
+            f"operator's deliberate, temporary act in the dashboard — a "
+            f"blueprint that ships it on makes it permanent and invisible.")
+
+    @pytest.mark.parametrize("name", sorted(PINNED_OFF))
+    def test_the_code_still_reads_it(self, name):
+        """A pin on a name nothing consults is a comment."""
+        source = TestTheDeclaredSetStaysHonest._all_source()
+        assert f'"{name}"' in source or f"'{name}'" in source
+
+
+class TestThePerimeterAllowlistStaysNarrow:
+    """``TESTFORTGE_BASIC_PUBLIC_PATHS`` decides what skips the outer gate.
+
+    Declaring it is not enough, for the reason the safety switches above
+    make: mutation flipped this to ``"/"`` — every path public, the HTTP
+    Basic perimeter gone entirely — and every other check in this file
+    still passed, because the var was present and read.
+
+    The value is pinned to the two probes. Widening it is a deliberate
+    edit here **and** in this test, which is the point: an allowlist on a
+    perimeter should cost two lines of thought, not one.
+    """
+
+    PROBES = {"/healthz", "/readyz"}
+
+    def test_it_is_pinned_to_the_probes(self, web_service):
+        value = _env_map(web_service).get("TESTFORTGE_BASIC_PUBLIC_PATHS")
+        assert value, "the allowlist must be declared, not left to the default"
+        entries = {p.strip() for p in str(value).split(",") if p.strip()}
+        assert entries == self.PROBES, (
+            f"expected exactly {sorted(self.PROBES)}, got {sorted(entries)}. "
+            f"Every path listed here skips the HTTP Basic gate.")
+
+    def test_no_entry_opens_the_whole_app(self, web_service):
+        """The failure this is really about. ``/`` is a prefix of every
+        path, so one character turns an allowlist into an off switch."""
+        value = str(_env_map(web_service).get(
+            "TESTFORTGE_BASIC_PUBLIC_PATHS") or "")
+        entries = {p.strip() for p in value.split(",") if p.strip()}
+        assert "/" not in entries, (
+            "'/' matches every request — the gate would be off for the "
+            "whole application while still looking configured")
