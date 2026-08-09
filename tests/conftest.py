@@ -1,8 +1,10 @@
 """Shared fixtures for all test levels."""
 
 import os
+import shutil
 import sys
 import tempfile
+import time
 import pytest
 
 # Add project root to path
@@ -39,15 +41,96 @@ os.environ.setdefault("FLASK_DEBUG", "1")
 # An explicit TESTFORTGE_DB or DATABASE_URL still wins and is never
 # deleted — that is how tests/test_schema_migration.py points itself at
 # Postgres, and how someone can inspect a run afterwards.
-if not os.environ.get("DATABASE_URL") and not os.environ.get("TESTFORTGE_DB"):
-    _scratch_db = os.path.join(tempfile.gettempdir(), "testfortge-pytest.db")
-    for _suffix in ("", "-journal", "-wal", "-shm"):
-        try:
-            os.unlink(_scratch_db + _suffix)
-        except OSError:
-            pass  # absent, or held open on Windows — a stale file is
-                  # the thing we are avoiding, not a reason to fail boot
-    os.environ["TESTFORTGE_DB"] = _scratch_db
+# …and everything it writes goes under a directory belonging to **this
+# process** (M-1).
+#
+# The scratch database used to be one fixed path, and the session, upload
+# and artefact directories were the working checkout's. That is fine for one
+# run and wrong for two: E10's confirmation run started a background
+# regression and the browser gate at the same time and got **9 failures**
+# that were not regressions at all —
+#
+#     test_failed_item_can_file_a_bug_carrying_the_testers_words
+#     test_the_limit_counts_across_the_whole_scope
+#     test_a_vanished_session_is_not_blamed_on_the_user            …and six more
+#
+# — eight of them two suites inserting into one SQLite file and counting
+# each other's rows, the ninth two suites sharing ``flask_session/``. The
+# same run alone was 4 581 green. A suite that cannot run beside itself
+# produces convincing false regressions inside the exercise that exists to
+# find regressions, and it rules out ``pytest-xdist`` and any background
+# run while you work.
+#
+# ``PYTEST_XDIST_WORKER`` first so an xdist worker is isolated from its
+# siblings rather than from the controller only; the pid otherwise.
+_RUN_TOKEN = os.environ.get("PYTEST_XDIST_WORKER") or f"pid-{os.getpid()}"
+_RUN_ROOT = os.path.join(tempfile.gettempdir(),
+                         f"testfortge-pytest-{_RUN_TOKEN}")
+
+# A *fresh* root each run, not merely a private one: pids are reused, and a
+# scratch directory that survives its process reproduces the accumulation
+# bug described above in a new place. Wiped here rather than in a session
+# fixture because ``engine.db`` and ``config`` open their paths during
+# ``from app import app`` below.
+shutil.rmtree(_RUN_ROOT, ignore_errors=True)
+
+# Roots older than a day belong to runs that are over — pids are not
+# reused fast enough for this to catch a live one, and without it a machine
+# accumulates one directory per pytest invocation forever. Best effort: a
+# temp directory that resists deletion is not a reason to fail a test run.
+try:
+    _cutoff = time.time() - 24 * 60 * 60
+    for _name in os.listdir(tempfile.gettempdir()):
+        if not _name.startswith("testfortge-pytest-"):
+            continue
+        _stale = os.path.join(tempfile.gettempdir(), _name)
+        if os.path.isdir(_stale) and os.path.getmtime(_stale) < _cutoff:
+            shutil.rmtree(_stale, ignore_errors=True)
+except OSError:  # pragma: no cover — an unreadable temp dir
+    pass
+
+# **A value we set in a parent process is not an explicit value.** This
+# stamp is the difference, and without it the fix above works for two
+# separate ``pytest`` invocations and does nothing for ``pytest -n 4``:
+# xdist workers are subprocesses that inherit the controller's environment,
+# so every worker would find ``TESTFORTGE_DB`` already set — by the
+# controller's own copy of this file — and keep it. Measured: four workers
+# on one database, and ``test_the_restore_button_rebuilds_the_project``
+# counting 31 projects where it created one.
+#
+# A value the *developer* exported still wins, because then no stamp is
+# present. That is how tests/test_schema_migration.py points itself at
+# Postgres and how someone can inspect a run afterwards.
+_STAMP = "TFG_TEST_PATHS_OWNER"
+_INHERITED = os.environ.get(_STAMP)
+_RECLAIM = _INHERITED is not None and _INHERITED != _RUN_TOKEN
+
+
+def _claim_path(var: str, value: str) -> None:
+    if _RECLAIM or not os.environ.get(var):
+        os.environ[var] = value
+
+
+# The database. ``DATABASE_URL`` is left alone in both directions: the
+# Postgres leg is one server for the whole run, so isolating *it* per worker
+# is a different problem than this one and is not solved here.
+if not os.environ.get("DATABASE_URL"):
+    _claim_path("TESTFORTGE_DB", os.path.join(_RUN_ROOT, "scratch.db"))
+
+# The directories the application writes to. ``config`` reads the first
+# three names; ``engine.automation_paths`` reads ``STORAGE_ROOT``, which is
+# also where ``LocalBackend`` serves artefacts and bug attachments from.
+# Isolating the database alone would leave two runs deleting each other's
+# evidence — ``tests/test_bug_attachments.py`` sweeps ``STORAGE_ROOT/project``
+# when it finishes, and it cannot know those projects are another run's.
+for _var, _leaf in (("SESSION_FILE_DIR", "flask_session"),
+                    ("UPLOAD_FOLDER", "uploads"),
+                    ("STORAGE_FOLDER", "storage"),
+                    ("STORAGE_ROOT", "storage")):
+    _claim_path(_var, os.path.join(_RUN_ROOT, _leaf))
+    os.makedirs(os.environ[_var], exist_ok=True)
+
+os.environ[_STAMP] = _RUN_TOKEN
 
 from app import app as flask_app
 

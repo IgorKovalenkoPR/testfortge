@@ -8,7 +8,15 @@ from __future__ import annotations
 
 import os
 
-STORAGE_ROOT = os.path.join(
+#: Where run artefacts, uploads and bug attachments live on local disk.
+#:
+#: Overridable by ``STORAGE_ROOT`` so a deployment can put artefacts on a
+#: mounted volume instead of inside the checkout — and so two test runs on
+#: one machine do not write into, and sweep, the same directory (M-1). It
+#: pairs with ``STORAGE_FOLDER`` in ``config.py``, which names the same
+#: place for the parts of the application that read config rather than this
+#: constant.
+STORAGE_ROOT = os.environ.get("STORAGE_ROOT", "").strip() or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "storage",
 )
