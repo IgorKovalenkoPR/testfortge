@@ -73,6 +73,19 @@ except Exception:  # pragma: no cover — surface DB outage but stay up
         "Database initialisation failed at boot — starting in degraded "
         "mode (DB-backed routes will retry lazily; see /readyz).")
 
+# The first administrator (E1.x follow-up, 2026-08-10). An account can only
+# be created by claiming an invitation, and an invitation can only be issued
+# by an admin — so a fresh database has no way to acquire its first one, and
+# enabling AUTH_ENABLED on one locks everybody out. engine/bootstrap.py is
+# that missing first caller; it does nothing unless the database has no
+# users and both variables are set. Wrapped like init_db above: a
+# misconfigured variable must not be the reason the service will not start.
+try:
+    from engine.bootstrap import claim_first_admin as _claim_first_admin
+    _claim_first_admin()
+except Exception:  # pragma: no cover — never block boot on this
+    log.exception("first-admin bootstrap raised; continuing without it.")
+
 
 def _start_snapshot_catchup_thread() -> None:
     """Daemon thread that fills gaps in ``DashboardMetricSnapshot``.

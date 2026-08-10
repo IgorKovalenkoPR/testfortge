@@ -2144,6 +2144,19 @@ def list_org_members(org_id: str) -> list[dict]:
         return out
 
 
+def count_users() -> int:
+    """How many accounts exist at all.
+
+    The input to the first-admin bootstrap (``engine.bootstrap``): with
+    authentication on, an account can only be created by claiming an
+    invitation, and an invitation can only be issued by an admin — so a
+    database with zero users has no way to acquire its first one. This is
+    the cheapest possible question to ask before minting one.
+    """
+    with session_scope() as sess:
+        return int(sess.query(func.count(User.id)).scalar() or 0)
+
+
 def count_org_admins(org_id: str) -> int:
     """How many admins the org has — the last-admin guard's input.
 
@@ -5589,7 +5602,8 @@ __all__ = [
     "record_llm_usage", "org_spend_micros", "llm_usage_summary",
     "purge_llm_usage",
     "create_organization", "add_org_member", "get_org_role",
-    "list_org_members", "count_org_admins", "remove_org_member",
+    "list_org_members", "count_org_admins", "count_users",
+    "remove_org_member",
     "change_org_role", "set_password_hash", "mark_email_verified",
     "touch_last_login", "bump_login_failure", "clear_login_failures",
     "lock_user", "set_user_active",

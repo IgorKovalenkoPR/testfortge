@@ -294,6 +294,29 @@ services:
         sync: false
       - key: TESTFORTGE_BASIC_PASSWORD
         sync: false
+      # ── The first administrator (engine/bootstrap.py) ─────────────
+      #
+      # An account is created only by claiming an invitation, and an
+      # invitation is issued only by an admin — so a fresh database has no
+      # way to acquire its first one, and turning AUTH_ENABLED on for one
+      # locks everybody out. These two variables are that missing first
+      # step: with both set and **no users in the database**, boot creates
+      # one verified admin and one organisation, then never acts again.
+      #
+      # Deliberately keyed on "no users" rather than "first boot ever": the
+      # free Postgres is recreated roughly monthly, and an instance that
+      # re-locks itself after every reset is not usable. The cost is in
+      # docs/runbooks/first-admin.md.
+      #
+      # The password is a credential, so `sync: false` — it stays in the
+      # dashboard. It is also validated against the product's own rule, so
+      # a short one creates nothing rather than a weak admin.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ORG_NAME
+        value: "My team"
       # ── Email (E0.4, engine/mailer.py) ────────────────────────────
       #
       # Resend. `sync: false` so the key stays a dashboard secret and never
