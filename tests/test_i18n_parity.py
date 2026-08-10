@@ -62,9 +62,7 @@ UA = TRANSLATIONS["ua"]
 DELIBERATELY_ENGLISH = {
     # Proper nouns, abbreviations, and words spelled the same way
     "chat_title": "Tedgie is a name",
-    "lang_en": "a language names itself",
     "us_id": "ID",
-    "guide_faq": "FAQ",
     "est_min": "MIN", "est_max": "MAX",
     "login_email": "Email is used as-is in Ukrainian",
     "reset_email_label": "Email",
@@ -73,7 +71,6 @@ DELIBERATELY_ENGLISH = {
     "os_storage_endpoint": "the S3 field is called Endpoint everywhere",
     "domain_ecommerce": "E-Commerce",
     "domain_edtech": "EdTech / E-Learning",
-    "est_persona_label": "QA Team Lead — a role title used in English",
     "brand_aria": "the brand's own tagline",
     "automation_base_url": "BASE_URL is the variable's name",
     "te_base_url": "the field is called Base URL in both",
@@ -88,10 +85,11 @@ DELIBERATELY_ENGLISH = {
     "us_stories_label": "as above",
     "user_story": "as above",
     "edge_case": "Edge Case",
+    # (Five entries left this list in §14 along with the dead keys they
+    #  described — te_passed, te_failed, te_blocked, est_persona_label and
+    #  lang_en were translated and rendered nowhere.)
     "passed": "test statuses stay English, as in the team's test plans",
     "failed": "as above", "passed_but": "as above", "blocked": "as above",
-    "te_passed": "as above", "te_failed": "as above",
-    "te_blocked": "as above",
     "tm_pass": "as above", "tm_fail": "as above", "tm_pass_but": "as above",
     "tm_bugs_critical": "severity names stay English",
     "tm_bugs_major": "as above", "tm_bugs_minor": "as above",
@@ -193,6 +191,75 @@ class TestEveryKeyATemplateAsksForExists:
             f"language: {missing}")
 
 
+class TestNoKeyOutlivesItsUser:
+    """The other direction: a dictionary entry nothing renders.
+
+    §14 measured 126 of them — 53 ``guide_*`` keys describing a product
+    with a Test Plan module that Stage 2 removed, and 73 more from earlier
+    rewrites of the automation, estimation and execution pages. Every one
+    was translated into Ukrainian, so the dictionary looked more complete
+    than the product was, and "is this page translated?" could not be
+    answered from the files.
+
+    Two kinds of key are legitimately invisible here and are named rather
+    than guessed at: those a template composes at render time. Everything
+    else must have a literal user.
+    """
+
+    #: Prefixes assembled in a template (`'dash_period_' ~ period`), whose
+    #: full names therefore appear nowhere in the source.
+    COMPOSED = ("dash_period_", "guide_card_")
+
+    #: Where a key may be used from. Deliberately wider than the two
+    #: template dirs: flash messages live in ``routes/``, and the recorder
+    #: extension has its own strings.
+    SOURCE_DIRS = ("templates", "routes", "engine", "static", "tools",
+                   "extension", "scripts")
+    SUFFIXES = {".py", ".html", ".js", ".ts", ".json"}
+
+    @classmethod
+    def _source(cls) -> str:
+        root = pathlib.Path(__file__).resolve().parent.parent
+        chunks = [(root / "app.py").read_text(encoding="utf-8",
+                                              errors="replace")]
+        for name in cls.SOURCE_DIRS:
+            for path in (root / name).rglob("*"):
+                if (path.is_file() and path.suffix in cls.SUFFIXES
+                        and "__pycache__" not in str(path)
+                        and "i18n" not in str(path)):
+                    chunks.append(path.read_text(encoding="utf-8",
+                                                 errors="replace"))
+        return "\n".join(chunks)
+
+    def test_every_key_has_a_user(self):
+        source = self._source()
+        quoted = set(re.findall(r"""['"]([a-z0-9_]{1,60})['"]""", source))
+        attrs = set(re.findall(r"\bt\.([a-z][a-z0-9_]*)", source))
+        orphans = sorted(k for k in EN
+                         if not k.startswith(self.COMPOSED)
+                         and k not in quoted and k not in attrs)
+        assert not orphans, (
+            f"{len(orphans)} keys are translated and rendered nowhere: "
+            f"{orphans}. Delete them, or — if a template composes the name "
+            f"— add the prefix to COMPOSED with the reason.")
+
+    def test_the_scan_reads_the_source(self):
+        """A green run because the scan found no files would pass this
+        file's main rule vacuously."""
+        assert len(self._source()) > 500_000
+
+    def test_the_composed_prefixes_are_really_composed(self):
+        """An entry here is permission to skip the rule, so it has to be
+        earned: the prefix must appear in a template next to a `~`."""
+        root = pathlib.Path(__file__).resolve().parent.parent / "templates"
+        markup = "\n".join(p.read_text(encoding="utf-8", errors="replace")
+                           for p in root.rglob("*.html"))
+        for prefix in self.COMPOSED:
+            assert re.search(re.escape(prefix) + r"['\"]\s*~", markup), (
+                f"{prefix!r} is listed as composed and no template "
+                f"concatenates it — the exemption is stale")
+
+
 class TestFormattingCannotBlowUpInOneLanguage:
     """A placeholder mismatch is not cosmetic — it is a 500.
 
@@ -261,12 +328,6 @@ TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
 #: chunks as ``_visible_text`` measures them, which is a proxy — the point
 #: is the direction, not the absolute figure.
 ENGLISH_BUDGET = {
-    # 4 800 words of user documentation, and 53 ``guide_*`` keys sit
-    # translated in both dictionaries that no template renders — the page
-    # was rewritten and left its own translation behind. Restoring that is
-    # a content change (which structure holds the guide), not the string
-    # extraction M-2 is, so it is measured here and left named.
-    "guide.html": 919,
     # Partially converted pages: the leftovers are fragments and single
     # words inside otherwise translated markup.
     "index.html": 50,
@@ -290,6 +351,16 @@ ENGLISH_BUDGET = {
     "techniques.html": 1,
     "test_execution_manual.html": 1,
 }
+
+#: The guide's panels are 4 800 words of documentation, held in one file
+#: per language under ``templates/guide/`` (§14). They are *localised
+#: content*, not untranslated markup, so counting English words in
+#: ``_sections_en.html`` would be counting the English guide and finding
+#: it English. Their guarantee is a different one and lives in
+#: ``tests/test_guide_localisation.py``: the two files carry the same
+#: sections, every card has a panel in both, and each Ukrainian panel
+#: actually contains Ukrainian.
+LOCALISED_CONTENT_DIR = "guide"
 
 _COMMENT = re.compile(r"\{#.*?#\}", re.S)
 _BLOCK = re.compile(r"\{%.*?%\}", re.S)
@@ -342,7 +413,8 @@ class TestNoPageGoesStraightToEnglish:
     def _counts() -> dict[str, int]:
         return {path.name: len(_visible_text(
                     path.read_text(encoding="utf-8", errors="replace")))
-                for path in sorted(TEMPLATES.rglob("*.html"))}
+                for path in sorted(TEMPLATES.rglob("*.html"))
+                if path.parent.name != LOCALISED_CONTENT_DIR}
 
     def test_no_template_carries_more_english_than_it_used_to(self):
         over = {name: (count, ENGLISH_BUDGET.get(name, 0))
@@ -367,7 +439,8 @@ class TestNoPageGoesStraightToEnglish:
     def test_the_scanner_still_finds_text(self):
         """A green run because the regexes stopped matching would be the
         least useful kind of green — the failure this file exists for."""
-        guide = (TEMPLATES / "guide.html").read_text(encoding="utf-8")
+        guide = (TEMPLATES / "guide" / "_sections_en.html").read_text(
+            encoding="utf-8")
         assert len(_visible_text(guide)) > 100
 
     def test_the_pages_this_change_converted_are_at_zero(self):
@@ -380,7 +453,10 @@ class TestNoPageGoesStraightToEnglish:
         # above holds that, and holds it from growing.
         for name in ("auth_login.html", "auth_invite.html", "403.html",
                      "org_members.html", "auth_forgot.html",
-                     "auth_reset.html", "auth_verify.html"):
+                     "auth_reset.html", "auth_verify.html",
+                     # §14: a shell now — its prose moved to
+                     # templates/guide/_sections_<lang>.html.
+                     "guide.html"):
             assert counts.get(name, 0) == 0, (
                 f"{name} has hardcoded English again: "
                 f"{_visible_text((TEMPLATES / name).read_text(encoding='utf-8'))}")

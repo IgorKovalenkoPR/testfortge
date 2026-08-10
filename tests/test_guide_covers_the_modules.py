@@ -42,6 +42,17 @@ MODULE_SECTIONS = {
 }
 
 
+#: §14 split the guide: the shell renders the cards from a list and the
+#: panels live in ``templates/guide/_sections_<lang>.html``, one file per
+#: language. The two questions this file asks did not change — every
+#: sidebar module has a card, every card opens something — but where the
+#: answers live did, and reading the old place would have made both
+#: vacuous rather than red. It is now asked of **every** language, which
+#: is strictly more than before.
+GUIDE_DIR = REPO_ROOT / "templates" / "guide"
+LANGS = ("en", "ua")
+
+
 @pytest.fixture(scope="module")
 def guide_source() -> str:
     return GUIDE_HTML.read_text(encoding="utf-8")
@@ -49,14 +60,24 @@ def guide_source() -> str:
 
 @pytest.fixture(scope="module")
 def cards(guide_source) -> set[str]:
-    return set(re.findall(r'class="guide-card"\s+data-section="([^"]+)"',
-                          guide_source))
+    """The card list the shell loops over."""
+    block = guide_source[guide_source.index("guide_cards = ["):
+                         guide_source.index("] %}")]
+    found = set(re.findall(r"\('([a-z\-]+)',", block))
+    assert found, "the card list is not where this test thinks it is"
+    return found
 
 
 @pytest.fixture(scope="module")
-def panels(guide_source) -> set[str]:
-    return set(re.findall(r'<template\s+data-content="([^"]+)"',
-                          guide_source))
+def panels() -> set[str]:
+    """Panels present in **every** language — a panel that exists in one
+    file only is not a panel the product has."""
+    per_lang = [
+        set(re.findall(r'<template\s+data-content="([^"]+)"',
+                       (GUIDE_DIR / f"_sections_{lang}.html").read_text(
+                           encoding="utf-8")))
+        for lang in LANGS]
+    return set.intersection(*per_lang)
 
 
 def test_the_sidebar_is_readable() -> None:
