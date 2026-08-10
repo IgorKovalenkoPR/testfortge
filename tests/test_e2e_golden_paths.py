@@ -54,6 +54,18 @@ from engine import db as _db  # noqa: E402
 #: that a hang is a failure rather than a coffee break.
 WAIT = 15_000
 
+#: For the one wait that sits behind **two** browsers competing for the
+#: same row, and therefore behind a write lock rather than a render.
+#:
+#: Measured 2026-08-10, when the conflict test below timed out once: this
+#: file alone passes 10/10 at 35-50 s; two copies of it concurrently pass
+#: at 63 s each; the single failure happened while two *full* suites ran at
+#: once, which is a thing M-1 now permits and a developer may well do. The
+#: assertion is about what the page shows, not how fast — a 15 s budget
+#: there was measuring the machine's load, so it is 45 s where the round
+#: trip is contended and unchanged everywhere else.
+CONTENDED_WAIT = 45_000
+
 #: Passes ``engine.auth.validate_password``; every account below uses it.
 PASSWORD = "Golden-Path-Suite-2617!"
 
@@ -614,7 +626,7 @@ class TestTwoPeopleInOneTeam:
         tester_control.press("Enter")
 
         note = tester.page.wait_for_selector(
-            ".ie-message.ie-message-error", timeout=WAIT)
+            ".ie-message.ie-message-error", timeout=CONTENDED_WAIT)
         assert "reload" in (note.inner_text() or "").lower(), \
             note.inner_text()
         tester.page.wait_for_selector("button.ie-reload", timeout=WAIT)

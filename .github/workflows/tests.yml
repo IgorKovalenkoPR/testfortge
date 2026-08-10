@@ -204,6 +204,7 @@ jobs:
           --cov=engine.permissions --cov=engine.auth --cov=engine.route_policy
           --cov=engine.session_timeout
           --cov=engine.mailer
+          --cov=engine.bootstrap
           --cov=engine.basic_auth
           --cov=engine.blobs
           --cov=engine.storage

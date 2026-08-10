@@ -502,3 +502,137 @@ services:
       # mcp_server.server._build_transport_security.
       - key: MCP_ALLOWED_HOSTS
         value: "testfortge-mcp.onrender.com"
+  # ── Staging (E10 entry criterion) ──────────────────────────────────
+  #
+  # The place to see a release before prod does. It exists because three
+  # zones were never verified anywhere: load, accessibility, and real mail
+  # delivery — each needs a running instance that is not the one people
+  # use.
+  #
+  # **It runs the mode the product ships in, which prod currently does
+  # not.** AUTH_ENABLED / ORG_MODE are 1 here and 0 there, the Basic gate
+  # is off, and the editors and dashboard-v2 flags are on. So this is also
+  # where those flags get their first real traffic.
+  #
+  # ── Two constraints that shaped it, both measured ──
+  #
+  # 1. **One free Postgres per account**, and prod holds it. So staging
+  #    runs on SQLite with the guard's own escape hatch, which means the
+  #    database is on the container's ephemeral disk and **resets on every
+  #    deploy**. That is a deliberate trade, not an oversight:
+  #      * what it buys — every deploy is a clean first-run, which is
+  #        exactly the path that had no first caller until
+  #        engine/bootstrap.py existed. Staging re-proves it on each push;
+  #      * what it costs — no migration testing, no "yesterday's data",
+  #        and concurrent-write behaviour under load is SQLite's, not
+  #        Postgres's. docs/runbooks/staging.md says so, and names the two
+  #        ways out ($6 Render Basic-256mb, or a second free database from
+  #        another provider).
+  #
+  # 2. **Free instance-hours are per account, not per service** (750/mo).
+  #    Prod's keep-alive window already spends ~264 of them, so staging
+  #    deliberately has **no keep-alive**: it sleeps, and a cold start on
+  #    a staging box costs nobody anything. Do not add KEEPALIVE_URL here.
+  - type: web
+    name: testfortge-staging
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    # Same command as prod, with one difference: --timeout 1800 instead of
+    # 7200. A staging run that hangs should end in half an hour rather
+    # than hold a worker for two — nobody is waiting on its output.
+    dockerCommand: >-
+      gunicorn
+      --bind 0.0.0.0:$PORT
+      --workers 1 --threads 4 --worker-class gthread
+      --timeout 1800 --graceful-timeout 30
+      --access-logfile - --error-logfile -
+      app:app
+    healthCheckPath: /healthz
+    envVars:
+      # ── The database: SQLite, on purpose, and loudly ──
+      #
+      # No DATABASE_URL: the app falls back to STORAGE_FOLDER/testfortge.db.
+      # The production guard in engine/db.py refuses SQLite outside debug
+      # mode, and this is the escape hatch it documents — set here rather
+      # than by turning FLASK_DEBUG on, because a debug Flask on a public
+      # URL is a different and much worse decision.
+      - key: TESTFORTGE_ALLOW_SQLITE_PROD
+        value: "1"
+      - key: FLASK_DEBUG
+        value: "0"
+      # ── The mode the product ships in ──
+      - key: AUTH_ENABLED
+        value: "1"
+      - key: ORG_MODE
+        value: "1"
+      # No shared password in front of the product's own login. The
+      # interlock in engine/basic_auth.py permits this only because
+      # AUTH_ENABLED is 1 above — with both off it would keep the gate up
+      # rather than expose the instance.
+      - key: BASIC_GATE_ENABLED
+        value: "0"
+      # Staging is where flags prod has not enabled get their first real
+      # traffic.
+      - key: EDITORS_ENABLED
+        value: "1"
+      - key: DASHBOARD_V2
+        value: "1"
+      - key: WORKSPACE_DB_FIRST
+        value: "1"
+      - key: RECORDER_ENABLED
+        value: "1"
+      - key: WALKTHROUGH_MODE_ENABLED
+        value: "1"
+      # In-app Chromium stays off here for the same measured reason as
+      # prod: ~390 MB over Flask against a 512 MB ceiling (E5.2).
+      - key: TESTFORTGE_BROWSER_ENABLED
+        value: "0"
+      # ── The first administrator ──
+      #
+      # Required here, not optional: the database resets on every deploy,
+      # so without these two nobody can sign in to the instance whose
+      # whole purpose is being signed into. engine/bootstrap.py acts only
+      # while the database has no users, which after a reset is always
+      # true and after the first request never is.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ORG_NAME
+        value: "Staging team"
+      # ── Storage ──
+      #
+      # Local disk, and never prod's bucket: E8.5 deletes a project's
+      # blobs by prefix, and a staging deletion test pointed at the
+      # production bucket would delete production evidence. When staging
+      # gets object storage it gets its **own** bucket.
+      - key: STORAGE_BACKEND
+        value: "local"
+      - key: STORAGE_BACKEND_CONFIGURABLE
+        value: "0"
+      # ── Secrets and the rest ──
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TESTFORTGE_ENCRYPTION_KEY
+        generateValue: true
+      # Its own token, so a staging upload can never land in prod's run
+      # history.
+      - key: AUTOMATION_INGEST_TOKEN
+        generateValue: true
+      # BYOK only. A platform key here would spend real money on test
+      # generations nobody reads.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Mail: staging is where "does the invitation actually arrive" gets
+      # answered, so the provider is set the same way as prod — from the
+      # dashboard, never from this file.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TESTFORTGE_SNAPSHOT_WORKER
+        value: "0"

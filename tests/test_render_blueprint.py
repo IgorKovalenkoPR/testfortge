@@ -613,3 +613,116 @@ class TestTheBrowserMemoryBudgetFitsThePlan:
             f"{budget} MB is below what Chromium needs to open one page "
             f"(measured: 267 MB tree at new_page), so every run would exit "
             f"before doing anything")
+# ── Staging (E10 entry criterion) ────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def staging_service(blueprint) -> dict:
+    svc = next((s for s in blueprint["services"]
+                if s["name"] == "testfortge-staging"), None)
+    assert svc is not None, (
+        "the staging service must be declared — E10's entry criteria name a "
+        "deployed staging, and three verification zones (load, "
+        "accessibility, real mail delivery) have no other home")
+    return svc
+
+
+class TestStagingIsActuallyStaging:
+    """A second service is not a staging environment by itself.
+
+    What makes it one is the set of properties below, and each is here
+    because getting it wrong turns staging into either a second production
+    or a hazard to the first one.
+    """
+
+    def test_it_runs_the_mode_the_product_ships_in(self, staging_service):
+        """Prod currently runs with authentication off, so the shipping
+        mode has never had real traffic. That is the gap staging closes,
+        and it closes nothing if it copies prod's flags."""
+        env = _env_map(staging_service)
+        assert env.get("AUTH_ENABLED") == "1"
+        assert env.get("ORG_MODE") == "1"
+
+    def test_the_basic_gate_is_off_and_that_is_safe_here(self,
+                                                        staging_service):
+        """Off **because** AUTH_ENABLED is 1 — the interlock in
+        engine/basic_auth.py refuses the other combination, which is what
+        stops this from being a public instance with no login at all."""
+        env = _env_map(staging_service)
+        assert env.get("BASIC_GATE_ENABLED") == "0"
+        assert env.get("AUTH_ENABLED") == "1", (
+            "gate off with auth off would be a fully public instance; the "
+            "interlock would override it, and a blueprint that asks for it "
+            "is still a blueprint nobody should copy")
+
+    def test_it_can_be_signed_into_after_a_reset(self, staging_service):
+        """Its database is ephemeral, so it is empty after every deploy —
+        and an empty database cannot issue itself an invitation. Without
+        the bootstrap variables this service is unreachable by design."""
+        env = _env_map(staging_service)
+        for key in ("BOOTSTRAP_ADMIN_EMAIL", "BOOTSTRAP_ADMIN_PASSWORD"):
+            assert env.get(key) == "__dashboard__", (
+                f"{key} must be declared with sync: false — staging resets "
+                f"on every deploy, so without it nobody can sign in to the "
+                f"instance whose purpose is being signed into")
+
+    def test_it_does_not_touch_the_production_database(self, staging_service):
+        """The one property with no acceptable exception. E8.5 deletes a
+        project's rows and blobs; a deletion test on staging pointed at
+        prod's database would delete prod's data."""
+        env = _env_map(staging_service)
+        assert "DATABASE_URL" not in env, (
+            "staging declares DATABASE_URL — if it is wired to "
+            "testfortge-db it shares production's database")
+        assert env.get("TESTFORTGE_ALLOW_SQLITE_PROD") == "1", (
+            "without the escape hatch the SQLite guard in engine/db.py "
+            "raises at boot, and the service never starts")
+
+    def test_it_does_not_touch_the_production_bucket(self, staging_service):
+        env = _env_map(staging_service)
+        assert env.get("STORAGE_BACKEND") == "local", (
+            "staging must not point at production object storage: E8.5 "
+            "deletes by prefix, and a deletion test would remove real "
+            "evidence. When staging gets a bucket it gets its own")
+
+    def test_its_tokens_and_keys_are_its_own(self, staging_service):
+        """A staging upload that lands in production's run history is
+        worse than no staging: it corrupts the data people trust."""
+        env = _env_map(staging_service)
+        assert env.get("AUTOMATION_INGEST_TOKEN") == "__generated__"
+        assert env.get("SECRET_KEY") == "__generated__"
+        assert env.get("TESTFORTGE_ENCRYPTION_KEY") == "__generated__"
+
+    def test_it_has_no_keepalive(self, staging_service):
+        """Free instance-hours are per **account**: 750 a month, shared.
+        Prod's working-hours window already spends ~264 of them, and a
+        cold start on staging costs nobody anything."""
+        env = _env_map(staging_service)
+        assert "KEEPALIVE_URL" not in env, (
+            "a keep-alive on staging spends production's free hours")
+
+    def test_it_declares_every_flag_production_declares(
+            self, staging_service, web_service):
+        """Not the same *values* — the same *set*. A flag missing here is
+        a flag whose staging behaviour is whatever the code defaults to,
+        which is the one thing staging exists to stop being a surprise."""
+        from engine import features
+        prod = set(_env_map(web_service))
+        staging = set(_env_map(staging_service))
+        flags = {name for name in prod if name in set(features.FLAGS)}
+        missing = sorted(flags - staging)
+        assert not missing, (
+            f"staging does not declare {missing}. Production does, so their "
+            f"behaviour differs by omission rather than by decision")
+
+    def test_the_browser_pass_is_off_here_too(self, staging_service):
+        """Same 512 MB, same measurement (E5.2: ~390 MB of Chromium over
+        Flask). Staging having it on would only prove the OOM again."""
+        env = _env_map(staging_service)
+        assert env.get("TESTFORTGE_BROWSER_ENABLED") == "0"
+
+    def test_it_is_on_the_free_plan(self, staging_service):
+        """Stated so an upgrade is a decision somebody makes rather than
+        something a copy-paste does: this is the $0 tier, and the business
+        plan prices the alternative at $7."""
+        assert staging_service.get("plan") == "free"
