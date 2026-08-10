@@ -50,6 +50,19 @@ def project(client, request):
     return pid
 
 
+def _rows(page: str) -> set[int]:
+    """The run ids the page actually lists.
+
+    Not ``f"#{run_id}" in page``, which is what these tests used to do and
+    what parallel CI exposed: with a fresh database the ids are single
+    digits, and ``"#3"`` matches ``&#39;`` inside Tedgie's greeting. The
+    test passed for years only because the full suite had created enough
+    runs to push the ids past two digits — a green that depended on
+    execution order rather than on the rule under test.
+    """
+    return {int(n) for n in re.findall(r"<td>#(\d+)</td>", page)}
+
+
 def _start(client, **extra) -> int:
     data = {"run_mode": "manual", "tester": "alice"}
     data.update(extra)
@@ -61,7 +74,7 @@ class TestTheRunsPage:
     def test_it_lists_the_projects_runs(self, client, project):
         run_id = _start(client)
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{run_id}" in page
+        assert run_id in _rows(page)
 
     def test_it_does_not_list_another_projects_runs(self, client, project,
                                                    request):
@@ -71,7 +84,7 @@ class TestTheRunsPage:
         other_run = _start(client)
         _activate(client, project)
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{other_run}" not in page
+        assert other_run not in _rows(page)
 
     def test_it_says_why_everything_is_listed_when_auth_is_off(
             self, auth_off, client, project):
@@ -98,7 +111,7 @@ class TestTheRunsPage:
         # a resume link would 404 — worse than no link.
         live_id = _db.start_execution_run(project, {"mode": "live"})
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{live_id}" in page
+        assert live_id in _rows(page)
         assert f"/manual/{live_id}/resume" not in page
 
     def test_no_project_redirects_rather_than_erroring(self, client,
@@ -138,15 +151,15 @@ class TestScopeIsAnAccessRuleWithAuthOn:
                                          as_user):
         self._as(as_user)
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{two_testers['mine']}" in page
-        assert f"#{two_testers['theirs']}" not in page
+        assert two_testers["mine"] in _rows(page)
+        assert two_testers["theirs"] not in _rows(page)
 
     def test_a_tester_cannot_widen_the_scope_by_url(self, client, two_testers,
                                                     as_user):
         self._as(as_user)
         page = client.get(
             "/test-execution/runs?scope=all").get_data(as_text=True)
-        assert f"#{two_testers['theirs']}" not in page
+        assert two_testers["theirs"] not in _rows(page)
 
     def test_a_tester_is_not_offered_the_switch(self, client, two_testers,
                                                as_user):
@@ -160,16 +173,16 @@ class TestScopeIsAnAccessRuleWithAuthOn:
         # everything is one click away.
         self._as(as_user, admin=True)
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{two_testers['mine']}" in page
-        assert f"#{two_testers['theirs']}" not in page
+        assert two_testers["mine"] in _rows(page)
+        assert two_testers["theirs"] not in _rows(page)
 
     def test_an_admin_can_see_everything(self, client, two_testers,
                                         as_user):
         self._as(as_user, admin=True)
         page = client.get(
             "/test-execution/runs?scope=all").get_data(as_text=True)
-        assert f"#{two_testers['mine']}" in page
-        assert f"#{two_testers['theirs']}" in page
+        assert two_testers["mine"] in _rows(page)
+        assert two_testers["theirs"] in _rows(page)
 
     def test_the_empty_mine_state_says_it_is_about_assignment(
             self, client, two_testers, as_user):

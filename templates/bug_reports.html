@@ -92,15 +92,15 @@
     </div>
     <div class="bug-stat-card stat-open">
         <span class="stat-value">{{ stats.open }}</span>
-        <span class="stat-label">Open</span>
+        <span class="stat-label">{{ t.bug_status_open }}</span>
     </div>
     <div class="bug-stat-card stat-critical">
         <span class="stat-value">{{ stats.critical }}</span>
-        <span class="stat-label">Critical</span>
+        <span class="stat-label">{{ t.tm_bugs_critical }}</span>
     </div>
     <div class="bug-stat-card stat-major">
         <span class="stat-value">{{ stats.major }}</span>
-        <span class="stat-label">Major</span>
+        <span class="stat-label">{{ t.tm_bugs_major }}</span>
     </div>
 </div>
 
@@ -347,13 +347,13 @@
                             <video src="{{ url_for('automation_asset', path=att) }}"
                                    controls preload="metadata" muted
                                    style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
-                            <div style="font-size:0.72em;color:#64748b;margin-top:2px;">🎥 video</div>
+                            <div style="font-size:0.72em;color:#64748b;margin-top:2px;">🎥 {{ t.bug_video }}</div>
                         </div>
                     {% elif lower.endswith('.png') or lower.endswith('.jpg') or lower.endswith('.jpeg') or lower.endswith('.gif') or lower.endswith('.webp') %}
                         <a href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener"
                            style="flex:0 0 auto;display:block;">
                             <img src="{{ url_for('automation_asset', path=att) }}"
-                                 alt="bug evidence"
+                                 alt="{{ t.bug_alt_evidence }}"
                                  style="width:140px;height:90px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;background:#fff;" />
                         </a>
                     {% else %}

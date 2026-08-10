@@ -763,7 +763,7 @@
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
                 {% if tc.trigger and tc.trigger != 'manual' %}
                 <span class="badge badge-outline" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3;"
-                      title="Walkthrough mode will fire this TC according to its trigger.">
+                      title="{{ t.tc_walkthrough_note }}">
                     🧭 {{ tc.trigger }}
                 </span>
                 {% endif %}
@@ -1004,7 +1004,7 @@
                                             data-index="{{ loop.index0 }}"
                                             style="font-size:0.82em;padding:2px 4px;width:100%;">
                                         <option value="action"
-                                                {% if _combo == 'action' %}selected{% endif %}>Action</option>
+                                                {% if _combo == 'action' %}selected{% endif %}>{{ t.tc_col_action }}</option>
                                         <option value="assertion/visible"
                                                 {% if _combo == 'assertion/visible' %}selected{% endif %}>Assert visible</option>
                                         <option value="assertion/text"

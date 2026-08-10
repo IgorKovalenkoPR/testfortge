@@ -30,6 +30,16 @@ from sqlalchemy import func, select
 from engine import db as _db
 
 
+#: One Postgres service container, many test files. ``--dist loadgroup`` in
+#: CI (see .github/workflows/tests.yml) keeps every test carrying this mark
+#: inside a single xdist worker, because M-1's per-process isolation gives
+#: each worker its own *SQLite* scratch database and cannot give it its own
+#: Postgres server. Two workers dropping and recreating tables in one
+#: database is the collision M-1 removed, in the one place the fix does not
+#: reach. Guarded by tests/test_suite_isolation.py.
+pytestmark = pytest.mark.xdist_group("postgres")
+
+
 @pytest.fixture
 def fresh_db(tmp_path, monkeypatch):
     """A database of this test's own.

@@ -57,6 +57,30 @@ jobs:
       # above. Its contents are destroyed by those tests, which is why it
       # is a dedicated throwaway database and not the app's own.
       TFG_TEST_POSTGRES_URL: "postgresql+psycopg2://tfg:tfg@localhost:5432/tfg_migration_test"
+      # Run the suite in parallel. Actions minutes are billed by wall
+      # clock, so this is a saving and not a luxury: locally the whole
+      # suite is 2:55 with four workers against 6:20 sequentially, and
+      # this job runs the suite five times (matrix ×3, plus coverage and
+      # the auth-on leg).
+      #
+      # Set through PYTEST_ADDOPTS rather than on each command because
+      # ``run_tests.py`` builds its own argv and pytest reads this
+      # variable itself — so one line covers the runner too.
+      #
+      # ``--dist loadgroup`` and not the default ``load``: three test files
+      # talk to the shared Postgres service container, and M-1's per-process
+      # isolation gives each worker its own *SQLite* scratch database — it
+      # cannot give it its own Postgres server. Those files carry
+      # ``pytest.mark.xdist_group("postgres")``, which loadgroup keeps
+      # inside one worker; two workers dropping and recreating tables in one
+      # database would reproduce exactly the false failures M-1 removed.
+      #
+      # ``loadfile`` was the first attempt and was not enough: it keeps a
+      # file together and says nothing about three of them.
+      # tests/test_suite_isolation.py::TestTheParallelCIStaysSafe holds the
+      # pairing, and fails if a fourth file starts using that database
+      # without the mark.
+      PYTEST_ADDOPTS: "-n auto --dist loadgroup"
 
     steps:
       - name: Checkout
@@ -77,6 +101,9 @@ jobs:
           # builds the web image, and a coverage plugin has no business in a
           # production dyno's site-packages.
           pip install pytest-cov
+          # Parallel test execution (see PYTEST_ADDOPTS above). Test-only,
+          # like the coverage plugin.
+          pip install pytest-xdist
           # E8.7: a real S3 server over HTTP, so the storage adapter is
           # exercised on the wire and not against a stub. Test-only and
           # deliberately NOT in requirements.txt — it pulls in boto3, the
@@ -241,6 +268,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
+    # Deliberately no PYTEST_ADDOPTS here: the ten-run gate is about
+    # determinism, and a browser suite sharing workers measures contention
+    # instead. This file is ~35 s; there is nothing to save.
     env:
       FLASK_DEBUG: "1"
       PYTHONIOENCODING: "utf-8"

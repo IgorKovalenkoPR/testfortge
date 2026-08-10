@@ -32,9 +32,12 @@ somebody has to remember to extend:
 4. ``%s``/``%(name)s`` placeholders match per plural form — a mismatch is
    not a typo, it is a ``TypeError`` on a rendered page;
 5. no template renders visible English that never passed through ``t``.
-   Rule 5 is a **ratchet**: files still carrying English are listed with
-   their current count, so the debt is visible and cannot grow, and a new
-   page starts at zero because it is not in the list at all.
+   This began as a ratchet — a per-file count that could fall and not
+   rise — and became a rule once every user-facing page reached zero
+   (§15). The two escape hatches are named and each carries its reason:
+   ``NEUTRAL_IN_MARKUP`` for strings identical in every language (a suite
+   tag the database stores, a shell command, another product's button),
+   and ``DEV_ONLY_TEMPLATES`` for a page no user can reach.
 """
 from __future__ import annotations
 
@@ -79,6 +82,11 @@ DELIBERATELY_ENGLISH = {
     "te_status_auto": "Auto, the value of the status field",
     "te_mode_walkthrough": "QA walkthrough — the mode's name in this product",
     "chat_aria": "the assistant's own name and tagline",
+    "dm_unit_tc": "TC", "dm_unit_cl": "CL",
+    "te_col_id": "ID",
+    "te_env_web": "Web is the platform's name",
+    "te_formats": "a list of file extensions",
+    "bug_status_open": "bug statuses stay English, like the severities",
     # The QA vocabulary this team writes in English
     "nav_user_stories": "User Story is used untranslated in QA here",
     "dash_user_stories": "as above",
@@ -94,6 +102,43 @@ DELIBERATELY_ENGLISH = {
     "tm_bugs_critical": "severity names stay English",
     "tm_bugs_major": "as above", "tm_bugs_minor": "as above",
     "tm_bugs_low": "as above",
+}
+
+#: Text in markup that is identical in every language, with the reason.
+#: The counterpart of DELIBERATELY_ENGLISH for strings that are not
+#: dictionary values at all: product vocabulary the database stores, other
+#: software's own labels, and the brand split across two tags.
+NEUTRAL_IN_MARKUP = {
+    # Suite tags. Stored in the database and matched by name — a
+    # translated tag would be a different tag.
+    "Smoke": "a suite tag, stored as this string",
+    "Regression": "as above",
+    "E2E": "as above",
+    # Platform names.
+    "iOS": "Apple's name for it",
+    "Android": "Google's name for it",
+    # Playwright codegen's own toolbar buttons: the guide tells a tester to
+    # click them, so the guide must call them what the browser calls them.
+    "Assert visible": "the label on codegen's own button",
+    "Assert text": "as above",
+    "Assert URL": "as above",
+    # The brand wordmark is split across three spans so both "Testfort"
+    # and "Forge" can be read out of it.
+    "TestFor": "half of the split wordmark",
+    "ge": "the other half",
+    # Shell commands and endpoints outside <code> in the guide's how-to.
+    "npm ci    npm test": "a command",
+    "npm run upload": "a command",
+    "POST /automation/allure-results": "an endpoint",
+    # Package names in the diagnostics banner, and the formula caption.
+    "pdf2image:": "a package name",
+    "poppler:": "a package name",
+    "figma.com/settings": "a URL a reader types",
+    "= buffer   total_tc   minutes_per_tc / 60 + 1": "a formula",
+    ".r2.cloudflarestorage.com\"": "half an example endpoint",
+    "sk-ant-…": "the shape of an API key",
+    "RECORDER_ENABLED=1 python -m tools.tfg_record --project   --tc   --url  START_URL":
+        "a command line",
 }
 
 PLACEHOLDER = re.compile(r"%(?:\((\w+)\))?[-#0 +]*\d*(?:\.\d+)?[sdfr]")
@@ -132,6 +177,41 @@ class TestTheDictionariesAgree:
         assert not stale, (
             f"{stale} are allowlisted as deliberately English but are not "
             f"identical any more (or no longer exist). Remove the entries.")
+
+
+class TestOneVoice:
+    """The product addresses the reader one way, and it is «ви».
+
+    Measured rather than chosen (§13): 48 formal forms against one informal
+    in the dictionary as it stood. §15 found the exception — Tedgie's own
+    greeting said «Запитуй», the one string a first-time visitor is
+    guaranteed to read — plus a hint that said «додай». Both are «ви» now,
+    and this keeps them there.
+
+    The greeting also listed the modules by their English names while the
+    sidebar showed Ukrainian ones, which is the same defect one layer up: a
+    reader told to ask about "Test Cases" will not find that item in the
+    menu.
+    """
+
+    #: Second-person-singular imperatives and possessives. Word-bounded, so
+    #: «перевірка» and «додайте» do not match.
+    INFORMAL = re.compile(
+        r"\b(запитуй|введи|натисни|обери|перевір|спробуй|додай|відкрий|"
+        r"дивись|скористайся|твій|твоя|твої|твоє|тебе|тобі)\b",
+        re.IGNORECASE)
+
+    def test_no_ukrainian_string_uses_the_informal_you(self):
+        offenders = sorted(
+            key for key, value in UA.items()
+            if isinstance(value, str) and self.INFORMAL.search(value))
+        assert not offenders, (
+            f"{offenders} address the reader as «ти» while the rest of the "
+            f"product uses «ви». One product, one voice.")
+
+    def test_the_pattern_would_catch_something(self):
+        assert self.INFORMAL.search("Запитуй про модулі")
+        assert not self.INFORMAL.search("Перевірка вимог і додайте файл")
 
 
 class TestEveryKeyATemplateAsksForExists:
@@ -327,29 +407,17 @@ TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
 #: immediately because it is not listed at all. Counts are of visible text
 #: chunks as ``_visible_text`` measures them, which is a proxy — the point
 #: is the direction, not the absolute figure.
-ENGLISH_BUDGET = {
-    # Partially converted pages: the leftovers are fragments and single
-    # words inside otherwise translated markup.
-    "index.html": 50,
-    "test_execution.html": 36,
-    "estimation.html": 33,
-    "test_execution_live.html": 25,
-    "test_cases.html": 15,
-    # Development-only harness: reachable solely with EDITORS_ENABLED and
-    # FLASK_DEBUG=1, so no user of either language can reach it.
-    "_ie_harness.html": 10,
-    "bug_reports.html": 5,
-    # The split brand wordmark (TestFor + T + ge) and the EN/UA switcher.
-    # Neither is translatable; the scanner cannot tell.
-    "base.html": 4,
-    "automation.html": 3,
-    "checklist.html": 3,
-    # Example values in placeholders: an endpoint URL and "sk-ant-…".
-    "org_settings.html": 3,
-    "review_session.html": 2,
-    "user_stories.html": 2,
-    "techniques.html": 1,
-    "test_execution_manual.html": 1,
+#: Templates allowed to carry English, with the reason each is allowed.
+#:
+#: This was a ratchet — a per-file count that could fall and not rise —
+#: while sixteen pages still held English. They are all at zero now, so a
+#: number would only be somewhere for new debt to hide. What is left is a
+#: rule: a template not named here renders no English of its own, and the
+#: one that is named has to earn it.
+DEV_ONLY_TEMPLATES = {
+    "_ie_harness.html": "E4.2 development harness — reachable only with "
+                        "EDITORS_ENABLED on and FLASK_DEBUG=1, so no user "
+                        "of either language can open it",
 }
 
 #: The guide's panels are 4 800 words of documentation, held in one file
@@ -363,6 +431,13 @@ ENGLISH_BUDGET = {
 LOCALISED_CONTENT_DIR = "guide"
 
 _COMMENT = re.compile(r"\{#.*?#\}", re.S)
+#: HTML comments too. A comment is not rendered, so English inside one is
+#: not English a reader meets — and one such comment in test_cases.html
+#: made this scanner report two phantom findings.
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+#: ``<code>`` and ``<pre>`` hold commands, identifiers and file names.
+#: Translating ``npm run upload`` would break it.
+_CODE = re.compile(r"(?is)<(code|pre)\b.*?</>")
 _BLOCK = re.compile(r"\{%.*?%\}", re.S)
 _EXPR = re.compile(r"\{\{.*?\}\}", re.S)
 _SCRIPT = re.compile(r"<script\b.*?</script>", re.S | re.I)
@@ -371,6 +446,11 @@ _TAG = re.compile(r"<[^>]+>", re.S)
 _WORDS = re.compile(r"[A-Za-z]{2,}")
 _VISIBLE_ATTR = re.compile(r'(?:placeholder|title|aria-label|alt)="([^"{}]+)"')
 _BRAND = re.compile(r"TestForTge|TestFortge|Tedgie", re.I)
+#: Strings that are identical in every language: example URLs and
+#: addresses, glob patterns, and bare identifiers with a trailing colon.
+_NEUTRAL = re.compile(
+    r"(?:https?://\S+|\*?/[\w*/.\-]+\*?|[\w.\-]+@[\w.\-]+|[a-z_]+_id:?)\s*")
+_HAS_LOWER = re.compile(r"[a-z]")
 _ENTITY = re.compile(r"&[a-zA-Z]+;|&#\d+;")
 
 
@@ -382,8 +462,10 @@ def _visible_text(src: str) -> list[str]:
     slicing before stripping leaves a half-open comment behind.
     """
     stripped = _COMMENT.sub(" ", src)
+    stripped = _HTML_COMMENT.sub(" ", stripped)
     stripped = _SCRIPT.sub(" ", stripped)
     stripped = _STYLE.sub(" ", stripped)
+    stripped = _CODE.sub(" ", stripped)
     stripped = _BLOCK.sub(" ", stripped)
     stripped = _EXPR.sub(" ", stripped)
     attrs = _VISIBLE_ATTR.findall(stripped)
@@ -402,8 +484,21 @@ def _visible_text(src: str) -> list[str]:
         if '="' in chunk:
             continue
         chunk = _ENTITY.sub(" ", _BRAND.sub("", chunk)).strip()
-        if chunk and _WORDS.search(chunk):
-            cleaned.append(chunk)
+        if not chunk or not _WORDS.search(chunk):
+            continue
+        # An example URL, an example address or a glob is the same string
+        # in every language. Counting them would leave permanent budget
+        # entries for text nobody can translate.
+        if _NEUTRAL.fullmatch(chunk):
+            continue
+        # No lower-case letter anywhere: an identifier or a unit — ID,
+        # BLK, UTC, SP, MB, run_id. A word a reader recognises has a
+        # lower-case letter in it.
+        if not _HAS_LOWER.search(chunk):
+            continue
+        if chunk in NEUTRAL_IN_MARKUP:
+            continue
+        cleaned.append(chunk)
     return cleaned
 
 
@@ -416,25 +511,26 @@ class TestNoPageGoesStraightToEnglish:
                 for path in sorted(TEMPLATES.rglob("*.html"))
                 if path.parent.name != LOCALISED_CONTENT_DIR}
 
-    def test_no_template_carries_more_english_than_it_used_to(self):
-        over = {name: (count, ENGLISH_BUDGET.get(name, 0))
-                for name, count in self._counts().items()
-                if count > ENGLISH_BUDGET.get(name, 0)}
+    def test_no_template_renders_english_of_its_own(self):
+        over = {name: count for name, count in self._counts().items()
+                if count and name not in DEV_ONLY_TEMPLATES}
         assert not over, (
-            f"hardcoded English grew, or a new page never asked the "
-            f"dictionary: {over} (file: found, allowed). Move the strings "
-            f"into engine/i18n/en.py and ua.py — that is what M-2 was.")
+            f"hardcoded English: {over}. Move the strings into "
+            f"engine/i18n/en.py and ua.py — or, if they are the same in "
+            f"every language (a suite tag, a command, another product's "
+            f"button), add them to NEUTRAL_IN_MARKUP with the reason.")
 
-    def test_the_budget_has_no_stale_entries(self):
-        """A budget that outlives its debt stops being a ratchet."""
-        counts = self._counts()
-        stale = {name: (counts.get(name), allowed)
-                 for name, allowed in ENGLISH_BUDGET.items()
-                 if counts.get(name, 0) < allowed}
-        assert not stale, (
-            f"these files carry less English than the budget allows: "
-            f"{stale} (file: found, allowed). Lower the numbers so the "
-            f"ratchet keeps holding.")
+    def test_the_dev_only_exemption_is_earned(self):
+        """A file is exempt because a user cannot reach it, so the gate
+        that keeps them out has to be visible in the file itself."""
+        for name in DEV_ONLY_TEMPLATES:
+            path = TEMPLATES / name
+            assert path.is_file(), f"{name} is exempt and does not exist"
+            text = path.read_text(encoding="utf-8")
+            assert "EDITORS_ENABLED" in text and "FLASK_DEBUG" in text, (
+                f"{name} is exempt as development-only and does not say so; "
+                f"if a user can reach it, it needs translating like every "
+                f"other page")
 
     def test_the_scanner_still_finds_text(self):
         """A green run because the regexes stopped matching would be the
@@ -443,20 +539,14 @@ class TestNoPageGoesStraightToEnglish:
             encoding="utf-8")
         assert len(_visible_text(guide)) > 100
 
-    def test_the_pages_this_change_converted_are_at_zero(self):
-        """Named, so a partial revert is visible as a failure rather than
-        as a number creeping up in the budget above."""
-        counts = self._counts()
-        # org_settings.html is deliberately absent: it is fully converted,
-        # and the three chunks the scanner still sees there are an example
-        # endpoint URL and "sk-ant-…" inside placeholders. Its budget of 3
-        # above holds that, and holds it from growing.
-        for name in ("auth_login.html", "auth_invite.html", "403.html",
-                     "org_members.html", "auth_forgot.html",
-                     "auth_reset.html", "auth_verify.html",
-                     # §14: a shell now — its prose moved to
-                     # templates/guide/_sections_<lang>.html.
-                     "guide.html"):
-            assert counts.get(name, 0) == 0, (
-                f"{name} has hardcoded English again: "
-                f"{_visible_text((TEMPLATES / name).read_text(encoding='utf-8'))}")
+    def test_the_neutral_list_has_no_stale_entries(self):
+        """An exemption nothing uses is a claim about the markup that is no
+        longer true."""
+        markup = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in TEMPLATES.rglob("*.html"))
+        stale = sorted(text for text in NEUTRAL_IN_MARKUP
+                       if text.split()[0] not in markup)
+        assert not stale, (
+            f"{stale} are exempt as language-neutral and no longer appear "
+            f"in any template")

@@ -13,7 +13,7 @@
         <span class="status-pill" id="status-pill"
               style="display:inline-block;padding:4px 12px;border-radius:999px;
                      font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569;">
-            ● idle
+            ● {{ t.tl_idle }}
         </span>
         {# Stage 5: memory pill — RSS / budget surfaced from Stage 3's
            OomGuard so operators see the early-warning band before the
@@ -36,10 +36,10 @@
               style="display:inline-block;padding:3px 8px;border-radius:4px;
                      font-size:0.75em;font-family:ui-monospace,SFMono-Regular,monospace;
                      background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;">
-            mode: —
+            {{ t.tl_mode }}: —
         </span>
         <span id="status-text" style="font-size:0.92em;color:#475569;">
-            Waiting for an automation run to start…
+            {{ t.tl_waiting }}
         </span>
         <span id="status-progress" style="font-size:0.92em;color:#0f172a;font-weight:600;margin-left:auto;"></span>
     </div>
@@ -63,7 +63,7 @@
         <div style="flex:1;min-width:240px;">
             <strong id="te-live-early-exit-title"
                     style="display:block;font-size:1em;margin-bottom:4px;">
-                Run stopped early
+                {{ t.tl_stopped }}
             </strong>
             <p id="te-live-early-exit-reason"
                style="margin:0;font-size:0.88em;font-family:ui-monospace,SFMono-Regular,monospace;
@@ -71,7 +71,7 @@
         </div>
         <a id="te-live-early-exit-import" href="#"
            class="btn btn-secondary" style="font-size:0.85em;">
-            Import partial results
+            {{ t.tl_import_partial_btn }}
         </a>
     </div>
 </div>
@@ -96,7 +96,7 @@
     </div>
     <img id="live-frame"
          src="{{ url_for('test_execution_live_frame') }}"
-         alt="Live automation frame"
+         alt="{{ t.tl_alt_frame }}"
          style="display:block;width:100%;max-height:80vh;object-fit:contain;background:#0f172a;" />
 </div>
 
@@ -106,7 +106,7 @@
     <img class="live-strip-thumb"
          data-slot="{{ '%02d' % i }}"
          src="{{ url_for('test_execution_live_strip', slot=i) }}?t=0"
-         alt="frame {{ i }}"
+         alt="{{ t.tl_alt_frame }} {{ i }}"
          style="width:96px;height:60px;object-fit:cover;background:#0f172a;border:1px solid #334155;border-radius:3px;cursor:pointer;" />
     {% endfor %}
 </div>
@@ -158,19 +158,17 @@
 
 {% if recent_runs %}
 <div id="te-recent-runs" class="card" style="margin-top:14px;">
-    <strong>Recent automation runs</strong>
+    <strong>{{ t.tl_recent }}</strong>
     <p style="margin:4px 0 8px 0;font-size:0.85em;color:#64748b;">
-        Use these links if you came here without a run_id (back-button,
-        bookmark, or after a service restart). Importing partial
-        results loads whatever cases the worker managed to finish.
+        {{ t.tl_recent_hint }}
     </p>
     <table style="width:100%;border-collapse:collapse;font-size:0.88em;">
         <thead>
             <tr style="background:#f1f5f9;text-align:left;">
                 <th style="padding:6px 8px;">run_id</th>
-                <th style="padding:6px 8px;">status</th>
-                <th style="padding:6px 8px;">age</th>
-                <th style="padding:6px 8px;">action</th>
+                <th style="padding:6px 8px;">{{ t.tl_col_status }}</th>
+                <th style="padding:6px 8px;">{{ t.tl_col_age }}</th>
+                <th style="padding:6px 8px;">{{ t.tl_col_action }}</th>
             </tr>
         </thead>
         <tbody>
@@ -179,32 +177,32 @@
                 <td style="padding:6px 8px;font-family:monospace;">{{ run.run_id }}</td>
                 <td style="padding:6px 8px;">
                     {% if run.status == 'done' %}
-                    <span style="color:#16a34a;font-weight:600;">✓ done</span>
+                    <span style="color:#16a34a;font-weight:600;">✓ {{ t.tl_done }}</span>
                     {% elif run.status == 'running' %}
-                    <span style="color:#0369a1;">● running</span>
+                    <span style="color:#0369a1;">● {{ t.te_running }}</span>
                     {% elif run.status == 'stalled' %}
-                    <span style="color:#b91c1c;font-weight:600;">⚠ stalled</span>
+                    <span style="color:#b91c1c;font-weight:600;">⚠ {{ t.tl_stalled }}</span>
                     {% else %}
-                    <span style="color:#94a3b8;">queued</span>
+                    <span style="color:#94a3b8;">{{ t.tl_queued }}</span>
                     {% endif %}
                 </td>
-                <td style="padding:6px 8px;">{{ run.age_s }}s ago</td>
+                <td style="padding:6px 8px;">{{ run.age_s }}{{ t.tl_ago }}</td>
                 <td style="padding:6px 8px;">
                     {% if run.status == 'done' %}
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
                        class="btn btn-primary" style="padding:4px 10px;font-size:0.8em;">
-                       Import results
+                       {{ t.te_import }}
                     </a>
                     {% elif run.status == 'stalled' %}
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
                        class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;"
-                       title="Worker died — try to import whatever cases finished before the crash">
-                       Import partial
+                       title="{{ t.tl_died }}">
+                       {{ t.tl_import_partial }}
                     </a>
                     {% else %}
                     <a href="{{ url_for('test_execution_live') }}?run_id={{ run.run_id }}"
                        class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;">
-                       Watch
+                       {{ t.tl_watch }}
                     </a>
                     {% endif %}
                 </td>
@@ -320,11 +318,11 @@
         // through to the idle pill and confused operators ("why does a
         // crashed run show as idle?").
         var colours = {
-            idle:       ['#f1f5f9', '#475569', '● idle'],
+            idle:       ['#f1f5f9', '#475569', '● {{ t.tl_idle }}'],
             starting:   ['#fef9c3', '#854d0e', '● starting'],
-            running:    ['#dcfce7', '#166534', '● running'],
-            running_tc: ['#dbeafe', '#1e40af', '● running TC'],
-            done:       ['#e0e7ff', '#3730a3', '✓ done'],
+            running:    ['#dcfce7', '#166534', '● {{ t.te_running }}'],
+            running_tc: ['#dbeafe', '#1e40af', '● {{ t.te_running }} TC'],
+            done:       ['#e0e7ff', '#3730a3', '✓ {{ t.tl_done }}'],
             oom_exit:   ['#fee2e2', '#7f1d1d', '⛔ oom exit'],
             early_exit: ['#fef3c7', '#854d0e', '⚠ early exit']
         };
@@ -342,7 +340,7 @@
         var isLiveWalk = /^LIVE-PAGE-/.test(currentTc);
 
         if (status === 'idle') {
-            stext.textContent = 'Waiting for an automation run to start…';
+            stext.textContent = '{{ t.tl_waiting }}';
             sprog.textContent = '';
         } else if (status === 'starting') {
             stext.textContent = 'Browser is launching…';
@@ -371,7 +369,7 @@
             sprog.textContent = (info.done || 0) + ' / '
                               + (info.total || 0) + ' (partial)';
         } else if (status === 'early_exit') {
-            stext.textContent = 'Run stopped early';
+            stext.textContent = '{{ t.tl_stopped }}';
             sprog.textContent = (info.done || 0) + ' / '
                               + (info.total || 0) + ' (partial)';
         }
@@ -481,7 +479,7 @@
             eeBanner.style.borderColor = '#fbbf24';
             eeBanner.style.color = '#854d0e';
             if (eeIcon)  eeIcon.textContent = '⚠';
-            if (eeTitle) eeTitle.textContent = 'Run stopped early';
+            if (eeTitle) eeTitle.textContent = '{{ t.tl_stopped }}';
         }
         if (eeReason) {
             eeReason.textContent = reason

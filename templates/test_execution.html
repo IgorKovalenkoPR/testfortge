@@ -144,7 +144,7 @@
             <i data-lucide="cloud-upload" class="icon-lg"></i>
         </div>
         <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
-        <p class="meta-text">XLSX, CSV, MD, JSON</p>
+        <p class="meta-text">{{ t.te_formats }}</p>
         <input type="file" name="upload_file" required
                id="te-tc-file"
                class="file-input-hidden"
@@ -192,7 +192,7 @@
             <i data-lucide="cloud-upload" class="icon-lg"></i>
         </div>
         <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
-        <p class="meta-text">XLSX, CSV, MD, JSON</p>
+        <p class="meta-text">{{ t.te_formats }}</p>
         <input type="file" name="upload_file" required
                id="te-cl-file"
                class="file-input-hidden"
@@ -279,14 +279,14 @@
 <div class="card run-card">
     <div class="run-header" data-action="toggle-run" data-run-id="{{ run.run_id }}">
         <div class="run-title">
-            <strong>Run {{ run.run_id }}</strong>
+            <strong>{{ t.te_run_word }} {{ run.run_id }}</strong>
             <span class="run-meta">
                 {{ run.tester_name }} &middot; {{ run.environment }} &middot; {{ run.testing_types }}
                 {% set total_ms = run.results | map(attribute='duration_ms') | map('default', 0, true) | sum %}
                 {% set count = run.results | length %}
                 {% if total_ms %}
-                    &middot; ⏱ {{ (total_ms / 1000) | round(1) }}s total
-                    {% if count %}&middot; {{ ((total_ms / count) / 1000) | round(2) }}s/case{% endif %}
+                    &middot; ⏱ {{ t.te_total_s|format((total_ms / 1000) | round(1)) }}
+                    {% if count %}&middot; {{ t.te_per_case|format(((total_ms / count) / 1000) | round(2)) }}{% endif %}
                 {% endif %}
             </span>
         </div>
@@ -330,9 +330,9 @@
             <thead>
                 <tr>
                     <th width="60">{{ t.get('status', 'Status') }}</th>
-                    <th width="90">ID</th>
+                    <th width="90">{{ t.te_col_id }}</th>
                     <th>{{ t.get('te_item_summary', 'Summary') }}</th>
-                    <th width="90">Bug ID</th>
+                    <th width="90">{{ t.te_col_bug }}</th>
                     <th>{{ t.get('te_comment', 'Comment') }}</th>
                 </tr>
             </thead>
@@ -384,7 +384,7 @@
                                target="_blank" rel="noopener"
                                style="flex:0 0 auto;display:block;">
                                 <img src="{{ url_for('automation_asset', path=shot) }}"
-                                     alt="step screenshot"
+                                     alt="{{ t.te_alt_step }}"
                                      style="width:140px;height:90px;object-fit:cover;
                                             border:1px solid #cbd5e1;border-radius:4px;background:#fff;" />
                             </a>
@@ -434,7 +434,7 @@
                     <tr class="result-row result-failed">
                         <td>
                             <span class="status-badge status-{{ sev_cls }}"
-                                  title="defect_class: {{ f.defect_class or 'unknown' }}">
+                                  title="{{ t.te_defect_class }}: {{ f.defect_class or t.te_unknown }}">
                                 {{ sev }}
                             </span>
                         </td>
@@ -508,7 +508,7 @@
                             <a href="{{ url_for('automation_asset', path=f.screenshot) }}"
                                target="_blank" rel="noopener" style="display:inline-block;">
                                 <img src="{{ url_for('automation_asset', path=f.screenshot) }}"
-                                     alt="finding screenshot"
+                                     alt="{{ t.te_alt_finding }}"
                                      style="width:240px;max-height:160px;object-fit:cover;
                                             border:1px solid #cbd5e1;border-radius:4px;background:#fff;">
                             </a>
@@ -802,7 +802,7 @@
                 {% if tc.suite %}
                 <span class="item-badge" style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">{{ tc.suite }}</span>
                 {% endif %}
-                <select name="status_{{ tc.id }}" class="item-status-select" aria-label="Status for {{ tc.id }}">
+                <select name="status_{{ tc.id }}" class="item-status-select" aria-label="{{ t.te_aria_status|format(tc.id) }}">
                     <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
                     <option value="Passed">{{ t.get('passed', 'Passed') }}</option>
                     <option value="Failed">{{ t.get('failed', 'Failed') }}</option>
@@ -810,7 +810,7 @@
                 </select>
                 <input type="text" name="bug_{{ tc.id }}" class="item-bug-input"
                        list="existing-bug-ids" placeholder="{{ t.get('te_bug_placeholder', 'Bug ID') }}"
-                       aria-label="Bug ID for {{ tc.id }}">
+                       aria-label="{{ t.te_aria_bug|format(tc.id) }}">
             </div>
         {% endfor %}
         {% endif %}
@@ -834,7 +834,7 @@
                 <span class="item-id">{{ cl.id }}</span>
                 <span class="item-summary">{{ cl.objective }}</span>
                 <span class="item-badge badge-{{ cl.category | lower | replace(' ', '-') }}">{{ cl.category }}</span>
-                <select name="status_{{ cl.id }}" class="item-status-select" aria-label="Status for {{ cl.id }}">
+                <select name="status_{{ cl.id }}" class="item-status-select" aria-label="{{ t.te_aria_status|format(cl.id) }}">
                     <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
                     <option value="Passed">{{ t.get('passed', 'Passed') }}</option>
                     <option value="Failed">{{ t.get('failed', 'Failed') }}</option>
@@ -842,7 +842,7 @@
                 </select>
                 <input type="text" name="bug_{{ cl.id }}" class="item-bug-input"
                        list="existing-bug-ids" placeholder="{{ t.get('te_bug_placeholder', 'Bug ID') }}"
-                       aria-label="Bug ID for {{ cl.id }}">
+                       aria-label="{{ t.te_aria_bug|format(cl.id) }}">
             </div>
         {% endfor %}
         {% endif %}
@@ -886,31 +886,29 @@
             <span id="te-active-pill"
                   style="display:inline-block;padding:4px 12px;border-radius:999px;
                          font-weight:700;font-size:0.85em;background:#dcfce7;color:#166534;">
-                ● running
+                ● {{ t.te_running }}
             </span>
             <span id="te-active-progress"
                   style="font-size:0.92em;color:#0f172a;font-weight:600;">
-                0 / {{ active_automation_run.case_count }} cases
+                {{ t.te_cases_progress|format(0, active_automation_run.case_count) }}
             </span>
             <span style="font-size:0.85em;color:#64748b;margin-left:auto;">
                 run_id: <code>{{ active_automation_run.run_id }}</code>
             </span>
         </div>
         <p id="te-active-hint" style="margin:8px 0 0 0;font-size:0.85em;color:#0c4a6e;">
-            Worker is running in the background. Page will refresh
-            automatically when done; you can navigate away — the run
-            keeps going.
+            {{ t.te_worker_hint }}
         </p>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
             <a href="{{ url_for('test_execution_live') }}?run_id={{ active_automation_run.run_id }}"
                target="_blank" rel="noopener"
                class="btn btn-secondary" style="font-size:0.85em;">
-                Open live filmstrip ↗
+                {{ t.te_open_filmstrip }}
             </a>
             <a href="{{ url_for('test_execution_results', run_id=active_automation_run.run_id) }}"
                id="te-active-results-btn"
                class="btn btn-primary" style="font-size:0.85em;display:none;">
-                Import results
+                {{ t.te_import }}
             </a>
         </div>
     </div>
@@ -954,11 +952,11 @@
     <div class="te-env-tabs" role="tablist" data-te-env-tabs>
         <label class="te-env-tab">
             <input type="checkbox" name="env_type" value="web" checked>
-            <span><strong>Web</strong><small>{{ t.get('te_env_web_help', 'desktop browser on Windows / macOS / Linux') }}</small></span>
+            <span><strong>{{ t.te_env_web }}</strong><small>{{ t.get('te_env_web_help', 'desktop browser on Windows / macOS / Linux') }}</small></span>
         </label>
         <label class="te-env-tab">
             <input type="checkbox" name="env_type" value="mobile_web">
-            <span><strong>Mobile Web</strong><small>{{ t.get('te_env_mw_help', 'a browser on a phone / tablet') }}</small></span>
+            <span><strong>{{ t.te_env_mw }}</strong><small>{{ t.get('te_env_mw_help', 'a browser on a phone / tablet') }}</small></span>
         </label>
         <label class="te-env-tab">
             <input type="checkbox" name="env_type" value="ios">
@@ -1049,7 +1047,7 @@
                     {% for d in ios_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="ios_device_custom" placeholder="e.g. iPhone 16 Pro" style="display:none; margin-top:6px">
+                <input type="text" name="ios_device_custom" placeholder="{{ t.te_ph_iphone }}" style="display:none; margin-top:6px">
             </div>
             <div class="form-group">
                 <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
@@ -1071,7 +1069,7 @@
                     {% for d in android_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="android_device_custom" placeholder="e.g. OnePlus 13" style="display:none; margin-top:6px">
+                <input type="text" name="android_device_custom" placeholder="{{ t.te_ph_android }}" style="display:none; margin-top:6px">
             </div>
             <div class="form-group">
                 <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
@@ -1225,7 +1223,7 @@
        the gunicorn 300 s ceiling on cold-start runs and the browser is
        left staring at this overlay. The X dismisses the modal so the
        operator can refresh manually. #}
-    <button type="button" id="te-overlay-close" aria-label="Close"
+    <button type="button" id="te-overlay-close" aria-label="{{ t.guide_close }}"
             style="position:absolute;top:8px;right:10px;border:none;
                    background:transparent;font-size:1.4em;color:#475569;
                    cursor:pointer;line-height:1;">&times;</button>
@@ -1237,7 +1235,7 @@
     <div id="te-overlay-live" style="display:none;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:10px;margin-bottom:10px;font-size:0.88em;color:#0f172a;">
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <span><strong id="te-overlay-tc">—</strong></span>
-        <span id="te-overlay-progress" style="color:#475569;">starting…</span>
+        <span id="te-overlay-progress" style="color:#475569;">{{ t.te_starting }}</span>
       </div>
     </div>
     <p style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;">

@@ -1729,4 +1729,125 @@ TRANSLATIONS = {
     "guide_card_projects_sub": "Switch / create from any module",
     "guide_card_tips_title": "Pro tips",
     "guide_card_tips_sub": "Things that save hours",
+    # ── Dashboard metrics widget (index.html) ──────────────────────
+    "dm_title": "Test Metrics",
+    "dm_pick": "Select a metric to display",
+    "dm_tab_tc": "Test Cases",
+    "dm_tab_cl": "Checklist",
+    "dm_tab_exec": "Execution Status",
+    "dm_tab_severity": "Bug Severity",
+    "dm_tab_priority": "Bug Priority",
+    "dm_tab_env": "Environments",
+    "dm_tc_written": "Test Cases Written",
+    "dm_cl_items": "Checklist Items",
+    "dm_no_tc": "No test cases generated yet.",
+    "dm_go_tc": "Generate Test Cases",
+    "dm_no_cl": "No checklist items generated yet.",
+    "dm_go_cl": "Generate Checklist",
+    "dm_by_category": "By Category",
+    "dm_by_priority": "By Priority",
+    "dm_executed": "Total Executed (%d run)|Total Executed (%d runs)",
+    "dm_pass_rate": "Pass Rate",
+    "dm_auto_pass_rate": "Automation Pass Rate",
+    "dm_skipped": "Skipped",
+    "dm_details": "Details",
+    "dm_no_exec": "No test executions yet.",
+    "dm_go_exec": "Run Test Execution",
+    "dm_no_auto": "No automation runs ingested.",
+    "dm_go_auto": "Generate the suite",
+    "dm_bugs_found": "Bugs Found",
+    "dm_bugs_by_priority": "Bugs by Priority",
+    "dm_no_bugs": "No bugs reported yet.",
+    "dm_env_covered": "Environments Covered",
+    "dm_col_platform": "Platform",
+    "dm_col_browser": "Browser",
+    "dm_col_device": "Device",
+    "dm_col_screen": "Screen",
+    "dm_col_runs": "Runs",
+    "dm_no_env": "No test environments covered yet.",
+    "dm_unit_tc": "TC",
+    "dm_unit_cl": "CL",
+    "dm_unit_bugs": "bug|bugs",
+    # ── The last of the hardcoded English (§15) ────────────────────
+    # Execution page
+    "te_formats": "XLSX, CSV, MD, JSON",
+    "te_total_s": "%s s total",
+    "te_per_case": "%s s/case",
+    "te_running": "running",
+    "te_starting": "starting…",
+    "te_run_word": "Run",
+    "te_cases_progress": "%d / %d cases",
+    "te_worker_hint": "Worker is running in the background. Page will "
+                      "refresh automatically when done; you can navigate "
+                      "away — the run keeps going.",
+    "te_open_filmstrip": "Open live filmstrip ↗",
+    "te_import": "Import results",
+    "te_alt_step": "step screenshot",
+    "te_alt_finding": "finding screenshot",
+    "te_aria_status": "Status for %s",
+    "te_aria_bug": "Bug ID for %s",
+    "te_col_id": "ID",
+    "te_col_bug": "Bug ID",
+    "te_env_web": "Web",
+    "te_env_mw": "Mobile Web",
+    "te_ph_iphone": "e.g. iPhone 16 Pro",
+    "te_ph_android": "e.g. OnePlus 13",
+    "te_defect_class": "defect_class",
+    "te_unknown": "unknown",
+    # Live view
+    "tl_idle": "idle",
+    "tl_mode": "mode",
+    "tl_waiting": "Waiting for an automation run to start…",
+    "tl_stopped": "Run stopped early",
+    "tl_import_partial_btn": "Import partial results",
+    "tl_recent": "Recent automation runs",
+    "tl_recent_hint": "Use these links if you came here without a run_id "
+                      "(back-button, bookmark, or after a service restart). "
+                      "Importing partial results loads whatever cases the "
+                      "worker managed to finish.",
+    "tl_col_status": "status",
+    "tl_col_age": "age",
+    "tl_col_action": "action",
+    "tl_done": "done",
+    "tl_stalled": "stalled",
+    "tl_queued": "queued",
+    "tl_ago": "s ago",
+    "tl_import_partial": "Import partial",
+    "tl_watch": "Watch",
+    "tl_alt_frame": "Live automation frame",
+    "tl_died": "Worker died — try to import whatever cases finished before "
+               "the crash",
+    # Estimation diagnostics banner
+    "est_diag_title": "Mockup vision readiness:",
+    "est_diag_set": "set",
+    "est_diag_missing": "missing",
+    "est_diag_installed": "installed",
+    "est_diag_absent": "absent",
+    "est_diag_cover_only": "unset (cover-only)",
+    "est_diag_json": "diag JSON ↗",
+    "est_diag_no_key_title": "Vision analysis disabled.",
+    "est_diag_no_key_body": "Set <code>ANTHROPIC_API_KEY</code> in Render "
+                            "env vars (Settings → Environment) before this "
+                            "tab can produce estimates. PNG / PDF uploads "
+                            "will be saved but no feature list will be "
+                            "extracted.",
+    "est_diag_pdf_title": "PDF rasterisation degraded.",
+    "est_diag_pdf_body": "The container is missing <code>pdf2image</code> "
+                         "and/or <code>poppler-utils</code>; PDF uploads "
+                         "fall back to a text-only render which loses "
+                         "visual signal. PNG / JPG uploads still work "
+                         "fully.",
+    "est_diag_figma_title": "Figma support is degraded.",
+    "est_diag_figma_body": "Without <code>FIGMA_PAT</code>, only the file's "
+                           "cover image is fetched — enough for high-level "
+                           "scope but not screen-by-screen detail. Get a "
+                           "token at",
+    "est_diag_figma_tail": "and add it to Render env vars.",
+    # Smaller pages
+    "bug_status_open": "Open",
+    "bug_video": "video",
+    "bug_alt_evidence": "bug evidence",
+    "tc_col_action": "Action",
+    "tc_walkthrough_note": "Walkthrough mode will fire this TC according to "
+                           "its trigger.",
 }

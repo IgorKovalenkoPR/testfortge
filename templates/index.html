@@ -69,9 +69,9 @@
             </div>
             <div style="margin-top:8px;font-size:0.82em;color:#64748b;
                         display:flex;gap:10px;flex-wrap:wrap;">
-                <span>📋 {{ p.test_cases_count or 0 }} TC</span>
-                <span>✅ {{ p.checklist_count or 0 }} CL</span>
-                <span>🐞 {{ p.bug_count or 0 }} bugs</span>
+                <span>📋 {{ p.test_cases_count or 0 }} {{ t.dm_unit_tc }}</span>
+                <span>✅ {{ p.checklist_count or 0 }} {{ t.dm_unit_cl }}</span>
+                <span>🐞 {{ p.bug_count or 0 }} {{ plural(p.bug_count or 0, "dm_unit_bugs") }}</span>
             </div>
             {% if p.updated_at %}
             <div style="margin-top:4px;font-size:0.75em;color:#94a3b8;">
@@ -366,28 +366,28 @@
 
 {% if (not dash_v2 or 'metrics' in dash_widgets) and metrics.has_data %}
 <div class="card">
-    <h2><i data-lucide="bar-chart-3" class="icon icon-coral"></i> Test Metrics</h2>
-    <p class="subtitle">Select a metric to display</p>
+    <h2><i data-lucide="bar-chart-3" class="icon icon-coral"></i> {{ t.dm_title }}</h2>
+    <p class="subtitle">{{ t.dm_pick }}</p>
 
     <div class="metrics-selector" data-metrics-selector>
-        <button type="button" class="metric-btn active" data-metric="tc_count">Test Cases</button>
-        <button type="button" class="metric-btn" data-metric="cl_count">Checklist</button>
-        <button type="button" class="metric-btn" data-metric="exec_status">Execution Status</button>
-        <button type="button" class="metric-btn" data-metric="bug_severity">Bug Severity</button>
-        <button type="button" class="metric-btn" data-metric="bug_priority">Bug Priority</button>
-        <button type="button" class="metric-btn" data-metric="environments">Environments</button>
+        <button type="button" class="metric-btn active" data-metric="tc_count">{{ t.dm_tab_tc }}</button>
+        <button type="button" class="metric-btn" data-metric="cl_count">{{ t.dm_tab_cl }}</button>
+        <button type="button" class="metric-btn" data-metric="exec_status">{{ t.dm_tab_exec }}</button>
+        <button type="button" class="metric-btn" data-metric="bug_severity">{{ t.dm_tab_severity }}</button>
+        <button type="button" class="metric-btn" data-metric="bug_priority">{{ t.dm_tab_priority }}</button>
+        <button type="button" class="metric-btn" data-metric="environments">{{ t.dm_tab_env }}</button>
     </div>
 
     {# ── 1. Test Cases Count ── #}
     <div id="metric_tc_count" class="metric-panel active">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.tc_total }}</div>
-            <div class="metric-big-label">Test Cases Written</div>
+            <div class="metric-big-label">{{ t.dm_tc_written }}</div>
         </div>
         {% if metrics.tc_total > 0 %}
         <div class="chart-row">
             <div class="chart-block">
-                <h4>By Category</h4>
+                <h4>{{ t.dm_by_category }}</h4>
                 <div class="bar-chart">
                     {% for cat, cnt in metrics.tc_by_category.items() %}
                     <div class="bar-row">
@@ -402,7 +402,7 @@
                 </div>
             </div>
             <div class="chart-block">
-                <h4>By Priority</h4>
+                <h4>{{ t.dm_by_priority }}</h4>
                 <div class="bar-chart">
                     {% for pri, cnt in metrics.tc_by_priority.items() %}
                     <div class="bar-row">
@@ -418,7 +418,7 @@
             </div>
         </div>
         {% else %}
-        <p class="metric-empty">No test cases generated yet. <a href="{{ url_for('test_cases_page') }}">Generate Test Cases</a></p>
+        <p class="metric-empty">{{ t.dm_no_tc }} <a href="{{ url_for('test_cases_page') }}">{{ t.dm_go_tc }}</a></p>
         {% endif %}
     </div>
 
@@ -426,12 +426,12 @@
     <div id="metric_cl_count" class="metric-panel">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.cl_total }}</div>
-            <div class="metric-big-label">Checklist Items</div>
+            <div class="metric-big-label">{{ t.dm_cl_items }}</div>
         </div>
         {% if metrics.cl_total > 0 %}
         <div class="chart-row">
             <div class="chart-block">
-                <h4>By Category</h4>
+                <h4>{{ t.dm_by_category }}</h4>
                 <div class="bar-chart">
                     {% for cat, cnt in metrics.cl_by_category.items() %}
                     <div class="bar-row">
@@ -446,7 +446,7 @@
                 </div>
             </div>
             <div class="chart-block">
-                <h4>By Priority</h4>
+                <h4>{{ t.dm_by_priority }}</h4>
                 <div class="bar-chart">
                     {% for pri, cnt in metrics.cl_by_priority.items() %}
                     <div class="bar-row">
@@ -462,7 +462,7 @@
             </div>
         </div>
         {% else %}
-        <p class="metric-empty">No checklist items generated yet. <a href="{{ url_for('checklist_page') }}">Generate Checklist</a></p>
+        <p class="metric-empty">{{ t.dm_no_cl }} <a href="{{ url_for('checklist_page') }}">{{ t.dm_go_cl }}</a></p>
         {% endif %}
     </div>
 
@@ -470,7 +470,7 @@
     <div id="metric_exec_status" class="metric-panel">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.exec_total }}</div>
-            <div class="metric-big-label">Total Executed ({{ metrics.runs_count }} runs)</div>
+            <div class="metric-big-label">{{ plural(metrics.runs_count, 'dm_executed')|format(metrics.runs_count) }}</div>
         </div>
         {% if metrics.exec_total > 0 %}
         <div class="donut-row">
@@ -497,29 +497,29 @@
                             stroke-dashoffset="{{ -(p_dash + f_dash) }}"
                             transform="rotate(-90 60 60)"/>
                     <text x="60" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">{{ metrics.exec_pass_rate }}%</text>
-                    <text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">Pass Rate</text>
+                    <text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">{{ t.dm_pass_rate }}</text>
                 </svg>
             </div>
             <div class="donut-legend">
                 <div class="legend-item">
                     <span class="legend-dot" style="background:#22c55e"></span>
-                    <span class="legend-label">Passed</span>
+                    <span class="legend-label">{{ t.passed }}</span>
                     <span class="legend-value">{{ metrics.exec_passed }}</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-dot" style="background:#ef4444"></span>
-                    <span class="legend-label">Failed</span>
+                    <span class="legend-label">{{ t.failed }}</span>
                     <span class="legend-value">{{ metrics.exec_failed }}</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-dot" style="background:#f59e0b"></span>
-                    <span class="legend-label">Blocked</span>
+                    <span class="legend-label">{{ t.blocked }}</span>
                     <span class="legend-value">{{ metrics.exec_blocked }}</span>
                 </div>
             </div>
         </div>
         {% else %}
-        <p class="metric-empty">No test executions yet. <a href="{{ url_for('test_execution_page') }}">Run Test Execution</a></p>
+        <p class="metric-empty">{{ t.dm_no_exec }} <a href="{{ url_for('test_execution_page') }}">{{ t.dm_go_exec }}</a></p>
         {% endif %}
     </div>
 
@@ -534,34 +534,34 @@
             <div class="metric-big-number">
                 {% if automation %}{{ '%.0f'|format(automation.pass_rate or 0) }}%{% else %}—{% endif %}
             </div>
-            <div class="metric-big-label">Automation Pass Rate</div>
+            <div class="metric-big-label">{{ t.dm_auto_pass_rate }}</div>
         </div>
         {% if automation %}
         <div class="metric-legend">
             <div class="legend-item">
                 <span class="legend-dot" style="background:#22c55e"></span>
-                <span class="legend-label">Passed</span>
+                <span class="legend-label">{{ t.passed }}</span>
                 <span class="legend-value">{{ automation.passed }}</span>
             </div>
             <div class="legend-item">
                 <span class="legend-dot" style="background:#ef4444"></span>
-                <span class="legend-label">Failed</span>
+                <span class="legend-label">{{ t.failed }}</span>
                 <span class="legend-value">{{ (automation.failed or 0) + (automation.broken or 0) }}</span>
             </div>
             <div class="legend-item">
                 <span class="legend-dot" style="background:#94a3b8"></span>
-                <span class="legend-label">Skipped</span>
+                <span class="legend-label">{{ t.dm_skipped }}</span>
                 <span class="legend-value">{{ automation.skipped }}</span>
             </div>
         </div>
         <p class="metric-empty" style="margin-top:.5rem">
             {{ automation.origin }}{% if automation.label %} · {{ automation.label }}{% endif %}
             · {{ ((automation.duration_ms or 0) / 1000)|round(1) }}s ·
-            <a href="{{ url_for('automation_run_detail', run_id=automation.id) }}">Details</a>
+            <a href="{{ url_for('automation_run_detail', run_id=automation.id) }}">{{ t.dm_details }}</a>
         </p>
         {% else %}
-        <p class="metric-empty">No automation runs ingested.
-            <a href="{{ url_for('automation_page') }}">Generate the suite</a></p>
+        <p class="metric-empty">{{ t.dm_no_auto }}
+            <a href="{{ url_for('automation_page') }}">{{ t.dm_go_auto }}</a></p>
         {% endif %}
     </div>
 
@@ -569,7 +569,7 @@
     <div id="metric_bug_severity" class="metric-panel">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.bug_total }}</div>
-            <div class="metric-big-label">Bugs Found</div>
+            <div class="metric-big-label">{{ t.dm_bugs_found }}</div>
         </div>
         {% if metrics.bug_total > 0 %}
         <div class="bar-chart bar-chart-wide">
@@ -594,7 +594,7 @@
             {% endfor %}
         </div>
         {% else %}
-        <p class="metric-empty">No bugs reported yet.</p>
+        <p class="metric-empty">{{ t.dm_no_bugs }}</p>
         {% endif %}
     </div>
 
@@ -602,7 +602,7 @@
     <div id="metric_bug_priority" class="metric-panel">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.bug_total }}</div>
-            <div class="metric-big-label">Bugs by Priority</div>
+            <div class="metric-big-label">{{ t.dm_bugs_by_priority }}</div>
         </div>
         {% if metrics.bug_total > 0 %}
         <div class="bar-chart bar-chart-wide">
@@ -622,7 +622,7 @@
             {% endfor %}
         </div>
         {% else %}
-        <p class="metric-empty">No bugs reported yet.</p>
+        <p class="metric-empty">{{ t.dm_no_bugs }}</p>
         {% endif %}
     </div>
 
@@ -630,17 +630,17 @@
     <div id="metric_environments" class="metric-panel">
         <div class="metric-header">
             <div class="metric-big-number">{{ metrics.environments|length }}</div>
-            <div class="metric-big-label">Environments Covered</div>
+            <div class="metric-big-label">{{ t.dm_env_covered }}</div>
         </div>
         {% if metrics.environments %}
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Platform</th>
-                    <th>Browser</th>
-                    <th>Device</th>
-                    <th>Screen</th>
-                    <th>Runs</th>
+                    <th>{{ t.dm_col_platform }}</th>
+                    <th>{{ t.dm_col_browser }}</th>
+                    <th>{{ t.dm_col_device }}</th>
+                    <th>{{ t.dm_col_screen }}</th>
+                    <th>{{ t.dm_col_runs }}</th>
                 </tr>
             </thead>
             <tbody>
@@ -656,7 +656,7 @@
             </tbody>
         </table>
         {% else %}
-        <p class="metric-empty">No test environments covered yet. <a href="{{ url_for('test_execution_page') }}">Run Test Execution</a></p>
+        <p class="metric-empty">{{ t.dm_no_env }} <a href="{{ url_for('test_execution_page') }}">{{ t.dm_go_exec }}</a></p>
         {% endif %}
     </div>
 </div>
@@ -716,7 +716,7 @@
                     {% if p.folder != active_project_id %}
                     <form method="POST" action="{{ url_for('db_select_project', project_id=p.folder) }}" style="display:inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-xs btn-secondary" aria-label="Activate">
+                        <button type="submit" class="btn btn-xs btn-secondary" aria-label="{{ t.activate }}">
                             <i data-lucide="check" class="icon-sm"></i> {{ t.get('activate', 'Activate') }}
                         </button>
                     </form>
@@ -749,7 +749,7 @@
                     <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-xs btn-danger" aria-label="Delete"><i data-lucide="trash-2" class="icon-sm"></i></button>
+                        <button type="submit" class="btn btn-xs btn-danger" aria-label="{{ t.delete }}"><i data-lucide="trash-2" class="icon-sm"></i></button>
                     </form>
                     {% endif %}
                 </td>

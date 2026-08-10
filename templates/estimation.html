@@ -227,51 +227,43 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <strong>
             {% if _all_ok %}✓{% elif mockup_env.mockups_minimum %}⚠{% else %}✗{% endif %}
-            Mockup vision readiness:
+            {{ t.est_diag_title }}
           </strong>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
                        background:{{ '#10b981' if mockup_env.anthropic_key else '#ef4444' }};color:white;">
-            ANTHROPIC_API_KEY: {{ 'set' if mockup_env.anthropic_key else 'missing' }}
+            ANTHROPIC_API_KEY: {{ t.est_diag_set if mockup_env.anthropic_key else t.est_diag_missing }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
                        background:{{ '#10b981' if mockup_env.pdf2image_ok else '#94a3b8' }};color:white;">
-            pdf2image: {{ 'installed' if mockup_env.pdf2image_ok else 'absent' }}
+            pdf2image: {{ t.est_diag_installed if mockup_env.pdf2image_ok else t.est_diag_absent }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
                        background:{{ '#10b981' if mockup_env.poppler_ok else '#94a3b8' }};color:white;">
-            poppler: {{ 'installed' if mockup_env.poppler_ok else 'absent' }}
+            poppler: {{ t.est_diag_installed if mockup_env.poppler_ok else t.est_diag_absent }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
                        background:{{ '#10b981' if mockup_env.figma_pat else '#94a3b8' }};color:white;">
-            FIGMA_PAT: {{ 'set' if mockup_env.figma_pat else 'unset (cover-only)' }}
+            FIGMA_PAT: {{ t.est_diag_set if mockup_env.figma_pat else t.est_diag_cover_only }}
           </span>
           <a href="{{ url_for('estimation_diag') }}" target="_blank"
-             style="margin-left:auto;font-size:0.85em;">diag JSON ↗</a>
+             style="margin-left:auto;font-size:0.85em;">{{ t.est_diag_json }}</a>
         </div>
         {% if not mockup_env.anthropic_key %}
         <p style="margin:8px 0 0 0;font-size:0.88em;">
-          <strong>Vision analysis disabled.</strong> Set
-          <code>ANTHROPIC_API_KEY</code> in Render env vars
-          (Settings → Environment) before this tab can produce
-          estimates. PNG / PDF uploads will be saved but no feature
-          list will be extracted.
+          <strong>{{ t.est_diag_no_key_title }}</strong>
+          {{ t.est_diag_no_key_body|safe }}
         </p>
         {% elif not (mockup_env.pdf2image_ok and mockup_env.poppler_ok) %}
         <p style="margin:8px 0 0 0;font-size:0.88em;">
-          <strong>PDF rasterisation degraded.</strong> The container
-          is missing <code>pdf2image</code> and/or
-          <code>poppler-utils</code>; PDF uploads fall back to a
-          text-only render which loses visual signal. PNG / JPG
-          uploads still work fully.
+          <strong>{{ t.est_diag_pdf_title }}</strong>
+          {{ t.est_diag_pdf_body|safe }}
         </p>
         {% elif not mockup_env.figma_pat %}
         <p style="margin:8px 0 0 0;font-size:0.88em;">
-          <strong>Figma support is degraded.</strong> Without
-          <code>FIGMA_PAT</code>, only the file's cover image is
-          fetched — enough for high-level scope but not screen-by-
-          screen detail. Get a token at
+          <strong>{{ t.est_diag_figma_title }}</strong>
+          {{ t.est_diag_figma_body|safe }}
           <a href="https://www.figma.com/settings" target="_blank">figma.com/settings</a>
-          and add it to Render env vars.
+          {{ t.est_diag_figma_tail }}
         </p>
         {% endif %}
       </div>

@@ -90,6 +90,12 @@ def _second_run(**env_changes) -> dict[str, str]:
     env = dict(os.environ)
     env[CHILD_MARKER] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # The child must be a plain invocation. Inheriting PYTEST_ADDOPTS —
+    # which CI sets to "-n auto --dist loadfile" — makes it spawn its own
+    # workers, and then the paths it prints belong to a worker rather than
+    # to the run being compared. Found by turning xdist on in CI: both
+    # tests below went red while nothing about isolation had changed.
+    env.pop("PYTEST_ADDOPTS", None)
     for name, value in env_changes.items():
         if value is None:
             env.pop(name, None)
@@ -182,3 +188,55 @@ class TestTwoRunsDoNotShareAnything:
         assert checkout not in path.parents, (
             f"the suite is writing its database inside the checkout "
             f"({path}); that is the developer's own data directory")
+
+
+class TestTheParallelCIStaysSafe:
+    """M-1 made the suite parallel-safe for **SQLite**. CI also has one
+    Postgres service container, and that is not per-worker.
+
+    ``-n auto`` with the default ``--dist load`` hands out individual tests,
+    so two workers could run two Postgres migration tests against the same
+    throwaway database at once — the same collision M-1 removed, in the one
+    place the fix does not reach. ``--dist loadfile`` distributes a file at
+    a time, which keeps that whole file inside one worker.
+
+    So the pairing is a rule, not a preference, and the workflow is read
+    here rather than trusted.
+    """
+
+    @staticmethod
+    def _workflow() -> str:
+        return (pathlib.Path(__file__).resolve().parent.parent
+                / ".github" / "workflows" / "tests.yml").read_text(
+                    encoding="utf-8")
+
+    def test_parallel_execution_keeps_the_postgres_tests_together(self):
+        text = self._workflow()
+        if "-n auto" not in text and "-n " not in text:
+            pytest.skip("CI does not run the suite in parallel")
+        assert "--dist loadgroup" in text, (
+            "CI runs pytest in parallel without --dist loadgroup. Tests "
+            "would be spread per test, and three files write to one shared "
+            "Postgres service container — two workers in it reproduce the "
+            "false failures M-1 removed.")
+
+    def test_every_file_using_the_shared_postgres_carries_the_mark(self):
+        """Written after ``--dist loadfile`` was tried first: it keeps one
+        file together and says nothing about three of them. This is the
+        assertion that caught it, and it is the one that keeps catching a
+        fourth file."""
+        root = pathlib.Path(__file__).resolve().parent
+        unmarked = []
+        for path in sorted(root.glob("test_*.py")):
+            if path.name == pathlib.Path(__file__).name:
+                continue          # this file only names the variable
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "TFG_TEST_POSTGRES_URL" not in text:
+                continue
+            if 'xdist_group("postgres")' not in text:
+                unmarked.append(path.name)
+        assert not unmarked, (
+            f"{unmarked} use the shared Postgres database and are not in "
+            f"the 'postgres' xdist group, so CI can run them in parallel "
+            f"against one database. Add "
+            f'pytestmark = pytest.mark.xdist_group("postgres").')
