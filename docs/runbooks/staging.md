@@ -32,6 +32,29 @@ The Basic gate is off here **because** authentication is on. The interlock in
 `engine/basic_auth.py` refuses the other combination — gate off with auth off
 would be a fully public instance, and it keeps the gate up rather than obey.
 
+## 1a. Before the first Manual Sync — the one check worth making
+
+A Manual Sync reconciles **every** service against `render.yaml`, and
+**deletes environment variables the blueprint does not declare**. That is
+the failure mode E0.6 exists for: on 2026-07-30 `RECORDER_ENABLED=1` was
+live on the web service and absent from the file, and a sync would have
+switched the Web Recorder off in production with no error, no log and no
+failing test.
+
+So before clicking Sync, open **`testfortge` → Environment** and compare the
+key names there with the blueprint's. Anything in the dashboard that is not
+in `render.yaml` will be gone after the sync.
+
+What this sync will do, if the blueprint and the dashboard agree:
+
+* **create** `testfortge-staging` (free plan);
+* **add** three keys to `testfortge`: `BOOTSTRAP_ADMIN_EMAIL`,
+  `BOOTSTRAP_ADMIN_PASSWORD` (both dashboard-managed, so empty until you
+  fill them) and `BOOTSTRAP_ORG_NAME`;
+* **change nothing else** — no existing value is rewritten, because
+  `sync: false` keys are left to the dashboard and every other key already
+  carries the value it has now.
+
 ## 2. Creating it
 
 The service is declared in `render.yaml`, so:

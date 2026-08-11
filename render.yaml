@@ -636,3 +636,58 @@ services:
         value: INFO
       - key: TESTFORTGE_SNAPSHOT_WORKER
         value: "0"
+      # ── Parity with production, and one of these is load-bearing ──
+      #
+      # Found by diffing the two services: staging declared 24 of the 54
+      # keys production does. Most of the absences fall back to the same
+      # code default, but not this first one — Render serves HTTPS, and
+      # without it the session cookie on a service with real logins is not
+      # marked Secure and CSRF loses its SSL strictness. On the one service
+      # whose purpose is exercising authentication, that is the wrong
+      # default to inherit silently.
+      - key: BEHIND_HTTPS
+        value: "1"
+      - key: LOG_FORMAT
+        value: json
+      # Same 512 MB ceiling, same measurement (E5.2). Declared rather than
+      # left to the cgroup-derived default for the same reason as prod: the
+      # number is load-bearing on this plan.
+      - key: MEMORY_BUDGET_MB
+        value: "380"
+      - key: SESSION_BACKEND
+        value: filesystem
+      - key: SESSION_IDLE_MINUTES
+        value: "240"
+      - key: SESSION_ABSOLUTE_HOURS
+        value: "24"
+      # Behaviour gates. A gate absent from the blueprint is a gate whose
+      # staging behaviour is whatever the code happens to default to —
+      # which is the one thing staging exists to stop being a surprise.
+      - key: TC_AUTHOR_ENABLED
+        value: "1"
+      - key: CL_AUTHOR_ENABLED
+        value: "1"
+      - key: BROWSER_CONTROL_ENABLED
+        value: "0"
+      - key: LEGACY_EXECUTOR
+        value: "0"
+      - key: SSRF_ALLOWLIST_BYPASS
+        value: "0"
+      # Capacity numbers, so the Settings page shows the same arithmetic
+      # here as there.
+      - key: LLM_ORG_BUDGET_USD
+        value: "5"
+      - key: MAIL_DAILY_LIMIT
+        value: "100"
+      - key: ORG_QUOTA_ROWS
+        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false
+      # Ops endpoints fail closed without a token, which is the right
+      # default — but then the endpoint cannot be exercised on the one
+      # instance meant for exercising things. Generated per service, so a
+      # staging token can never authenticate against production.
+      - key: BACKUP_TOKEN
+        generateValue: true
+      - key: OPS_ENDPOINTS_TOKEN
+        generateValue: true

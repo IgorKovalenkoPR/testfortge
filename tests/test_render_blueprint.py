@@ -701,19 +701,65 @@ class TestStagingIsActuallyStaging:
         assert "KEEPALIVE_URL" not in env, (
             "a keep-alive on staging spends production's free hours")
 
-    def test_it_declares_every_flag_production_declares(
+    #: Keys production declares and staging deliberately does not, each
+    #: with the reason. Everything else must be declared on both.
+    #:
+    #: The first version of this test compared only ``engine.features``
+    #: flags, and passed while staging was missing ``BEHIND_HTTPS`` — on
+    #: HTTPS, with real logins, that means a session cookie not marked
+    #: Secure. Found by diffing the two services (24 keys against 54)
+    #: rather than by reading either, which is why the rule is now about
+    #: **every** key and the exceptions have to be named.
+    DELIBERATE_DIVERGENCES = {
+        "DATABASE_URL": "staging must not touch production's database",
+        "STORAGE_S3_ENDPOINT": "nor its bucket — E8.5 deletes by prefix",
+        "STORAGE_S3_BUCKET": "as above",
+        "STORAGE_S3_ACCESS_KEY": "as above",
+        "STORAGE_S3_SECRET_KEY": "as above",
+        "STORAGE_S3_REGION": "as above",
+        "STORAGE_S3_SECURE": "as above",
+        "TESTFORTGE_BASIC_USER": "no shared password in front of staging",
+        "TESTFORTGE_BASIC_PASSWORD": "as above",
+        "TESTFORTGE_BASIC_PUBLIC_PATHS": "as above — no gate, no exceptions",
+        "GOOGLE_CLIENT_ID": "the OAuth client's redirect URI is per host, so "
+                            "production's cannot be reused; Google sign-in "
+                            "is off on staging until it gets its own",
+        "GOOGLE_CLIENT_SECRET": "as above",
+        "FIGMA_PAT": "a personal token; nothing on staging needs it",
+    }
+
+    def test_it_declares_everything_production_declares(
             self, staging_service, web_service):
-        """Not the same *values* — the same *set*. A flag missing here is
-        a flag whose staging behaviour is whatever the code defaults to,
-        which is the one thing staging exists to stop being a surprise."""
-        from engine import features
+        """Not the same *values* — the same *set*, minus named exceptions.
+
+        A key missing here is a key whose staging behaviour is whatever the
+        code happens to default to, which is the one thing staging exists
+        to stop being a surprise.
+        """
         prod = set(_env_map(web_service))
         staging = set(_env_map(staging_service))
-        flags = {name for name in prod if name in set(features.FLAGS)}
-        missing = sorted(flags - staging)
+        missing = sorted(prod - staging - set(self.DELIBERATE_DIVERGENCES))
         assert not missing, (
             f"staging does not declare {missing}. Production does, so their "
-            f"behaviour differs by omission rather than by decision")
+            f"behaviour differs by omission rather than by decision. Declare "
+            f"them, or add each to DELIBERATE_DIVERGENCES with the reason.")
+
+    def test_the_divergence_list_has_no_stale_entries(self):
+        """An exception that no longer diverges is a claim about the two
+        services that is not true any more."""
+        blueprint_text = RENDER_YAML.read_text(encoding="utf-8")
+        staging_block = blueprint_text.split("testfortge-staging", 1)[1]
+        stale = sorted(name for name in self.DELIBERATE_DIVERGENCES
+                       if f"- key: {name}" in staging_block)
+        assert not stale, (
+            f"{stale} are listed as deliberate divergences and staging "
+            f"declares them after all")
+
+    def test_it_is_served_over_https_like_production(self, staging_service):
+        """The absence that mattered, pinned by name as well as by the rule
+        above: without it the session cookie on a service with real logins
+        is not Secure, and CSRF loses its SSL strictness."""
+        assert _env_map(staging_service).get("BEHIND_HTTPS") == "1"
 
     def test_the_browser_pass_is_off_here_too(self, staging_service):
         """Same 512 MB, same measurement (E5.2: ~390 MB of Chromium over
