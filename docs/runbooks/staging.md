@@ -7,6 +7,8 @@ criteria name a deployed staging; this is it.
 
 **What it costs:** $0. Free plan, no extra database, no keep-alive.
 
+**Status:** live since 2026-08-11 at `testfortge-staging.onrender.com`, running commit `8656eb5`. The first-admin path was walked by hand on the day it was created: the two `BOOTSTRAP_ADMIN_*` variables were filled, and the account signs in with the `admin` role. Externally verified from outside the dashboard: `/` redirects to the login page (so authentication is on and the Basic gate is off), the session cookie carries `Secure`, HSTS and CSP are present, and the Google button is absent as declared.
+
 ---
 
 ## 1. It runs the mode the product ships in — production does not
