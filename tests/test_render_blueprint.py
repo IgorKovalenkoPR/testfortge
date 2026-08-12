@@ -838,3 +838,126 @@ class TestStagingIsActuallyStaging:
         something a copy-paste does: this is the $0 tier, and the business
         plan prices the alternative at $7."""
         assert staging_service.get("plan") == "free"
+
+
+# ── Build minutes (free plan, 500/month) ─────────────────────────────
+
+
+class TestNotEveryPushDeservesThreeBuilds:
+    """The nearest free-tier ceiling, and it was on no pricing page.
+
+    The free plan allows **500 build minutes a month**. This blueprint
+    declares three web services from one Dockerfile, none of which had a
+    build filter, so **one push to main cost three Docker builds**.
+    Measured on 2026-08-12: three pushes, nine builds — and six of them
+    rebuilt the image for commits that touched only ``docs/``. At four
+    minutes a build the ceiling lands on the 41st push of the month.
+
+    The dangerous half of the fix is the filter itself. An ignore list that
+    grows to cover something the running app depends on does not fail: the
+    build is simply skipped, the old image keeps serving, and the change is
+    "deployed" in git and absent in production. Nothing errors, no log
+    line, no failing test — which is why there is one here.
+    """
+
+    #: Real files whose change must always produce a build. Each is checked
+    #: to exist, so this list cannot rot into a set of phantoms that match
+    #: nothing and pass.
+    LOAD_BEARING = (
+        "app.py",
+        "Dockerfile",
+        "requirements.txt",
+        "render.yaml",
+        "engine/db.py",
+        "engine/features.py",
+        "engine/capacity.py",
+        "engine/i18n/ua.py",
+        "routes/settings.py",
+        "routes/execution.py",
+        "templates/base.html",
+        "templates/org_settings.html",
+        "templates/guide/_sections_ua.html",
+        "static/css/style.css",
+        "scripts/verify_storage.py",
+        "mcp_server/server.py",
+        "mcp_server/requirements.txt",
+        "tests/test_render_blueprint.py",
+    )
+
+    @staticmethod
+    def _matches(pattern: str, path: str) -> bool:
+        """Deliberately **more** permissive than any real glob.
+
+        Both ``**`` and ``*`` become ``.*``, so a single star is allowed to
+        cross directory separators. Render's exact semantics are not the
+        point: a pattern that could plausibly swallow a load-bearing file
+        under any reading is one this repo should not carry, and a guard
+        that depends on a vendor's glob dialect is a guard with a footnote.
+        """
+        regex = re.escape(pattern).replace(r"\*\*", ".*").replace(r"\*", ".*")
+        return re.fullmatch(regex, path) is not None
+
+    def _filters(self, blueprint) -> dict[str, list[str]]:
+        return {svc["name"]: (svc.get("buildFilter") or {}).get("ignoredPaths")
+                for svc in blueprint["services"] if svc.get("type") == "web"}
+
+    def test_every_web_service_has_one(self, blueprint):
+        missing = sorted(name for name, paths in self._filters(blueprint).items()
+                         if not paths)
+        assert not missing, (
+            f"{missing} rebuild for every commit, including documentation. "
+            f"Three services × 500 build minutes is the ceiling this filter "
+            f"exists to move.")
+
+    def test_the_three_services_agree(self, blueprint):
+        """Divergence here is not a safety problem, it is a comprehension
+        one: two services skipping a commit while a third rebuilds is a
+        state nobody can reason about from the dashboard."""
+        distinct = {tuple(paths) for paths in self._filters(blueprint).values()}
+        assert len(distinct) == 1, (
+            f"the services ignore different paths: {distinct}")
+
+    def test_the_load_bearing_files_are_real(self):
+        """A guard whose subjects do not exist reports success for a list it
+        never checked."""
+        absent = [name for name in self.LOAD_BEARING
+                  if not (REPO_ROOT / name).is_file()]
+        assert not absent, f"this test is guarding files that are gone: {absent}"
+
+    @pytest.mark.parametrize("path", LOAD_BEARING)
+    def test_no_filter_can_swallow_something_the_app_runs_on(
+            self, blueprint, path):
+        for name, patterns in self._filters(blueprint).items():
+            for pattern in patterns or ():
+                assert not self._matches(pattern, path), (
+                    f"{name} ignores {pattern!r}, which covers {path}. A "
+                    f"change there would be skipped: git would say deployed, "
+                    f"production would keep the old image, and nothing would "
+                    f"report it.")
+
+    def test_the_matcher_would_catch_the_mistake(self):
+        """The pattern most likely to be added in a hurry, and the one that
+        would hurt most."""
+        assert self._matches("templates/**", "templates/base.html")
+        assert self._matches("**/*.py", "engine/db.py")
+        assert self._matches("*", "app.py")
+        assert not self._matches("docs/**", "engine/db.py")
+
+    def test_nobody_added_a_positive_path_list(self, blueprint):
+        """``paths:`` inverts the default. Then every new directory is
+        excluded until somebody remembers to add it — the same failure as
+        above, arriving by omission instead of by a pattern."""
+        offenders = [svc["name"] for svc in blueprint["services"]
+                     if (svc.get("buildFilter") or {}).get("paths")]
+        assert not offenders, (
+            f"{offenders} declare buildFilter.paths. Keep the default at "
+            f"'build' and list exceptions, so a forgotten directory fails "
+            f"loudly rather than silently not deploying.")
+
+    def test_documentation_is_actually_ignored(self, blueprint):
+        """The measured win, asserted rather than assumed: six of nine
+        builds on 2026-08-12 were docs-only."""
+        for name, patterns in self._filters(blueprint).items():
+            assert any(self._matches(p, "docs/plans/free_tier_mvp.md")
+                       for p in patterns or ()), (
+                f"{name} still rebuilds for a documentation change")

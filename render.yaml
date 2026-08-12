@@ -31,6 +31,39 @@ services:
     plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
+    # ── What is not worth a Docker build ──
+    #
+    # The free plan allows 500 build minutes a month and this blueprint
+    # declares three services from one Dockerfile, so a single push to main
+    # costs three builds. Measured on 2026-08-12: three pushes, nine
+    # builds, and six of them rebuilt the image for commits that touched
+    # only docs/. At four minutes a build that ceiling lands on the 41st
+    # push of the month — see docs/plans/free_tier_mvp.md §3.1.
+    #
+    # Only ignoredPaths, no paths: a positive list would have to enumerate
+    # everything that matters and would silently stop deploying whatever it
+    # forgot. This way the default is "build", and each exception is here
+    # with a reason.
+    #
+    # Deliberately NOT ignored:
+    #   scripts/** — verify_storage.py and friends are run inside the
+    #                container, so they have to be in the image;
+    #   tests/**   — nothing in production runs them, but somebody
+    #                verifying a deploy from the Render shell would then be
+    #                running a stale suite and could not tell;
+    #   render.yaml — a blueprint change is exactly when to redeploy.
+    #
+    # tests/test_render_blueprint.py fails the build if this list ever
+    # grows to cover something the running app depends on.
+    buildFilter:
+      ignoredPaths:
+        - docs/**
+        - "*.md"
+        - .github/**
+        # Built and served by Cloudflare Pages from this repo, not by
+        # Flask — no route sends it, so a marketing change cannot alter
+        # what any of these three services do.
+        - marketing/**
     # The Dockerfile CMD binds to a hardcoded :5000; Render injects $PORT
     # at runtime, so we override the CMD here to honour it.
     # Free-tier specifics (0.1 CPU, 512 MB RAM):
@@ -449,6 +482,39 @@ services:
     plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
+    # ── What is not worth a Docker build ──
+    #
+    # The free plan allows 500 build minutes a month and this blueprint
+    # declares three services from one Dockerfile, so a single push to main
+    # costs three builds. Measured on 2026-08-12: three pushes, nine
+    # builds, and six of them rebuilt the image for commits that touched
+    # only docs/. At four minutes a build that ceiling lands on the 41st
+    # push of the month — see docs/plans/free_tier_mvp.md §3.1.
+    #
+    # Only ignoredPaths, no paths: a positive list would have to enumerate
+    # everything that matters and would silently stop deploying whatever it
+    # forgot. This way the default is "build", and each exception is here
+    # with a reason.
+    #
+    # Deliberately NOT ignored:
+    #   scripts/** — verify_storage.py and friends are run inside the
+    #                container, so they have to be in the image;
+    #   tests/**   — nothing in production runs them, but somebody
+    #                verifying a deploy from the Render shell would then be
+    #                running a stale suite and could not tell;
+    #   render.yaml — a blueprint change is exactly when to redeploy.
+    #
+    # tests/test_render_blueprint.py fails the build if this list ever
+    # grows to cover something the running app depends on.
+    buildFilter:
+      ignoredPaths:
+        - docs/**
+        - "*.md"
+        - .github/**
+        # Built and served by Cloudflare Pages from this repo, not by
+        # Flask — no route sends it, so a marketing change cannot alter
+        # what any of these three services do.
+        - marketing/**
     # uvicorn binds to $PORT (Render injects it). The HTTP entrypoint
     # refuses to boot without MCP_BEARER_TOKEN set, so no
     # accidentally-public deploys.
@@ -539,6 +605,39 @@ services:
     plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
+    # ── What is not worth a Docker build ──
+    #
+    # The free plan allows 500 build minutes a month and this blueprint
+    # declares three services from one Dockerfile, so a single push to main
+    # costs three builds. Measured on 2026-08-12: three pushes, nine
+    # builds, and six of them rebuilt the image for commits that touched
+    # only docs/. At four minutes a build that ceiling lands on the 41st
+    # push of the month — see docs/plans/free_tier_mvp.md §3.1.
+    #
+    # Only ignoredPaths, no paths: a positive list would have to enumerate
+    # everything that matters and would silently stop deploying whatever it
+    # forgot. This way the default is "build", and each exception is here
+    # with a reason.
+    #
+    # Deliberately NOT ignored:
+    #   scripts/** — verify_storage.py and friends are run inside the
+    #                container, so they have to be in the image;
+    #   tests/**   — nothing in production runs them, but somebody
+    #                verifying a deploy from the Render shell would then be
+    #                running a stale suite and could not tell;
+    #   render.yaml — a blueprint change is exactly when to redeploy.
+    #
+    # tests/test_render_blueprint.py fails the build if this list ever
+    # grows to cover something the running app depends on.
+    buildFilter:
+      ignoredPaths:
+        - docs/**
+        - "*.md"
+        - .github/**
+        # Built and served by Cloudflare Pages from this repo, not by
+        # Flask — no route sends it, so a marketing change cannot alter
+        # what any of these three services do.
+        - marketing/**
     # Same command as prod, with one difference: --timeout 1800 instead of
     # 7200. A staging run that hangs should end in half an hour rather
     # than hold a worker for two — nobody is waiting on its output.
