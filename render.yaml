@@ -551,13 +551,31 @@ services:
       app:app
     healthCheckPath: /healthz
     envVars:
-      # ── The database: SQLite, on purpose, and loudly ──
+      # ── The database: staging's own Postgres, managed in the dashboard ──
       #
-      # No DATABASE_URL: the app falls back to STORAGE_FOLDER/testfortge.db.
-      # The production guard in engine/db.py refuses SQLite outside debug
-      # mode, and this is the escape hatch it documents — set here rather
-      # than by turning FLASK_DEBUG on, because a debug Flask on a public
-      # URL is a different and much worse decision.
+      # `sync: false`, never `fromDatabase`. The connection string carries a
+      # password, so it does not belong in git — and the *linked* form is the
+      # one thing this service must never have: pointing it at
+      # `testfortge-db` would share production's database, and E8.5's
+      # "delete this project's data" would then delete production's rows
+      # from a staging test. `tests/test_render_blueprint.py` fails the
+      # build if this key ever becomes a link.
+      #
+      # Why a second database at all: the free plan has no persistent disk,
+      # so SQLite here was wiped on every redeploy. That was fine while
+      # staging existed to re-prove the first-run path, and stopped being
+      # fine the moment somebody wanted to create a project on Monday and
+      # still have it on Tuesday.
+      - key: DATABASE_URL
+        sync: false
+      # The fallback while the value above is empty — a fresh blueprint sync
+      # creates the key without a value, and this keeps the service booting
+      # on SQLite instead of raising the production guard in engine/db.py at
+      # start-up.
+      #
+      # It is also the reason the Capacity card on Settings names the engine:
+      # an empty DATABASE_URL fails *quietly* into SQLite, and "the variable
+      # is declared" is not the same claim as "Postgres is in force".
       - key: TESTFORTGE_ALLOW_SQLITE_PROD
         value: "1"
       - key: FLASK_DEBUG
@@ -591,11 +609,13 @@ services:
         value: "0"
       # ── The first administrator ──
       #
-      # Required here, not optional: the database resets on every deploy,
-      # so without these two nobody can sign in to the instance whose
-      # whole purpose is being signed into. engine/bootstrap.py acts only
-      # while the database has no users, which after a reset is always
-      # true and after the first request never is.
+      # Required here, not optional. A brand-new database has no users, and
+      # an empty database cannot issue itself an invitation — so without
+      # these two nobody can sign in to the instance whose whole purpose is
+      # being signed into. engine/bootstrap.py acts only while the database
+      # has no users, so they stay set harmlessly afterwards: it no-ops from
+      # the first user onward, and mints an admin again if the database is
+      # ever emptied on purpose.
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
       - key: BOOTSTRAP_ADMIN_PASSWORD

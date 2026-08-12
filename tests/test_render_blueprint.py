@@ -655,28 +655,90 @@ class TestStagingIsActuallyStaging:
             "interlock would override it, and a blueprint that asks for it "
             "is still a blueprint nobody should copy")
 
-    def test_it_can_be_signed_into_after_a_reset(self, staging_service):
-        """Its database is ephemeral, so it is empty after every deploy —
-        and an empty database cannot issue itself an invitation. Without
-        the bootstrap variables this service is unreachable by design."""
+    def test_it_can_be_signed_into_when_its_database_is_empty(
+            self, staging_service):
+        """A new database has no users, and an empty database cannot issue
+        itself an invitation. Without the bootstrap variables this service
+        is unreachable by design.
+
+        The reason was stronger when staging ran on an ephemeral SQLite file
+        and *every deploy* produced an empty database. It still holds: the
+        database is empty once — on the day it is created — and that is the
+        one day nobody can invite anybody.
+        """
         env = _env_map(staging_service)
         for key in ("BOOTSTRAP_ADMIN_EMAIL", "BOOTSTRAP_ADMIN_PASSWORD"):
             assert env.get(key) == "__dashboard__", (
-                f"{key} must be declared with sync: false — staging resets "
-                f"on every deploy, so without it nobody can sign in to the "
+                f"{key} must be declared with sync: false — a fresh database "
+                f"has no users, so without it nobody can sign in to the "
                 f"instance whose purpose is being signed into")
 
     def test_it_does_not_touch_the_production_database(self, staging_service):
         """The one property with no acceptable exception. E8.5 deletes a
         project's rows and blobs; a deletion test on staging pointed at
-        prod's database would delete prod's data."""
+        prod's database would delete prod's data.
+
+        Staging now has a database of its own, so the rule can no longer be
+        "declares no DATABASE_URL" — the earlier and cruder form. What
+        matters is the *shape* of the declaration: dashboard-managed is a
+        string somebody pasted, `fromDatabase` is a link to the database
+        this service must never see.
+        """
         env = _env_map(staging_service)
-        assert "DATABASE_URL" not in env, (
-            "staging declares DATABASE_URL — if it is wired to "
-            "testfortge-db it shares production's database")
+        assert env.get("DATABASE_URL") == "__dashboard__", (
+            f"staging's DATABASE_URL is {env.get('DATABASE_URL')!r}. It must "
+            f"be declared `sync: false` — a linked value ('__linked__') is "
+            f"production's database, and a literal value would put a "
+            f"password in git")
+
+    def test_its_database_is_not_the_one_production_uses(self):
+        """Read from the text rather than the parsed map, because the parse
+        flattens every link to the same marker: this has to fail on the
+        *name* `testfortge-db` appearing anywhere in staging's block, not
+        merely on the key being linked."""
+        blueprint_text = RENDER_YAML.read_text(encoding="utf-8")
+        staging_block = blueprint_text.split("name: testfortge-staging", 1)[1]
+        offenders = [line.strip() for line in staging_block.splitlines()
+                     if "testfortge-db" in line and not line.strip().startswith("#")]
+        assert not offenders, (
+            f"staging references production's database: {offenders}. E8.5 "
+            f"deletes a project's rows, and a deletion test would delete "
+            f"production's.")
+
+    def test_it_can_still_boot_before_the_url_is_pasted(self, staging_service):
+        """A blueprint sync creates a `sync: false` key with no value, and an
+        empty DATABASE_URL falls back to SQLite. Without the escape hatch the
+        guard in engine/db.py raises at boot and the service never starts —
+        so the first deploy after this change would fail, on a Sunday, for a
+        reason nobody would connect to a database that had not been pasted
+        in yet."""
+        env = _env_map(staging_service)
         assert env.get("TESTFORTGE_ALLOW_SQLITE_PROD") == "1", (
-            "without the escape hatch the SQLite guard in engine/db.py "
-            "raises at boot, and the service never starts")
+            "without the escape hatch an unset DATABASE_URL takes the "
+            "service down instead of degrading to SQLite")
+
+    def test_an_empty_url_falls_back_instead_of_connecting_to_nothing(
+            self, monkeypatch):
+        """The other half of the sentence above, and the half that is a claim
+        about the code rather than about the file.
+
+        The blueprint now declares a key whose value arrives later, by hand.
+        Everything above assumes the app treats *present but empty* the same
+        as absent — and `database_url()` does, because it coerces with
+        ``or ""`` and strips. If it ever read ``"DATABASE_URL" in os.environ``
+        instead, a sync would point staging at the empty string and the
+        service would die on a connection to nowhere. Asserted against the
+        real function, not a copy of the rule.
+        """
+        from engine.db import database_url
+        for value in ("", "   "):
+            monkeypatch.setenv("DATABASE_URL", value)
+            monkeypatch.delenv("TESTFORTGE_DB", raising=False)
+            url = database_url()
+            assert url.startswith("sqlite:"), (
+                f"DATABASE_URL={value!r} resolved to {url!r}. An empty "
+                f"dashboard value has to read as absent — a blueprint sync "
+                f"creates the key that way.")
 
     def test_it_does_not_touch_the_production_bucket(self, staging_service):
         env = _env_map(staging_service)
@@ -711,7 +773,11 @@ class TestStagingIsActuallyStaging:
     #: rather than by reading either, which is why the rule is now about
     #: **every** key and the exceptions have to be named.
     DELIBERATE_DIVERGENCES = {
-        "DATABASE_URL": "staging must not touch production's database",
+        # DATABASE_URL is no longer here: staging declares it too, as a
+        # dashboard-managed string rather than a link to production's
+        # database. The invariant moved from "staging has no database" to
+        # "staging's database is its own" — see
+        # test_its_database_is_not_the_one_production_uses.
         "STORAGE_S3_ENDPOINT": "nor its bucket — E8.5 deletes by prefix",
         "STORAGE_S3_BUCKET": "as above",
         "STORAGE_S3_ACCESS_KEY": "as above",

@@ -466,3 +466,88 @@ class TestTheKeepaliveWorkflow:
         text = self._workflow()
         assert "::error::" in text
         assert "exit 1" in text
+
+
+# ── Which database is in force ────────────────────────────────────────
+
+class TestTheCardNamesTheDatabaseEngine:
+    """`engine.capacity` has computed the engine name from the first
+    version of this module and no screen has ever shown it.
+
+    It started mattering when staging got a `DATABASE_URL` managed in the
+    Render dashboard rather than linked to a database service. A
+    `sync: false` key exists with **no value** until somebody pastes one,
+    an empty value is falsy, and the app falls back to SQLite — quietly,
+    successfully, and on a disk that a redeploy replaces. So "the
+    blueprint declares DATABASE_URL" and "this instance is on Postgres"
+    became two different claims, and nothing on any page could separate
+    them. That is the shape of defect this repo has hit before: a
+    declaration standing in for a fact.
+    """
+
+    @pytest.fixture
+    def viewer(self, monkeypatch):
+        monkeypatch.setenv("AUTH_ENABLED", "1")
+        monkeypatch.setenv("ORG_MODE", "1")
+        monkeypatch.setitem(flask_app.config, "TESTING", True)
+        monkeypatch.setitem(flask_app.config, "WTF_CSRF_ENABLED", False)
+
+        def _open(usage: _capacity.DatabaseUsage, lang: str = "en"):
+            monkeypatch.setattr(_capacity, "database_usage", lambda: usage)
+            org = _org_with()
+            uid = _db.create_user(f"eng-{secrets.token_hex(5)}@x.test",
+                                  email_verified=True)
+            _db.add_org_member(org, uid, "admin")
+            client = flask_app.test_client()
+            with client.session_transaction() as sess:
+                sess[_perm.SESSION_USER_KEY] = uid
+                sess[_perm.SESSION_ORG_KEY] = org
+            return client.get(f"/org/settings?lang={lang}").get_data(as_text=True)
+
+        return _open
+
+    def test_it_says_postgres_when_postgres_is_in_force(self, viewer):
+        body = viewer(_capacity.DatabaseUsage(bytes_used=5_000_000,
+                                              engine="postgresql"))
+        assert "Database engine: postgresql" in body
+
+    def test_it_says_sqlite_when_the_url_never_arrived(self, viewer):
+        body = viewer(_capacity.DatabaseUsage(bytes_used=400_000,
+                                              engine="sqlite"))
+        assert "Database engine: sqlite" in body
+
+    def test_sqlite_carries_the_consequence_and_postgres_does_not(self, viewer):
+        """Naming the engine is only half the answer: a reader who does not
+        already know that this plan has no persistent disk learns nothing
+        from the word "sqlite"."""
+        sqlite = viewer(_capacity.DatabaseUsage(bytes_used=400_000,
+                                                engine="sqlite"))
+        assert "redeploy replaces it" in sqlite
+        assert "DATABASE_URL" in sqlite
+
+        postgres = viewer(_capacity.DatabaseUsage(bytes_used=400_000,
+                                                  engine="postgresql"))
+        assert "redeploy replaces it" not in postgres, (
+            "the ephemeral-disk warning is about SQLite; on Postgres it is "
+            "false and would send an admin looking for a problem that is "
+            "not there")
+
+    def test_it_survives_the_case_it_was_written_for(self, viewer):
+        """The size is the thing most likely to be unreadable — and that is
+        exactly when an admin wants to know which database they are on. The
+        first draft put this line inside the `bytes_used` branch, where it
+        would have been hidden in that very case."""
+        body = viewer(_capacity.DatabaseUsage(bytes_used=None,
+                                              engine="postgresql"))
+        assert "Database engine: postgresql" in body
+
+    def test_it_says_nothing_when_the_engine_is_unknown(self, viewer):
+        """Better a missing line than "Database engine: ." """
+        body = viewer(_capacity.DatabaseUsage(bytes_used=None, engine=""))
+        assert "Database engine" not in body
+
+    def test_the_ukrainian_page_says_it_too(self, viewer):
+        body = viewer(_capacity.DatabaseUsage(bytes_used=400_000,
+                                              engine="sqlite"), lang="ua")
+        assert "Рушій бази: sqlite" in body
+        assert "редеплой замінює його" in body

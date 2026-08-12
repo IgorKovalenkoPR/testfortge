@@ -261,6 +261,21 @@
 <div class="card">
   <h2>{{ t.os_capacity_heading }}</h2>
 
+  {# ── Which database is actually in force ──
+     Computed by engine/capacity.py all along and never shown. It started
+     mattering the day staging got a DATABASE_URL managed in the dashboard:
+     an **empty** value falls back to SQLite silently, so "the variable is
+     declared" and "Postgres is in force" became two different claims with
+     nothing on any screen to tell them apart. Rendered outside the
+     `bytes_used` branch on purpose — the size is the thing most likely to
+     be unreadable, and that is exactly when you want to know the engine. #}
+  {% if capacity_db.engine %}
+  <p class="text-muted settings-note">
+    {{ t.os_capacity_engine|format(capacity_db.engine) }}
+    {%- if capacity_db.engine == 'sqlite' %} {{ t.os_capacity_engine_ephemeral }}{% endif %}
+  </p>
+  {% endif %}
+
   {# ── The database, instance-wide ── #}
   {% if capacity_db.bytes_used %}
   {# Its own class as well as the shared one: the page now has two meters,

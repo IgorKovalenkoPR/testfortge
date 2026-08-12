@@ -764,6 +764,13 @@ TRANSLATIONS = {
                       'work whose output can be checked automatically.',
 
     'os_capacity_heading': 'Capacity',
+    # Named because an empty DATABASE_URL degrades to SQLite quietly, and
+    # a declared variable is not the same claim as a database in force.
+    'os_capacity_engine': 'Database engine: %s.',
+    'os_capacity_engine_ephemeral': "SQLite here lives on the instance's "
+                                   'own disk, so a redeploy replaces it '
+                                   'with an empty one. Set DATABASE_URL '
+                                   'to keep data between deploys.',
     'os_capacity_meter': '%s of %s used on this server',
     'os_capacity_pill': 'getting full',
     'os_capacity_unreadable': 'The database size could not be read just now.',
