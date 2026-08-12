@@ -38,12 +38,19 @@ would be a fully public instance, and it keeps the gate up rather than obey.
 
 ## 1a. Before the first Manual Sync — the one check worth making
 
-A Manual Sync reconciles **every** service against `render.yaml`, and
-**deletes environment variables the blueprint does not declare**. That is
-the failure mode E0.6 exists for: on 2026-07-30 `RECORDER_ENABLED=1` was
-live on the web service and absent from the file, and a sync would have
-switched the Web Recorder off in production with no error, no log and no
-failing test.
+A sync reconciles **every** service against `render.yaml`, and **deletes
+environment variables the blueprint does not declare**. That is the failure
+mode E0.6 exists for: on 2026-07-30 `RECORDER_ENABLED=1` was live on the web
+service and absent from the file, and a sync would have switched the Web
+Recorder off in production with no error, no log and no failing test.
+
+**And this blueprint auto-syncs.** Measured 2026-08-12: the sync history
+shows the reconciliation attached to commit `1e28aac`, and a Manual Sync run
+afterwards answered "Resources already up to date". So the deletion hazard
+does not wait for anybody to click Sync — **a push to `main` is a sync**, and
+the check below is something to do *before pushing* rather than before
+clicking. Verified the same day across all three services: no live variable
+is missing from the blueprint.
 
 So before clicking Sync, open **`testfortge` → Environment** and compare the
 key names there with the blueprint's. Anything in the dashboard that is not
