@@ -1708,6 +1708,12 @@ TRANSLATIONS = {
                         "типовим порядком роботи, ключовими елементами "
                         "керування та типовими помилками.",
     "guide_close": "Закрити",
+    # Це не модуль, а маршрут по модулях — і саме тому картка перша:
+    # команді без Jira й TestRail спершу потрібен порядок дій, а вже
+    # потім окремий екран.
+    "guide_card_workflow_title": "З чого почати",
+    "guide_card_workflow_sub": "Цілий проєкт на одному інстансі · без "
+                               "Jira, TestRail і таблиць",
     "guide_card_dashboard_title": "Головна",
     "guide_card_dashboard_sub": "Збережені проєкти + живі метрики",
     "guide_card_estimation_title": "Оцінка",
@@ -1719,6 +1725,9 @@ TRANSLATIONS = {
     "guide_card_test_execution_title": "Виконання тестів",
     "guide_card_test_execution_sub": "Прогін TC у Playwright · прохід руками "
                                      "· запис сесій → набори",
+    "guide_card_runs_title": "Прогони",
+    "guide_card_runs_sub": "Реєстр прогонів · призначення · продовження "
+                           "· перегляд",
     "guide_card_automation_title": "Автоматизація QA",
     "guide_card_automation_sub": "Набір TypeScript + Playwright назовні · "
                                  "результати Allure всередину",
@@ -1728,6 +1737,11 @@ TRANSLATIONS = {
     "guide_card_tedgie_sub": "QA-асистент · навчений на ISTQB",
     "guide_card_projects_title": "Проєкти",
     "guide_card_projects_sub": "Перемкнути / створити з будь-якого модуля",
+    "guide_card_team_title": "Команда",
+    "guide_card_team_sub": "Запрошення та ролі",
+    "guide_card_settings_title": "Налаштування",
+    "guide_card_settings_sub": "Ліміт на AI · власний ключ · сховище · "
+                               "місткість",
     "guide_card_tips_title": "Поради",
     "guide_card_tips_sub": "Те, що економить години",
     # ── Віджет метрик на Головній (index.html) ─────────────────────

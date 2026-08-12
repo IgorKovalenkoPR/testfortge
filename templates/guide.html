@@ -18,16 +18,27 @@
    same set of sections, so a new panel cannot land in one language only —
    the failure mode a duplicated file always has (M-2 / §14). #}
 
+{# The order is the reading order, and the first card is deliberate: a QA
+   team arriving on an instance with no Jira, no TestRail and no
+   spreadsheet needs the *route through the modules* before it needs any
+   single module. Everything after it is one module per card, in the order
+   the work actually happens, and `tests/test_guide_localisation.py`
+   requires a card for every module in the sidebar — the gap that let
+   Runs, Team and Settings ship undocumented cannot reopen silently. #}
 {% set guide_cards = [
+     ('workflow',       '🚀'),
      ('dashboard',      '📊'),
      ('estimation',     '📈'),
      ('test-cases',     '✅'),
      ('checklist',      '📋'),
      ('test-execution', '▶️'),
+     ('runs',           '🧾'),
      ('automation',     '🧰'),
      ('bug-reports',    '🐞'),
      ('tedgie',         '💬'),
      ('projects',       '🗂'),
+     ('team',           '👥'),
+     ('settings',       '⚙️'),
      ('tips',           '💡'),
    ] %}
 
@@ -39,7 +50,8 @@
     </p>
 </div>
 
-{# ── 10-card grid (8 modules + Projects + Pro tips) ────────────
+{# ── Card grid (one card per sidebar module + the route through them,
+     Projects, Tedgie and Pro tips) ─────────────────────────────
    Inline styles only so the guide doesn't depend on style.css
    classes that may move. Each card is a button that opens a modal
    populated from the matching <template> in the content partial.

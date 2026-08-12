@@ -1707,6 +1707,12 @@ TRANSLATIONS = {
                         "card opens a focused panel with the typical "
                         "workflow, key controls, and common mistakes.",
     "guide_close": "Close",
+    # The route through the modules, not a module — first card, because a
+    # team with no Jira and no TestRail needs the order of operations
+    # before it needs any single screen.
+    "guide_card_workflow_title": "Start here",
+    "guide_card_workflow_sub": "A whole project on one instance · no "
+                               "Jira, no TestRail, no spreadsheet",
     "guide_card_dashboard_title": "Dashboard",
     "guide_card_dashboard_sub": "Saved projects + live metrics",
     "guide_card_estimation_title": "Estimation",
@@ -1718,6 +1724,8 @@ TRANSLATIONS = {
     "guide_card_test_execution_title": "Test Execution",
     "guide_card_test_execution_sub": "Run TCs in Playwright · walk them by "
                                      "hand · record sessions → suites",
+    "guide_card_runs_title": "Runs",
+    "guide_card_runs_sub": "The run register · assign · resume · review",
     "guide_card_automation_title": "Automation QA",
     "guide_card_automation_sub": "TypeScript + Playwright suite out · Allure "
                                  "results in",
@@ -1727,6 +1735,11 @@ TRANSLATIONS = {
     "guide_card_tedgie_sub": "QA assistant · ISTQB-trained",
     "guide_card_projects_title": "Projects",
     "guide_card_projects_sub": "Switch / create from any module",
+    "guide_card_team_title": "Team",
+    "guide_card_team_sub": "Invitations and roles",
+    "guide_card_settings_title": "Settings",
+    "guide_card_settings_sub": "AI allowance · your own key · storage · "
+                               "capacity",
     "guide_card_tips_title": "Pro tips",
     "guide_card_tips_sub": "Things that save hours",
     # ── Dashboard metrics widget (index.html) ──────────────────────

@@ -148,3 +148,156 @@ class TestTheStaleGuideKeysAreGone:
                 f"{lang} still carries guide keys nothing renders: "
                 f"{orphans}. A dictionary with dead entries cannot be used "
                 f"to answer 'is this translated?'")
+
+
+def _cards() -> set[str]:
+    shell = SHELL.read_text(encoding="utf-8")
+    block = shell[shell.index("guide_cards = ["):shell.index("] %}")]
+    return {section for section, _emoji in CARD.findall(block)}
+
+
+class TestTheGuideCoversEveryModule:
+    """The gap a person found by eye, and nothing else could.
+
+    The sidebar had eleven entries; the guide had eight modules. **Runs,
+    Team and Settings shipped undocumented** — and they are the three
+    newest, which is the pattern rather than the coincidence: the guide was
+    written when the product was single-user, and each capability added
+    since arrived without a card. Two of the three are exactly what a QA
+    team needs on day one to divide work between people.
+
+    Nothing failed. Both languages agreed, every card had a panel, every
+    panel had a label, no key was orphaned. Consistency checks cannot see a
+    missing *subject* — only a comparison against the product can. So this
+    derives the module list from the navigation the reader actually sees.
+    """
+
+    #: Sidebar endpoint → guide card. A module added to the sidebar and not
+    #: to the guide fails here; the fix is a card, or a line in EXEMPT with
+    #: a reason next to it.
+    ENDPOINT_TO_CARD = {
+        "index": "dashboard",
+        "estimation_page": "estimation",
+        "test_cases_page": "test-cases",
+        "checklist_page": "checklist",
+        "test_execution_page": "test-execution",
+        "manual_runs_page": "runs",
+        "automation_page": "automation",
+        "bug_reports_page": "bug-reports",
+        "org_members": "team",
+        "org_settings": "settings",
+    }
+    #: The guide does not document itself.
+    EXEMPT = {"guide_page"}
+
+    @staticmethod
+    def _sidebar_endpoints() -> list[str]:
+        base = (GUIDE.parent / "base.html").read_text(encoding="utf-8")
+        start = base.index('<ul class="nav-steps">')
+        block = base[start:base.index("</ul>", start)]
+        return re.findall(r"url_for\('([a-z_]+)'\)", block)
+
+    def test_the_sidebar_is_where_this_test_thinks_it_is(self):
+        """A structural test that silently matches nothing is worse than no
+        test: it reports success for a list it never read."""
+        found = self._sidebar_endpoints()
+        assert len(found) >= 10, f"only found {found} in the sidebar markup"
+
+    def test_every_module_in_the_sidebar_has_a_guide_card(self):
+        cards = _cards()
+        undocumented = []
+        for endpoint in self._sidebar_endpoints():
+            if endpoint in self.EXEMPT:
+                continue
+            card = self.ENDPOINT_TO_CARD.get(endpoint)
+            if card is None:
+                undocumented.append(f"{endpoint} (unmapped in this test)")
+            elif card not in cards:
+                undocumented.append(f"{endpoint} → no '{card}' card")
+        assert not undocumented, (
+            "the sidebar offers modules the guide does not describe: "
+            f"{undocumented}. A reader who opens the guide to learn the "
+            "product is told it has fewer parts than it has.")
+
+
+class TestTheGuidePromisesOnlyExportsThatExist:
+    """Found while writing the workflow card: the guide offered **.docx and
+    Jira-XML**, in three places, in both languages. Neither has ever been
+    served — ``routes/generation.py`` answers markdown, html, csv, xlsx and
+    feature, bug reports answer csv and markdown, and the word "jira"
+    appears in no export handler at all.
+
+    Same defect as the 53 stale keys in this file's docstring, one layer
+    up: documentation for a product that does not exist. Worse than a
+    missing feature, because a tester promises the client a Jira import and
+    discovers it on handover day.
+
+    The vocabulary is derived from the routes rather than listed here, so
+    the day a real .docx export lands this test starts allowing the word on
+    its own.
+    """
+
+    ROUTES = GUIDE.parent.parent / "routes"
+
+    #: Format-looking tokens a panel might use. Only sentences that talk
+    #: about exporting are scanned, because .docx and .pdf are legitimate
+    #: *inputs* — the estimator and both generators accept them.
+    TOKEN = re.compile(
+        r"\.?(docx|xlsx|csv|pdf|feature|markdown|html|json)\b"
+        r"|jira[\s(-]*xml\)?", re.IGNORECASE)
+    ABOUT_EXPORT = re.compile(r"export|експорт", re.IGNORECASE)
+
+    def _served(self) -> set[str]:
+        generation = (self.ROUTES / "generation.py").read_text(encoding="utf-8")
+        bugs = (self.ROUTES / "bugs.py").read_text(encoding="utf-8")
+        served = {fmt.split("-")[0].lower()
+                  for fmt in re.findall(r'fmt == "([a-z-]+)"', generation)}
+        # The bug exports are two fixed endpoints rather than one
+        # parameterised route, so they are read from the filenames they
+        # answer with.
+        served |= {ext.lower() for ext in re.findall(
+            r"filename=bug_reports_\{name\}\.([a-z]+)", bugs)}
+        return served
+
+    def test_the_route_vocabulary_was_actually_read(self):
+        served = self._served()
+        assert {"markdown", "html", "csv", "xlsx", "feature"} <= served, served
+        assert "docx" not in served and "xml" not in served, (
+            f"a docx or XML export exists now — {sorted(served)} — so the "
+            f"guide may promise it again")
+
+    @staticmethod
+    def _blocks(lang: str) -> list[str]:
+        """One list item or paragraph per block, tags stripped afterwards.
+
+        Not sentences: splitting prose on "." cuts ".xlsx" and ".docx" into
+        fragments that no longer contain the word "export", so the filter
+        below discards them and the scan reports nothing. The first version
+        of this test did exactly that and passed with the defect restored —
+        caught by putting the old claim back, which is the only way that
+        kind of hole shows itself.
+        """
+        return [TAGS.sub(" ", block)
+                for block in re.split(r"</li>|</p>|</h3>", _content(lang))]
+
+    @pytest.mark.parametrize("lang", LANGS)
+    def test_no_panel_offers_an_export_the_app_cannot_produce(self, lang):
+        served = self._served()
+        promised: set[str] = set()
+        for block in self._blocks(lang):
+            if not self.ABOUT_EXPORT.search(block):
+                continue
+            for match in self.TOKEN.finditer(block):
+                token = (match.group(1) or match.group(0)).lower()
+                promised.add("xml" if "jira" in token else token)
+        unserved = sorted(token for token in promised if token not in served)
+        assert not unserved, (
+            f"{lang}: the guide offers exports the app does not produce: "
+            f"{unserved}. Served formats are {sorted(served)}.")
+
+    def test_the_scan_would_catch_the_defect_it_was_written_for(self):
+        """The claim that was live until today, verbatim."""
+        old = "Use Export for .xlsx / .csv / .docx / Jira-XML."
+        found = {(m.group(1) or m.group(0)).lower()
+                 for m in self.TOKEN.finditer(old)}
+        assert "docx" in found and any("jira" in f for f in found)

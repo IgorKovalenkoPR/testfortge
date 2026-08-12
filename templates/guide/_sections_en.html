@@ -2,6 +2,135 @@
    tests/test_guide_localisation.py checks they carry the same sections. #}
 <div class="guide-sections" hidden>
 
+  <template data-content="workflow">
+    <h3>What this card is</h3>
+    <p>The route through the modules, for the case TestForTge exists for:
+       a project starts, there is no Jira, no TestRail, and nobody wants
+       to run the release out of a spreadsheet. One instance then holds
+       the estimate, the test cases, the checklist, the runs, the defects
+       and the numbers you report.</p>
+    <p>Every other card describes one screen. This one describes the
+       order.</p>
+
+    <h3>What replaces what</h3>
+    <ul>
+      <li><strong>TestRail / Zephyr</strong> → <em>Test Cases</em> holds
+          the pack, <em>Runs</em> is the register of walks over it. A run
+          is the equivalent of a test run: it has an owner, a state and a
+          pass rate.</li>
+      <li><strong>Jira</strong> → <em>Bug Reports</em>, filed from the
+          failing step itself, with the steps, the environment and the
+          run already inside them.</li>
+      <li><strong>The spreadsheet</strong> → <em>Checklist</em> for
+          atomic coverage, and the run's own progress instead of a
+          colour-coded column somebody forgets to update.</li>
+      <li><strong>The estimate in a document</strong> →
+          <em>Estimation</em>, which produces both the hours and the
+          feature list the test cases are generated from, so the pack and
+          the quote describe the same scope.</li>
+    </ul>
+
+    <h3>Day one — the instance</h3>
+    <ol>
+      <li><strong>Team → Invite</strong> everyone who will test. There
+          are two roles: <em>Admin</em> creates projects, changes
+          Settings and hands runs to people; <em>User</em> does the
+          testing and sees what is assigned to them. Invitations are
+          <strong>not emailed</strong> unless the server has a mail key —
+          you get a link and send it however you already talk to your
+          team.</li>
+      <li><strong>Create the project</strong> from the 🗂 picker and name
+          it after the client or the release. Everything attaches to
+          whichever project is active, and an "Untitled project
+          2026-08-11" is hard to recognise three weeks later.</li>
+      <li><strong>Settings</strong>, once per team: the monthly AI
+          allowance or your own Anthropic key, and — if screenshots and
+          videos must survive a restart — object storage.</li>
+    </ol>
+
+    <h3>Scope, before you write a single case</h3>
+    <p>Open <strong>Estimation</strong> and give it whatever the client
+       actually sent: the requirements text, the Figma frames, or just
+       the URL of the thing. You get hours per phase, a Min/Max band, a
+       suggested tester headcount, and a feature list. Send the hours to
+       whoever asked "how long"; keep the feature list, because the next
+       button drops it straight into the generator.</p>
+
+    <h3>Design — two artefacts, not one</h3>
+    <ol>
+      <li><strong>Test Cases</strong> for the flows that need
+          preconditions, data and an expected result per step. This is
+          what you show a client and what a new tester follows.</li>
+      <li><strong>Checklist</strong> for the breadth a case pack makes
+          expensive: every field, every state, every screen size. It is
+          the artefact a spreadsheet was standing in for.</li>
+    </ol>
+    <p>Both save to the active project on their own. Both export —
+       .xlsx, .csv, Markdown, HTML, and .feature for the test cases if
+       there is a BDD repository waiting.</p>
+
+    <h3>Execution — the part the spreadsheet does worst</h3>
+    <ol>
+      <li>Open <strong>Test Execution</strong>, pick what to walk (the
+          whole pack, only the test cases, only the checklist, or a
+          selection), name the environment, and start the run.</li>
+      <li>Each item gets one verdict and a note. There are five:
+          <em>Passed</em>, <em>Passed but</em> (it works, and there is a
+          defect worth recording anyway), <em>Failed</em>,
+          <em>Blocked</em> and <em>Skipped</em>. A verdict can be
+          corrected — the run overwrites it rather than counting the item
+          twice — and <em>Skipped</em> is not counted as exercised, so it
+          cannot quietly inflate the pass rate.</li>
+      <li>On <em>Failed</em> or <em>Passed but</em>, tick
+          <strong>file a bug</strong>. The
+          bug is created with the steps, the summary, the environment and
+          a link back to this run, so nobody retypes a reproduction at
+          six in the evening.</li>
+      <li>Close the run when it is done. Closing it early is allowed and
+          honest — a partial run is recorded as partial and says how many
+          items have a verdict, which is the number that would otherwise
+          get rounded up in a status meeting.</li>
+    </ol>
+
+    <h3>Who does what</h3>
+    <p>An admin starts runs and assigns them; a tester opens
+       <strong>Runs</strong>, sees their own queue, and resumes where
+       they stopped — a walk of sixty checks survives a laptop sleep and
+       a weekend. Reassigning an existing run is an admin action and
+       keeps every verdict already recorded; starting a second run
+       instead is how a team loses an afternoon.</p>
+
+    <h3>Triage and the second release</h3>
+    <p><strong>Bug Reports</strong> is the tracker: severity and priority
+       as independent axes, states to move a defect through, evidence
+       attached. Export CSV for a client who has an importer, or Markdown
+       to paste into a channel or an email.</p>
+    <p>For the next release, run the same pack again. The previous runs
+       stay in <em>Runs</em> as the history, so "what did we cover last
+       time" is a question with an answer, and the Dashboard shows the
+       pass rate and the severity mix without anyone building a chart.</p>
+
+    <h3>Four limits worth knowing before you promise this to a client</h3>
+    <ul>
+      <li><strong>Invitations and password resets are not emailed</strong>
+          unless whoever runs the server sets a mail key. Until then you
+          pass links by hand — fine for a team of five, awkward for
+          thirty.</li>
+      <li><strong>There is no live two-way sync with a tracker.</strong>
+          Export is a file. If the client already lives in Jira, they get
+          CSV or Markdown, not a mirrored issue.</li>
+      <li><strong>Screenshots and videos sit on the instance's disk</strong>
+          until object storage is configured in Settings. On a hosting
+          plan with an ephemeral disk, a restart takes them with it —
+          the verdicts and the bug text survive, the evidence does
+          not.</li>
+      <li><strong>AI generation costs money</strong> — either against the
+          team's monthly allowance on the shared key, or against your own
+          key. Past the allowance, generation falls back to the built-in
+          rule engines rather than stopping.</li>
+    </ul>
+  </template>
+
   <template data-content="dashboard">
     <h3>What it is</h3>
     <p>The landing page. Shows your saved projects, live session
@@ -112,7 +241,9 @@
       <li>Click Generate. Background job; progress modal polls
           until done.</li>
       <li>Review. Cases group by section. Use Export for
-          .xlsx / .csv / .docx / Jira-XML.</li>
+          .xlsx / .csv / Markdown / HTML, or <strong>.feature</strong>
+          — a zip of Gherkin files, one per section, for a BDD
+          repository.</li>
     </ol>
     <h3>URL-based generation</h3>
     <p>Paste a URL on its own line — the crawler walks the site,
@@ -435,6 +566,57 @@ python -m playwright install chromium</pre>
        not your specific business flows.</p>
   </template>
 
+  <template data-content="runs">
+    <h3>What it is</h3>
+    <p>The register of every walk over this project's pack — the manual
+       ones and the automated ones. One row per run: number, when it
+       started, mode, tester, state. It is the module that answers "who
+       is testing what right now" and "what did we cover last
+       release".</p>
+
+    <h3>The two scopes</h3>
+    <ul>
+      <li><strong>Assigned to me</strong> — the tester's queue. This is
+          the default with authentication on.</li>
+      <li><strong>All runs</strong> — every run in the project.
+          Admin-only, and deliberately not something a URL can widen: a
+          tester who edits the address bar still sees their own runs.
+          With authentication off there is nobody to scope by, so the
+          page lists everything and says so.</li>
+    </ul>
+
+    <h3>What you do from here</h3>
+    <ol>
+      <li><strong>Resume</strong> an open run — it returns to the first
+          item without a verdict, not to the beginning.</li>
+      <li><strong>Review</strong> a closed one: the verdicts, the notes,
+          the bugs it produced, and the pass rate it finished on.</li>
+      <li><strong>Reassign</strong> (admin) when a walk outlives the
+          person who started it. Every verdict already recorded stays.
+          A run has an owner from the moment it starts — whoever started
+          it, unless an admin picked someone else.</li>
+    </ol>
+
+    <h3>Open, partial, closed</h3>
+    <p>A run is <em>open</em> until somebody closes it. Closing it with
+       items left unjudged records it as <strong>partial</strong> and
+       reports how many of the total have a verdict. That distinction is
+       the whole point of the state: a partial run reported as complete
+       overstates coverage, and it is the number a status meeting repeats
+       without checking.</p>
+
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Starting a new run instead of resuming — the verdicts are on
+          the old one, and the new one begins at zero.</li>
+      <li>Reading "Assigned to me" as empty and concluding the runs are
+          gone. They are under <em>All runs</em>, held by somebody
+          else.</li>
+      <li>Leaving runs open across releases, so the register stops
+          telling you what is actually in progress.</li>
+    </ul>
+  </template>
+
   <template data-content="automation">
     <h3>What it is</h3>
     <p>A separate module because automation has a different lifecycle
@@ -602,7 +784,11 @@ python -m playwright install chromium</pre>
           week — bump to Highest").</li>
       <li>Assign to a developer, add labels, set the
           fix-version.</li>
-      <li>Export to Jira (XML) when ready to hand off.</li>
+      <li>Export when you are ready to hand off: <strong>CSV</strong>,
+          which a tracker's CSV importer reads (Jira, Redmine and
+          YouTrack all have one), or <strong>Markdown</strong>, which
+          pastes into a ticket, a PR description or an email as it
+          is.</li>
     </ol>
 
     <h3>Common mistakes</h3>
@@ -771,6 +957,141 @@ python -m playwright install chromium</pre>
     </ul>
   </template>
 
+  <template data-content="team">
+    <h3>What it is</h3>
+    <p>Who is on the team, what they may do, and the invitations that
+       have not been accepted yet. Projects, test cases, runs and bugs all
+       belong to a team, not to a person — which is what makes a handover
+       possible at all.</p>
+
+    <h3>The two roles</h3>
+    <ul>
+      <li><strong>Admin</strong> — everything a user can do, plus:
+          creates projects, changes Settings, invites and removes people,
+          and hands runs to other testers.</li>
+      <li><strong>User</strong> — works with everything: generates,
+          walks runs assigned to them, files and triages bugs.</li>
+    </ul>
+    <p>Two roles rather than five, because a QA team of three to ten
+       people has exactly one meaningful boundary: who may change the
+       team's configuration.</p>
+
+    <h3>Inviting someone</h3>
+    <ol>
+      <li>Enter the address, pick the role, create the invitation.</li>
+      <li>You get <strong>a link</strong>. TestForTge sends no email
+          unless whoever runs the server has configured a mail key, so
+          normally you pass that link yourself — chat, email, whatever
+          the team already uses.</li>
+      <li>The invitation expires. The <em>Pending</em> table shows when,
+          so an unaccepted one is visible rather than forgotten.</li>
+    </ol>
+
+    <h3>Guards that will stop you</h3>
+    <ul>
+      <li><strong>You cannot demote the last admin</strong> — your own
+          role included. Promote somebody first; an instance with no
+          admin can change nothing, and no screen can fix that from the
+          inside.</li>
+      <li>A removed member is <em>deactivated</em>, not erased: their
+          runs, verdicts and bug reports keep their author, because a
+          defect with no reporter is worth less than one with a name on
+          it.</li>
+    </ul>
+
+    <h3>Where the first admin comes from</h3>
+    <p>On a brand-new instance nobody can invite anybody — there is no
+       first account to log in as. Whoever runs the server sets two
+       variables and the first administrator is created at start-up. From
+       then on the invitation flow is the only way in, and this page is
+       where it happens.</p>
+
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Inviting the whole team as Admin. It works, and then a project
+          gets renamed and nobody knows by whom.</li>
+      <li>Waiting for an email that is not being sent. Copy the
+          link.</li>
+      <li>Letting invitations expire and re-inviting instead of checking
+          the Pending table.</li>
+    </ul>
+  </template>
+
+  <template data-content="settings">
+    <h3>What it is</h3>
+    <p>Everything configured <strong>per team</strong>: the name, the AI
+       spend, where artefacts are stored, how much room the team is
+       using. Members can read this page; only admins can change it.
+       Server-wide things — which models are allowed, whether email works
+       at all — are shown here but set by whoever runs the instance.</p>
+
+    <h3>AI usage and cost</h3>
+    <ul>
+      <li><strong>Monthly allowance (USD)</strong> caps spend on the
+          platform's shared key. <code>0</code> removes the cap.</li>
+      <li>The month's calls are itemised by feature and model, with the
+          input, output and cost — so "why did generation get expensive"
+          is answerable rather than a suspicion.</li>
+      <li>Past the allowance, generation does not stop: it
+          <strong>falls back to the built-in rule engines</strong>. The
+          output is thinner and it costs nothing.</li>
+    </ul>
+
+    <h3>Your own API key</h3>
+    <p>Supply an Anthropic key and the team's generation bills to your
+       account, not the platform's — the allowance above stops applying.
+       Two things to know: the key is stored encrypted and
+       <strong>cannot be revealed again</strong> (only replaced or
+       removed), and an instance whose server has no encryption key
+       configured will refuse to store one at all rather than keep it in
+       the clear.</p>
+
+    <h3>Capacity</h3>
+    <p>How many rows the team holds against the guideline for this
+       server, what the largest part of that is, and roughly how much
+       space it takes. Old execution results and closed bug reports from
+       finished releases are the first things worth deleting — they are
+       usually most of the total, and the least likely to be read
+       again.</p>
+
+    <h3>Storage</h3>
+    <p>By default screenshots, videos and generated files live on the
+       instance's own disk, which is fine until the instance restarts on
+       a plan where that disk is ephemeral. Point the team at
+       <strong>its own S3-compatible bucket</strong> — endpoint, bucket,
+       region, access key, secret, HTTPS — and use
+       <strong>Test connection</strong> before trusting it. The check
+       writes, reads and deletes one object, and tells you which of the
+       three failed.</p>
+
+    <h3>Email</h3>
+    <p>Whether this instance can send anything at all, the address it
+       sends from, and how much of the daily allowance is spent.
+       With no mail key configured, invitations and password resets
+       produce links for you to pass on rather than silently failing to
+       arrive.</p>
+
+    <h3>Projects with no team</h3>
+    <p>Projects created before teams existed belong to nobody. If there
+       is exactly one team on the server you can claim them in one
+       click; with several teams the bulk claim is refused on purpose,
+       because guessing wrong makes one team's work visible to another
+       and there is no undo for having seen it.</p>
+
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Looking for per-project settings. There are none — this is per
+          team, and the project is the container for work, not for
+          configuration.</li>
+      <li>Configuring a bucket and never pressing Test connection. A
+          wrong region or a bucket that does not exist looks identical to
+          a working setup until the first artefact disappears.</li>
+      <li>Setting the allowance to 0 to "unblock" generation, when the
+          honest fix is a key of your own or fewer full-pack
+          regenerations.</li>
+    </ul>
+  </template>
+
   <template data-content="tips">
     <h3>Things that save hours</h3>
     <ul>
@@ -789,9 +1110,10 @@ python -m playwright install chromium</pre>
       <li><strong>Open Live view in a separate tab</strong>
           when running &gt;30 cases. Watching frame-by-frame is
           usually how you spot WHY a run stalled.</li>
-      <li><strong>Export to .xlsx for stakeholders, .docx for
-          documentation, Jira-XML for engineering.</strong>
-          All three exports preserve the same data.</li>
+      <li><strong>Match the export to its reader:</strong> .xlsx for
+          stakeholders, Markdown or HTML for documentation, CSV for a
+          tracker's importer, .feature for a BDD repository. Every
+          export carries the same data.</li>
       <li><strong>Use the Bug Reports tabs to triage.</strong>
           The auto-bugs land Open; move them through the
           workflow as they're worked.</li>

@@ -209,6 +209,26 @@ class TestOneVoice:
             f"{offenders} address the reader as «ти» while the rest of the "
             f"product uses «ви». One product, one voice.")
 
+    def test_the_ukrainian_guide_speaks_the_same_way(self):
+        """The rule above reads the dictionary, and the dictionary is not
+        where most of the product's Ukrainian lives.
+
+        `templates/guide/_sections_ua.html` is about 5 000 words — more
+        prose than every dictionary value combined — and it is a file, not
+        a set of keys, so the scan over `UA.items()` never saw it. A guide
+        that says «натисни» while every button says «натисніть» is the same
+        defect the rule was written for, in the place it is most visible:
+        the page a new tester reads first.
+        """
+        guide = (pathlib.Path(__file__).resolve().parent.parent / "templates"
+                 / "guide" / "_sections_ua.html")
+        assert guide.is_file(), guide
+        offenders = sorted({m.group(0).lower() for m in
+                            self.INFORMAL.finditer(guide.read_text(encoding="utf-8"))})
+        assert not offenders, (
+            f"the Ukrainian guide uses {offenders} — «ти» in a document the "
+            f"rest of the product addresses as «ви».")
+
     def test_the_pattern_would_catch_something(self):
         assert self.INFORMAL.search("Запитуй про модулі")
         assert not self.INFORMAL.search("Перевірка вимог і додайте файл")
