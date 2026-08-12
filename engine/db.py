@@ -54,6 +54,40 @@ _engine: Engine | None = None
 _Session: sessionmaker | None = None
 
 
+#: ``scheme://`` at the front of a URL.
+_HAS_SCHEME = re.compile(r"^[a-z][a-z0-9+.\-]*://", re.IGNORECASE)
+
+#: ``user:password@host[:port]/database`` with no scheme — what the Neon and
+#: Render consoles show *after* the ``postgresql://`` part, and therefore what
+#: ends up in the variable when somebody selects the visible text by hand.
+_SCHEMELESS_DSN = re.compile(
+    r"^[^\s:/@]+:[^\s@/]*@[^\s:/@]+(:\d+)?/[^\s?]+", re.IGNORECASE)
+
+
+def redact_url(raw: str) -> str:
+    """A connection string safe to put in a log line.
+
+    Everything between the scheme and ``@`` becomes ``***``. This exists
+    because of a real leak: on 2026-08-12 a ``DATABASE_URL`` pasted without
+    its scheme made SQLAlchemy raise ``ArgumentError``, whose message
+    **contains the string it could not parse**. The message went to the log
+    verbatim, so the database password was sitting in Render's log viewer —
+    and in a screenshot of it. A credential in a log is worse than the
+    outage that produced it: the outage ends when the value is fixed, the
+    log line stays until the password is rotated.
+    """
+    if not raw:
+        return "(empty)"
+    value = raw.strip()
+    head, sep, tail = value.partition("@")
+    if not sep:
+        # No credentials to hide; still keep query parameters out of logs.
+        return value.split("?", 1)[0]
+    scheme = _HAS_SCHEME.match(head)
+    prefix = scheme.group(0) if scheme else ""
+    return f"{prefix}***@{tail.split('?', 1)[0]}"
+
+
 def _normalize_url(raw: str) -> str:
     """Adapt legacy / Render-style URLs for SQLAlchemy 2.x."""
     if not raw:
@@ -64,7 +98,60 @@ def _normalize_url(raw: str) -> str:
         return "postgresql+psycopg2://" + raw[len("postgres://"):]
     if raw.startswith("postgresql://"):
         return "postgresql+psycopg2://" + raw[len("postgresql://"):]
+    # A scheme-less ``user:pass@host/db``: unambiguous here, because the only
+    # non-SQLite backend this app supports is Postgres. Repaired rather than
+    # refused, and the warning names what was assumed — the alternative
+    # measured itself on 2026-08-12: every page answered 500, /healthz kept
+    # answering 200 because it is deliberately DB-free, so Render reported
+    # the service Live while nothing worked.
+    if not _HAS_SCHEME.match(raw) and _SCHEMELESS_DSN.match(raw):
+        log.warning(
+            "DATABASE_URL has no scheme; assuming postgresql:// for %s. "
+            "The consoles show the string with 'postgresql://' in front — "
+            "add it to the variable so this stops being a guess.",
+            redact_url(raw))
+        return "postgresql+psycopg2://" + raw
     return raw
+
+
+def _reject_unusable_url(url: str, raw: str) -> None:
+    """Refuse a URL SQLAlchemy cannot parse, in operator language.
+
+    Raised **before** ``create_engine`` on purpose: SQLAlchemy's own
+    ``ArgumentError`` quotes the whole string, password included, and any
+    traceback of it lands in the log. Everything here is redacted.
+    """
+    if url.startswith("sqlite"):
+        return
+    value = raw.strip()
+    if value.lower().startswith(("psql ", "psql'", 'psql"')):
+        raise RuntimeError(
+            "DATABASE_URL looks like a psql command rather than a "
+            "connection string. Copy only the postgresql://… URI, without "
+            "the psql prefix.")
+    if value[:1] in {"'", '"'}:
+        raise RuntimeError(
+            "DATABASE_URL is wrapped in quotes. The dashboard stores the "
+            "value literally, so the quotes become part of the host name — "
+            "paste the URI on its own.")
+    # The scheme is checked on the **normalised** url, not on the raw value:
+    # a scheme-less `user:pass@host/db` was already repaired by
+    # `_normalize_url`, and the first version of this function tested `raw`
+    # here — which refused the very value the repair had just made usable.
+    # Caught by running it, not by reading it.
+    if not _HAS_SCHEME.match(url):
+        raise RuntimeError(
+            f"DATABASE_URL has no scheme and does not look like a "
+            f"connection string: it begins {value.split(':', 1)[0]!r}. A "
+            f"Postgres URI starts with 'postgresql://'.")
+    from sqlalchemy.engine import url as _sa_url
+    try:
+        _sa_url.make_url(url)
+    except Exception as exc:
+        raise RuntimeError(
+            f"DATABASE_URL could not be parsed as a connection string "
+            f"({type(exc).__name__}). Redacted value: {redact_url(raw)}"
+        ) from None
 
 
 def database_url() -> str:
@@ -77,7 +164,9 @@ def database_url() -> str:
     """
     url = (os.environ.get("DATABASE_URL") or "").strip()
     if url:
-        return _normalize_url(url)
+        normalised = _normalize_url(url)
+        _reject_unusable_url(normalised, url)
+        return normalised
 
     explicit = (os.environ.get("TESTFORTGE_DB") or "").strip()
     if explicit:
