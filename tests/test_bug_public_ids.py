@@ -185,6 +185,34 @@ class TestIdsThatAreNotIds:
                  for row in _db.list_bugs(project)}
         assert shown == set(stored), (shown, stored)
 
+    def test_the_backfilled_id_steps_past_one_already_in_use(self, project):
+        """The backfill must not collide with an id minted by counting.
+
+        Two mints coexist: ``generate_bug_id`` counts a project's bugs, and
+        the backfill above uses the row's sequence id. Those namespaces
+        overlap — a project holding ``BUG-001``..``BUG-022`` with row ids
+        1..22 is one deletion away from the sequence handing out a number
+        some row already stores.
+
+        This was a live regression in the first version of the backfill:
+        the UPDATE raised ``IntegrityError``, and ``save_bug``'s retry
+        re-mints only when the *caller* supplied an id, so the exception
+        escaped and lost a bug that had saved cleanly before the backfill
+        existed. Worse than the duplicate id it was fixing.
+        """
+        # Occupy exactly the id the next row's sequence id maps to.
+        first = _file(project, "BUG-002", "Minted by counting")
+        assert first
+
+        # Must not raise, and must not reuse BUG-002.
+        _file(project, "", "No id at all")
+
+        stored = _ids(project)
+        assert len(stored) == 2
+        assert all(s for s in stored), f"a bug was left id-less: {stored}"
+        assert len(set(stored)) == 2, stored
+        assert "BUG-002" in stored
+
     def test_a_bug_with_no_project_is_not_constrained(self, fresh_db):
         """Tedgie files before a project is chosen, and that is allowed.
 

@@ -4276,6 +4276,12 @@ def _resolve_bug_area(bug: dict) -> str:
 #: running out is somebody's finding.
 BUG_ID_ATTEMPTS = 25
 
+#: How far to walk forward looking for a free public id when backfilling
+#: one onto an id-less bug. Bounded so a project with a pathological id set
+#: gives up and leaves the row NULL rather than scanning without end — the
+#: pre-backfill behaviour, which is degraded but never wrong.
+_BUG_ID_BACKFILL_TRIES = 50
+
 
 def _next_external_id(sess, model, project_id: str, like: str) -> str:
     """One past the highest number already using *like*'s prefix — E4.4a.
@@ -4417,8 +4423,47 @@ def _insert_bug(project_id: str | None, bug: dict, source: str,
             # numbering is not dense — a project's first bug can be
             # BUG-042 — which is exactly what the display already showed,
             # so this changes no rendered value.
-            row.external_id = f"BUG-{int(row.id):03d}"
-            sess.flush()
+            #
+            # But the row id can still collide with an id some *other* row
+            # already stores, because those are minted by counting
+            # (``generate_bug_id``) while this one comes from the sequence.
+            # A project whose bugs are BUG-001..BUG-022 with row ids 1..22
+            # is one deletion away from an overlap. So: pick a number no
+            # row in this project is already using, and treat losing a race
+            # for it as "leave it NULL" rather than failing the insert —
+            # ``save_bug``'s retry only re-mints when the *caller* supplied
+            # an id, so an IntegrityError raised here would escape and lose
+            # a bug that used to save cleanly.
+            taken = {
+                eid for (eid,) in sess.execute(
+                    select(BugReport.external_id).where(
+                        BugReport.project_id == project_id,
+                        BugReport.external_id.is_not(None),
+                    )
+                ).all()
+            }
+            candidate = int(row.id)
+            for _ in range(_BUG_ID_BACKFILL_TRIES):
+                if f"BUG-{candidate:03d}" not in taken:
+                    break
+                candidate += 1
+            else:
+                candidate = None
+            if candidate is not None:
+                # Savepoint: a unique-violation on this UPDATE must not
+                # poison the transaction that already inserted the row.
+                try:
+                    with sess.begin_nested():
+                        row.external_id = f"BUG-{candidate:03d}"
+                        sess.flush()
+                except IntegrityError:
+                    # Another writer took it between the read and the
+                    # write. The row stays id-less, exactly as it did
+                    # before this backfill existed.
+                    row.external_id = None
+                    log.warning(
+                        "bug %s: public-id backfill lost a race, left NULL",
+                        row.id)
         return row.id
 
 
