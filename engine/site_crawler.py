@@ -1061,7 +1061,8 @@ def _fetch_page(url: str) -> tuple[str, str]:
         # urlopen follows redirects by default, so validating only the
         # first URL let an allowed host bounce the fetch to a private
         # address. See engine.security._ValidatingRedirectHandler.
-        with _security.safe_opener().open(req, timeout=FETCH_TIMEOUT, context=ctx) as resp:
+        with _security.safe_opener(context=ctx).open(
+                req, timeout=FETCH_TIMEOUT) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" not in content_type and "application/xhtml" not in content_type:
                 return "", f"Not HTML: {content_type}"

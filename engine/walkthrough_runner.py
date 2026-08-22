@@ -1355,7 +1355,7 @@ class WalkthroughRunner:
     () => {
         const out = [];
         const els = document.querySelectorAll(
-            'button:not([type=hidden]), .w-button, a.button, '
+            'button:not([type=hidden]), .w-button, a.button, ' +
             '[role="button"], input[type=submit]');
         Array.from(els).slice(0, 60).forEach(el => {
             const r = el.getBoundingClientRect();

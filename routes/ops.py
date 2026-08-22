@@ -165,7 +165,18 @@ def register(app: Flask) -> None:
             header = request.headers.get("X-Ops-Token", "")
             if not hmac.compare_digest(
                     header.encode("utf-8"), token.encode("utf-8")):
-                return Response("Forbidden", status=401)
+                # 403, not 401. This was `Response("Forbidden", status=401)`
+                # — a 401 whose body used 403's wording, and with no
+                # `WWW-Authenticate` header, which RFC 9110 requires on a
+                # 401 so a client can learn how to authenticate.
+                #
+                # 403 is the honest code rather than adding the header:
+                # `X-Ops-Token` is a proprietary header, not a registered
+                # HTTP auth scheme, so there is no scheme to name. Where
+                # this codebase does use real HTTP auth it already sends
+                # the header correctly (engine/basic_auth.py).
+                return Response("Forbidden\n", status=403,
+                                content_type="text/plain; charset=utf-8")
         q = get_queue()
         jobs = q.list_kind("automation") + q.list_kind("estimation")
 

@@ -373,8 +373,10 @@ def live_view_diag_reply(lang: str) -> ChatReply:
             "дає чорні png.\n"
             "4. **Картка Test Account заповнена?** Якщо флоу за логіном, без "
             "неї перший крок впаде на 401, і скріншот не зробиться.\n"
-            "5. **Browser context живий?** На /healthz має бути "
-            "`browser_pool: ok`. Якщо ні — перезапустіть worker.\n\n"
+            "5. **Чи не перезапустився worker?** `/healthz` віддає "
+            "`uptime_seconds`. Значення менше хвилини означає, що процес "
+            "перезапустився під час прогону — зазвичай через межу "
+            "пам'яті — і забрав із собою браузер та зняті кадри.\n\n"
             "Якщо всі п'ять зелені — пришліть фрагмент логу runner за час "
             "прогону, я допоможу його розібрати."
         )
@@ -393,8 +395,17 @@ def live_view_diag_reply(lang: str) -> ChatReply:
             "4. **Test Account card filled?** If the flow is auth-gated, an "
             "empty card means the first navigation 401s and no screenshot "
             "is taken.\n"
-            "5. **Browser context alive?** /healthz should report "
-            "`browser_pool: ok`. If not, restart the runner worker.\n\n"
+            # Was "/healthz should report `browser_pool: ok`" — no such
+            # field has ever existed. /healthz is deliberately
+            # dependency-free and reports only status, uptime_seconds and
+            # three directory-writability checks, so the advice sent
+            # operators looking for something they could not find. uptime
+            # is the field that actually diagnoses an empty live view: the
+            # runner dies with the worker.
+            "5. **Did the worker restart?** `/healthz` reports "
+            "`uptime_seconds`. A value under a minute means the process "
+            "restarted mid-run — usually the memory ceiling — which takes "
+            "the browser and the captured frames with it.\n\n"
             "If all five are green, paste the runner log slice for the "
             "failing run and I'll help diagnose."
         )
@@ -405,6 +416,32 @@ def live_view_diag_reply(lang: str) -> ChatReply:
                      "How do I add a test account?",
                      "Show Automation QA help"],
     )
+
+
+#: ``[Authentication] Login is not completed`` → ``Authentication``.
+#: The runner titles every finding this way, so the component is nearly
+#: always present in the title even though the ``component`` column is
+#: empty — it is a free-text field only a human filling the form ever sets.
+_TITLE_COMPONENT = re.compile(r"^\s*\[([^\]]{1,40})\]")
+
+
+def _component_of(bug: dict) -> str:
+    """The most specific component name this bug actually carries.
+
+    Grouping on ``component`` alone put every runner-created bug under
+    "(unspecified)" — including ones literally titled
+    ``[Authentication] …`` — which made the summary useless on exactly the
+    bugs the product generates itself. Order: the operator's own value, the
+    title prefix the runner writes, then the always-populated triage area.
+    """
+    explicit = (bug.get("component") or "").strip()
+    if explicit:
+        return explicit
+    match = _TITLE_COMPONENT.match(str(bug.get("title") or ""))
+    if match:
+        return match.group(1).strip()
+    area = (bug.get("bug_area") or "").strip()
+    return area or "(unspecified)"
 
 
 def summarise_bugs_by_component_reply(lang: str) -> ChatReply:
@@ -439,8 +476,7 @@ def summarise_bugs_by_component_reply(lang: str) -> ChatReply:
     last = sorted(bugs, key=lambda b: b.get("created_at") or "")[-10:]
     by_comp: dict = {}
     for b in last:
-        comp = (b.get("component") or "").strip() or "(unspecified)"
-        by_comp.setdefault(comp, []).append(b)
+        by_comp.setdefault(_component_of(b), []).append(b)
     header = (f"**Зведення останніх {len(last)} багів за компонентом**"
               if lang == "ua"
               else f"**Summary of the last {len(last)} bug(s) by component**")

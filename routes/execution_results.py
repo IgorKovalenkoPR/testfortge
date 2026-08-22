@@ -204,10 +204,30 @@ def register(app: Flask) -> None:
         for et in env_types:
             environment = (envs_meta.get(et, {}) or {}).get("environment") \
                 or et.title()
-            db_run_id = None
+            # Adopt the row the dispatch path opened for this env, rather
+            # than opening a second one. Dispatch registers a run per
+            # env_type so the Runs register and the concurrency gate can
+            # see it while it is still in flight; without this lookup the
+            # import would double every automated run in the register.
+            #
+            # ``or None`` because an id of 0 is not a row, and older
+            # pending configs written before E11 have no db_run_ids key at
+            # all — those still fall through to opening one here.
+            #
+            # Re-applied here by hand during the E11 rebase: the commit
+            # that wrote it edited this loop while it still lived in
+            # routes/execution.py, and Stage 7 Phase B moved the whole
+            # view into this module in between. Git saw a delete against
+            # an edit and could only offer the conflict; the two halves of
+            # that commit — open the row at dispatch, adopt it at import —
+            # are what make each other correct, so dropping either would
+            # have left the double-registration it was written to remove.
+            db_run_id = ((cfg.get("db_run_ids") or {}).get(et)
+                         or (cfg.get("db_run_ids") or {}).get(str(et))
+                         or None)
             try:
                 pid = ensure_active_project()
-                if pid:
+                if pid and db_run_id is None:
                     db_run_id = _db.start_execution_run(
                         pid,
                         env_payload={

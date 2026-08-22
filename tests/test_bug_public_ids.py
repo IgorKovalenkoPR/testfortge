@@ -148,19 +148,42 @@ class TestFilingTwiceUnderTheSameId:
 
 
 class TestIdsThatAreNotIds:
-    def test_an_empty_id_is_stored_as_nothing(self, project):
-        """Empty string is not an id.
+    def test_an_id_less_bug_is_stored_under_the_id_it_is_shown_as(
+            self, project):
+        """Empty string is not an id — but neither is NULL, in practice.
 
-        Storing it as one would put every id-less bug in a project into a
-        single collision the index cannot resolve — and it would make the
-        second such filing renumber to ``_001``, inventing an id for a bug
-        nobody gave one.
+        This used to assert that an id-less bug kept ``external_id IS
+        NULL``, on the grounds that inventing an id for a bug nobody gave
+        one is worse than leaving it blank. The reasoning missed that the
+        id was being invented anyway, one layer up:
+        ``workspace.bug_row_to_dict`` renders ``BUG-{row.id:03d}`` when the
+        column is NULL, so the operator has always seen ``BUG-001``.
+
+        The two halves then disagreed. ``editable._next_public_id`` mints
+        from *stored* ids, so a project holding one NULL-id bug displayed as
+        ``BUG-001`` handed ``BUG-001`` straight back out to the next manual
+        creation — and the ``(project_id, external_id)`` index could not
+        object, because NULL is unconstrained on both engines. Two bugs, one
+        id, in the UI and in the Markdown export.
+
+        So the property is not "store nothing", it is **the id shown is the
+        id stored**. That is what makes the index able to do its job.
         """
         _file(project, "", "No id at all")
         _file(project, "   ", "Also no id")
 
-        assert _ids(project) == [None, None]
-        assert len(_db.list_bugs(project)) == 2
+        stored = _ids(project)
+        assert len(stored) == 2
+        assert all(s and s.startswith("BUG-") for s in stored), stored
+        # The point of the fix: two id-less filings do not share an id.
+        assert len(set(stored)) == 2, stored
+
+        # And the stored value is the one the UI renders, so the mint and
+        # the display can no longer disagree.
+        from engine import workspace as _workspace
+        shown = {_workspace.bug_row_to_dict(row)["id"]
+                 for row in _db.list_bugs(project)}
+        assert shown == set(stored), (shown, stored)
 
     def test_a_bug_with_no_project_is_not_constrained(self, fresh_db):
         """Tedgie files before a project is chosen, and that is allowed.

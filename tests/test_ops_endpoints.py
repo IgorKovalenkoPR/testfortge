@@ -125,13 +125,23 @@ class TestMetricsTokenGate:
     def test_token_set_requires_matching_header(self, client, monkeypatch):
         monkeypatch.setenv("OPS_ENDPOINTS_TOKEN", "s3cret-ops")
 
-        # Missing header → 401
+        # Missing header → 403. Not 401: X-Ops-Token is a proprietary
+        # header, not an HTTP auth scheme, so there is no scheme to name in
+        # the WWW-Authenticate header a 401 is required to carry. This used
+        # to answer 401 with the body "Forbidden" — 403's wording — and no
+        # WWW-Authenticate at all, which is malformed either way round.
         resp = client.get("/metrics")
-        assert resp.status_code == 401
+        assert resp.status_code == 403
+        assert b"Forbidden" in resp.data
 
-        # Wrong header → 401
+        # Wrong header → 403
         resp = client.get("/metrics", headers={"X-Ops-Token": "wrong"})
-        assert resp.status_code == 401
+        assert resp.status_code == 403
+
+        # Whichever code it is, the body has to match it, and a 401 has to
+        # carry WWW-Authenticate. Asserted so the pair cannot drift apart
+        # again without a test noticing.
+        assert resp.status_code != 401 or "WWW-Authenticate" in resp.headers
 
         # Correct header → 200
         resp = client.get("/metrics",
