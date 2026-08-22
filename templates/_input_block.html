@@ -183,7 +183,7 @@
 
     input.addEventListener('change', render);
 
-    // Exposed for any legacy inline onchange="showUploadedFiles(this)".
+    // Exposed for any legacy inline handler calling showUploadedFiles(this).
     window.showUploadedFiles = function (el) {
         if (el && el.files) {
             input.files = el.files;

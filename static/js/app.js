@@ -80,34 +80,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-/* ── Tab switching (global) ──────────────────────────────────── */
-function showTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
-}
+/* Tab switching — removed.
+ * This was the third identical copy (the others were inline in
+ * recommendations / test_cases / test_metrics / tools), and every one read
+ * the implicit global `event`, which only has a value when the function is
+ * called from an inline attribute — the very thing the CSP blocks. Tabs
+ * are delegated in static/js/ui-handlers.js via data-tab, using the real
+ * event object.
+ */
 
-/* ── Collapsible sections ────────────────────────────────────── */
-function toggleCollapse(header) {
-    const body = header.nextElementSibling;
-    const icon = header.querySelector('.collapse-icon');
-    if (body) {
-        body.classList.toggle('collapsed');
-        if (icon) {
-            icon.textContent = body.classList.contains('collapsed') ? '\u25B6' : '\u25BC';
-        }
-    }
-}
+/* ── Collapsible sections ──────────────────────────
+ * Removed. One of two identical definitions (the other lived inline in
+ * user_stories.html), and its only caller was an onclick= attribute the
+ * CSP blocks. Collapsing is now delegated in static/js/ui-handlers.js via
+ * data-collapse, and the chevron rotates in CSS rather than having a text
+ * triangle written over the lucide icon it contains.
+ */
 
-/* ── Test case filter ────────────────────────────────────────── */
-function filterTC(category, btn) {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.tc-card').forEach(card => {
-        card.style.display = (category === 'all' || card.dataset.category === category) ? '' : 'none';
-    });
-}
+/* ── Test case filter ──────────────────────────────────────────
+ * Removed. This was a *second* definition of filterTC — the one in
+ * test_cases.html's inline block shadowed it, and that one also honoured
+ * the suite filter this copy ignored. Both were dead either way: the
+ * buttons calling them were inline onclick= attributes, which the CSP
+ * blocks. Filtering now lives in static/js/ui-handlers.js.
+ */
 
 /* ── Drag & Drop file upload ───────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {

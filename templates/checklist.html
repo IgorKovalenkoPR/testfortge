@@ -420,10 +420,10 @@
 
 <div class="filter-bar">
     <label>{{ t.filter }}:</label>
-    <button class="filter-btn active" onclick="filterCL('all', this)">{{ t.all }}</button>
-    <button class="filter-btn" onclick="filterCL('Positive', this)">{{ t.positive }}</button>
-    <button class="filter-btn" onclick="filterCL('Negative', this)">{{ t.negative }}</button>
-    <button class="filter-btn" onclick="filterCL('Edge Case', this)">{{ t.edge_case }}</button>
+    <button class="filter-btn active" data-filter-scope=".cl-row" data-filter-key="category" data-filter="all">{{ t.all }}</button>
+    <button class="filter-btn" data-filter-scope=".cl-row" data-filter-key="category" data-filter="Positive">{{ t.positive }}</button>
+    <button class="filter-btn" data-filter-scope=".cl-row" data-filter-key="category" data-filter="Negative">{{ t.negative }}</button>
+    <button class="filter-btn" data-filter-scope=".cl-row" data-filter-key="category" data-filter="Edge Case">{{ t.edge_case }}</button>
 </div>
 
 <div class="card">
@@ -573,12 +573,9 @@
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
 <script nonce="{{ csp_nonce }}">
-function filterCL(category, btn) {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.cl-row').forEach(row => {
-        row.style.display = (category === 'all' || row.dataset.category === category) ? '' : 'none';
-    });
-}
+// The category filter now lives in static/js/ui-handlers.js, driven by
+// data-filter-scope / data-filter-key / data-filter. Its buttons used
+// inline handler attributes, which this app's CSP blocks, so filtering
+// had never worked here.
 </script>
 {% endblock %}

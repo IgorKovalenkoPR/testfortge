@@ -201,7 +201,7 @@
             🎯 {{ t.get('bug_run_filter_label', 'Run:') }}
         </label>
         <select id="bug-run-select" name="run" class="form-select"
-                onchange="this.form.submit()"
+                data-autosubmit
                 style="font-size:0.85em;padding:4px 8px;border:1px solid #cbd5e1;
                        border-radius:6px;max-width:420px;">
             <option value="all" {% if not run_filter %}selected{% endif %}>

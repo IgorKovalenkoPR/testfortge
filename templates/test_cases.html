@@ -533,29 +533,29 @@
 
 <!-- Tabs -->
 <div class="tabs">
-    <button class="tab active" onclick="showTab('testcases')">{{ t.nav_test_cases }}</button>
-    <button class="tab" onclick="showTab('traceability')">{{ t.traceability_matrix }}</button>
+    <button class="tab active" data-tab="testcases">{{ t.nav_test_cases }}</button>
+    <button class="tab" data-tab="traceability">{{ t.traceability_matrix }}</button>
 </div>
 
 <!-- Test Cases Tab -->
 <div id="testcases" class="tab-content active">
     <div class="filter-bar">
         <label>{{ t.filter }}:</label>
-        <button class="filter-btn active" onclick="filterTC('all', this)">{{ t.all }}</button>
-        <button class="filter-btn" onclick="filterTC('Positive', this)">{{ t.positive }}</button>
-        <button class="filter-btn" onclick="filterTC('Negative', this)">{{ t.negative }}</button>
-        <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
-        <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
+        <button class="filter-btn active" data-filter-scope=".tc-card" data-filter-key="category" data-filter="all">{{ t.all }}</button>
+        <button class="filter-btn" data-filter-scope=".tc-card" data-filter-key="category" data-filter="Positive">{{ t.positive }}</button>
+        <button class="filter-btn" data-filter-scope=".tc-card" data-filter-key="category" data-filter="Negative">{{ t.negative }}</button>
+        <button class="filter-btn" data-filter-scope=".tc-card" data-filter-key="category" data-filter="Edge Case">{{ t.edge_case }}</button>
+        <button class="filter-btn" data-filter-scope=".tc-card" data-filter-key="category" data-filter="Security">{{ t.security }}</button>
     </div>
     {# PR-D suite filter — sits separately from the category chips
        above so the two axes compose (e.g. Positive ∩ Smoke). The
        "All suites" reset is the default. #}
     <div class="filter-bar" style="margin-top:8px;">
         <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
-        <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Regression', this)">Regression</button>
-        <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
+        <button class="filter-btn-suite active" data-filter-scope=".tc-card" data-filter-key="suite" data-filter="all">{{ t.get('filter_suite_all', 'All suites') }}</button>
+        <button class="filter-btn-suite" data-filter-scope=".tc-card" data-filter-key="suite" data-filter="Smoke">Smoke</button>
+        <button class="filter-btn-suite" data-filter-scope=".tc-card" data-filter-key="suite" data-filter="Regression">Regression</button>
+        <button class="filter-btn-suite" data-filter-scope=".tc-card" data-filter-key="suite" data-filter="E2E">E2E</button>
     </div>
 
     {# PR-E browser-extension trigger. Visible only when RECORDER_ENABLED
@@ -852,7 +852,7 @@
 
         <div class="tc-status-row">
             <label>{{ t.status }}:</label>
-            <select class="status-select" onchange="this.className='status-select status-'+this.value.toLowerCase().replace(' ','-')">
+            <select class="status-select" data-status-class-prefix="status-select">
                 <option value="Unchecked">{{ t.unchecked }}</option>
                 <option value="Passed">{{ t.passed }}</option>
                 <option value="Failed">{{ t.failed }}</option>
@@ -1109,43 +1109,11 @@
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
 <script nonce="{{ csp_nonce }}">
-function showTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
-}
-// PR-D — category filter and suite filter compose multiplicatively
-// (a card is visible iff it passes both). Both filters keep their
-// current selection in module-level vars so we don't need to read it
-// out of the DOM on every change.
-var _activeCategory = 'all';
-var _activeSuite = 'all';
-
-function _applyFilters() {
-    document.querySelectorAll('.tc-card').forEach(card => {
-        var catOk = (_activeCategory === 'all'
-                      || card.dataset.category === _activeCategory);
-        var suiteOk = (_activeSuite === 'all'
-                        || card.dataset.suite === _activeSuite);
-        card.style.display = (catOk && suiteOk) ? '' : 'none';
-    });
-}
-
-function filterTC(category, btn) {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    _activeCategory = category;
-    _applyFilters();
-}
-
-function filterSuite(suite, btn) {
-    document.querySelectorAll('.filter-btn-suite').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    _activeSuite = suite;
-    _applyFilters();
-}
-
+// PR-D's category × suite filter now lives in static/js/ui-handlers.js,
+// driven by data-filter-scope / data-filter-key / data-filter. It still
+// composes multiplicatively — a card is visible iff it passes every active
+// key — but the buttons that drove it were inline handler attributes,
+// which this app's CSP blocks, so none of it had ever run.
 // PR-B Recorder: per-TC <details> block updates its CLI command as the
 // tester types a Start URL, and the Copy button pushes the rendered
 // command onto the clipboard. No-op when the Recorder section is gated

@@ -35,7 +35,7 @@
 </div>
 
 <div class="card collapsible">
-    <h2 class="collapsible-header" onclick="toggleCollapse(this)">
+    <h2 class="collapsible-header" data-collapse>
         <span class="collapse-icon"><i data-lucide="chevron-down" class="icon-sm"></i></span> {{ t.us_parsed_requirements }} ({{ requirements|length }})
     </h2>
     <div class="collapsible-body">
@@ -92,13 +92,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
-<script nonce="{{ csp_nonce }}">
-function toggleCollapse(header) {
-    const body = header.nextElementSibling;
-    const icon = header.querySelector('.collapse-icon');
-    body.classList.toggle('collapsed');
-    icon.textContent = body.classList.contains('collapsed') ? '\u25B6' : '\u25BC';
-}
-</script>
-{% endblock %}
+{# Collapsing is handled by static/js/ui-handlers.js via data-collapse.
+   The copy that lived here was one of two identical definitions (the other
+   in app.js), and both were unreachable: their inline handler attribute is
+   blocked by the CSP. #}

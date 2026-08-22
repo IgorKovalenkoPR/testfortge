@@ -191,7 +191,7 @@
     </div>
     <div class="form-actions">
       <button type="submit" class="btn btn-secondary btn-sm"
-              onclick="return confirm('{{ t.get('move_confirm', 'Move all artefacts of the active project? This rewrites their project_id.') }}')">
+              data-confirm="{{ t.get('move_confirm', 'Move all artefacts of the active project? This rewrites their project_id.') }}">
         <i data-lucide="move" class="icon-sm"></i>
         {{ t.get('move_btn', 'Move artefacts') }}
       </button>
@@ -227,7 +227,7 @@
             <button type="submit" class="btn btn-sm btn-success"><i data-lucide="save" class="icon-sm"></i> {{ t.save_project }}</button>
         </form>
         <form method="POST" action="{{ url_for('new_session') }}" style="display:inline"
-              onsubmit="return confirm('{{ t.new_session_confirm }}')">
+              data-confirm="{{ t.new_session_confirm }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger"><i data-lucide="x" class="icon-sm"></i> {{ t.new_session }}</button>
         </form>
@@ -747,7 +747,7 @@
                         </button>
                     </form>
                     <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
-                          onsubmit="return confirm('{{ t.delete_confirm }}')">
+                          data-confirm="{{ t.delete_confirm }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs btn-danger" aria-label="{{ t.delete }}"><i data-lucide="trash-2" class="icon-sm"></i></button>
                     </form>

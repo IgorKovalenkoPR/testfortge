@@ -420,15 +420,24 @@ class TestReviewPost:
 class TestSuiteFilterUI:
     def test_test_cases_page_renders_suite_chips(self, client, staged_draft):
         """/test-cases must surface the 4-button suite filter row added
-        in PR-D."""
+        in PR-D.
+
+        Asserted on ``data-filter-key="suite"`` rather than on the old
+        ``filterSuite(`` string. That string was an inline ``onclick=``
+        attribute, which this app's CSP blocks — so the assertion was
+        checking for the presence of markup that could not work, and would
+        have kept passing for as long as the chips stayed broken.
+        """
         resp = client.get("/test-cases")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "filterSuite(" in body
+        assert 'data-filter-key="suite"' in body
         assert "All suites" in body
         assert ">Smoke<" in body
         assert ">Regression<" in body
         assert ">E2E<" in body
+        # The chips are only wired if the delegated handler is loaded.
+        assert "js/ui-handlers.js" in body
 
     def test_test_execution_page_renders_run_only_knob(self, client,
                                                        staged_draft):

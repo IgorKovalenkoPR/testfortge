@@ -234,6 +234,12 @@
     </script>
 
     <script src="{{ url_for('static', filename='js/app.js') }}" nonce="{{ csp_nonce }}"></script>
+    {# Delegated replacements for inline on* attributes, which the CSP
+       blocks — a nonce does not whitelist a handler attribute. Loaded for
+       every page because the data-confirm guard protects destructive
+       actions, and a page that forgot to include it would lose them
+       silently, which is exactly how the inline versions failed. #}
+    <script src="{{ url_for('static', filename='js/ui-handlers.js') }}" nonce="{{ csp_nonce }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

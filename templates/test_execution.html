@@ -82,7 +82,7 @@
        on it returned 405 Method Not Allowed in the operator video). #}
     <form method="POST" action="{{ url_for('new_session') }}"
           style="display:inline;margin:0;"
-          onsubmit='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
+          data-confirm='{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}'>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-secondary"
                 style="font-size:0.8em;padding:6px 12px;">

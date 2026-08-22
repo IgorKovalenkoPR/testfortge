@@ -235,7 +235,14 @@ a:hover { text-decoration: underline; }
 /* ── Collapsible ──────────────────────────────────────────────── */
 .collapsible-header { cursor: pointer; user-select: none; }
 .collapsible-header:hover { color: var(--primary); }
-.collapse-icon { font-size: .8rem; margin-right: .3rem; }
+.collapse-icon { font-size: .8rem; margin-right: .3rem;
+                 display: inline-block; transition: transform .15s ease; }
+/* Rotate the chevron instead of overwriting it. Both former copies of
+   toggleCollapse wrote a text triangle into .collapse-icon — which holds a
+   lucide <i> element, so the glyph would have replaced the icon. Neither
+   copy ever ran (their onclick= was blocked by the CSP), so it was never
+   seen; rotating is what the markup was always asking for. */
+.collapsible-header.collapsed .collapse-icon { transform: rotate(-90deg); }
 .collapsible-body.collapsed { display: none; }
 
 /* ── Forms ────────────────────────────────────────────────────── */

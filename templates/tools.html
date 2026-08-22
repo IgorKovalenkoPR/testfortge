@@ -20,8 +20,8 @@
 
 {% if tool_recs %}
 <div class="tabs">
-    <button class="tab active" onclick="showTab('testing-tools')">{{ t.tools_testing }}</button>
-    <button class="tab" onclick="showTab('nocode-tools')">{{ t.tools_nocode }}</button>
+    <button class="tab active" data-tab="testing-tools">{{ t.tools_testing }}</button>
+    <button class="tab" data-tab="nocode-tools">{{ t.tools_nocode }}</button>
 </div>
 
 <!-- Testing Tools Tab -->
@@ -114,11 +114,5 @@
 
 {% block scripts %}
 <script nonce="{{ csp_nonce }}">
-function showTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
-}
 </script>
 {% endblock %}

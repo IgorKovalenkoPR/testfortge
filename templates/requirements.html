@@ -51,7 +51,8 @@
 <div class="card card-info">
     <h3>{{ t.req_example_title }}</h3>
     <pre class="example-block">{{ t.req_example_text }}</pre>
-    <button type="button" class="btn btn-sm" onclick="document.getElementById('requirements_text').value=this.parentElement.querySelector('pre').textContent">
+    <button type="button" class="btn btn-sm"
+            data-fill-target="requirements_text" data-fill-from="pre">
         {{ t.insert_example }}
     </button>
 </div>
