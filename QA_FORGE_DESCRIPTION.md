@@ -420,16 +420,9 @@ F:/Claude_AI_Project/
 |   |-- base.html                  # Master layout + sidebar
 |   |-- index.html                 # Dashboard
 |   |-- setup.html                 # Project setup form
-|   |-- requirements.html          # Requirements input
-|   |-- user_stories.html          # Generated stories display
 |   |-- input_stories.html         # Direct story input
 |   |-- test_cases.html            # TestFort test cases
 |   |-- checklist.html             # TestFort checklist
-|   |-- status_report.html         # Status report form + output
-|   |-- test_metrics.html          # Metrics tables (3 tabs)
-|   |-- techniques.html            # Test design techniques
-|   |-- recommendations.html       # Types, focus, standards
-|   |-- tools.html                 # Tool recommendations
 |   |-- guide.html                 # Step-by-step guide
 |-- static/
 |   |-- css/style.css              # Complete stylesheet (~800 lines)

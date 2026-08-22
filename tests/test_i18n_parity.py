@@ -65,7 +65,6 @@ UA = TRANSLATIONS["ua"]
 DELIBERATELY_ENGLISH = {
     # Proper nouns, abbreviations, and words spelled the same way
     "chat_title": "Tedgie is a name",
-    "us_id": "ID",
     "est_min": "MIN", "est_max": "MAX",
     "login_email": "Email is used as-is in Ukrainian",
     "reset_email_label": "Email",
@@ -88,20 +87,22 @@ DELIBERATELY_ENGLISH = {
     "te_formats": "a list of file extensions",
     "bug_status_open": "bug statuses stay English, like the severities",
     # The QA vocabulary this team writes in English
-    "nav_user_stories": "User Story is used untranslated in QA here",
-    "dash_user_stories": "as above",
     "us_stories_label": "as above",
     "user_story": "as above",
     "edge_case": "Edge Case",
     # (Five entries left this list in §14 along with the dead keys they
     #  described — te_passed, te_failed, te_blocked, est_persona_label and
     #  lang_en were translated and rendered nowhere.)
+    # (Eight more left in E11, when seven unrouted templates were deleted
+    #  and took 114 keys with them: us_id, nav_user_stories,
+    #  dash_user_stories, tm_pass, tm_fail, tm_pass_but, tm_bugs_minor and
+    #  tm_bugs_low. tm_bugs_critical and tm_bugs_major stayed — the
+    #  dashboard still renders those two, which is why the split looks
+    #  arbitrary and is not.)
     "passed": "test statuses stay English, as in the team's test plans",
     "failed": "as above", "passed_but": "as above", "blocked": "as above",
-    "tm_pass": "as above", "tm_fail": "as above", "tm_pass_but": "as above",
     "tm_bugs_critical": "severity names stay English",
-    "tm_bugs_major": "as above", "tm_bugs_minor": "as above",
-    "tm_bugs_low": "as above",
+    "tm_bugs_major": "as above",
 }
 
 #: Text in markup that is identical in every language, with the reason.

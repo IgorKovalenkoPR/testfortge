@@ -99,7 +99,19 @@
 ### 1.12. Допоміжні сторінки (docs / static)
 **`GET /guide`** — вбудований User Guide: карткове меню модулів (Dashboard, Estimation, Test Cases, Checklist, Test Execution, Bug Reports, Tedgie, Projects, Pro tips), кожна картка відкриває панель з workflow, ключовими контролами й типовими помилками.
 
-> Шаблони `techniques.html`, `tools.html`, `requirements.html`, `recommendations.html`, `status_report.html`, `test_metrics.html` існують у `templates/`, але **наразі не зареєстровані як маршрути** (легасі/заплановані освітні сторінки). Не покладайтеся на прямі URL до них.
+> **Видалено 2026-08-22 (E11).** Шаблони `techniques.html`, `tools.html`,
+> `requirements.html`, `recommendations.html`, `status_report.html`,
+> `test_metrics.html` та `user_stories.html` лежали в `templates/` без
+> жодного маршруту — цей абзац описував їх як «легасі/заплановані освітні
+> сторінки». Останні змістовні правки в них датуються 2026-05-19 і раніше,
+> `status_report.html` помер разом із модулем Test Plan, а `user_stories.html`
+> не був зареєстрований ніколи.
+>
+> Причина видалення, а не збереження: вони були пасткою. Десять із
+> тридцяти одного inline-обробника, які CSP блокує, жили саме в них — тобто
+> сторінки, які ніхто не відкриває, витрачали час на ревʼю й правки. Жодного
+> ключа i18n це не осиротило (перевірено проти `test_i18n_parity`).
+> Історія git зберігає їх, якщо якась із цих сторінок повернеться в план.
 
 ---
 

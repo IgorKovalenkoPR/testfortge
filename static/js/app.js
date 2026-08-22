@@ -90,11 +90,12 @@ document.addEventListener('DOMContentLoaded', () => {
  */
 
 /* ── Collapsible sections ──────────────────────────
- * Removed. One of two identical definitions (the other lived inline in
- * user_stories.html), and its only caller was an onclick= attribute the
- * CSP blocks. Collapsing is now delegated in static/js/ui-handlers.js via
- * data-collapse, and the chevron rotates in CSS rather than having a text
- * triangle written over the lucide icon it contains.
+ * Removed. One of two identical definitions -- the other lived inline in
+ * user_stories.html, which was itself unrouted and has since been deleted.
+ * Its only caller was a handler attribute the CSP blocks. Collapsing is
+ * delegated in static/js/ui-handlers.js via data-collapse, and the chevron
+ * rotates in CSS rather than having a text triangle written over the lucide
+ * icon it contains.
  */
 
 /* ── Test case filter ──────────────────────────────────────────

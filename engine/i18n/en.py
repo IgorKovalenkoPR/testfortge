@@ -3,13 +3,8 @@
 TRANSLATIONS = {
     # Navigation
     "nav_dashboard": "Dashboard",
-    "nav_user_stories": "User Stories",
     "nav_test_cases": "Test Cases",
     "nav_checklist": "Checklist",
-    "nav_techniques": "Techniques",
-    "nav_recommendations": "Recommendations",
-    "nav_tools": "Tools",
-    "nav_status_report": "Status Report",
     "nav_test_metrics": "Test Metrics",
     "nav_guide": "Guide",
     "nav_export": "Export",
@@ -31,8 +26,6 @@ TRANSLATIONS = {
     "delete": "Delete",
     "save_project": "Save Project",
     "dash_requirements": "Requirements",
-    "dash_user_stories": "User Stories",
-    "dash_acceptance_criteria": "Acceptance Criteria",
     "dash_feat_tc_title": "Test Cases & Checklists",
     "dash_feat_tc_desc": "Generate positive, negative and edge case test cases or compact checklists in TestFort format",
     # Setup
@@ -95,21 +88,17 @@ TRANSLATIONS = {
     "release_quarterly": "Quarterly",
 
     # Requirements
-    "req_title": "Requirements Input",
-    "req_subtitle": "Upload requirements or enter them manually",
     "text_input": "Text Input",
     "file_upload": "File Upload",
     "file_upload_hint": "Drag files here or click to select",
     "supported_formats": "Supported formats: .txt, .md, .docx, .xlsx, .csv, .pdf, .png, .jpg, .jpeg, .mp4, .webm, .avi, .mov, .mkv, .flv, .wmv, .gif",
     "generate_btn": "Generate",
-    "insert_example": "Insert Example",
     "custom_prompt": "Additional Instructions (optional)",
     "custom_prompt_hint": "e.g. 'focus on security and edge cases', 'cover only smoke tests', 'add negative scenarios for the login flow', 'check WCAG accessibility'. Plain English or Ukrainian. The generator detects testing types, narrowing keywords ('only', 'just', 'тільки'), and area focus.",
     "input_placeholder": "Paste requirements, user stories, test data, or any relevant information...",
 
     # Shared input block titles
     "input_title_default": "Input: Requirements, Project Documents, or Attachments",
-    "input_title_additional": "Additional Data: Attachments & Instructions",
 
     # Common
     "step": "Step",
@@ -142,23 +131,11 @@ TRANSLATIONS = {
     "reasoning": "Reasoning",
     "subtypes": "Subtypes",
     "module": "Module",
-    "why_critical": "Why Critical",
     "recommended_tools": "Recommended tools",
     "notes": "Notes",
-    "required_badge": "Required",
-    "recommended_badge": "Recommended",
-    "existing_data_hint": "You can also generate from existing project data (User Stories, Test Cases) if they are already created.",
     "go": "Go",
 
     # User Stories
-    "us_generated": "Generated",
-    "us_from_requirements": "User Stories from",
-    "us_requirements_word": "requirements",
-    "us_parsed_requirements": "Parsed Requirements",
-    "us_as_a": "As a",
-    "us_i_want": "I want",
-    "us_so_that": "so that",
-    "us_acceptance_criteria": "Acceptance Criteria",
 
     # Test Cases
     "tc_title": "Test Cases",
@@ -187,102 +164,18 @@ TRANSLATIONS = {
     "cl_how_to_desc": "Enter requirements or upload files above, then click Generate.",
 
     # Status Report
-    "sr_title": "Status Report",
-    "sr_subtitle": "Daily/weekly testing status report",
     "sr_date": "Report Date",
-    "sr_what_done": "What has been done",
-    "sr_what_planned": "What's planned",
-    "sr_bugs": "Bugs",
-    "sr_features_tested": "Features Tested",
-    "sr_platforms_tested": "Platforms Tested",
-    "sr_bugs_found": "Bug References",
-    "sr_next_steps": "Next Steps",
-    "sr_report_details": "Report Details",
-    "sr_features_placeholder": "e.g. Login, Registration, Dashboard",
-    "sr_platforms_placeholder": "e.g. Chrome, Firefox, iOS Safari",
-    "sr_bugs_placeholder": "e.g. BUG-101, BUG-102, BUG-103",
-    "sr_stats_summary": "Statistics Summary",
     # Test Metrics
-    "tm_title": "Test Metrics",
-    "tm_subtitle": "Coverage, execution summary, and issues breakdown",
-    "tm_input_data": "Metrics Input Data",
-    "tm_devices_label": "Devices / Browsers (comma-separated)",
-    "tm_devices_placeholder": "e.g. Chrome Windows, Safari macOS, iPhone 14 Pro",
-    "tm_tc_execution": "Test Case Execution Data",
-    "tm_bugs_data": "Bugs / Defects Data",
-    "tm_total_tc": "Total Test Cases",
-    "tm_total_bugs": "Total Bugs",
     "tm_bugs_critical": "Critical / Blocker",
     "tm_bugs_major": "Major",
-    "tm_bugs_minor": "Minor",
-    "tm_bugs_low": "Low",
-    "tm_kpi_title": "Key Performance Indicators (KPIs)",
-    "tm_coverage": "Coverage Completion Table",
-    "tm_execution": "Test Execution Summary by Platforms",
-    "tm_issues": "Issues Summary",
-    "tm_device": "Device",
-    "tm_overall": "Overall # checks",
-    "tm_remaining": "Remaining",
-    "tm_percentage": "Percentage",
-    "tm_pass": "Pass",
-    "tm_fail": "Fail",
-    "tm_pass_but": "Pass but",
-    "tm_by_platform": "Issues by Platform",
-    "tm_by_type": "Defect Type",
-    "tm_by_status": "Status (for dev team)",
-    "tm_by_severity": "Defect Severity",
-    "tm_how_to_title": "How to generate Test Metrics",
-    "tm_how_to_desc": "Enter your test execution data above (test case counts, bug counts), then click Generate. You can also:",
-    "tm_how_to_1": "Upload a test report file (CSV, XLSX, TXT) with execution data",
-    "tm_how_to_2": "Leave fields empty to auto-populate from generated Test Cases in this project",
-    "tm_how_to_3": "Add devices/browsers to see per-platform coverage breakdown",
-    "tm_history_title": "Metrics over time",
-    "tm_history_subtitle": "Pass rate (%) and defect density (×100) per snapshot. Activate a project and run something to start the timeline.",
-    "tm_history_empty": "No snapshots yet — they’re written automatically when you load the dashboard or finish an automation run.",
 
     # Techniques
-    "tech_title": "Test Design Techniques",
-    "tech_subtitle": "Recommended test design techniques for your project",
-    "tech_found": "Techniques Found",
     "when_to_use": "When to use",
     "example": "Example",
-    "why_for_project": "Why for your project",
-    "tech_how_to_title": "How to get Technique Recommendations",
-    "tech_how_to_desc": "Upload project requirements or enter a description above, then click Generate. Techniques are recommended dynamically based on your project's actual content:",
-    "tech_how_to_1": "Authentication features → Security testing techniques",
-    "tech_how_to_2": "Forms and inputs → Boundary Value Analysis, Equivalence Partitioning",
-    "tech_how_to_3": "APIs → API testing, State Transition Testing",
-    "tech_how_to_4": "Payment flows → Decision Table Testing, Error Guessing",
 
     # Recommendations
-    "rec_title": "Testing Recommendations",
-    "rec_subtitle": "Testing types, focus areas, and standards",
-    "rec_testing_types": "Testing Types",
-    "rec_focus_areas": "Focus Areas & Edge Cases",
-    "rec_standards": "Standards",
-    "rec_critical_modules": "Critical Modules",
-    "rec_edge_cases": "Edge Cases & Negative Scenarios",
-    "rec_platform_checks": "Platform: What to Test",
-    "rec_domain_standards": "Domain Standards",
-    "rec_how_to_title": "How to get Recommendations",
-    "rec_how_to_desc": "Upload project requirements or enter a description above, then click Generate. Recommendations are personalized based on your project content:",
-    "rec_how_to_1": "Testing Types — Functional, Security, Performance, Accessibility, etc. based on detected features",
-    "rec_how_to_2": "Focus Areas — Critical modules, edge cases, platform-specific checks",
-    "rec_how_to_3": "Standards — Relevant ISO, OWASP, WCAG, GDPR based on your domain and features",
 
     # Tools
-    "tools_title": "Tools Recommendations",
-    "tools_subtitle": "Recommended testing tools with reasoning",
-    "tools_testing": "Testing Tools",
-    "tools_nocode": "No-Code Automation",
-    "tools_best_for": "Best for",
-    "tools_nocode_empty": "No-code automation is not recommended for the current project configuration, or the module is disabled in settings.",
-    "tools_how_to_title": "How to get Tool Recommendations",
-    "tools_how_to_desc": "Upload project requirements or enter a description above, then click Generate. Tool recommendations are based on detected features:",
-    "tools_how_to_1": "API features → Postman, Swagger, REST Assured",
-    "tools_how_to_2": "Security features → OWASP ZAP, Burp Suite",
-    "tools_how_to_3": "Performance concerns → JMeter, k6, Lighthouse",
-    "tools_how_to_4": "Mobile platform → Appium, BrowserStack",
 
     # Input Stories
     "is_title": "User Stories — Direct Input",
@@ -320,12 +213,8 @@ TRANSLATIONS = {
     "mod_focus_areas_desc": "Critical modules, edge cases, standards & certifications",
 
     # Requirements page
-    "req_placeholder": "Paste requirements here...\n\nSupported formats:\n• Numbered list: 1. The system must...\n• Bullet list: - Users shall be able to...\n• REQ-ID: REQ-001: The application must...",
-    "req_example_title": "Example Requirements",
-    "req_example_text": "1. The system must allow users to register using email and password.\n2. Users must be able to log in using their credentials.\n3. The application must display a product catalog with filtering.\n4. Users must be able to add items to cart.\n5. Checkout must support credit card payments via Stripe.\n6. Order status must be trackable in real time.\n7. Admin panel must allow managing products.\n8. The system must send email notifications.\n9. Search must support filters by category, price, and rating.\n10. User profile must allow editing personal info.",
 
     # Status report extra
-    "sr_next_steps_placeholder": "One step per line",
 
     # Delete confirm
     # E8.5. The old text was "Delete project?", which asks about the
@@ -343,10 +232,7 @@ TRANSLATIONS = {
     "export_project_title": "Download everything this project holds, as a zip",
 
     # User stories page
-    "us_id": "ID",
-    "us_requirement_text": "Requirement Text",
     "us_stories_label": "User Stories",
-    "us_original": "Original",
 
     # Guide
     # MVP
