@@ -52,7 +52,29 @@ def tmp_storage(tmp_path, monkeypatch):
 @pytest.fixture
 def patched_subprocess(monkeypatch):
     """Capture the argv the route would Popen, so we can read the
-    serialised config_payload without actually spawning a worker."""
+    serialised config_payload without actually spawning a worker.
+
+    The cap is lifted here because this fixture's worker never finishes.
+    Dispatch now opens an ExecutionRun row before spawning (E11 — the
+    Playwright path used to create none, which left the Runs register blind
+    and the concurrency gate counting zero forever). A real worker closes
+    its row when results are imported; ``_FakePopen`` cannot, so every test
+    using this fixture leaves an open browser run behind.
+
+    With ORG_MODE=1 that is fatal to the *next* test: ``_run_limit_scope``
+    resolves through ``current_org_id()``, so the whole organisation's
+    projects are in scope and the previous test's abandoned run trips the
+    limit. The route then flashes and redirects instead of dispatching,
+    Popen is never called, and the assertion fails as ``KeyError: 'argv'``
+    — six tests at once, and only in CI, because org mode is off by default
+    locally. Exactly the failure the auth-on matrix leg exists to catch.
+
+    These tests are about run-mode parsing and TC projection, not about
+    fair use. ``tests/test_run_limits.py`` owns the cap, including the
+    route-level refusal, so lifting it here removes an interaction rather
+    than coverage.
+    """
+    monkeypatch.setenv("TESTFORTGE_MAX_CONCURRENT_RUNS", "10000")
     captured: dict = {}
 
     class _FakePopen:
