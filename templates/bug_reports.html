@@ -7,11 +7,17 @@
     read-only rather than offering an editor that would 404 on save. -#}
 {% set bug_edit = edit_metadata('bugs') %}
 
-{% macro bug_field_edit(bug, field, value, kind="text", label=None) %}
+{# ``choices`` must be passed for every kind="choice" field. Without it
+   _inline_edit omits data-ie-choices, inline-edit.js builds the <select>
+   from an empty list, and the only option left is the value the field
+   already has — an editor that renders, opens, and cannot change
+   anything. That was live for severity and priority. -#}
+{% macro bug_field_edit(bug, field, value, kind="text", label=None, choices=None) %}
   {%- set meta = bug_edit.get(bug.id) if bug_edit else None -%}
   {{ editable("bug", bug.id, field, value,
               version=meta.row_version if meta else None,
-              kind=kind, label=label, readonly=(meta is none)) }}
+              kind=kind, label=label, choices=choices,
+              readonly=(meta is none)) }}
 {%- endmacro %}
 {% block title %}{{ t.get('bug_title', 'Bug Reports') }}{% endblock %}
 
@@ -285,8 +291,8 @@
             {{ edited_marker(t.get('bug_edited', 'edited')) }}
         </span>
         <div class="bug-badges">
-            <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug_field_edit(bug, "severity", bug.severity, kind="choice") }}</span>
-            <span class="badge priority-badge">{{ bug_field_edit(bug, "priority", bug.priority, kind="choice") }}</span>
+            <span class="badge severity-badge-{{ bug.severity | lower }}">{{ bug_field_edit(bug, "severity", bug.severity, kind="choice", choices=severities) }}</span>
+            <span class="badge priority-badge">{{ bug_field_edit(bug, "priority", bug.priority, kind="choice", choices=priorities) }}</span>
             {%- if bug_edit.get(bug.id) and editors_enabled() %}
             {# Only the statuses reachable from this bug's current one, so the
                control cannot offer a move the server will refuse. Closing is
@@ -694,8 +700,14 @@ pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consola
         refresh();
     });
 
-    // Initial sync (browser may restore checkbox state on reload).
-    showValueFor('');
+    // Initial sync. The browser restores the *select* on reload too, not
+    // just the checkboxes — so this has to read the restored action rather
+    // than assume "none". Passing '' here re-disabled every value field
+    // while the action still read "Set severity", so Apply posted
+    // action=severity with no severity_value, and the handler wrote NULL:
+    // the audit log said "severity -> None" and the card kept showing
+    // Minor because workspace.py renders `row.severity or "Minor"`.
+    showValueFor(actionSel.value);
     refresh();
 })();
 

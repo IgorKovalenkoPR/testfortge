@@ -966,6 +966,14 @@ def generate_test_cases(stories: list[UserStory], custom_prompt: str = "",
             test_steps=steps_text, test_data=tmpl.test_data,
             expected_result=tmpl.expected_result,
             category=tmpl.category, priority=tmpl.priority,
+            # Carry the owning story through. Omitting it here is why the
+            # exported Traceability Matrix printed every requirement with
+            # empty Test Cases and Categories columns: generate_traceability
+            # joins on exactly this field, and _make_tc (the other
+            # constructor in this module) has always set it. Templates with
+            # no owning story — the KB-derived area packs — legitimately
+            # have none, and those rows stay empty by design.
+            user_story_id=getattr(tmpl, "user_story_id", "") or "",
         )
         # Stash testing_type on the TC so exporters / UI / filters can
         # pick it up. Older code paths that read TestCase as a dataclass

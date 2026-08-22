@@ -1172,7 +1172,7 @@ TRANSLATIONS = {
     "est_team_override": "Override",
     "est_team_size_hint": "TestForTge suggests a headcount from the "
                           "estimate. Override only if you have a fixed team "
-                          "— it feeds Brooks\\",
+                          "— it feeds Brooks's-law communication overhead.",
     "est_tab_text": "Requirements text",
     "est_tab_mockups": "Mockups",
     "est_tab_url": "URL crawl",

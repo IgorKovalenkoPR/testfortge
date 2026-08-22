@@ -166,6 +166,27 @@ class TestE2ENewSessionClearsAll:
 class TestE2EInstructionFiltering:
     """Instruction text in user input must never appear in generated output."""
 
+    @pytest.fixture(autouse=True)
+    def _no_live_crawl(self, monkeypatch):
+        """Keep the network out of it.
+
+        The input below names a real URL, so generation crawls it. That was
+        free while the crawler was broken — every fetch raised TypeError
+        before opening a socket (E11), so the whole POST finished inside
+        SYNC_GEN_BUDGET_S and returned 200. With the fetch repaired, a real
+        multi-page crawl of a live site blows that budget, the route falls
+        back to the async path exactly as designed, and the assertion below
+        saw a 302.
+
+        The test is about instruction text not leaking into generated
+        output, so the crawl is incidental to it and the honest fix is to
+        remove it rather than widen the budget. Stubbed at ``_fetch_page``
+        so ``crawl_site``'s own logic still runs.
+        """
+        from engine import site_crawler
+        monkeypatch.setattr(site_crawler, "_fetch_page",
+                            lambda url: ("", "stubbed: no network in tests"))
+
     def test_instructions_not_in_checklist(self, client):
         resp = client.post("/checklist", data={
             "input_text": ("Створи низькорівневий чек-ліст для https://testfort.com/.\n"

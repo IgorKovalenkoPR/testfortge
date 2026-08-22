@@ -1345,6 +1345,73 @@ def register(app: Flask) -> None:
                           "tc_binding": tc_binding,
                           "walkthrough": walkthrough_block,
                       }
+
+                      # Open the run row now, not when results are
+                      # imported. Until E11 this path created none at all:
+                      # the only start_execution_run on the POST was in the
+                      # per-environment loop further down, which this
+                      # branch returns before ever reaching. Three
+                      # consequences, all reported as separate defects:
+                      #
+                      #  * the Runs register (which reads
+                      #    list_execution_runs) could not show an automated
+                      #    run, in flight or finished;
+                      #  * run_limits.check() counts open rows, so the
+                      #    browser-run cap at the top of this handler
+                      #    counted zero forever and admitted every run —
+                      #    two Chromiums under one 380 MB ceiling, which is
+                      #    the OOM this file's own comment predicts;
+                      #  * a run whose worker died before the operator
+                      #    clicked Import left no trace whatsoever.
+                      #
+                      # A row per env_type, matching what the results
+                      # endpoint does, so the ids can simply be adopted
+                      # there instead of opening a second set.
+                      #
+                      # If the worker dies without finishing, these rows
+                      # stay "running" — deliberately survivable, because
+                      # run_limits.split_by_age ignores anything past its
+                      # staleness window, so a crashed run stops blocking
+                      # the cap on its own rather than wedging it.
+                      db_run_ids: dict[str, int] = {}
+                      try:
+                          _pid = ensure_active_project()
+                          if _pid:
+                              for _et in env_types:
+                                  _environment = (
+                                      (envs_meta.get(_et, {}) or {})
+                                      .get("environment") or _et.title())
+                                  db_run_ids[_et] = _db.start_execution_run(
+                                      _pid,
+                                      env_payload={
+                                          "env_type": _et,
+                                          "environment": _environment,
+                                          "tester_id": tester_id,
+                                          "tester_name": tester_name,
+                                          "testing_types": testing_types,
+                                          "source": source,
+                                          # run_limits reads this to decide
+                                          # whether the row counts as a
+                                          # browser run.
+                                          "mode": run_mode,
+                                          "site_url": site_url,
+                                      },
+                                      browser_visibility=(
+                                          "headless" if headless
+                                          else "visible"),
+                                      record_video=record_video,
+                                      base_url=base_url,
+                                  )
+                      except Exception as exc:
+                          # Not fatal: a run that cannot be registered is
+                          # still worth executing, and the results endpoint
+                          # falls back to opening its own row.
+                          log.warning(
+                              "automation: could not open run row(s): %s",
+                              exc)
+                          db_run_ids = {}
+                      config_payload["db_run_ids"] = db_run_ids
+
                       with open(config_path, "w", encoding="utf-8") as _f:
                           _json.dump(config_payload, _f)
 
@@ -2388,10 +2455,21 @@ def register(app: Flask) -> None:
         for et in env_types:
             environment = (envs_meta.get(et, {}) or {}).get("environment") \
                 or et.title()
-            db_run_id = None
+            # Adopt the row the dispatch path opened for this env, rather
+            # than opening a second one. Dispatch registers a run per
+            # env_type so the Runs register and the concurrency gate can
+            # see it while it is still in flight; without this lookup the
+            # import would double every automated run in the register.
+            #
+            # ``or None`` because an id of 0 is not a row, and older
+            # pending configs written before E11 have no db_run_ids key at
+            # all — those still fall through to opening one here.
+            db_run_id = ((cfg.get("db_run_ids") or {}).get(et)
+                         or (cfg.get("db_run_ids") or {}).get(str(et))
+                         or None)
             try:
                 pid = ensure_active_project()
-                if pid:
+                if pid and db_run_id is None:
                     db_run_id = _db.start_execution_run(
                         pid,
                         env_payload={

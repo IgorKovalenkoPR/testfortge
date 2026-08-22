@@ -46,6 +46,12 @@ class TCTemplate:
     # can tag the case heuristically. Generators that already know the right
     # testing type — SEO / Usability / Localization — set it explicitly.
     testing_type: str = ""
+    # The story this case covers, when it came from one.
+    # ``generate_traceability`` joins the matrix on it, so a template that
+    # loses it here produces a requirement row with empty Test Cases and
+    # Categories columns. Empty is correct for the KB-derived area packs,
+    # which cover an area rather than a single story.
+    user_story_id: str = ""
 
 
 @dataclass
@@ -589,6 +595,17 @@ def _story_test_cases(story, section: str) -> list[TCTemplate]:
         ))
     else:
         cases.extend(_generic_test_cases(action, story.original_text, section))
+
+    # Stamp the owning story on everything this path produced, in one place
+    # rather than in each of the three builders above. Without it
+    # ``generate_traceability`` has nothing to join on and the exported
+    # matrix prints every requirement with empty Test Cases and Categories
+    # columns — the traceability half of the export was blank for as long
+    # as this was missing.
+    story_id = getattr(story, "id", "") or ""
+    if story_id:
+        for case in cases:
+            case.user_story_id = story_id
 
     return cases
 

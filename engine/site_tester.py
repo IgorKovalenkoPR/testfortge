@@ -414,7 +414,8 @@ def _fetch_test_page(url: str, timeout: int = 8) -> TestPageData:
         # urlopen follows redirects by default, so validating only the
         # first URL let an allowed host bounce the fetch to a private
         # address. See engine.security._ValidatingRedirectHandler.
-        with _security.safe_opener().open(req, timeout=timeout, context=_SSL_CTX) as resp:
+        with _security.safe_opener(context=_SSL_CTX).open(
+                req, timeout=timeout) as resp:
             elapsed = time.monotonic() - start
             page.status_code = resp.status
             page.response_time_ms = int(elapsed * 1000)
@@ -500,7 +501,8 @@ def _check_url_status(url: str, timeout: int = 5) -> tuple[int, float]:
             req = urllib.request.Request(url, method=method, headers=_HEADERS)
             start = time.monotonic()
             # Same reason as above — every hop is checked.
-            with _security.safe_opener().open(req, timeout=timeout, context=_SSL_CTX) as resp:
+            with _security.safe_opener(context=_SSL_CTX).open(
+                    req, timeout=timeout) as resp:
                 elapsed = time.monotonic() - start
                 return resp.status, elapsed
         except urllib.error.HTTPError as e:

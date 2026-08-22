@@ -37,6 +37,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+import ssl
 import urllib.request
 from urllib.parse import urlparse
 
@@ -194,11 +195,28 @@ class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def safe_opener(*handlers) -> urllib.request.OpenerDirector:
+def safe_opener(*handlers,
+                context: ssl.SSLContext | None = None,
+                ) -> urllib.request.OpenerDirector:
     """An opener that applies the SSRF policy to redirects as well.
 
     Use this instead of :func:`urllib.request.urlopen` anywhere the URL is
     operator- or crawl-supplied. The extra handlers are appended, so a
     caller that needs its own (a cookie jar, a proxy) keeps them.
+
+    Pass a TLS context as ``context=`` **here**, not to ``.open()``. This
+    returns an :class:`~urllib.request.OpenerDirector`, whose ``open`` is
+    ``open(fullurl, data=None, timeout=...)`` — it takes no ``context``
+    argument, and ``urlopen``'s does. Three call sites carried the kwarg
+    over when they were moved off ``urlopen`` to pick up the redirect
+    policy, so every fetch raised ``TypeError`` before opening a socket,
+    was swallowed by a bare ``except``, and returned an empty page with a
+    message nothing displayed. The crawler reported "no strong
+    architecture signals" for every site on the internet for as long as
+    that lasted. Taking the context here means the mistake has nowhere to
+    live.
     """
-    return urllib.request.build_opener(_ValidatingRedirectHandler, *handlers)
+    extra = list(handlers)
+    if context is not None:
+        extra.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(_ValidatingRedirectHandler, *extra)

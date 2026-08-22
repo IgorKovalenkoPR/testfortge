@@ -47,6 +47,17 @@ from .projects import _require_project_owner
 log = get_logger(__name__)
 
 
+#: Bulk actions that set a field, and therefore cannot proceed without a
+#: value. ``close`` and ``delete`` take none; ``assign`` is left out on
+#: purpose, because an empty assignee legitimately means "unassign".
+#:
+#: Kept as an explicit tuple rather than read from ``db._BULK_COLUMN_MAP``
+#: so that adding a column-setting action there is a deliberate decision
+#: here too — silently inheriting one would reintroduce the NULL write
+#: this guards against.
+_VALUE_REQUIRED_ACTIONS = ("status", "severity", "priority", "fix_version")
+
+
 #: DB row → the session-flat shape ``dict_to_bug`` consumes.
 #:
 #: The mapping itself moved to :func:`engine.workspace.bug_row_to_dict` in
@@ -488,6 +499,20 @@ def register(app: Flask) -> None:
             flash(g.t.get("bug_bulk_invalid",
                           "Pick at least one bug and a valid action."),
                   "error")
+            return redirect(url_for("bug_reports_page"))
+
+        # An action that sets a field needs the field. Without this the
+        # handler accepted value=None and wrote NULL over every selected
+        # bug's severity/priority, logging "severity -> None" in each audit
+        # trail; the cards then still read Minor/Medium because
+        # workspace.py renders `row.severity or "Minor"`, so the damage was
+        # invisible until an export showed the real column. A missing value
+        # is a broken submission, not an instruction to clear the field.
+        if action in _VALUE_REQUIRED_ACTIONS and value is None:
+            flash(g.t.get(
+                "bug_bulk_missing_value",
+                "Pick a value for that action — nothing was changed."),
+                "error")
             return redirect(url_for("bug_reports_page"))
 
         # Most bulk actions are ordinary triage; `delete` destroys evidence

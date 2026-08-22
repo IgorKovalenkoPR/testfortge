@@ -197,4 +197,44 @@ class TestEveryFetchSiteUsesIt:
         import importlib
         import inspect
         src = inspect.getsource(importlib.import_module(f"engine.{module}"))
-        assert "safe_opener()" in src
+        # "safe_opener(" not "safe_opener()" — the TLS context is passed as
+        # a keyword argument now, so the empty-parens spelling no longer
+        # appears. Asserting the exact literal made this guard describe one
+        # call shape rather than the property it is about.
+        assert "safe_opener(" in src
+
+    @pytest.mark.parametrize("module", ["site_crawler", "site_tester"])
+    def test_no_call_site_passes_a_context_to_open(self, module):
+        """``OpenerDirector.open`` takes no ``context``; ``urlopen`` does.
+
+        All three fetch sites carried that keyword over when they moved off
+        ``urlopen`` to pick up the redirect policy above. Every call then
+        raised ``TypeError`` during argument binding — before DNS, before a
+        socket — and a bare ``except Exception`` turned it into an empty
+        page with an error string nothing rendered. The crawler reported
+        "No strong architecture signals" for every site on the internet.
+
+        The sibling test above could not see it: it calls
+        ``safe_opener().open(url, timeout=5)``, a shape no production call
+        site uses. So this asserts on the shape they *do* use.
+        """
+        import importlib
+        import inspect
+        src = inspect.getsource(importlib.import_module(f"engine.{module}"))
+        offenders = []
+        for line in src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            call = stripped.find(".open(")
+            if call == -1:
+                continue
+            # Only a ``context=`` that falls *after* ``.open(`` is inside
+            # its argument list. The correct form puts it before, on the
+            # same line — ``safe_opener(context=ctx).open(req, ...)`` — so
+            # a naive "both substrings present" check flags the fix itself.
+            if "context=" in stripped[call:]:
+                offenders.append(stripped)
+        assert not offenders, (
+            f"context= passed to OpenerDirector.open in {module}: {offenders}. "
+            "Pass it to safe_opener(context=...) instead.")

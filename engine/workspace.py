@@ -399,6 +399,19 @@ def case_result_to_dict(row: dict) -> dict:
         "item_id": row.get("case_external_id") or "",
         "status": row.get("status") or "",
         "kind": row.get("case_kind") or "test_case",
+        # Same value under the name the execution pipeline uses. The
+        # in-session producer (``qa_testers``) emits ``item_type`` and this
+        # DB reader emitted only ``kind``, so ``test_execution.html``'s
+        # ``{% if r.item_type == 'test_case' %}`` was comparing an
+        # Undefined for every row read back from the database: Jinja made
+        # that False, each row fell through to the checklist lookup, the
+        # test-case id was never found there, and the Summary column
+        # rendered empty for the whole run — silently, since a missing key
+        # is not an error in a template.
+        #
+        # Both names are emitted rather than renaming one, because ``kind``
+        # is what the manual-run views read.
+        "item_type": row.get("case_kind") or "test_case",
         "source": row.get("source") or "auto",
         # The display id, and "" when there is none — matching the shape
         # every consumer already assumes. The integer FK stays available

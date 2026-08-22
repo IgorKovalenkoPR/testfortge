@@ -237,6 +237,67 @@ class TestTheRouteRefusesPolitely:
         # purpose, because a person reading a page costs nothing.
         assert resp.status_code == 307
 
+    def test_a_dispatched_automated_run_is_registered_and_blocks_the_next(
+            self, client, project, monkeypatch):
+        """The gap the tests above could not see (E11).
+
+        Every route test here pre-seeds the blocking run by calling
+        ``start_execution_run`` directly. That establishes by hand the
+        precondition the product was failing to establish: the automation
+        dispatch path returned before the only ``start_execution_run`` on
+        the POST, so a real Playwright run created **no row**. The gate
+        below then counted zero open runs, forever, and admitted a second
+        Chromium onto a box with one machine's worth of memory.
+
+        So this drives the dispatch itself and asserts both halves: a row
+        exists afterwards (which is also what the Runs register reads), and
+        the *next* request is refused because of it.
+        """
+        monkeypatch.setenv("TESTFORTGE_MAX_CONCURRENT_RUNS", "1")
+
+        # The worker is a detached subprocess; the run does not need to
+        # happen for the row to be the thing under test.
+        import subprocess
+
+        class _FakePopen:
+            pid = 4242
+
+            def __init__(self, *a, **kw):
+                pass
+
+        monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+
+        assert not _db.list_execution_runs(project), "fixture starts clean"
+
+        form = {"run_mode": "tc_driven",
+                "selected_items": ["TC_001"],
+                "source": "test_cases",
+                "env_type": "web",
+                # base_url is what makes the route choose the automation
+                # branch — see wants_automation in routes/execution.py.
+                "base_url": "https://example.com/"}
+
+        first = client.post("/test-execution", data=form,
+                            follow_redirects=True)
+        assert first.status_code == 200
+
+        runs = _db.list_execution_runs(project)
+        assert len(runs) == 1, (
+            "a dispatched automated run left no row — the Runs register "
+            "cannot show it and the concurrency gate cannot count it")
+        assert (runs[0].get("env_payload") or {}).get("mode") == "tc_driven", (
+            "the row must record its mode, or run_limits will not treat it "
+            "as a browser run")
+
+        # And now the gate has something to count.
+        second = client.post("/test-execution", data=form,
+                             follow_redirects=True)
+        body = second.get_data(as_text=True)
+        assert "already in progress" in body, (
+            "a second browser run was admitted while the first was open")
+        assert len(_db.list_execution_runs(project)) == 1, (
+            "the refused run must not register a row of its own")
+
     def test_a_stale_run_does_not_block_the_route(self, client, project,
                                                  monkeypatch):
         monkeypatch.setenv("TESTFORTGE_MAX_CONCURRENT_RUNS", "1")

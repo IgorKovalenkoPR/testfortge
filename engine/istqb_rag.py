@@ -23,10 +23,15 @@ Design choices
 Returned answers
 ----------------
 :func:`answer` returns a :class:`ChatReply` (or ``None`` when no chunk
-clears the relevance bar). The body is the verbatim chunk text — we
-explicitly do *not* paraphrase so a candidate studying for the exam
-gets words straight from the source. Source + page reference is shown
-inline so they can verify and cross-check.
+clears the relevance bar). The body is a verbatim *excerpt* of the chunk —
+we do not paraphrase, so a candidate studying for the exam gets words
+straight from the source — capped at :data:`MAX_EXCERPT_WORDS` and marked
+where it was cut. Source + page reference is shown inline so they can go to
+the page for the rest.
+
+The cap is deliberate and load-bearing: this used to emit whole chunks, up
+to 2 594 characters each, from a corpus that is mostly one commercial
+textbook. See :data:`MAX_EXCERPT_WORDS`.
 """
 from __future__ import annotations
 
@@ -60,6 +65,22 @@ B = 0.75      # length-norm
 MIN_RELEVANCE = 4.0
 # Maximum chunks to merge into a single answer when several score high.
 TOP_K_MERGE = 1
+
+#: Longest verbatim run, in words, that an answer may quote from a source.
+#:
+#: There was no cap at all: :func:`answer` emitted ``h["text"]`` whole, and
+#: the largest chunk in the shipped corpus is 2 594 characters — several
+#: hundred words of continuous prose, with a page citation attached. Nearly
+#: all of that corpus is one commercial textbook (2 330 of 2 826 chunks,
+#: spanning 404 pages of a 409-page book), so "quote the chunk verbatim"
+#: amounted to serving the book a paragraph at a time on request.
+#:
+#: A cap is not a licence. It reduces how much of a copyrighted work any one
+#: answer reproduces; it does not make redistributing the corpus itself
+#: acceptable. See ``docs/plans/`` for the outstanding decision on the book
+#: half of the corpus — the syllabus half is freely redistributable under
+#: ISTQB's terms and is not affected.
+MAX_EXCERPT_WORDS = 60
 
 
 # ── Tokeniser (UA + EN) ────────────────────────────────────────────
@@ -206,6 +227,21 @@ def search(query: str, k: int = 3) -> list[dict[str, Any]]:
 
 # ── ChatReply integration ──────────────────────────────────────────
 
+def _excerpt(hit: dict[str, Any]) -> str:
+    """A quotable fragment of a chunk, not the whole chunk.
+
+    Cuts at :data:`MAX_EXCERPT_WORDS` on a word boundary and marks the cut,
+    so the reader can see the quote is partial and go to the cited page for
+    the rest. Short chunks — most of the syllabus — are returned unchanged
+    and read exactly as before.
+    """
+    text = str(hit.get("text") or "").strip()
+    words = text.split()
+    if len(words) <= MAX_EXCERPT_WORDS:
+        return text
+    return " ".join(words[:MAX_EXCERPT_WORDS]).rstrip(",;:") + " […]"
+
+
 def answer(query: str, lang: str = "en") -> "Any | None":
     """Return a ``ChatReply``-shaped answer when a chunk clears
     :data:`MIN_RELEVANCE`. Otherwise ``None`` so the dispatcher can
@@ -229,7 +265,7 @@ def answer(query: str, lang: str = "en") -> "Any | None":
             if lang != "ua"
             else f"_{h['source'].title()} · стор. {h['page']}_"
         )
-        parts.append(f"{h['text']}\n\n{ref}")
+        parts.append(f"{_excerpt(h)}\n\n{ref}")
 
     body = "\n\n— — —\n\n".join(parts)
     title = "ISTQB material — closest match" if lang != "ua" \

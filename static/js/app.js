@@ -204,8 +204,25 @@ function applyStatusColor(select) {
         }[c]));
     }
     function mdToHtml(s) {
+        // Italics were never handled, so every single-asterisk and
+        // underscore emphasis reached the user as literal punctuation —
+        // "— *EP (verbatim):*" from the guide replies, and the
+        // "_Book · page 224_" citation the ISTQB retrieval path appends to
+        // every answer. Bold ran first and still does, so by the time the
+        // italic passes run there are no ** pairs left to confuse them.
+        //
+        // Both patterns are deliberately narrow. The underscore form
+        // requires whitespace or a bracket before the opener and
+        // punctuation or end-of-string after the closer, so snake_case
+        // identifiers in answers about `browser_pool` or `run_id` are left
+        // alone; the asterisk form refuses a leading space so a literal
+        // "2 * 3" is not read as an opener.
         return escapeHtml(s)
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?!\*)/g,
+                     '$1<em>$2</em>')
+            .replace(/(^|[\s(])_(?!\s)([^_\n]+?)_(?=[\s.,;:!?)]|$)/g,
+                     '$1<em>$2</em>')
             .replace(/\n/g, '<br>');
     }
     function scrollBottom() { body.scrollTop = body.scrollHeight; }

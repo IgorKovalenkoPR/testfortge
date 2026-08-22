@@ -13,8 +13,27 @@ Sources (paths can be overridden by ``ISTQB_SYLLABUS_PDF`` and
 ``ISTQB_BOOK_PDF`` env vars):
 
   * ``uploads/ISTQB_CTFL_Syllabus_v4.0.1.pdf`` — official v4.0.1 syllabus.
+    Redistributable under ISTQB's terms; this is what ships.
   * ``uploads/ISTQB Certified Tester Foundation Level_book.pdf`` —
-    self-study textbook by Stapp / Roman / Pilaeten.
+    self-study textbook by Stapp / Roman / Pilaeten. **Excluded unless
+    ``ISTQB_BOOK_CORPUS=1``.**
+
+Why the book is excluded
+------------------------
+It is a commercial title. The corpus that shipped until E11 held 2 330
+book chunks covering **404 distinct pages of a 409-page book** — roughly
+136 000 words, effectively the whole text — committed to this repository
+and served to users verbatim with page citations. Note also that
+``NOISE_PATTERNS`` below strips ``© YYYY`` lines, so the attribution the
+source carried did not survive extraction.
+
+``engine.istqb_rag`` caps how much of any chunk one answer quotes, but a
+cap is not a licence: the exposure is the committed artefact, not the
+runtime read. If a licence is obtained, set ``ISTQB_BOOK_CORPUS=1`` and
+rebuild.
+
+Removing the book from the working tree does **not** remove it from git
+history — that needs a history rewrite, which is a separate decision.
 
 The output JSON is a list of chunks::
 
@@ -67,7 +86,43 @@ NOISE_PATTERNS = [
     re.compile(r"^\s*ISTQB\s*®?\s*$", re.IGNORECASE),
     re.compile(r"^\s*Certified Tester\s*$", re.IGNORECASE),
     re.compile(r"^\s*Foundation Level Syllabus\s*$", re.IGNORECASE),
+    # ── Added in E11 ────────────────────────────────────────────────
+    # These survived the original filter and mattered more than they
+    # look. While the corpus also held the textbook, real prose always
+    # outscored them; with the syllabus alone they started *winning*
+    # retrieval, so "What is risk-based testing?" answered with a
+    # bibliography line and "What is statement coverage?" with a
+    # table-of-contents row. 116 of 496 syllabus chunks carried one.
+    #
+    # Table-of-contents entries — dot leaders then a page number.
+    re.compile(r"^.*\.{4,}\s*\d+\s*$"),
+    # The running header, which pypdf emits inline with the body text:
+    # "Foundation Level v4.0.1 Page 2 of 78  2024 -09-15".
+    re.compile(r"^.{0,40}Page\s+\d+\s+of\s+\d+.*$", re.IGNORECASE),
+    # Boilerplate that appears on its own line on most pages. The
+    # copyright pattern above only matches a leading "©", and extraction
+    # mangles that glyph, so the line survived it.
+    re.compile(r"^\s*.{0,3}\s*International Software Testing\s+"
+               r"Qualifications Board\s*.*$", re.IGNORECASE),
 ]
+
+#: Chunks shorter than this after line filtering carry no answerable
+#: content — they are the remains of a page that was all boilerplate.
+MIN_CHUNK_CHARS = 80
+
+
+def clean_chunk_text(text: str) -> str:
+    """Drop boilerplate lines from an already-built chunk.
+
+    Factored out so the same rules can be applied to the committed
+    ``engine/istqb_corpus.json`` without the source PDFs to hand — the
+    alternative was a second implementation that would drift from
+    :data:`NOISE_PATTERNS`.
+    """
+    kept = [line for line in text.splitlines()
+            if line.strip()
+            and not any(p.match(line.strip()) for p in NOISE_PATTERNS)]
+    return "\n".join(kept).strip()
 
 
 # ── PDF → page text → paragraphs → chunks ──────────────────────────
@@ -179,14 +234,33 @@ def _chunks_for_pdf(path: Path, source_label: str,
     return out
 
 
+def _book_allowed() -> bool:
+    """Whether the commercial textbook may be built into the corpus.
+
+    Off unless ``ISTQB_BOOK_CORPUS=1``. The shipped corpus is
+    syllabus-only, and the check lives here — in the builder — rather than
+    at load time, because the exposure is the *committed artefact*, not the
+    runtime read. A flag that still writes the book into
+    ``engine/istqb_corpus.json`` would not have helped.
+    """
+    return os.environ.get("ISTQB_BOOK_CORPUS", "").strip() == "1"
+
+
 # ── Entry-point ────────────────────────────────────────────────────
 
 def main() -> None:
     syllabus = Path(os.environ.get("ISTQB_SYLLABUS_PDF") or DEFAULT_SYLLABUS)
     book = Path(os.environ.get("ISTQB_BOOK_PDF") or DEFAULT_BOOK)
 
+    sources: list[tuple[Path, str]] = [(syllabus, "syllabus")]
+    if _book_allowed():
+        sources.append((book, "book"))
+    else:
+        print("  skip: book (ISTQB_BOOK_CORPUS=1 not set — see module "
+              "docstring)")
+
     all_chunks: list[dict] = []
-    for path, label in [(syllabus, "syllabus"), (book, "book")]:
+    for path, label in sources:
         if not path.is_file():
             print(f"  skip: {path} (not found)")
             continue

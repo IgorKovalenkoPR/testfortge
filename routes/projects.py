@@ -502,6 +502,14 @@ def register(app: Flask) -> None:
         # silently lost estimations and run history, leaving the user
         # confused why their previous project's estimation table was
         # empty after switching back.
+        #
+        # Bound before the try so the confirmation flash below can count
+        # them even if a hydrate step raises — and so it reports what was
+        # actually loaded rather than 0.
+        tcs: list = []
+        cls: list = []
+        bugs: list = []
+        runs: list = []
         try:
             # The GENERATED_KEYS wipe above emptied the session, so these
             # reads fall through to the database — but drop the
@@ -556,12 +564,19 @@ def register(app: Flask) -> None:
         except Exception as exc:
             log.warning("project select: hydrate failed: %s", exc)
 
+        # Count what was read from the database, not what landed in the
+        # session. ``mirror_pack`` returns without writing when
+        # WORKSPACE_DB_FIRST is on, so the session keys are empty in the
+        # mode the product ships in — and this flash reported
+        # "(0 TC · 0 CL · 0 bugs · 0 runs)" for a project holding 62 test
+        # cases, directly beside a picker that read the real numbers off
+        # the database.
         flash(
             f"Active project: {meta['name']} "
-            f"({len(session.get('test_cases_data') or [])} TC · "
-            f"{len(session.get('checklist_data') or [])} CL · "
-            f"{len(session.get('bug_reports_data') or [])} bugs · "
-            f"{len(session.get('test_runs') or [])} runs).",
+            f"({len(tcs)} TC · "
+            f"{len(cls)} CL · "
+            f"{len(bugs)} bugs · "
+            f"{len(runs)} runs).",
             "success",
         )
         return redirect(next_url)
