@@ -415,6 +415,66 @@ class TestUiTrigger:
         assert 'id="ext-recorder-start"' not in body
 
 
+class TestTheProjectComesFromPostgresNotTheSession:
+    """The session key is empty more often than it looks.
+
+    ``session["project_id"]`` is set when somebody picks a project in
+    this session. It is empty after a fresh sign-in, and empty after the
+    free plan wipes the filesystem session store on restart — while the
+    project itself sits in Postgres and the picker renders it correctly.
+    So /start answered "no_active_project" on a page whose header named
+    the active project. ``resolve_active_project()`` exists for exactly
+    this and is what every other project read in the module uses.
+
+    Found by walking the recorder end to end on staging. No unit test
+    had a session without the key, so nothing pointed at it.
+    """
+
+    def test_a_session_without_the_key_still_finds_the_project(
+            self, client):
+        # The project is created the way a browser creates one, so it is
+        # owned by this session in Postgres — that ownership is how
+        # resolve_active_project finds it. Planting an ownerless row
+        # instead would make the resolver return "" for the right reason
+        # and the assertion would blame the wrong thing.
+        name = f"ext-nosess-{os.urandom(4).hex()}"
+        created = client.post("/projects/db/create",
+                              data={"project_name": name, "next": "/"},
+                              follow_redirects=False)
+        assert created.status_code in (302, 303), created.status_code
+
+        with client.session_transaction() as s:
+            pid = s.get("project_id")
+            assert pid, "project creation did not pin a project"
+            # Now drop it. This is the state a fresh sign-in leaves, and
+            # the state the free plan leaves after a restart wipes the
+            # filesystem session store.
+            s.pop("project_id", None)
+            s["_session_active_since"] = 9_999_999_999
+
+        try:
+            with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+                resp = client.post("/api/recorder-session/start", json={})
+            assert resp.status_code == 200, resp.get_json()
+            assert resp.get_json().get("project_id") == pid
+        finally:
+            db.delete_project(pid)
+
+    def test_an_explicit_project_id_still_wins(self, client, ext_project):
+        other = db.upsert_project(
+            name=f"ext-explicit-{os.urandom(4).hex()}",
+            base_url="https://other.example.com",
+        )
+        try:
+            with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+                resp = client.post("/api/recorder-session/start",
+                                   json={"project_id": other})
+            assert resp.status_code == 200
+            assert resp.get_json().get("project_id") == other
+        finally:
+            db.delete_project(other)
+
+
 # ── The extension download ───────────────────────────────────────────
 
 class TestTheExtensionArchive:

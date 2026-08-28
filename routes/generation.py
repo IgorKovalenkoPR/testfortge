@@ -1689,9 +1689,17 @@ def register(app: Flask) -> None:
         if not _recorder_enabled():
             return _json_with_cors({"error": "recorder_disabled"}, 403)
         payload = request.get_json(silent=True) or {}
-        pid = (payload.get("project_id")
-
-                or session.get("project_id") or "").strip()
+        # resolve_active_project(), not session["project_id"] — the same
+        # correction line 1595 already carries, in a route written
+        # without it. The session key is empty on any request whose
+        # session did not set it: a fresh sign-in, or the free plan
+        # wiping the filesystem session store on restart. The project
+        # itself is in Postgres and the picker renders it correctly, so
+        # the page showed an active project while this endpoint answered
+        # "no_active_project" — found by walking the recorder end to end
+        # on staging, which nothing had done before.
+        pid = ((payload.get("project_id") or "").strip()
+               or resolve_active_project())
         if not pid:
             return _json_with_cors({"error": "no_active_project"}, 400)
         # Token is the same shape as PR-D's draft tokens — secrets-grade
