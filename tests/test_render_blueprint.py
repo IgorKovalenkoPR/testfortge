@@ -643,6 +643,23 @@ class TestStagingIsActuallyStaging:
         assert env.get("AUTH_ENABLED") == "1"
         assert env.get("ORG_MODE") == "1"
 
+    def test_sessions_survive_the_sleep(self, staging_service):
+        """Pinned to "db", and the value is the whole point.
+
+        Staging is a free instance that sleeps after ~15 idle minutes.
+        Under SESSION_BACKEND=filesystem the dyno's disk goes with it and
+        every session on it — so a walk through any multi-step feature
+        was interrupted by a sign-in, and four deploys in one afternoon
+        meant four more. Measured 2026-08-28 while walking the recorder.
+
+        Asserted rather than left to the "filesystem" or "db" check
+        above, because that one passes for either value and this service
+        is only useful at one of them. Prod stays on filesystem
+        deliberately: it does not sleep, and that migration is its own
+        decision.
+        """
+        assert _env_map(staging_service).get("SESSION_BACKEND") == "db"
+
     def test_the_basic_gate_is_off_and_that_is_safe_here(self,
                                                         staging_service):
         """Off **because** AUTH_ENABLED is 1 — the interlock in

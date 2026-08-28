@@ -835,8 +835,32 @@ services:
       # number is load-bearing on this plan.
       - key: MEMORY_BUDGET_MB
         value: "380"
+      # Postgres-backed sessions (engine/server_session.py). Staging
+      # diverges from production here on purpose, and the divergence is
+      # the point of staging: this is a free instance that sleeps after
+      # ~15 idle minutes, and with the filesystem backend the dyno's disk
+      # — and every session on it — goes with it. Measured on 2026-08-28
+      # while walking the recorder: signed out by the sleep, by the
+      # restart, and by each of four deploys, which made a
+      # multi-step feature impossible to walk end to end.
+      #
+      # It also hid a defect rather than merely being inconvenient. A
+      # session that comes back empty still has its project in Postgres,
+      # so the picker rendered one while an endpoint reading
+      # session["project_id"] answered "no_active_project" — see the
+      # comment in routes/generation.api_recorder_session_start. Sessions
+      # that survive a restart make that class of bug rarer AND easier to
+      # recognise when it happens.
+      #
+      # Nothing to migrate: the ``server_session`` table is already in the
+      # model (engine/db.py). Rollback is this value back to
+      # "filesystem".
       - key: SESSION_BACKEND
-        value: filesystem
+        value: db
+      # Now load-bearing. Under the filesystem backend the ~15-minute
+      # sleep expired sessions long before either clock could, so both
+      # numbers were decorative on this service; with rows that survive
+      # restarts they are what actually signs somebody out.
       - key: SESSION_IDLE_MINUTES
         value: "240"
       - key: SESSION_ABSOLUTE_HOURS
