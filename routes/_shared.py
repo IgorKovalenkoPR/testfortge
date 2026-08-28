@@ -418,7 +418,18 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
     try:
         if not hasattr(_db, "list_projects"):
             return ""
-        existing = _db.list_projects(owner_sid=sid) or []
+        # visible_projects, not list_projects(owner_sid=...) — the same
+        # correction that function's own docstring records, which was
+        # applied to the *list* and not to the resolver behind it. Under
+        # ORG_MODE a team's projects belong to the organisation and carry
+        # no owner_sid at all, so a cookie-scoped lookup could never match
+        # one: the picker rendered the team's projects while this returned
+        # "" and every caller behaved as though no project existed.
+        #
+        # Measured on staging 2026-08-28: the page header named an active
+        # project and "Start session recording" answered
+        # "no_active_project" in the same breath.
+        existing = visible_projects(sess) or []
         if not existing:
             return ""
         pick = existing[0]
@@ -438,11 +449,12 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
             sess["project_id"] = pid
             if hasattr(sess, "modified"):
                 sess.modified = True
-        log.info("resolve_active_project: recovered project_id=%s from "
-                 "owner_sid=%s (session store was wiped)", pid, sid[:8])
+        log.info("resolve_active_project: recovered project_id=%s for "
+                 "sid=%s (session store was wiped)", pid, sid[:8])
         return pid
     except Exception as exc:
-        log.debug("resolve_active_project: owner_sid lookup failed: %s", exc)
+        log.debug("resolve_active_project: visible-project lookup "
+                  "failed: %s", exc)
         return ""
 
 
@@ -477,15 +489,20 @@ def ensure_active_project(session_obj=None) -> str:
 
     sid = get_session_id(sess)
 
-    # Recovery path: the cookie carries the same SID across Render
-    # restarts (SECRET_KEY is preserved per render.yaml), so any project
-    # already created by this session is still tagged with this owner_
-    # sid in Postgres. Pick the most recent one before falling back to
-    # auto-create — otherwise the user gets an empty "Untitled project"
-    # while their actual TC pack lives under the old project_id.
+    # Recovery path: pick the most recent project the caller can see
+    # before falling back to auto-create — otherwise the user gets an
+    # empty "Untitled project" while their actual TC pack lives under the
+    # old project_id.
+    #
+    # Scoped through visible_projects for the reason spelled out in
+    # resolve_active_project: in the legacy era that is this session's own
+    # projects (the cookie carries the same SID across Render restarts),
+    # and under ORG_MODE it is the team's — which have no owner_sid at
+    # all, so the cookie-scoped lookup this replaced auto-created a fresh
+    # empty project for a team that already had one.
     try:
         if hasattr(_db, "list_projects"):
-            existing = _db.list_projects(owner_sid=sid) or []
+            existing = visible_projects(sess) or []
             if existing:
                 # list_projects returns most-recent-first per its sort.
                 # Defensive: also accept created_at desc if present.
@@ -494,7 +511,7 @@ def ensure_active_project(session_obj=None) -> str:
                 if pid:
                     log.info(
                         "ensure_active_project: rehydrated project_id=%s "
-                        "from owner_sid=%s (session was empty)",
+                        "for sid=%s (session was empty)",
                         pid, sid[:8])
                     sess["project_id"] = pid
                     setup = sess.get("project_setup") or {}

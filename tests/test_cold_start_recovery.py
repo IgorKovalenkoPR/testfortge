@@ -291,3 +291,109 @@ class TestExplicitClearIsRespected:
             sess.pop("project_id", None)
         body = client.get("/test-cases").get_data(as_text=True)
         assert "Verify that User can open the Employee details page" in body
+
+
+# ── The org era, which the recovery path never learned about ─────────
+
+class TestRecoveryUnderOrgMode:
+    """A team's projects have no ``owner_sid`` at all.
+
+    ``visible_projects`` says so in its own docstring, and says it as a
+    bug report: scoping the *list* by browser cookie meant "a signed-in
+    admin saw an empty dashboard". The list was corrected. The two
+    resolvers behind it — ``resolve_active_project`` and
+    ``ensure_active_project`` — kept looking the project up by
+    ``owner_sid``, which under ORG_MODE can never match.
+
+    What that cost, measured on staging 2026-08-28: the page header named
+    an active project while "Start session recording" answered
+    "no_active_project" in the same breath, because the header came from
+    the org-scoped list and the endpoint came from the cookie-scoped
+    resolver. Every feature that resolves a project this way had the same
+    hole; the recorder is only where it was noticed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _org_mode(self, monkeypatch):
+        monkeypatch.setenv("AUTH_ENABLED", "1")
+        monkeypatch.setenv("ORG_MODE", "1")
+        _db.init_db()
+
+    def _team_with_a_project(self, client):
+        """An org, a member signed into it, and a project owned by the
+        org — created the way org mode creates one, with no owner_sid."""
+        import secrets
+        from engine import auth as _auth
+        from engine import permissions as _perm
+
+        org = _db.create_organization(f"Team {secrets.token_hex(4)}")
+        uid = _db.create_user(
+            f"member-{secrets.token_hex(5)}@example.test",
+            password_hash=_auth.hash_password("a passphrase here"))
+        _db.add_org_member(org, uid, "admin")
+        pid = _db.upsert_project(name=f"team-proj-{secrets.token_hex(4)}",
+                                 base_url="https://app.example.test",
+                                 org_id=org)
+        with client.session_transaction() as sess:
+            sess[_perm.SESSION_USER_KEY] = uid
+            sess[_perm.SESSION_ORG_KEY] = org
+            sess["_session_active_since"] = 9_999_999_999
+            sess.pop("project_id", None)
+        return org, uid, pid
+
+    def test_the_project_has_no_owner_sid_which_is_the_whole_point(self):
+        # Pin the premise. If org projects ever start carrying an
+        # owner_sid, the tests below would pass for the wrong reason.
+        import secrets
+        org = _db.create_organization(f"Team {secrets.token_hex(4)}")
+        pid = _db.upsert_project(name=f"p-{secrets.token_hex(4)}",
+                                 org_id=org)
+        row = _db.get_project(pid) if hasattr(_db, "get_project") else None
+        if row is not None:
+            assert not row.get("owner_sid")
+
+    def test_resolve_finds_the_teams_project_without_a_session_key(
+            self, client):
+        from routes._shared import resolve_active_project
+
+        org, uid, pid = self._team_with_a_project(client)
+        with client.application.test_request_context("/"):
+            from flask import session as fsession
+            from engine import permissions as _perm
+            fsession[_perm.SESSION_USER_KEY] = uid
+            fsession[_perm.SESSION_ORG_KEY] = org
+            assert resolve_active_project() == pid
+
+    def test_ensure_does_not_auto_create_a_second_project(self, client):
+        """The louder half of the same bug.
+
+        ``ensure_active_project`` falls through to auto-create when the
+        lookup finds nothing — so under org mode a team with a project
+        got a fresh empty "Untitled project" instead, and their pack
+        looked lost while sitting in Postgres.
+        """
+        from routes._shared import ensure_active_project
+
+        org, uid, pid = self._team_with_a_project(client)
+        before = len(_db.list_projects_for_org(org) or [])
+        with client.application.test_request_context("/"):
+            from flask import session as fsession
+            from engine import permissions as _perm
+            fsession[_perm.SESSION_USER_KEY] = uid
+            fsession[_perm.SESSION_ORG_KEY] = org
+            got = ensure_active_project()
+        assert got == pid
+        assert len(_db.list_projects_for_org(org) or []) == before, (
+            "a second project was created for a team that already had one")
+
+    def test_the_recorder_endpoint_agrees_with_the_page(self, client):
+        # The symptom as the operator met it, end to end.
+        import os
+        from unittest import mock
+
+        org, uid, pid = self._team_with_a_project(client)
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.post("/api/recorder-session/start", json={})
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json().get("project_id") == pid
+
