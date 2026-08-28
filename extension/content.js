@@ -18,6 +18,17 @@
 (function tfgRecorderContent() {
   'use strict';
 
+  // One instance per page, enforced rather than assumed.
+  //
+  // The manifest injects this file once, so in principle this cannot
+  // happen — but "in principle once" is what every listener that fires
+  // twice was believed to be. Every handler below is registered on
+  // `document`, so a second copy of this script would silently double
+  // every captured step, and the symptom (a pack that clicks everything
+  // twice on replay) points nowhere near the cause.
+  if (window.__tfgRecorderContentInstalled) return;
+  window.__tfgRecorderContentInstalled = true;
+
   const HANDOFF_PARAM_TOKEN = 'testfortge-recorder-token';
   const HANDOFF_PARAM_FINISH = 'testfortge-finish-url';
   const HOST_ID = 'testfortge-recorder-host';
@@ -442,9 +453,39 @@
     }, () => { void chrome.runtime.lastError; });
   }
 
+  // One physical interaction must produce one step.
+  //
+  // Observed on staging 2026-08-28: a walk of two clicks produced four
+  // click steps, each duplicated back to back. The cause was not
+  // established — this page also carried five other extensions injecting
+  // into it, and any of them re-dispatching an event would do it, as
+  // would a second copy of this script (now prevented above). So this is
+  // a guard on the property that matters rather than a fix aimed at a
+  // cause: whatever delivers the same interaction twice, it is recorded
+  // once. A replayed pack that clicks twice per step is worse than a
+  // missing step — it can submit twice.
+  //
+  // The window is deliberately tiny. Duplicates of one physical event
+  // arrive in the same task, microseconds apart; a human double-click
+  // cannot be faster than about 60 ms, so a real one still records as
+  // two steps and still replays as two clicks.
+  const DUPLICATE_WINDOW_MS = 50;
+  let lastEvent = {type: '', target: null, value: '', at: -Infinity};
+
+  function isDuplicate(e, value) {
+    const at = typeof e.timeStamp === 'number' ? e.timeStamp : Date.now();
+    const same = lastEvent.type === e.type
+      && lastEvent.target === e.target
+      && lastEvent.value === (value || '')
+      && (at - lastEvent.at) < DUPLICATE_WINDOW_MS;
+    lastEvent = {type: e.type, target: e.target, value: value || '', at};
+    return same;
+  }
+
   document.addEventListener('click', (e) => {
     if (!isActive) return;
     if (isOverlayEvent(e.target)) return;
+    if (isDuplicate(e, '')) return;
     const cands = deriveCandidates(e.target);
     if (!cands.length) return;
     const primary = cands[0].value;
@@ -473,6 +514,10 @@
     const primary = cands[0].value;
     const alternates = cands.slice(1, 5).map(c => c.value);
     const value = (el.value || '').slice(0, 500);
+    // Same guard as the click path: a doubled fill writes the value
+    // twice on replay, which an input with an append behaviour turns
+    // into corrupt test data rather than a redundant step.
+    if (isDuplicate(e, value)) return;
     const action = tag === 'select' ? 'select' : 'fill';
     emitStep({
       action,
