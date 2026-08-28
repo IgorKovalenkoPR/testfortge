@@ -4,7 +4,8 @@
   * POST /org/members/invite                — admin: invite an address
   * POST /org/members/<user_id>/role        — admin: change a role
   * POST /org/members/<user_id>/remove      — admin: remove a member
-  * POST /org/invites/<token>/revoke        — admin: cancel an invitation
+  * POST /org/invites/revoke                — admin: cancel an invitation
+  * POST /org/invites/reissue               — admin: new link for one
 
 With registration invite-only, this page is the **only** door into the
 platform, which makes two things load-bearing rather than nice:
@@ -16,6 +17,15 @@ the address get typed wrong needs to forward it themselves, and a message
 the provider accepted can still bounce. The free tier also allows only 100
 a day, so "it was not emailed" is an ordinary outcome rather than a fault
 — see ``_UNDELIVERED``.
+
+**...and it can be asked for again.** The link lives in a flash message,
+and a flash survives exactly one page load. An admin on an instance with
+no mail provider who clicked away before copying it had no way back: the
+token is deliberately absent from the pending list, so nothing on the page
+could show it again. ``org_reissue_invite`` mints a fresh one for an
+address that is already pending — the same replace-the-old-link move the
+invite form already makes, reached without retyping the address and
+without the admin having to work out that re-inviting is the workaround.
 
 **Whether it was emailed is recorded**, in ``Invite.emailed_at``, and that
 is not bookkeeping. An invitation that arrived in an inbox can only have
@@ -79,6 +89,22 @@ def _undelivered(delivery) -> str:
         "The email could not be delivered just now.")
 
 
+#: The opening sentence of the flash, by what the admin did and whether it
+#: was emailed. Only the opening: everything after it — why it was not
+#: emailed, and the link — is composed once in ``_issue_invite``, because
+#: the link is the part that matters and it is handed over the same way
+#: whether this is a first invitation or a replacement for one whose flash
+#: scrolled away.
+_LEAD = {
+    ("create", True): "Invitation sent to %s as %s.",
+    ("create", False): "Invitation created for %s as %s.",
+    ("reissue", True): "A new invitation was sent to %s as %s. The earlier "
+                       "link no longer works.",
+    ("reissue", False): "A new link was issued for %s as %s. The earlier "
+                        "link no longer works.",
+}
+
+
 def register(app: Flask) -> None:
 
     @app.route("/org/members", methods=["GET"])
@@ -101,6 +127,16 @@ def register(app: Flask) -> None:
             "org_members.html", org=org, members=members, invites=invites,
             roles=_db.ORG_ROLES, me=_perm.current_user_id(),
             admin_count=_db.count_org_admins(org_id),
+            # Whether this instance can send mail decides which sentence
+            # the note under the form tells. It said "TestForTge does not
+            # send email on this plan" from before E0.4 until now, which
+            # was a promise the product had stopped keeping in both
+            # directions — untrue where a key is set, and on an instance
+            # without one it blamed the plan for a missing setting.
+            # configured() and not state(): the page shows no
+            # counter, and state() would cost an audit-table count on
+            # every load of a page nobody opens to read a quota.
+            mail_configured=_mailer.configured(),
         )
 
     @app.route("/org/members/invite", methods=["POST"])
@@ -131,15 +167,73 @@ def register(app: Flask) -> None:
                   f"below instead.", "info")
             return _members_redirect()
 
+        return _issue_invite(org_id, email, role, action="create")
+
+    @app.route("/org/invites/reissue", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_reissue_invite():
+        """Issue a fresh link for an address that is already invited.
+
+        Keyed on **email, not token**, for the same reason
+        ``org_revoke_invite`` is: the token is a bearer credential for
+        somebody else's seat and never reaches the page. The role is read
+        back from the pending invite rather than taken from the form, so a
+        button that means "let me have the link again" cannot quietly
+        become a promotion.
+
+        It re-issues rather than re-displays because there is nothing to
+        re-display: the token is stored, but showing it again would mean
+        putting it in the pending list, and then every admin session's
+        rendered HTML, browser cache and screenshot carries a live
+        credential for every open seat. Minting a new one costs the old
+        link — which is exactly what ``_db.create_invite`` already does
+        when the same address is invited twice, and what the note under
+        the invite form has always said happens.
+        """
+        org_id = _perm.current_org_id()
+        email = _db.normalize_email(request.form.get("email"))
+        if not (org_id and email):
+            flash("That invitation is no longer active.", "info")
+            return _members_redirect()
+
+        # The pending list is the authority on both "is there one" and "at
+        # what role", and it is already scoped to this organisation — so an
+        # admin of one team cannot mint a link into another's.
+        pending = next((i for i in _db.list_pending_invites(org_id)
+                        if i.get("email") == email), None)
+        if pending is None:
+            # Claimed, cancelled, expired, or never existed. One message:
+            # the difference does not change what the admin does next,
+            # which is to invite the address again from the form above.
+            flash("That invitation is no longer active. Invite the address "
+                  "again to send a new link.", "info")
+            return _members_redirect()
+
+        role = pending.get("role") or "user"
+        if role not in _db.ORG_ROLES:      # pragma: no cover — stored value
+            role = "user"
+        return _issue_invite(org_id, email, role, action="reissue")
+
+    def _issue_invite(org_id: str, email: str, role: str, *, action: str):
+        """Mint a token, store it, try to email it, hand over the link.
+
+        Shared by the invite form and the reissue button so the two cannot
+        drift — in particular so that the link keeps reaching the admin on
+        the reissue path, which exists precisely because the first one did
+        not reach them.
+        """
+        actor = _perm.current_user_id()
         token = new_invite_token()
+        # This revokes any live invite for the address, which is what makes
+        # the reissue path safe to press twice.
         if not _db.create_invite(org_id, email, role, token,
-                                 invited_by_user_id=_perm.current_user_id()):
+                                 invited_by_user_id=actor):
             flash("That invitation could not be created — see server logs.",
                   "error")
             return _members_redirect()
 
-        _db.append_audit(entity="invite", action="create",
-                         user_id=_perm.current_user_id(), org_id=org_id,
+        _db.append_audit(entity="invite", action=action,
+                         user_id=actor, org_id=org_id,
                          diff={"email": email, "role": role})
 
         link = url_for("auth_accept_invite", token=token, _external=True)
@@ -151,7 +245,7 @@ def register(app: Flask) -> None:
         # answer beats "probably sent".
         delivery = _mailer.send(
             to=email, kind="invite",
-            user_id=_perm.current_user_id(), org_id=org_id,
+            user_id=actor, org_id=org_id,
             subject=f"You have been invited to {org_name(org_id)} "
                     f"on TestForTge",
             text=(
@@ -161,26 +255,26 @@ def register(app: Flask) -> None:
                 f"The invitation is valid for 7 days.\n"
             ))
 
+        lead = _LEAD[(action, bool(delivery.sent))] % (email, role)
         if delivery.sent:
             _db.mark_invite_emailed(token)
             # The link is *still* shown. An admin who watched the address
             # get typed wrong needs to be able to forward it themselves, and
             # a delivery that Resend accepted can still bounce.
-            flash(f"Invitation sent to {email} as {role}. If it does not "
-                  f"arrive, this link works too — it is valid for 7 days "
-                  f"and is cancelled if you invite the same address again: "
-                  f"{link}", "success")
+            tail = (f"If it does not arrive, this link works too — it is "
+                    f"valid for 7 days and is cancelled if you invite the "
+                    f"same address again: {link}")
         else:
             # The pre-E0.4 behaviour, kept as the fallback rather than
             # replaced by it: say what happened and hand over the link.
             # Claiming a message was sent would leave the admin waiting for
             # one that never arrives — and would make the invited address
             # count as proven when nothing proved it.
-            flash(f"Invitation created for {email} as {role}. "
-                  f"{_undelivered(delivery)} Send them this link — it is "
-                  f"valid for 7 days and is cancelled if you invite the "
-                  f"same address again: {link}", "success")
+            tail = (f"{_undelivered(delivery)} Send them this link — it is "
+                    f"valid for 7 days and is cancelled if you invite the "
+                    f"same address again: {link}")
 
+        flash(f"{lead} {tail}", "success")
         return _members_redirect()
 
     @app.route("/org/members/<user_id>/role", methods=["POST"])

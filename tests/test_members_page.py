@@ -1,10 +1,18 @@
 """Organisation members and invitations — routes/members.py (E2.4).
 
 With registration invite-only, this page is the only door into the
-platform. Two properties carry the most weight: an admin can always get a
-usable invite link (email delivery is E0.4 and unbuilt), and neither door
-to "this organisation has no admin" is open — removing the last admin and
-demoting the last admin reach the same unrecoverable state.
+platform. Two properties carry the most weight: an admin can **always**
+get a usable invite link, and neither door to "this organisation has no
+admin" is open — removing the last admin and demoting the last admin
+reach the same unrecoverable state.
+
+"Always" is the word that grew a test class. E0.4 built email, but it
+only runs where the server has a provider configured, so on every other
+instance the link exists in exactly one place: a flash message, which
+survives one page load. An admin who clicked away had no route back to
+it — the token is deliberately absent from the pending list — and the
+only workaround was to know that re-inviting the same address mints a
+new one. ``TestReissuing`` covers the button that makes that a button.
 """
 
 import secrets
@@ -326,6 +334,155 @@ class TestRevoking:
         resp = client.post("/org/invites/revoke", data={"email": invited},
                            follow_redirects=True)
         assert resp.status_code == 200
+
+
+# ── What the page promises about email ────────────────────────────
+
+class TestTheInviteNote:
+    """The note has to describe *this* instance, not a past release.
+
+    It read "TestForTge does not send email on this plan" from before
+    E0.4 until now — which blamed the hosting plan for what is a server
+    setting, and was simply false anywhere the setting is filled in. An
+    admin who believes it will not go looking for the message, and an
+    admin who is told mail works when it does not will wait for one that
+    never comes. Both directions are asserted.
+    """
+
+    def _note(self, client, org, admin) -> str:
+        _signed_in_as(client, org, admin)
+        return client.get("/org/members").get_data(as_text=True)
+
+    def test_without_a_provider_it_says_the_instance_cannot_send(
+            self, client, monkeypatch):
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("MAIL_FROM", raising=False)
+        org, (admin,) = _team("admin")
+
+        body = self._note(client, org, admin)
+
+        assert "This instance cannot send email" in body
+        assert "will be emailed the link" not in body
+
+    def test_with_a_provider_it_does_not_deny_sending(
+            self, client, monkeypatch):
+        # Both halves set: a key with no verified sender is a 403 on every
+        # send, so mailer.configured() requires the pair — and so does the
+        # sentence that depends on it.
+        monkeypatch.setenv("RESEND_API_KEY", "re_a_key_for_this_test")
+        monkeypatch.setenv("MAIL_FROM", "qa@example.com")
+        org, (admin,) = _team("admin")
+
+        body = self._note(client, org, admin)
+
+        assert "will be emailed the link" in body
+        assert "cannot send email" not in body
+
+    def test_a_key_without_a_sender_still_counts_as_cannot_send(
+            self, client, monkeypatch):
+        # The half that gets forgotten. Claiming delivery here would be
+        # the same lie in a new place.
+        monkeypatch.setenv("RESEND_API_KEY", "re_a_key_for_this_test")
+        monkeypatch.delenv("MAIL_FROM", raising=False)
+        org, (admin,) = _team("admin")
+
+        body = self._note(client, org, admin)
+
+        assert "This instance cannot send email" in body
+
+
+# ── Getting the link back ─────────────────────────────────────────
+
+class TestReissuing:
+    """The link is shown once. This is the way back to one."""
+
+    def _flash(self, client) -> str:
+        """The flash text, read from the session rather than the page.
+
+        The redirect target renders fine either way, so asserting on the
+        landing page would pass whether or not anything was flashed —
+        which is the failure this whole class exists to prevent.
+        """
+        with client.session_transaction() as sess:
+            return " ".join(m for _, m in sess.get("_flashes", []))
+
+    def test_it_hands_the_admin_a_working_link(self, client):
+        org, (admin,) = _team("admin")
+        invited = _email()
+        _db.create_invite(org, invited, "user", new_invite_token())
+        _signed_in_as(client, org, admin)
+
+        client.post("/org/invites/reissue", data={"email": invited})
+
+        # Not "a link was flashed" — the link that was flashed has to be
+        # the one that actually opens the seat.
+        flashed = self._flash(client)
+        assert "/auth/accept/" in flashed
+        token = flashed.split("/auth/accept/")[1].split()[0].rstrip(".,")
+        invite = _db.get_invite(token)
+        assert invite is not None
+        assert invite["email"] == invited
+
+    def test_the_previous_link_stops_working(self, client):
+        # The cost of the button, and the reason the note says so.
+        org, (admin,) = _team("admin")
+        invited, first = _email(), new_invite_token()
+        _db.create_invite(org, invited, "user", first)
+        _signed_in_as(client, org, admin)
+
+        client.post("/org/invites/reissue", data={"email": invited})
+
+        assert _db.get_invite(first) is None
+        assert len(_db.list_pending_invites(org)) == 1
+
+    def test_the_role_comes_from_the_invitation_not_the_form(self, client):
+        # A button meaning "let me have the link again" must not be a
+        # promotion. The form field is ignored on purpose.
+        org, (admin,) = _team("admin")
+        invited = _email()
+        _db.create_invite(org, invited, "user", new_invite_token())
+        _signed_in_as(client, org, admin)
+
+        client.post("/org/invites/reissue",
+                    data={"email": invited, "role": "admin"})
+
+        assert _db.list_pending_invites(org)[0]["role"] == "user"
+
+    def test_another_teams_invitation_cannot_be_reissued(self, client):
+        # Otherwise this is a way to mint a credential into a team you
+        # are not an admin of.
+        theirs, _ = _team("user")
+        mine, (admin,) = _team("admin")
+        invited, token = _email(), new_invite_token()
+        _db.create_invite(theirs, invited, "user", token)
+        _signed_in_as(client, mine, admin)
+
+        client.post("/org/invites/reissue", data={"email": invited})
+
+        assert _db.get_invite(token) is not None
+        assert len(_db.list_pending_invites(theirs)) == 1
+
+    def test_a_plain_user_cannot_reissue(self, client):
+        org, (admin, user) = _team("admin", "user")
+        invited, token = _email(), new_invite_token()
+        _db.create_invite(org, invited, "user", token)
+        _signed_in_as(client, org, user)
+
+        resp = client.post("/org/invites/reissue", data={"email": invited},
+                           headers={"Accept": "application/json"})
+
+        assert resp.status_code == 403
+        assert _db.get_invite(token) is not None
+
+    def test_an_address_with_no_invitation_is_not_invited_by_it(self, client):
+        # The button must not be a second, unlabelled invite form.
+        org, (admin,) = _team("admin")
+        _signed_in_as(client, org, admin)
+
+        client.post("/org/invites/reissue", data={"email": _email()})
+
+        assert _db.list_pending_invites(org) == []
+        assert "no longer active" in self._flash(client)
 
 
 # ── End to end: the only door into the platform ───────────────────
