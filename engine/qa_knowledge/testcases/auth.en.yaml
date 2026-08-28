@@ -2,85 +2,92 @@ version: 1
 area: auth
 locale: en
 default_section: Authentication
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that login is completed successfully with valid credentials"
-    preconditions: "Application is accessible. Test user account is created."
+    preconditions: "The application at {url} is reachable. A test user account exists and its password is known."
     steps:
-      - "Navigate to the login page"
+      - "Open {url} and go to the login page"
       - "Enter a valid email address"
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: testuser@example.com, Password: ValidPass123!"
-    expected_result: "User is authenticated successfully. User is redirected to the dashboard/Homepage. Session cookie is set."
+    expected_result: "The user should be authenticated and redirected to the dashboard or Homepage. A session cookie should be set."
     category: Positive
     priority: High
     section: Authentication
   - summary: "Verify that login is rejected with an invalid-credentials message when the password does not match"
-    preconditions: "Application is accessible. Test user account is created."
+    preconditions: "The application at {url} is reachable. A test user account exists and its password is known."
     steps:
-      - "Navigate to the login page"
+      - "Open {url} and go to the login page"
       - "Enter a valid registered email address"
       - "Enter a password that does not match the stored hash"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: testuser@example.com, Password: WrongPass999"
-    expected_result: "Login is rejected. Generic error message is displayed (e.g. 'Invalid credentials'). No information about which field is wrong is revealed."
+    expected_result: "The login should be rejected and a generic error message should be displayed (e.g. 'Invalid credentials'). The message should not reveal which field was wrong."
     category: Negative
     priority: High
     section: Authentication
   - summary: "Verify that login is rejected when email field is left empty"
-    preconditions: "Application is accessible. Login page is opened."
+    preconditions: "The login page of {host} is open in the browser."
     steps:
       - "Leave the email field empty"
       - "Enter a password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: (empty), Password: ValidPass123!"
-    expected_result: "Form is not submitted. Validation error is displayed for the email field."
+    expected_result: "The form should not be submitted. A validation error should be displayed for the email field."
     category: Negative
     priority: High
     section: Authentication
   - summary: "Verify that validation is triggered for invalid email format"
-    preconditions: "Application is accessible. Login page is opened."
+    preconditions: "The login page of {host} is open in the browser."
     steps:
       - "Enter an invalid email format in the email field"
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: 'test@', '@domain.com', 'plaintext', 'test @example.com'"
-    expected_result: "Form validation is triggered. Error message indicates invalid email format."
+    expected_result: "Form validation should be triggered and the error message should name the invalid email format."
     category: Negative
     priority: High
     section: Authentication
   - summary: "Verify that brute-force protection is activated after multiple failed login attempts"
-    preconditions: "Application is accessible. Test user account is created."
+    preconditions: "The application at {url} is reachable. A test user account exists and its password is known."
     steps:
-      - "Navigate to the login page"
+      - "Open {url} and go to the login page"
       - "Enter a valid email address"
       - "Enter a password that does not match the stored hash"
       - "Repeat failed login 5+ times consecutively"
       - "Observe the system behavior"
     test_data: "Email: testuser@example.com, Password: WrongPass (repeated 5+ times)"
-    expected_result: "Account lockout is activated, or CAPTCHA is displayed, or rate-limiting is applied after the threshold is exceeded."
+    expected_result: "After the threshold is exceeded, the account should be locked out, or a CAPTCHA should be displayed, or rate limiting should be applied."
     category: Security
     priority: High
     section: Authentication
   - summary: "Verify that SQL injection is blocked in the login form"
-    preconditions: "Application is accessible. Login page is opened."
+    preconditions: "The login page of {host} is open in the browser."
     steps:
       - "Enter an SQL injection payload in the email field"
       - "Enter any value in the password field"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: ' OR 1=1 --, Password: anything"
-    expected_result: "Input is sanitized. No database error is exposed. Login is rejected with a generic error message."
+    expected_result: "The input should be sanitized and no database error should be exposed. The login should be rejected with a generic error message."
     category: Security
     priority: High
     section: Authentication
   - summary: "Verify that the user is logged out successfully"
-    preconditions: "User is authenticated. Application is accessible."
+    preconditions: "A test user is signed in to {host} and a protected page is open."
     steps:
       - "Click the 'Logout' / 'Sign Out' button or link"
       - "Observe the redirect"
       - "Attempt to access a protected page directly via URL"
     test_data: ""
-    expected_result: "User is logged out. Session is destroyed. Protected pages are not accessible. User is redirected to the login page."
+    expected_result: "The user should be logged out and the session should be destroyed. Protected pages should no longer be reachable and the user should be redirected to the login page."
     category: Positive
     priority: High
     section: Authentication

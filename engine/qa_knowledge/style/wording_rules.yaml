@@ -160,13 +160,17 @@ result_wording:
       field is highlighted in red and an error message is displayed below
       the field'.
     - >-
-      "should" IS accepted in expected results — the team's reviewed
-      training deliverable uses it throughout ("The entered data should be
-      accepted", "Button should be hidden when there is no additional
-      data") and the reviewing team lead did not object. Present-tense
-      declarative ("The entered data is accepted") is equally accepted and
-      is what the Odoo client corpus uses. Do not rewrite one into the
-      other.
+      "should" / "should be" is the voice to WRITE in an expected result —
+      "The entered data should be accepted", "Button should be hidden when
+      there is no additional data". The team's reviewed training
+      deliverable uses it throughout, the reviewing team lead did not
+      object, and operator ruling 2026-08-28 made it the default the
+      generator produces.
+    - >-
+      Present-tense declarative ("The entered data is accepted") stays
+      valid and is never rewritten when it came from a human. The Odoo
+      client corpus is written that way throughout, so a hand-authored
+      pack or an imported suite in that voice is correct as it stands.
     - >-
       "must" and "shall" stay banned — neither reference corpus uses them
       and they read as a requirement, not an observation.

@@ -753,29 +753,62 @@ def _ensure_verify_that(summary: str) -> str:
     return "Verify that " + (s[:1].lower() + s[1:])
 
 
-# Weak-modal → declarative rewrites, longest pattern first so
-# "should not be" is handled before "should be".
-# "should" is absent here for the reason spelled out at _WEAK_MODAL_RE:
-# the operator ruled it acceptable, so rewriting it would be editing text
-# a reviewer already signed off on.
+# Banned-modal rewrites, longest pattern first so "must not be" is
+# handled before "must be".
+#
+# They land on "should be" rather than on the declarative "is". Operator
+# ruling 2026-08-28 made "should" the voice this generator writes, so
+# rewriting a banned modal onto the house voice keeps one document in one
+# voice — rewriting to "is" would produce expected results that switched
+# voice depending on which modal the model happened to type.
+#
+# "should" itself is absent from the patterns for the reason spelled out
+# at _WEAK_MODAL_RE: it is the permitted modal, so there is nothing here
+# to rewrite.
 _MODAL_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bmust\s+not\s+be\b", re.I),     "is not"),
-    (re.compile(r"\bshall\s+not\s+be\b", re.I),    "is not"),
-    (re.compile(r"\bmust\s+be\b", re.I),           "is"),
-    (re.compile(r"\bshall\s+be\b", re.I),          "is"),
-    (re.compile(r"\bought\s+to\s+be\b", re.I),     "is"),
-    (re.compile(r"\b(?:is|are)\s+expected\s+to\s+be\b", re.I), "is"),
-    (re.compile(r"\b(?:is|are)\s+expected\s+to\b", re.I),      "is"),
+    (re.compile(r"\bmust\s+not\s+be\b", re.I),     "should not be"),
+    (re.compile(r"\bshall\s+not\s+be\b", re.I),    "should not be"),
+    (re.compile(r"\bmust\s+be\b", re.I),           "should be"),
+    (re.compile(r"\bshall\s+be\b", re.I),          "should be"),
+    (re.compile(r"\bought\s+to\s+be\b", re.I),     "should be"),
+    (re.compile(r"\b(?:is|are)\s+expected\s+to\s+be\b", re.I), "should be"),
+    (re.compile(r"\b(?:is|are)\s+expected\s+to\b", re.I),      "should"),
 )
+
+# Only "must" and "shall" — never "should", which is the voice an expected
+# result is written in and therefore has nothing to rewrite there.
+_BARE_MODAL_RE = re.compile(
+    r"\b(?:must|shall)\s+(?:not\s+)?([a-z][a-z-]+)\b", re.I)
+
+# ── The summary is a different field with a different rule ───────────
+#
+# Operator ruling 2026-08-01, verbatim: summaries carry no modal at all,
+# and "should" is permitted "лише у Expected result". So the same input
+# has two correct outputs depending on which field it came from — "The
+# record must be saved" becomes "should be saved" in an expected result
+# and "is saved" in a summary — and the two live as separate functions
+# rather than one with a flag, because passing the wrong flag would
+# produce a lint finding rather than a crash.
+#
+# Which is why the conjugation machinery below survives the 2026-08-28
+# ruling: a modal does not inflect, but "is"/"are" and "rejects" do, and
+# the summary still needs them.
+_SUMMARY_BE_REWRITES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(?:must|shall|should)\s+not\s+be\b", re.I),
+    re.compile(r"\bought\s+to\s+not\s+be\b", re.I),
+    re.compile(r"\b(?:must|shall|should)\s+be\b", re.I),
+    re.compile(r"\bought\s+to\s+be\b", re.I),
+    re.compile(r"\b(?:is|are)\s+expected\s+to\s+be\b", re.I),
+)
+
+_SUMMARY_BARE_RE = re.compile(
+    r"\b(?:must|shall|should)\s+(?:not\s+)?([a-z][a-z-]+)\b", re.I)
 
 # Irregular third-person-singular forms. Everything else is conjugated
 # by :func:`_third_person_singular`.
 _IRREGULAR_3SG: dict[str, str] = {
     "be": "is", "have": "has", "do": "does", "go": "goes",
 }
-
-_BARE_MODAL_RE = re.compile(
-    r"\b(?:must|shall)\s+(?:not\s+)?([a-z][a-z-]+)\b", re.I)
 
 
 def _third_person_singular(verb: str) -> str:
@@ -822,33 +855,29 @@ def _plural_subject(prefix: str) -> bool:
     return False
 
 
-def normalise_expected_result(text: str) -> str:
-    """Rewrite an expected result into the house declarative voice.
+def normalise_summary(text: str) -> str:
+    """Strip every modal from a summary, leaving declarative voice.
 
-    ``"The record should be created. Errors should not be shown."`` →
-    ``"The record is created. Errors are not shown."``
+    ``"the record must be saved"`` → ``"the record is saved"``.
+
+    "should" is stripped here even though it is the permitted modal in an
+    expected result — a summary states what is checked, and a modal turns
+    it into a requirement. This is the field where the Odoo corpus and the
+    training deliverable agree, so nothing about the 2026-08-28 ruling
+    touches it.
     """
     if not text:
         return text
     out = text
 
-    # Number-agreement pass on the "<subject> should be" forms.
     def _sub_be(m: re.Match) -> str:
-        start = m.start()
-        neg = "not" in m.group(0).lower()
-        plural = _plural_subject(out[:start])
-        verb = "are" if plural else "is"
+        neg = " not " in f" {m.group(0).lower()} "
+        verb = "are" if _plural_subject(out[:m.start()]) else "is"
         return f"{verb} not" if neg else verb
 
-    for pattern, default in _MODAL_REWRITES:
-        if default in ("is", "is not"):
-            out = pattern.sub(_sub_be, out)
-        else:  # pragma: no cover — every current rewrite is a be-form
-            out = pattern.sub(default, out)
+    for pattern in _SUMMARY_BE_REWRITES:
+        out = pattern.sub(_sub_be, out)
 
-    # Remaining bare "should <verb>" forms. A plural subject keeps the
-    # base form ("Errors occur"), a singular one takes the -s ending
-    # ("The message states"), and a negated form takes do/does support.
     def _sub_bare(m: re.Match) -> str:
         verb = m.group(1).lower()
         neg = " not " in m.group(0).lower()
@@ -856,6 +885,41 @@ def normalise_expected_result(text: str) -> str:
         if neg:
             return ("do not " if plural else "does not ") + verb
         return verb if plural else _third_person_singular(verb)
+
+    out = _SUMMARY_BARE_RE.sub(_sub_bare, out)
+    return re.sub(r"\s{2,}", " ", out).strip()
+
+
+def normalise_expected_result(text: str) -> str:
+    """Rewrite a banned modal in an expected result onto the house voice.
+
+    ``"The record must be created. Errors shall not be shown."`` →
+    ``"The record should be created. Errors should not be shown."``
+
+    "should" is what this produces, and therefore also what it leaves
+    alone: operator ruling 2026-08-01 named it the one permitted modal
+    and scoped it to the expected result, and the ruling of 2026-08-28
+    made it the voice the generator writes rather than one it tolerates.
+    Text already in that voice passes through untouched — as does
+    declarative present tense, which no pattern here matches, because a
+    human may have written it and a reviewer signed it off.
+    """
+    if not text:
+        return text
+    out = text
+
+    for pattern, replacement in _MODAL_REWRITES:
+        out = pattern.sub(replacement, out)
+
+    # Bare "must <verb>" / "shall <verb>", with no copula to hang the
+    # rewrite on. The verb keeps its base form after a modal, so unlike
+    # the declarative rewrite this needs neither the subject's number nor
+    # do/does support: "must reject" → "should reject" for one row or a
+    # thousand.
+    def _sub_bare(m: re.Match) -> str:
+        verb = m.group(1).lower()
+        neg = " not " in m.group(0).lower()
+        return ("should not " if neg else "should ") + verb
 
     out = _BARE_MODAL_RE.sub(_sub_bare, out)
     out = re.sub(r"\s{2,}", " ", out).strip()
@@ -1033,7 +1097,10 @@ def normalise_case(case: AuthoredCase) -> tuple[AuthoredCase, list[str]]:
         fixed.append("summary opener")
 
     if has_weak_modal(case.summary):
-        case.summary = normalise_expected_result(case.summary)
+        # normalise_summary, not normalise_expected_result: a summary
+        # carries no modal at all, so "must be saved" lands on "is saved"
+        # here and on "should be saved" in the expected result below.
+        case.summary = normalise_summary(case.summary)
         fixed.append("summary modal")
 
     case.steps = [_strip_step_number(s) for s in case.steps]
@@ -1401,6 +1468,7 @@ __all__ = [
     "build_control_inventory",
     "house_style_text", "coverage_rules_text",
     "lint_case", "normalise_case", "normalise_expected_result",
+    "normalise_summary",
     "has_weak_modal", "is_generic_step", "asserts_feedback",
     "append_feedback_assertion",
     "objective_core", "infer_category", "navigation_step",

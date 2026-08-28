@@ -2,51 +2,58 @@ version: 1
 area: usability
 locale: en
 default_section: Usability
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the primary call-to-action on the Homepage is visible above the fold"
-    preconditions: "Homepage is reachable in a 1280×800 viewport."
+    preconditions: "{url} is open in the browser at a 1280×800 viewport."
     steps:
-      - "Open the Homepage at 1280×800"
+      - "Open {url} at 1280×800"
       - "Pay attention to whether the primary CTA (e.g. Sign up / Buy / Start) is reachable without scrolling"
       - "Pay attention to its colour contrast and clickable affordance"
     test_data: "Viewport: 1280×800"
-    expected_result: "The primary CTA is visible above the fold, has a contrasting background, and is recognisable as a clickable control on first glance."
+    expected_result: "The primary CTA should be visible above the fold, should sit on a contrasting background, and should be recognisable as a clickable control at first glance."
     category: Positive
     priority: High
     section: Usability
     testing_type: Usability
   - summary: "Verify that body text uses a readable font size (>= 14 px) and adequate line-height"
-    preconditions: "Any content page is loaded at 1280×800."
+    preconditions: "A content-rich page of {host} is open at a 1280×800 viewport."
     steps:
       - "Open a content-rich page"
       - "Inspect computed font-size and line-height of the main body text"
       - "Pay attention to the computed body font-size and line-height"
     test_data: "Body paragraphs"
-    expected_result: "Body text reads cleanly at default zoom: font-size >= 14 px, line-height 1.4-1.7. No paragraphs use < 12 px."
+    expected_result: "Body text should read cleanly at default zoom: font-size should be at least 14 px and line-height should be between 1.4 and 1.7. No paragraph should use less than 12 px."
     category: Positive
     priority: Medium
     section: Usability
     testing_type: Usability
   - summary: "Verify that interactive controls have visible hover and focus states"
-    preconditions: "Any page with multiple links / buttons is loaded."
+    preconditions: "A page of {host} carrying several links and buttons is open in the browser."
     steps:
       - "Hover over each navigation link, button and interactive icon"
       - "Tab through the same controls using only the keyboard"
       - "Pay attention to how the hover and focus states differ from the default"
     test_data: "Top nav, primary CTA, footer links"
-    expected_result: "Every interactive element has a clearly different appearance on hover and on keyboard focus. No control silently absorbs focus."
+    expected_result: "Every interactive element should look clearly different on hover and on keyboard focus. No control should absorb focus without showing it."
     category: Positive
     priority: Medium
     section: Usability
     testing_type: Usability
   - summary: "Verify that error and empty states are user-friendly, not raw stack traces"
-    preconditions: "Application is reachable."
+    preconditions: "{url} is reachable in the browser."
     steps:
-      - "Trigger a known-bad URL (404)"
+      - "Open a known-bad path under {host} to trigger a 404"
       - "Trigger a form submission with invalid input"
       - "If the app exposes search, search for nonsense to hit an empty-state"
     test_data: "/this-does-not-exist-123, malformed form input, query: ‘zzzqqqxxx’"
-    expected_result: "Each error / empty state is rendered with a friendly message and a recovery CTA (link home, retry, contact). No raw 500 page or stack trace leaks."
+    expected_result: "Each error and empty state should render a friendly message and a recovery CTA (link home, retry, contact). No raw 500 page or stack trace should be exposed."
     category: Negative
     priority: High
     section: Usability

@@ -120,21 +120,40 @@ class TestControlInventory:
 
 class TestDeclarativeVoice:
     @pytest.mark.parametrize("src,want", [
-        ("The record must be created", "The record is created"),
-        ("The banner shall be visible", "The banner is visible"),
-        ("The record must not be created", "The record is not created"),
-        ("Errors shall not be displayed", "Errors are not displayed"),
+        ("The record must be created", "The record should be created"),
+        ("The banner shall be visible", "The banner should be visible"),
+        ("The record must not be created",
+         "The record should not be created"),
+        ("Errors shall not be displayed",
+         "Errors should not be displayed"),
         ("The server must reject the payload",
-         "The server rejects the payload"),
-        ("No errors shall occur", "No errors occur"),
-        ("Images must have alt text", "Images have alt text"),
+         "The server should reject the payload"),
+        ("No errors shall occur", "No errors should occur"),
+        ("Images must have alt text", "Images should have alt text"),
         ("The message must identify the field",
-         "The message identifies the field"),
-        ("The row must not persist", "The row does not persist"),
-        ("X is expected to be Y", "X is Y"),
-        ("X ought to be Y", "X is Y"),
+         "The message should identify the field"),
+        ("The row must not persist", "The row should not persist"),
+        ("X is expected to be Y", "X should be Y"),
+        ("X ought to be Y", "X should be Y"),
     ])
     def test_rewrites(self, src, want):
+        # A banned modal lands on the house voice, not on the declarative
+        # "is". One document, one voice: rewriting "must be" to "is" while
+        # the generator writes "should be" everywhere else produced
+        # expected results whose voice depended on what the model typed.
+        assert tc_author.normalise_expected_result(src) == want
+
+    @pytest.mark.parametrize("src,want", [
+        ("The record must be saved", "The record should be saved"),
+        ("The records must be saved", "The records should be saved"),
+        ("Errors must not appear", "Errors should not appear"),
+        ("The error must not appear", "The error should not appear"),
+    ])
+    def test_the_rewrite_does_not_depend_on_the_subject_number(self, src,
+                                                               want):
+        # The reason the conjugation machinery could go: a modal does not
+        # inflect, so singular and plural subjects take identical output
+        # and no "is"/"are" guess is needed to get it right.
         assert tc_author.normalise_expected_result(src) == want
 
     @pytest.mark.parametrize("src", [
@@ -159,12 +178,12 @@ class TestDeclarativeVoice:
                "filling. A warning is displayed.")
         assert tc_author.normalise_expected_result(src) == src
 
-    def test_multi_sentence_agreement_is_per_clause(self):
+    def test_every_clause_of_a_multi_sentence_result_is_rewritten(self):
         src = ("The record must be saved. Validation errors shall not "
                "be displayed.")
         out = tc_author.normalise_expected_result(src)
-        assert out == ("The record is saved. Validation errors are not "
-                       "displayed.")
+        assert out == ("The record should be saved. Validation errors "
+                       "should not be displayed.")
 
     def test_no_weak_modal_survives_the_rewrite(self):
         for src in ("X must be Y", "X must occur", "X shall not be Z",
@@ -172,15 +191,17 @@ class TestDeclarativeVoice:
             assert not tc_author.has_weak_modal(
                 tc_author.normalise_expected_result(src)), src
 
-    def test_third_person_singular_orthography(self):
-        f = tc_author._third_person_singular
-        assert f("match") == "matches"
-        assert f("pass") == "passes"
-        assert f("carry") == "carries"
-        assert f("stay") == "stays"
-        assert f("go") == "goes"
-        assert f("have") == "has"
-        assert f("round-trip") == "round-trips"
+    def test_declarative_present_tense_is_still_left_alone(self):
+        # The Odoo client corpus is written this way throughout, and a
+        # hand-authored pack or an imported suite in that voice is correct
+        # as it stands. Making "should" the voice the generator WRITES
+        # must not turn it into a voice it ENFORCES on somebody else's
+        # signed-off text.
+        for src in ("The required fields are highlighted.",
+                    "Odoo Warning is displayed.",
+                    "The entered data is accepted."):
+            assert tc_author.normalise_expected_result(src) == src
+            assert tc_author.lint_case(_case(expected_result=src)) == []
 
 
 # ── Lint / normalise ─────────────────────────────────────────────────
@@ -259,7 +280,7 @@ class TestNormalise:
         assert fixed.summary.startswith("Verify that ")
         assert not tc_author.has_weak_modal(fixed.summary)
         assert fixed.steps == ["Go to the grid", "Click Save"]
-        assert fixed.expected_result == "The record is saved"
+        assert fixed.expected_result == "The record should be saved"
         assert residual == []
 
     def test_drops_generic_steps(self):
@@ -746,7 +767,7 @@ class TestTeamLeadHouseStyle:
         from engine.qa_team_lead import review_test_cases
         tc = _TC(expected_result="The record must be saved")
         fixed, report = review_test_cases([tc])
-        assert fixed[0].expected_result == "The record is saved"
+        assert fixed[0].expected_result == "The record should be saved"
         finding = next(f for f in report.findings
                        if f.category == "Expected Result Voice")
         assert finding.auto_fixed

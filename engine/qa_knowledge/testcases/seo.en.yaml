@@ -2,64 +2,71 @@ version: 1
 area: seo
 locale: en
 default_section: SEO
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that every public page has a unique, non-empty <title> under 60 characters"
-    preconditions: "The site is reachable and indexable."
+    preconditions: "{url} is reachable and is not blocked from indexing."
     steps:
       - "Visit the Homepage and at least 3 representative inner pages"
       - "Inspect <head><title> via DevTools or `view-source:`"
       - "Pay attention to the length and uniqueness of each title"
     test_data: "Pages: /, /about, /contact, /<feature>"
-    expected_result: "Every audited page has its own descriptive <title>, none are duplicated, none exceed 60 chars."
+    expected_result: "Every audited page should carry its own descriptive <title>. No two titles should be identical and none should exceed 60 characters."
     category: Positive
     priority: High
     section: SEO
     testing_type: SEO
   - summary: "Verify that every page has a meta description (50-160 chars) and canonical URL"
-    preconditions: "Site is reachable."
+    preconditions: "{url} is reachable and its inner pages can be opened in the browser."
     steps:
-      - "View page source on the Homepage and 3 representative inner pages"
+      - "View page source on {url} and on 3 representative inner pages"
       - "Pay attention to the <meta name=\"description\"> content and its length"
       - "Pay attention to the <link rel=\"canonical\"> target"
     test_data: "HTML head of each audited page"
-    expected_result: "Each page declares a meaningful meta description in the 50-160-char range and a canonical link pointing to itself (or its preferred variant)."
+    expected_result: "Each page should declare a meaningful meta description of 50-160 characters and a canonical link pointing to itself or to its preferred variant."
     category: Positive
     priority: High
     section: SEO
     testing_type: SEO
   - summary: "Verify that robots.txt and sitemap.xml are reachable and consistent"
-    preconditions: "Site is reachable."
+    preconditions: "{url} is reachable over the public internet."
     steps:
-      - "Open /robots.txt — verify HTTP 200 and that it references a Sitemap directive"
+      - "Open {url}/robots.txt — verify HTTP 200 and that it references a Sitemap directive"
       - "Open the Sitemap URL — verify HTTP 200 and valid XML"
       - "Spot-check 3 URLs from the sitemap return HTTP 200"
     test_data: "/robots.txt, /sitemap.xml"
-    expected_result: "Both files return HTTP 200. robots.txt declares the sitemap. Sample sitemap URLs resolve without 4xx/5xx."
+    expected_result: "Both files should return HTTP 200. robots.txt should declare the sitemap, and the sampled sitemap URLs should resolve without 4xx/5xx."
     category: Positive
     priority: Medium
     section: SEO
     testing_type: SEO
   - summary: "Verify that Open Graph and Twitter Card meta tags are present on shareable pages"
-    preconditions: "Site is reachable."
+    preconditions: "{url} is reachable and serves at least one content or article page."
     steps:
-      - "Open the Homepage and one content/article page"
+      - "Open {url} and one content/article page"
       - "Pay attention to the og:title, og:description, og:image and og:url tags"
       - "Pay attention to the twitter:card, twitter:title and twitter:description tags"
       - "Use a card validator (e.g. opengraph.xyz) and confirm preview renders"
     test_data: "Homepage URL + one content URL"
-    expected_result: "Both pages render a clean Open Graph + Twitter Card preview when shared on Slack/Telegram/X. og:image loads and is at least 1200×630."
+    expected_result: "Both pages should render a clean Open Graph and Twitter Card preview when shared on Slack, Telegram or X. og:image should load and should be at least 1200×630."
     category: Positive
     priority: Medium
     section: SEO
     testing_type: SEO
   - summary: "Verify that all images on the Homepage have meaningful alt attributes"
-    preconditions: "Homepage is reachable."
+    preconditions: "{url} is reachable in the browser."
     steps:
-      - "Open the Homepage"
+      - "Open {url}"
       - "Run an a11y/SEO audit (Lighthouse or `document.querySelectorAll('img:not([alt]), img[alt=\"\"]')`)"
       - "Inspect every <img> for an alt attribute"
     test_data: "Homepage <img> elements"
-    expected_result: "Every <img> has an alt attribute. Decorative images use alt=\"\" and the attribute itself is present. No img is missing alt."
+    expected_result: "Every <img> should carry an alt attribute. Decorative images should use alt=\"\" with the attribute still present, and no <img> should be missing it."
     category: Positive
     priority: Medium
     section: SEO

@@ -614,21 +614,11 @@ def _localization_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
         return []
 
     from .qa_knowledge_loader import LOADER
-    url = analysis.url or ""
-    out: list[TCTemplate] = []
-    for tpl in LOADER.get_test_cases("localization"):
-        out.append(TCTemplate(
-            summary=tpl.summary,
-            preconditions=tpl.preconditions.replace("{url}", url),
-            steps=list(tpl.steps),
-            test_data=tpl.test_data,
-            expected_result=tpl.expected_result,
-            category=tpl.category,
-            priority=tpl.priority,
-            section=tpl.section,
-            testing_type=tpl.testing_type,
-        ))
-    return out
+    # The ``{url}`` this pack carries is filled by _contextualise on the
+    # way out of generate_professional_test_cases, along with every other
+    # pack's. It used to be substituted here and only here, which is why
+    # this was the only pack that could use a placeholder at all.
+    return list(LOADER.get_test_cases("localization"))
 
 
 def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
@@ -939,6 +929,78 @@ _AREA_SECTION: dict[str, str] = {
 }
 
 
+#: What a pack may ask the funnel to fill in for it.
+#:
+#: The packs have to fit any site — that is what makes them a usable
+#: baseline with no LLM and no crawl. It is also why a project whose URL
+#: was known all along produced "Open the application URL in the browser"
+#: on every case: nothing ever told the template which site it was for.
+#:
+#: The mechanism was already half-built. ``localization.en.yaml`` used
+#: ``{url}`` and exactly one call site substituted it, so the other eight
+#: packs could not use the placeholder even if they wrote it — it would
+#: have rendered literally. :func:`_contextualise` moves the substitution
+#: to the one funnel every template passes through, which is what makes
+#: the placeholder safe to use anywhere.
+_PLACEHOLDER_FALLBACK = {
+    "url": "the application URL",
+    "host": "the application",
+}
+
+
+def _site_context(analysis: "AnalysisResult") -> dict[str, str]:
+    """The values a pack placeholder resolves to for this run.
+
+    Falls back to prose rather than to an empty string: a precondition
+    reading "Site is reachable at ." is worse than the generic sentence
+    it replaced, and prompt-only runs have no URL at all.
+    """
+    url = (getattr(analysis, "url", "") or "").strip()
+    host = (getattr(analysis, "url_domain", "") or "").strip()
+    if not host and url:
+        try:
+            from urllib.parse import urlparse
+            host = (urlparse(url).netloc or "").strip()
+        except Exception:      # pragma: no cover — urlparse is total
+            host = ""
+    return {
+        "url": url or _PLACEHOLDER_FALLBACK["url"],
+        "host": host or _PLACEHOLDER_FALLBACK["host"],
+    }
+
+
+def _contextualise(templates: list[TCTemplate],
+                   context: dict[str, str]) -> list[TCTemplate]:
+    """Fill ``{url}`` / ``{host}`` in every field a tester reads.
+
+    Applied to the whole stream on the way out, not per pack, so a
+    placeholder cannot be introduced into a pack and silently render as
+    literal braces because somebody forgot to add a call site.
+
+    ``str.replace`` and not ``str.format``: expected results legitimately
+    contain braces (a JSON body, a CSS snippet), and ``format`` would
+    raise ``KeyError`` on them and take the whole generation down.
+    """
+    import dataclasses
+
+    def fill(text: str) -> str:
+        for key, value in context.items():
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    out: list[TCTemplate] = []
+    for tpl in templates:
+        out.append(dataclasses.replace(
+            tpl,
+            summary=fill(tpl.summary),
+            preconditions=fill(tpl.preconditions),
+            steps=[fill(step) for step in tpl.steps],
+            test_data=fill(tpl.test_data),
+            expected_result=fill(tpl.expected_result),
+        ))
+    return out
+
+
 def generate_professional_test_cases(analysis: AnalysisResult,
                                      stories: list | None = None,
                                      custom_prompt: str = "") -> list[TCTemplate]:
@@ -992,7 +1054,10 @@ def generate_professional_test_cases(analysis: AnalysisResult,
         cases = [c for c in cases if "sql injection" not in c.summary.lower()
                  and "sql" not in c.summary.lower().split("inject")[0:1]]
 
-    return cases
+    # Last, so it covers every source above — the packs, the flow packs,
+    # the story cases and the browser findings — rather than only the
+    # ones that remembered to ask.
+    return _contextualise(cases, _site_context(analysis))
 
 
 def _detect_area_for_text(text: str) -> str | None:

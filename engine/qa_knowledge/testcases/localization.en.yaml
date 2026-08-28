@@ -2,28 +2,35 @@ version: 1
 area: localization
 locale: en
 default_section: Localization
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the language switcher changes UI strings without breaking the layout"
-    preconditions: "Site is reachable at {url}."
+    preconditions: "{url} is reachable and exposes a language switcher in the header or the footer."
     steps:
-      - "Open the Homepage in the default language"
+      - "Open {url} in the default language"
       - "Use the language switcher in the Header or Footer to toggle to each available language"
       - "Pay attention to the visible UI strings after each switch"
       - "Pay attention to text overflow, clipped buttons and alignment after each switch"
     test_data: "All language toggles exposed in nav/footer"
-    expected_result: "Switching language replaces the visible UI strings end-to-end. The layout adapts to longer translations without overflow or clipping. The selected language persists on subsequent navigation."
+    expected_result: "Switching the language should replace the visible UI strings end to end. The layout should absorb longer translations without overflow or clipping, and the selected language should persist across subsequent navigation."
     category: Positive
     priority: High
     section: Localization
     testing_type: Localization
   - summary: "Verify that html[lang] reflects the active locale and matches the rendered text"
-    preconditions: "Site supports more than one language."
+    preconditions: "{host} serves more than one language and DevTools is available in the browser."
     steps:
       - "Switch to each available language"
       - "Open DevTools and inspect the <html lang=\"…\"> attribute"
       - "Pay attention to the html[lang] value for each locale (e.g. uk, en, ru, pl)"
     test_data: "Locale toggles + DevTools"
-    expected_result: "The lang attribute on <html> changes to the active locale on every switch. Screen readers and browsers receive the language hint matching that locale."
+    expected_result: "The lang attribute on <html> should change to the active locale on every switch, so that screen readers and browsers receive the language hint matching the rendered text."
     category: Positive
     priority: Medium
     section: Localization

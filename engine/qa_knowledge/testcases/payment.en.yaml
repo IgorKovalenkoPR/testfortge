@@ -2,21 +2,28 @@ version: 1
 area: payment
 locale: en
 default_section: "Payment & Checkout"
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that items are added to the cart successfully"
-    preconditions: "Application is accessible. Products are available."
+    preconditions: "{url} is open in the browser and at least one purchasable product is in stock."
     steps:
-      - "Navigate to a product page"
+      - "Open {url} and go to a product page"
       - "Click 'Add to Cart' button"
       - "Navigate to the cart page"
       - "Pay attention to the name, price and image of the item in the cart"
     test_data: "Any available product"
-    expected_result: "Product is added to the cart. Cart count is updated. Product details in the cart match the product page fields exactly."
+    expected_result: "The product should be added to the cart and the cart count should increase by one. The name, price and image in the cart should match the product page exactly."
     category: Positive
     priority: High
     section: "Payment & Checkout"
   - summary: "Verify that checkout is completed successfully with valid payment details"
-    preconditions: "Items are in the cart. Checkout page is accessible."
+    preconditions: "At least one item is in the cart on {host} and the checkout page is reachable."
     steps:
       - "Navigate to checkout"
       - "Fill shipping/billing information"
@@ -24,29 +31,29 @@ cases:
       - "Complete the purchase"
       - "Pay attention to the order confirmation Message"
     test_data: "Valid card: 4242 4242 4242 4242, Exp: 12/28, CVC: 123"
-    expected_result: "Order is placed successfully. Confirmation page/email is received. Cart is cleared."
+    expected_result: "The order should be placed successfully, a confirmation page should be displayed, and the cart should be emptied."
     category: Positive
     priority: High
     section: "Payment & Checkout"
   - summary: "Verify that checkout is rejected with invalid payment details"
-    preconditions: "Items are in the cart. Checkout page is opened."
+    preconditions: "At least one item is in the cart on {host} and the checkout page is open."
     steps:
       - "Enter invalid or expired payment details"
       - "Attempt to complete the purchase"
       - "Observe the error handling"
     test_data: "Declined card: 4000 0000 0000 0002, Expired: 01/20"
-    expected_result: "Payment is declined. Clear error message is displayed. Cart is preserved for retry."
+    expected_result: "The payment should be declined and a clear error message should be displayed. The cart contents should be preserved for a retry."
     category: Negative
     priority: High
     section: "Payment & Checkout"
   - summary: "Verify that double-charge is prevented on multiple submit clicks"
-    preconditions: "Checkout page is reached. Payment form is filled."
+    preconditions: "The checkout page of {host} is open and the payment form is filled with valid details."
     steps:
       - "Click the 'Pay' / 'Place Order' button rapidly multiple times"
       - "Pay attention to the number of charges in the payment provider dashboard"
       - "Try to find a duplicate charge for the same order"
     test_data: ""
-    expected_result: "Only one charge is processed. No duplicate orders are created."
+    expected_result: "Only one charge should be processed and no duplicate order should be created."
     category: "Edge Case"
     priority: High
     section: "Payment & Checkout"

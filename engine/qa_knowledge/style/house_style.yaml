@@ -137,8 +137,8 @@ steps:
 
 expected_result:
   style: >-
-    Third person, stating the observable system state. Declarative present
-    tense is the default; "should" is also accepted.
+    Third person, stating the observable system state, written with
+    "should" / "should be" as the assertion verb.
   evidence: >-
     Odoo corpus expected results read "User can filter Job Positions using
     filters", "The required fields are highlighted", "Odoo Warning is
@@ -148,13 +148,23 @@ expected_result:
     ("Training Plan_Horban Yaroslavna.xlsx") writes the opposite ("The
     entered data should be accepted", "Button should be hidden when there
     is no additional data") and the reviewing team lead objected to none
-    of it. Operator ruling: both voices are accepted, neither is rewritten
-    into the other.
+    of it. Operator ruling 2026-08-01 named "should / should be" the one
+    permitted modal and scoped it to the expected result; the ruling of
+    2026-08-28 made it the voice this generator WRITES, not merely one it
+    tolerates. So the Odoo corpus is deliberately not followed on this
+    single point — recorded here so the next person to measure the corpus
+    does not "correct" it back.
   rules:
     - >-
-      "should" and "should be" are accepted. Declarative present tense
-      ("The entered data is accepted") is equally accepted. Pick one voice
-      and hold it for the whole document — do not mix them case by case.
+      Write "should" / "should be": "The entered data should be accepted",
+      "The required fields should be highlighted". This is the voice to
+      produce.
+    - >-
+      Declarative present tense ("The entered data is accepted") stays
+      valid and is NEVER rewritten when a human wrote it — a reviewer
+      signed that text off, and editing it under them is not this tool's
+      job. The rule above governs what the generator writes, not what it
+      is allowed to keep.
     - >-
       Banned: "must", "shall", "is expected to", "ought to". These read as
       a requirement on the product rather than something the tester can

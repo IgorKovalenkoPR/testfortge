@@ -503,10 +503,13 @@ class TestQATeamLeadReview:
     """QA Team Lead must catch and fix documentation quality issues."""
 
     def test_review_fixes_requirement_voiced_expected_result(self):
-        """"must" / "shall" are rewritten to an observation.
+        """"must" / "shall" are rewritten onto the house voice.
 
-        Both reference corpora avoid them: they state a requirement on the
-        product rather than something a tester can record. See
+        Neither reference corpus uses them: they state a requirement on
+        the product rather than something a tester can record. They land
+        on "should", which operator ruling 2026-08-28 made the voice the
+        generator writes in an expected result — so one reviewed document
+        holds one voice. See
         ``engine/qa_knowledge/style/house_style.yaml`` →
         ``expected_result``.
         """
@@ -519,8 +522,8 @@ class TestQATeamLeadReview:
             preconditions="App is accessible.", test_steps="1. Login",
         )
         fixed, report = review_test_cases([tc])
-        assert fixed[0].expected_result == ("User is authenticated. "
-                                            "Session is created.")
+        assert fixed[0].expected_result == ("User should be authenticated. "
+                                            "Session should be created.")
         assert report.items_fixed > 0
 
     def test_review_keeps_should_voiced_expected_result(self):
@@ -556,6 +559,9 @@ class TestQATeamLeadReview:
             test_steps="1. Open the login page\n2. Submit valid credentials",
         )
         fixed, report = review_test_cases([tc])
+        # Untouched. "should" is the voice the generator WRITES; it is not
+        # a voice the reviewer imposes on text somebody else already wrote,
+        # and the Odoo client corpus is declarative throughout.
         assert fixed[0].expected_result == ("User is authenticated. "
                                             "Session is created.")
         assert not [f for f in report.findings

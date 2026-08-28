@@ -2,9 +2,16 @@ version: 1
 area: forms
 locale: en
 default_section: Forms
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the form is submitted successfully with all valid data"
-    preconditions: "Application is accessible. Form page is opened."
+    preconditions: "The page carrying the form is open at {url}."
     steps:
       - "Scroll the page down to the Form section"
       - "Fill the 'name' field with 'Olena Marchenko'"
@@ -14,53 +21,53 @@ cases:
       - "Pay attention to the confirmation Message"
       - "Scroll the page up to the top"
     test_data: "Name: Olena Marchenko, Email: tester@example.com, Message: Smoke test from TestForTge"
-    expected_result: "Form is submitted successfully. Success confirmation is displayed. Data is saved."
+    expected_result: "The form should be submitted successfully, a success confirmation should be displayed, and the data should be saved."
     category: Positive
     priority: High
     section: Forms
   - summary: "Verify that validation errors are displayed when required fields are left empty"
-    preconditions: "Application is accessible. Form page is opened."
+    preconditions: "The page carrying the form is open at {url}."
     steps:
       - "Scroll the page down to the Form"
       - "Fill the 'email' field with ''"
       - "Click the 'Submit' button"
       - "Pay attention to the validation Message under each required field"
     test_data: "All fields empty"
-    expected_result: "Form is not submitted. Validation error messages are displayed for each required field."
+    expected_result: "The form should not be submitted. A validation error message should be displayed under each required field."
     category: Negative
     priority: High
     section: Forms
   - summary: "Verify that email field rejects invalid email format"
-    preconditions: "Application is accessible. Form with email field is opened."
+    preconditions: "A page of {host} carrying a form with an email field is open in the browser."
     steps:
       - "Enter an invalid email address in the email field"
       - "Click the Submit/Save button"
       - "Observe the validation error"
     test_data: "Invalid emails: 'test@', '@domain.com', 'plaintext', 'test @example'"
-    expected_result: "Email field rejects invalid formats. Clear error message is displayed."
+    expected_result: "The email field should reject the invalid format and a clear error message should be displayed."
     category: Negative
     priority: High
     section: Forms
   - summary: "Verify that XSS and SQL injection are blocked in form fields"
-    preconditions: "Application is accessible. Form is opened."
+    preconditions: "A page of {host} carrying the form under test is open in the browser."
     steps:
       - "Enter XSS payload in text fields and submit"
       - "Enter SQL injection payload in text fields and submit"
       - "Observe the behavior"
     test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
-    expected_result: "Payloads are sanitized. No script execution or database errors occur."
+    expected_result: "Both payloads should be sanitized. No script should execute and no database error should be displayed."
     category: Security
     priority: High
     section: Forms
   - summary: "Verify that form accepts min and max boundary values and rejects min-1 / max+1"
-    preconditions: "Application is accessible. Form is opened."
+    preconditions: "A page of {host} carrying the form under test is open in the browser."
     steps:
       - "Enter minimum length values in text fields (1 character)"
       - "Enter maximum length values in text fields"
       - "Enter special characters and Unicode in all text fields"
       - "Submit the form after each test"
     test_data: "Min: 'A', Max: 255 chars, Special: @#$%^&*(), Unicode: test"
-    expected_result: "Min and max boundary values are accepted; min-1 and max+1 are rejected with a field-specific message. No errors or data corruption occurs."
+    expected_result: "The min and max boundary values should be accepted; min-1 and max+1 should be rejected with a field-specific message. No error or data corruption should occur."
     category: "Edge Case"
     priority: Medium
     section: Forms

@@ -2,31 +2,38 @@ version: 1
 area: navigation
 locale: en
 default_section: Navigation
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that every navigation menu item opens the URL that matches its label"
-    preconditions: "Application is accessible. Main page is loaded."
+    preconditions: "{url} is open in the browser and the main navigation is visible."
     steps:
       - "Identify all items in the navigation menu"
       - "Click each menu item one by one"
       - "Pay attention to the destination URL and to the page heading"
       - "Pay attention to the browser URL"
     test_data: "All navigation menu items"
-    expected_result: "Every navigation item opens the URL that matches its label. The browser URL matches the route declared for that menu item."
+    expected_result: "Every navigation item should open the URL that matches its label, and the browser URL should match the route declared for that menu item."
     category: Positive
     priority: High
     section: Navigation
   - summary: "Verify that 404 page is displayed for non-existent URLs"
-    preconditions: "Application is accessible."
+    preconditions: "{url} is reachable in the browser."
     steps:
-      - "Enter a non-existent URL path in the browser address bar"
+      - "Enter a non-existent path under {host} in the browser address bar"
       - "Observe the page that loads"
     test_data: "Non-existent path: /this-page-does-not-exist-12345"
-    expected_result: "A 404 error page is displayed. The page is styled and user-friendly, not a raw server error."
+    expected_result: "A 404 error page should be displayed. It should be styled and user-friendly rather than a raw server error."
     category: Negative
     priority: High
     section: Navigation
   - summary: "Verify that the previous route is reopened by the browser Back button and the next one by Forward"
-    preconditions: "Application is accessible. User has navigated through several pages."
+    preconditions: "{url} is open and at least three inner pages have been visited in this tab."
     steps:
       - "Navigate through 3-4 different pages"
       - "Click the browser Back button"
@@ -34,7 +41,7 @@ cases:
       - "Click the browser Forward button"
       - "Pay attention to the browser URL and to the page layout"
     test_data: ""
-    expected_result: "Browser Back and Forward restore the previous and next routes respectively. Each restored page renders without console errors or missing assets."
+    expected_result: "Browser Back and Forward should restore the previous and the next route respectively. Each restored page should render without console errors or missing assets."
     category: Positive
     priority: Medium
     section: Navigation

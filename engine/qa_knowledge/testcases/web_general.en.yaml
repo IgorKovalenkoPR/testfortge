@@ -2,89 +2,98 @@ version: 1
 area: web_general
 locale: en
 default_section: "General Web"
+# Placeholders {url} and {host} are filled by engine.qa_persona._contextualise
+# on the way out of generate_professional_test_cases. Use them wherever a
+# tester would otherwise have to guess which site the case is about — a
+# precondition that says "Application is accessible" is true of every site
+# ever built and tells the person running the case nothing.
+#
+# Expected results use "should" / "should be" per the operator ruling of
+# 2026-08-01: it is the one modal permitted, and only here. "must" and
+# "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the Homepage loads within 3 seconds and shows the expected title, heading, and main content"
-    preconditions: "Application is accessible via browser."
+    preconditions: "{url} is reachable and the browser cache is cleared."
     steps:
-      - "Open the application URL in the browser"
+      - "Open {url} in the browser"
       - "Wait for the document ready event and measure load time in DevTools Network tab"
       - "Pay attention to the browser tab title"
       - "Pay attention to the H1 heading in the page source"
-    test_data: "Application URL"
-    expected_result: "Homepage loads in under 3 seconds on a wired connection. Browser tab title and H1 match the spec. Network tab shows no 4xx/5xx and Console tab shows no JavaScript errors."
+    test_data: "{url}"
+    expected_result: "The Homepage should load in under 3 seconds on a wired connection. The browser tab title and the H1 should match the spec. The Network tab should show no 4xx/5xx and the Console tab should show no JavaScript errors."
     category: Positive
     priority: High
     section: "General Web"
   - summary: "Verify that all images are loaded without broken links"
-    preconditions: "Application is accessible. Page is fully loaded."
+    preconditions: "{url} is open in the browser and the page is fully loaded."
     steps:
-      - "Open the page in the browser"
+      - "Open {url} in the browser"
       - "Inspect all images on the page"
       - "Pay attention to every image on the page"
       - "Pay attention to the alt attribute of every image in the page source"
     test_data: ""
-    expected_result: "All images are loaded successfully. No broken image placeholders are visible. Images have alt text."
+    expected_result: "All images should be loaded successfully. No broken image placeholders should be visible. Every image should have alt text."
     category: Positive
     priority: High
     section: "General Web"
   - summary: "Verify that the page is responsive on mobile viewport (375px width)"
-    preconditions: "Application is accessible."
+    preconditions: "{url} is open in the browser with DevTools responsive mode available."
     steps:
-      - "Open the page in browser DevTools responsive mode"
+      - "Open {url} in browser DevTools responsive mode"
       - "Set viewport width to 375px (mobile)"
       - "Pay attention to the column count and to the Header"
       - "Try to find a horizontal scroll bar"
       - "Pay attention to the computed font size of the body text at 100% zoom"
     test_data: "Viewport: 375x812 (iPhone)"
-    expected_result: "Layout uses a single column at 375px. No horizontal scrollbar. Body font ≥ 14px. Every tap target measures ≥ 44×44 CSS pixels including padding."
+    expected_result: "The layout should use a single column at 375px. There should be no horizontal scrollbar. Body font should be at least 14px. Every tap target should measure at least 44×44 CSS pixels including padding."
     category: Positive
     priority: High
     section: "Responsive Design"
   - summary: "Verify that the page is responsive on tablet viewport (768px width)"
-    preconditions: "Application is accessible."
+    preconditions: "{url} is open in the browser with DevTools responsive mode available."
     steps:
-      - "Open the page in browser DevTools responsive mode"
+      - "Open {url} in browser DevTools responsive mode"
       - "Set viewport width to 768px (tablet)"
       - "Pay attention to the layout against the tablet breakpoint in the design spec"
       - "Pay attention to element overlap and to container width"
     test_data: "Viewport: 768x1024 (iPad)"
-    expected_result: "Layout matches the tablet breakpoint defined in the design spec. No overlapping elements. No horizontal scrollbar."
+    expected_result: "The layout should match the tablet breakpoint defined in the design spec. No elements should overlap. There should be no horizontal scrollbar."
     category: Positive
     priority: High
     section: "Responsive Design"
   - summary: "Verify that the page loads within 3 seconds and has no console errors"
-    preconditions: "Application is accessible. Browser DevTools is open."
+    preconditions: "{url} is reachable and browser DevTools is open on the Console and Network tabs."
     steps:
       - "Open browser DevTools (Console and Network tabs)"
-      - "Load the page"
+      - "Load {url}"
       - "Pay attention to the page load time in the Network tab"
       - "Pay attention to the Console tab"
     test_data: ""
-    expected_result: "Page loads within 3 seconds. No JavaScript errors appear in the console."
+    expected_result: "The page should load within 3 seconds. No JavaScript errors should appear in the console."
     category: Positive
     priority: High
     section: "Performance"
   - summary: "Verify that the page is served over HTTPS with valid certificate"
-    preconditions: "Application URL is accessible."
+    preconditions: "{url} is reachable over the public internet."
     steps:
-      - "Open the application URL"
+      - "Open {url}"
       - "Pay attention to the padlock in the browser address bar"
       - "Click on the padlock and pay attention to the certificate details"
       - "Try to find a mixed-content warning in the Console tab"
-    test_data: ""
-    expected_result: "Page is served over HTTPS. Certificate is valid. No mixed content (HTTP resources on HTTPS page)."
+    test_data: "{url}"
+    expected_result: "The page should be served over HTTPS. The certificate should be valid for {host} and unexpired. There should be no mixed content (HTTP resources on an HTTPS page)."
     category: Security
     priority: High
     section: "Security"
   - summary: "Verify that the page meets basic accessibility standards (keyboard navigation, alt text)"
-    preconditions: "Application is accessible."
+    preconditions: "{url} is open in the browser and the page is fully loaded."
     steps:
       - "Navigate the page using only keyboard (Tab, Enter, Escape)"
       - "Pay attention to which interactive elements receive focus"
       - "Pay attention to the focus indicator on each focused element"
       - "Pay attention to the alt text of every image in the page source"
     test_data: ""
-    expected_result: "Page is fully navigable via keyboard. Focus indicators are visible. All images have alt text."
+    expected_result: "The page should be fully navigable via keyboard. Focus indicators should be visible on every focused control. All images should have alt text."
     category: Positive
     priority: Medium
     section: "Accessibility"
