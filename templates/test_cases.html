@@ -594,12 +594,27 @@
                 {{ t.get('ext_recorder_hint',
                     'Walk through your scenario in any tab — Stop and the captured TCs land in a review screen.') }}
             </span>
-            <a href="#" id="ext-recorder-install-link"
+            {# A real download, not a link to instructions about finding a
+               folder the reader does not have. The href is the route, so
+               it works with JavaScript off and can be copied; the JS
+               handler below only opens the Guide alongside it. #}
+            <a href="{{ url_for('recorder_extension_zip') }}"
+               id="ext-recorder-install-link" download
                style="font-size:0.85em;margin-left:auto;color:#0369a1;">
-                {{ t.get('ext_recorder_install',
-                    'Install the extension') }} ↗
+                ⬇ {{ t.get('ext_recorder_install',
+                    'Download the extension (.zip)') }}
             </a>
         </div>
+        {# Why the download matters, said where the decision is made
+           rather than three clicks away in the Guide. #}
+        <p style="margin:10px 0 0;font-size:0.82em;color:#7c2d12;
+                  line-height:1.5;">
+            {{ t.get('ext_recorder_why',
+                'Recording needs the TestForTge browser extension — it is '
+                'the part that watches the tab and captures the steps.') }}
+            <a href="/guide#test-execution" target="_blank" rel="noopener"
+               style="color:#0369a1;">{{ t.get('nav_guide', 'Guide') }} ↗</a>
+        </p>
 
         {# Hidden modal — shown by the JS handler when the operator
            clicks Start. Contains a Start URL field + the launch button
@@ -1301,15 +1316,10 @@ function filterSuite(suite, btn) {
             setStatus('');
         }
     });
-    if (installLink) {
-        installLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            // Anchor to the README section in the Guide; same page,
-            // hash-jump so the operator can read install steps without
-            // losing context.
-            window.open('/guide#test-execution', '_blank');
-        });
-    }
+    // The install link is now a plain download anchor pointing at
+    // /recorder/extension.zip. No handler: hijacking the click to open
+    // the Guide would cancel the download, and the Guide link sits
+    // beside it in the markup for anyone who wants the long version.
 
     launchBtn.addEventListener('click', async () => {
         const startUrl = (urlInput.value || '').trim();

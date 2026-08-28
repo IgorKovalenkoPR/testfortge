@@ -413,3 +413,95 @@ class TestUiTrigger:
             resp = client.get("/test-cases")
         body = resp.get_data(as_text=True)
         assert 'id="ext-recorder-start"' not in body
+
+
+# ── The extension download ───────────────────────────────────────────
+
+class TestTheExtensionArchive:
+    """/recorder/extension.zip — the install path for people without git.
+
+    The button beside this download mints a token and opens a tab; the
+    capture itself lives in the extension's content-script. So an
+    instruction that ended at "select the extension/ folder from your
+    checkout" made the recorder unusable by exactly the audience it was
+    built for — testers who did not want a terminal.
+    """
+
+    def _archive(self, client):
+        import io
+        import zipfile
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.get("/recorder/extension.zip")
+        assert resp.status_code == 200, resp.status_code
+        return resp, zipfile.ZipFile(io.BytesIO(resp.get_data()))
+
+    def test_it_serves_a_real_zip_as_an_attachment(self, client,
+                                                   ext_project):
+        resp, _ = self._archive(client)
+        assert resp.mimetype == "application/zip"
+        disposition = resp.headers.get("Content-Disposition", "")
+        assert "attachment" in disposition
+        assert "testfortge-recorder.zip" in disposition
+
+    def test_the_archive_is_a_loadable_extension(self, client, ext_project):
+        # Chrome's Load unpacked needs a manifest at the root of the
+        # folder it is pointed at. One top-level folder, manifest inside.
+        _, zf = self._archive(client)
+        names = zf.namelist()
+        assert "testfortge-recorder/manifest.json" in names, names[:10]
+        roots = {n.split("/")[0] for n in names}
+        assert roots == {"testfortge-recorder"}, (
+            f"unzipping would scatter {len(roots)} entries into Downloads")
+
+    def test_the_manifest_survives_the_round_trip(self, client,
+                                                  ext_project):
+        # Not "a file called manifest.json exists" — a corrupted archive
+        # would pass that and fail in Chrome with a useless message.
+        _, zf = self._archive(client)
+        manifest = json.loads(
+            zf.read("testfortge-recorder/manifest.json").decode("utf-8"))
+        assert manifest.get("manifest_version")
+        assert manifest.get("name")
+
+    def test_it_carries_the_content_script_that_does_the_capturing(
+            self, client, ext_project):
+        # The reason the download exists at all.
+        _, zf = self._archive(client)
+        assert "testfortge-recorder/content.js" in zf.namelist()
+
+    def test_no_editor_droppings_ship_to_a_tester(self, client,
+                                                  ext_project):
+        _, zf = self._archive(client)
+        for name in zf.namelist():
+            leaf = name.rsplit("/", 1)[-1]
+            assert not leaf.startswith("."), name
+            assert "__pycache__" not in name, name
+
+    def test_a_host_outside_the_pilot_serves_nothing(self, client,
+                                                     ext_project):
+        env = {k: v for k, v in os.environ.items()
+               if k != "RECORDER_ENABLED"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            resp = client.get("/recorder/extension.zip")
+        assert resp.status_code == 403
+
+    def test_an_anonymous_caller_gets_nothing(self, anon_client):
+        # Listed in route_policy.POLICY as "login". The build is not a
+        # secret, but an open path serves it to anyone who guesses the
+        # URL, and the fail-closed table is where that decision lives.
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1",
+                                          "AUTH_ENABLED": "1",
+                                          "ORG_MODE": "1"}):
+            resp = anon_client.get("/recorder/extension.zip")
+        assert resp.status_code in (302, 401, 403), resp.status_code
+        assert resp.mimetype != "application/zip"
+
+    def test_a_second_download_is_byte_identical(self, client, ext_project):
+        # The archive is cached on the folder's mtime. A cache keyed
+        # wrongly would show up as two different builds of the same
+        # extension, which is a bug nobody thinks to suspect.
+        first, _ = self._archive(client)
+        second, _ = self._archive(client)
+        assert first.get_data() == second.get_data()
+        assert first.headers.get("ETag") == second.headers.get("ETag")
+

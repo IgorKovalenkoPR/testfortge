@@ -1407,7 +1407,14 @@ TRANSLATIONS = {
     "ext_recorder_start": "Start session recording",
     "ext_recorder_hint": "Walk through your scenario in any tab — Stop and "
                          "the captured TCs land in a review screen.",
-    "ext_recorder_install": "Install the extension",
+    # Says what the download IS, not just that one exists. The old
+    # label named an action whose only documented path went through
+    # a repository checkout the reader does not have.
+    "ext_recorder_install": "Download the extension (.zip)",
+    # And why they would want it. Without the extension the button
+    # beside this text mints a token, opens a tab, and nothing ever
+    # reads it — the capture lives in the extension.
+    "ext_recorder_why": "Recording needs the TestForTge browser extension — it is the part that watches the tab and captures the steps. Without it the button above opens a page and records nothing. Unzip the download, then in Chrome open chrome://extensions, turn on Developer mode and use Load unpacked on the unzipped folder.",
     "ext_recorder_modal_title": "Start session recording",
     "ext_recorder_modal_hint": "The TestForTge recorder extension must be "
                                "installed in this Chrome profile. The "

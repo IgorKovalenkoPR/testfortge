@@ -449,12 +449,25 @@ python -m playwright install chromium</pre>
        <strong>TestForTge Recorder</strong> Chrome extension provides
        the same review-mode flow entirely in the browser. Pilot
        release — install via Developer mode unpacked.</p>
+    <p><strong>What the extension is for.</strong> It is the part that
+       watches the tab: every click, fill, change and SPA navigation is
+       captured by its content-script, and that capture is what becomes
+       test cases. The <em>Start session recording</em> button on
+       <code>/test-cases</code> only mints a token and opens the page —
+       without the extension installed in that Chrome profile, the page
+       opens and nothing is recorded.</p>
     <ol>
-      <li><strong>Install the extension once:</strong> open
+      <li><strong>Install the extension once:</strong>
+          <a href="/recorder/extension.zip" download>download the
+          extension</a> and unzip it, then open
           <code>chrome://extensions</code> → toggle <em>Developer mode</em>
           on (top-right) → click <em>Load unpacked</em> → select the
-          <code>extension/</code> folder from your TestForTge checkout.
-          A 🎬 icon appears in the toolbar.</li>
+          unzipped <code>testfortge-recorder</code> folder. A 🎬 icon
+          appears in the toolbar. (Chrome cannot install a <code>.zip</code>
+          directly, and it refuses packaged <code>.crx</code> files that
+          did not come from the Web Store — so unpacking is a step the
+          pilot cannot skip. If you have the repository checked out, the
+          <code>extension/</code> folder in it works just as well.)</li>
       <li><strong>On <code>/test-cases</code></strong> (with
           <code>RECORDER_ENABLED=1</code> on the host) click
           <strong>🎬 Start session recording</strong> above the TC

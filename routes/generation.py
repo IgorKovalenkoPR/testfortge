@@ -1614,6 +1614,56 @@ def register(app: Flask) -> None:
     # list and reuses the PR-D segmenter → classifier → SessionDraft
     # pipeline.
 
+    @app.route("/recorder/extension.zip", methods=["GET"])
+    def recorder_extension_zip():
+        """Serve the recorder extension as a zip the tester can unpack.
+
+        Why this route exists at all: the install instructions said
+        "select the ``extension/`` folder from your TestForTge checkout",
+        and a tester who only has the web app has no checkout. The
+        extension is not optional decoration — without it the "Start
+        session recording" button mints a token, opens a tab, and nothing
+        ever reads it, because the capture happens in the extension's
+        content-script. So the one documented way to make that button
+        work required being a developer.
+
+        What this does NOT do, and the UI says so: Chrome cannot install
+        a zip. The tester still unpacks it and uses Developer mode →
+        Load unpacked. A .crx would be installable, but Chrome refuses
+        CRX files that did not come from the Web Store, so it would trade
+        an honest two-step install for one that silently fails. This
+        removes the checkout, not the pilot.
+
+        Gated on RECORDER_ENABLED like every other recorder surface, so a
+        host outside the pilot does not serve a download for a feature it
+        has switched off.
+        """
+        if not _recorder_enabled():
+            return jsonify({"error": "recorder_disabled"}), 403
+
+        root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "extension")
+        if not os.path.isdir(root):
+            # A deployment that shipped without the folder. 404 rather
+            # than an empty archive: a zip with nothing in it would look
+            # like a broken extension rather than a missing one.
+            _log.warning("extension folder not found at %s", root)
+            return jsonify({"error": "extension_not_bundled"}), 404
+
+        payload, stamp = _extension_archive(root)
+        from flask import send_file
+        import io as _io2
+        response = send_file(
+            _io2.BytesIO(payload), mimetype="application/zip",
+            as_attachment=True, download_name="testfortge-recorder.zip",
+            max_age=0)
+        # The tester re-downloads after an update, and a cached copy of
+        # yesterday's extension is the kind of bug nobody thinks to
+        # suspect. ETag off the folder's newest mtime.
+        response.set_etag(f"ext-{stamp}")
+        return response
+
     @app.route("/api/recorder-session/start", methods=["POST", "OPTIONS"])
     def api_recorder_session_start():
         """Mint a fresh recording token for the active project.
@@ -2376,6 +2426,60 @@ def register(app: Flask) -> None:
                 headers={"Content-Disposition":
                          f"attachment; filename={name}_features.zip"})
         return "Unknown format", 400
+
+
+#: Cached extension archive, keyed on the folder's newest mtime. The
+#: folder is ~114 KB and changes only on deploy, so rebuilding it per
+#: download is pure waste; keying on mtime rather than caching forever
+#: means a redeploy is picked up without a restart.
+_EXTENSION_CACHE: dict[str, tuple[bytes, str]] = {}
+
+#: Never shipped to a tester: editor droppings and OS metadata that would
+#: make Chrome's "Load unpacked" complain about unexpected files.
+_EXTENSION_SKIP = ("__pycache__", ".DS_Store", "Thumbs.db", ".gitkeep")
+
+
+def _extension_archive(root: str) -> tuple[bytes, str]:
+    """Zip the extension folder. Returns ``(bytes, mtime_stamp)``.
+
+    Paths inside the archive are rooted at ``testfortge-recorder/`` so
+    unzipping produces one folder to point Chrome at, rather than
+    scattering manifest.json and friends into the tester's Downloads.
+    """
+    import io as _io
+    import zipfile
+
+    files: list[tuple[str, str]] = []
+    newest = 0.0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _EXTENSION_SKIP
+                       and not d.startswith(".")]
+        for name in sorted(filenames):
+            if name in _EXTENSION_SKIP or name.startswith("."):
+                continue
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            files.append((full, f"testfortge-recorder/{rel}"))
+            try:
+                newest = max(newest, os.path.getmtime(full))
+            except OSError:      # pragma: no cover — raced with a deploy
+                pass
+
+    stamp = f"{newest:.0f}-{len(files)}"
+    cached = _EXTENSION_CACHE.get(stamp)
+    if cached is not None:
+        return cached
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for full, arcname in files:
+            zf.write(full, arcname)
+    payload = buf.getvalue()
+    # One entry only: the stamp changes on deploy and the old bytes are
+    # dead weight in a 512 MB dyno.
+    _EXTENSION_CACHE.clear()
+    _EXTENSION_CACHE[stamp] = (payload, stamp)
+    return payload, stamp
 
 
 def _feature_archive(cases: list, project_name: str) -> bytes:

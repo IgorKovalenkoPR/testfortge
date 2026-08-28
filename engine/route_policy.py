@@ -144,6 +144,12 @@ POLICY: dict[str, str] = {
     "dashboard_layout": "login",
     "dashboard_export_csv": "login",
     "guide_page": "login",
+    # The recorder extension archive. Member-level: it is the
+    # product's own client, not a secret, but an anonymous
+    # download would serve a build to anyone who guessed the path.
+    # Self-gated on RECORDER_ENABLED as well, so a host outside the
+    # pilot serves nothing.
+    "recorder_extension_zip": "login",
     # Asking for a confirmation link for your own address. Self-enforcing
     # via @require_login and listed anyway: the fail-closed table is where
     # somebody looks to find out what a route needs.

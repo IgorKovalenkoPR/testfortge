@@ -453,12 +453,24 @@ python -m playwright install chromium</pre>
        Chrome <strong>TestForTge Recorder</strong> дає той самий режим
        перегляду повністю в браузері. Пілотний випуск — встановлюється
        через Developer mode як розпакований.</p>
+    <p><strong>Навіщо це розширення.</strong> Саме воно стежить за
+       вкладкою: кожен клік, введення, зміну й SPA-перехід захоплює його
+       content-script, і з цього захоплення постають тест-кейси. Кнопка
+       <em>Почати запис сесії</em> на <code>/test-cases</code> лише видає
+       токен і відкриває сторінку — без розширення в цьому профілі Chrome
+       сторінка відкриється, але не запишеться нічого.</p>
     <ol>
-      <li><strong>Встановіть розширення один раз:</strong> відкрийте
+      <li><strong>Встановіть розширення один раз:</strong>
+          <a href="/recorder/extension.zip" download>завантажте
+          розширення</a> й розпакуйте архів, тоді відкрийте
           <code>chrome://extensions</code> → увімкніть <em>Developer
           mode</em> (праворуч угорі) → натисніть <em>Load unpacked</em>
-          → виберіть теку <code>extension/</code> зі свого чекауту
-          TestForTge. На панелі з'явиться іконка 🎬.</li>
+          → виберіть розпаковану теку <code>testfortge-recorder</code>.
+          На панелі з'явиться іконка 🎬. (Chrome не вміє встановлювати
+          <code>.zip</code> напряму й відхиляє зібрані <code>.crx</code>,
+          які не з Web Store, — тож розпакування пілот пропустити не
+          може. Якщо у вас є чекаут репозиторію, тека
+          <code>extension/</code> у ньому підходить так само.)</li>
       <li><strong>На <code>/test-cases</code></strong> (за
           <code>RECORDER_ENABLED=1</code> на хості) натисніть
           <strong>🎬 Почати запис сесії</strong> над списком TC.
