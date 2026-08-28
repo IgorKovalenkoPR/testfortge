@@ -109,9 +109,14 @@ The service is declared in `render.yaml`, so:
    invitation ([first-admin.md](first-admin.md)). Without them the service
    starts and nobody can sign in. They stay set afterwards, harmlessly —
    `claim_first_admin()` no-ops once the database has any user at all.
-4. Optionally `RESEND_API_KEY` + `MAIL_FROM` if you want to test that an
-   invitation actually arrives, and `ANTHROPIC_API_KEY` if you want AI
-   generation on staging (BYOK per team also works).
+4. Optionally a mail transport, if you want to test that an invitation
+   actually arrives. Resend (`RESEND_API_KEY` + `MAIL_FROM`) needs a domain
+   you can verify, which `*.onrender.com` is not; SMTP (`SMTP_HOST`,
+   `SMTP_USER`, `SMTP_PASSWORD` + `MAIL_FROM`) needs only a mailbox, which
+   is why staging is the place it earns its keep. See
+   [self-hosting.md](self-hosting.md) for the Gmail specifics. Also
+   `ANTHROPIC_API_KEY` if you want AI generation on staging (BYOK per team
+   also works).
 
 It lands on `testfortge-staging.onrender.com`.
 

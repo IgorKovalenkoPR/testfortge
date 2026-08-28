@@ -105,7 +105,8 @@ work as intended until they are set in the dashboard:
 
 | Variable | Needed for |
 |---|---|
-| `RESEND_API_KEY`, `MAIL_FROM` | Password resets and invitations. Without them the app falls back to showing the link on screen |
+| `MAIL_FROM` + one transport | Password resets and invitations. The transport is either `RESEND_API_KEY` (needs a domain verified with Resend) or `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD` (any mailbox, no domain). Without a transport the app falls back to showing the link on screen |
+| `MAIL_TRANSPORT`, `SMTP_PORT`, `SMTP_SECURITY` | Only when the defaults are wrong: `resend` wins if both transports are configured, port 587, STARTTLS |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | The first administrator. Without it, `AUTH_ENABLED=1` on a fresh database locks everybody out — an account needs an invitation and an invitation needs an admin. **Step-by-step: [first-admin.md](first-admin.md)** |
 | `STORAGE_S3_*` (6) | Object storage. Until then artefacts are on the ephemeral disk (E0.5). **Step-by-step: [object-storage-setup.md](object-storage-setup.md)** |
 | `BACKUP_TOKEN` | The weekly backup workflow, with the same value as the repository secret |

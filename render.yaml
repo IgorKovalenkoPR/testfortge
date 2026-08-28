@@ -367,6 +367,37 @@ services:
       # tier allows one domain.
       - key: MAIL_FROM
         sync: false
+      # ── The second transport (SMTP) ──
+      #
+      # Declared here and not only in the dashboard because this blueprint
+      # syncs on every push: a variable that exists only in the dashboard
+      # is a variable nobody reviewing this file knows is load-bearing.
+      # All blank by default — an instance with no SMTP_HOST is unchanged.
+      #
+      # Why it exists at all: Resend will not send until you verify a
+      # domain you own, and this service runs on *.onrender.com. SMTP
+      # authenticates as a mailbox instead, so any account works — set
+      # SMTP_HOST, SMTP_USER, SMTP_PASSWORD (an app password, not the
+      # account password) and point MAIL_FROM at the same mailbox.
+      #
+      # With both transports configured Resend wins; MAIL_TRANSPORT=smtp
+      # is how you say otherwise.
+      - key: MAIL_TRANSPORT
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      # An app password is a credential like any other: dashboard only,
+      # never this file.
+      - key: SMTP_PASSWORD
+        sync: false
+      # starttls (default, port 587) | ssl (port 465) | none (a relay on
+      # a private network, never across the internet).
+      - key: SMTP_SECURITY
+        sync: false
       # Messages per rolling 24 hours. The free tier's real ceiling is 100 a
       # day (3,000 a month) — declared here at that number so the limit is
       # visible to whoever operates the service rather than discovered when
@@ -750,6 +781,37 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
+        sync: false
+      # ── The second transport (SMTP) ──
+      #
+      # Declared here and not only in the dashboard because this blueprint
+      # syncs on every push: a variable that exists only in the dashboard
+      # is a variable nobody reviewing this file knows is load-bearing.
+      # All blank by default — an instance with no SMTP_HOST is unchanged.
+      #
+      # Why it exists at all: Resend will not send until you verify a
+      # domain you own, and this service runs on *.onrender.com. SMTP
+      # authenticates as a mailbox instead, so any account works — set
+      # SMTP_HOST, SMTP_USER, SMTP_PASSWORD (an app password, not the
+      # account password) and point MAIL_FROM at the same mailbox.
+      #
+      # With both transports configured Resend wins; MAIL_TRANSPORT=smtp
+      # is how you say otherwise.
+      - key: MAIL_TRANSPORT
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      # An app password is a credential like any other: dashboard only,
+      # never this file.
+      - key: SMTP_PASSWORD
+        sync: false
+      # starttls (default, port 587) | ssl (port 465) | none (a relay on
+      # a private network, never across the internet).
+      - key: SMTP_SECURITY
         sync: false
       - key: LOG_LEVEL
         value: INFO

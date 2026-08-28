@@ -142,10 +142,33 @@ means no shared password and no accounts either — an open instance.
 `engine/basic_auth.py` refuses that combination and keeps the gate up, so the
 mistake is survivable, but the order above avoids the argument.
 
-Sign-up needs email to send anything (password resets, invitations). Without
-`RESEND_API_KEY` and `MAIL_FROM` the app falls back to showing the link on
-screen for an admin to pass along, which is workable for a small team and
-tedious for a large one.
+Sign-up needs email to send anything (password resets, invitations). With no
+transport configured the app falls back to showing the link on screen for an
+admin to pass along, which is workable for a small team and tedious for a
+large one.
+
+There are two transports, and the difference is what they ask of you:
+
+| | Needs | Set |
+|---|---|---|
+| **Resend** | a domain you can add DNS records to | `RESEND_API_KEY`, `MAIL_FROM` |
+| **SMTP** | a mailbox and its password | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` |
+
+Resend is the better one to grow into — a verified domain is what keeps mail
+out of spam folders, and its free tier covers 3,000 messages a month. SMTP is
+the one you can turn on this afternoon without buying anything: it
+authenticates as a mailbox, so a personal account with an app password works.
+
+For Gmail specifically: turn on 2-Step Verification, generate an app password
+(a normal account password is refused), then set `SMTP_HOST=smtp.gmail.com`,
+`SMTP_USER` and `MAIL_FROM` to the address, and `SMTP_PASSWORD` to the app
+password. Port 587 with STARTTLS is the default and needs no setting; 465
+works as `SMTP_PORT=465` with `SMTP_SECURITY=ssl`.
+
+`MAIL_DAILY_LIMIT` defaults to 100 — Resend's free ceiling. It is not
+Gmail's, which is nearer 500; raise it if you are on SMTP and hit the cap.
+With both transports configured Resend is used, and `MAIL_TRANSPORT=smtp`
+overrides that.
 
 ---
 

@@ -837,8 +837,14 @@ TRANSLATIONS = {
                     'link to pass on. Password reset does not, because the '
                     'link has nowhere to go — an admin has to set the '
                     'password for whoever is locked out.',
+    # Both transports named, because which one is reachable depends on
+    # something the operator has and this page cannot know: Resend needs a
+    # domain you can add DNS records to, SMTP needs only a mailbox.
     'os_mail_how': 'Whoever runs the server can switch it on by setting '
-                   '<code>RESEND_API_KEY</code> and <code>MAIL_FROM</code>.',
+                   '<code>MAIL_FROM</code> plus either '
+                   '<code>RESEND_API_KEY</code> (needs a domain verified '
+                   'with Resend) or <code>SMTP_HOST</code> and the other '
+                   '<code>SMTP_*</code> settings (any mailbox will do).',
 
     'os_storage_heading': 'Storage',
     'os_storage_s3_pre': 'Screenshots, videos and export bundles go to object '

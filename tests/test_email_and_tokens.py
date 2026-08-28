@@ -22,11 +22,14 @@ The four acceptance criteria, and where each is checked:
   free tier allows 100 a day, and a cap discovered by having mail silently
   dropped is worse than one the product knows about.
 
-**Nothing here talks to Resend.** ``engine.mailer._post_resend`` is the one
-provider-specific function and it is replaced by a recorder, so the tests
-run offline and assert on what would have been sent. What that cannot
-catch — a wrong endpoint, a payload Resend rejects — is not something a
-mock would catch either.
+**Nothing here talks to a provider.** ``engine.mailer`` has two
+provider-specific functions — ``_post_resend`` and ``_send_smtp`` — and the
+tests replace one or the other with a recorder, so they run offline and
+assert on what would have been sent. What that cannot catch — a wrong
+endpoint, a payload Resend rejects, a relay that refuses the envelope — is
+not something a mock would catch either. The SMTP tests go one level
+deeper and replace ``smtplib`` itself, so the message that gets built is
+the thing under test rather than the call that would have sent it.
 
 **Mode.** Authenticated throughout: reset and verify act on accounts, and
 accounts do not exist with the flags off.
@@ -213,6 +216,266 @@ def _reset_token(user_id: str) -> str | None:
                 _db.AuthToken.used_at.is_(None),
                 _db.AuthToken.revoked_at.is_(None))
         ).scalars().first()
+
+
+# ── E0.4: choosing a transport ───────────────────────────────────────
+
+class FakeSMTP:
+    """Stands in for ``smtplib.SMTP``/``SMTP_SSL`` and records the message.
+
+    Replaces the library rather than ``_send_smtp``, so what is under test
+    is the message this module builds — the headers above all, since those
+    are the part that has a way of going wrong that JSON does not.
+    """
+
+    instances: list["FakeSMTP"] = []
+
+    def __init__(self, host, port, timeout=None, context=None):
+        self.host, self.port, self.timeout = host, port, timeout
+        self.implicit_tls = context is not None
+        self.started_tls = False
+        self.login_as: tuple | None = None
+        self.messages: list = []
+        self.raise_on_login: Exception | None = None
+        self.raise_on_send: Exception | None = None
+        FakeSMTP.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def starttls(self, context=None):
+        self.started_tls = True
+
+    def login(self, user, password):
+        if self.raise_on_login is not None:
+            raise self.raise_on_login
+        self.login_as = (user, password)
+
+    def send_message(self, message):
+        if self.raise_on_send is not None:
+            raise self.raise_on_send
+        self.messages.append(message)
+
+    # — reading —
+
+    @classmethod
+    def reset(cls):
+        cls.instances = []
+
+    @classmethod
+    def only(cls):
+        assert len(cls.instances) == 1, (
+            f"expected one connection, saw {len(cls.instances)}")
+        return cls.instances[0]
+
+    @classmethod
+    def sole_message(cls):
+        return cls.only().messages[0]
+
+
+@pytest.fixture
+def smtp(monkeypatch):
+    """A configured SMTP transport whose library is a recorder."""
+    import smtplib
+
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("MAIL_TRANSPORT", raising=False)
+    monkeypatch.delenv("SMTP_SECURITY", raising=False)
+    monkeypatch.delenv("SMTP_PORT", raising=False)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_USER", "postbox@example.test")
+    monkeypatch.setenv("SMTP_PASSWORD", "an app password")
+    monkeypatch.setenv("MAIL_FROM", "TestForTge <postbox@example.test>")
+    monkeypatch.delenv("MAIL_DAILY_LIMIT", raising=False)
+    _forget_todays_email()
+    FakeSMTP.reset()
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
+    return FakeSMTP
+
+
+class TestChoosingATransport:
+    """Which one runs, and the rule that protects existing deployments."""
+
+    def test_nothing_configured_is_no_transport(self, monkeypatch):
+        for key in ("RESEND_API_KEY", "SMTP_HOST", "MAIL_TRANSPORT"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("MAIL_FROM", "q@example.test")
+        assert _mailer.transport() == ""
+        assert _mailer.configured() is False
+
+    def test_a_resend_key_alone_still_means_resend(self, monkeypatch):
+        # The property that matters most: adding SMTP support must not
+        # re-route an instance that already sends.
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("MAIL_TRANSPORT", raising=False)
+        monkeypatch.setenv("RESEND_API_KEY", "re_x")
+        monkeypatch.setenv("MAIL_FROM", "q@example.test")
+        assert _mailer.transport() == "resend"
+
+    def test_an_smtp_host_alone_means_smtp(self, monkeypatch):
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("MAIL_TRANSPORT", raising=False)
+        monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+        monkeypatch.setenv("MAIL_FROM", "q@example.test")
+        assert _mailer.transport() == "smtp"
+        assert _mailer.configured() is True
+
+    def test_with_both_resend_wins_until_told_otherwise(self, monkeypatch):
+        monkeypatch.setenv("RESEND_API_KEY", "re_x")
+        monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+        monkeypatch.delenv("MAIL_TRANSPORT", raising=False)
+        assert _mailer.transport() == "resend"
+        monkeypatch.setenv("MAIL_TRANSPORT", "smtp")
+        assert _mailer.transport() == "smtp"
+
+    def test_a_transport_with_no_sender_is_not_configured(self, monkeypatch):
+        # The half that gets forgotten, asserted for the new transport too.
+        monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+        monkeypatch.delenv("MAIL_FROM", raising=False)
+        assert _mailer.configured() is False
+
+    def test_an_unknown_transport_name_falls_back_rather_than_breaking(
+            self, monkeypatch):
+        monkeypatch.setenv("MAIL_TRANSPORT", "sendmail")
+        monkeypatch.setenv("RESEND_API_KEY", "re_x")
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        assert _mailer.transport() == "resend"
+
+
+class TestSendingOverSMTP:
+    def test_the_message_reaches_the_relay(self, smtp, person):
+        outcome = _mailer.send(to=person["email"], kind="invite",
+                               subject="Join the team", text="the link")
+
+        assert outcome.sent is True
+        message = smtp.sole_message()
+        assert message["To"] == person["email"]
+        assert message["Subject"] == "Join the team"
+        assert message["From"] == "TestForTge <postbox@example.test>"
+        assert "the link" in message.get_content()
+
+    def test_it_authenticates_and_upgrades_the_connection(self, smtp,
+                                                          person):
+        _mailer.send(to=person["email"], kind="invite", subject="s",
+                     text="t")
+
+        connection = smtp.only()
+        assert (connection.host, connection.port) == ("smtp.example.test",
+                                                      587)
+        assert connection.started_tls is True
+        assert connection.login_as == ("postbox@example.test",
+                                       "an app password")
+
+    def test_implicit_tls_does_not_also_start_tls(self, smtp, person,
+                                                  monkeypatch):
+        # Port 465 is already encrypted; issuing STARTTLS on it is an error.
+        monkeypatch.setenv("SMTP_SECURITY", "ssl")
+        monkeypatch.setenv("SMTP_PORT", "465")
+
+        _mailer.send(to=person["email"], kind="invite", subject="s",
+                     text="t")
+
+        connection = smtp.only()
+        assert connection.port == 465
+        assert connection.started_tls is False
+        assert connection.implicit_tls is True
+
+    def test_a_relay_that_wants_no_credentials_is_not_given_any(
+            self, smtp, person, monkeypatch):
+        # An internal relay accepts mail from inside the network; sending
+        # AUTH to one that never offered it is an error, not a courtesy.
+        monkeypatch.delenv("SMTP_USER", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+
+        _mailer.send(to=person["email"], kind="invite", subject="s",
+                     text="t")
+
+        assert smtp.only().login_as is None
+
+    def test_a_rejected_password_is_reported_not_raised(self, smtp, person):
+        """Sending is never the reason a user's action fails."""
+        import smtplib
+
+        def refuse(host, port, timeout=None, context=None):
+            connection = FakeSMTP(host, port, timeout, context)
+            connection.raise_on_login = smtplib.SMTPAuthenticationError(
+                535, b"Username and Password not accepted")
+            return connection
+
+        smtp.reset()
+        import engine.mailer  # noqa: F401  — patched below via smtplib
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(smtplib, "SMTP", refuse)
+        try:
+            outcome = _mailer.send(to=person["email"], kind="invite",
+                                   subject="s", text="t")
+        finally:
+            monkey.undo()
+
+        assert outcome.sent is False
+        assert outcome.reason == "provider_refused"
+        assert outcome.needs_fallback is True
+
+    def test_an_unreachable_relay_is_reported_not_raised(self, smtp, person):
+        import smtplib
+
+        def unreachable(host, port, timeout=None, context=None):
+            raise OSError("connection refused")
+
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(smtplib, "SMTP", unreachable)
+        try:
+            outcome = _mailer.send(to=person["email"], kind="invite",
+                                   subject="s", text="t")
+        finally:
+            monkey.undo()
+
+        assert outcome.sent is False
+        assert outcome.reason == "provider_unreachable"
+
+    def test_a_send_over_smtp_is_counted_against_the_daily_cap(self, smtp,
+                                                              person):
+        # The count comes from the audit row, so it has to be written on
+        # this path too — otherwise the ceiling silently stops applying.
+        before = _mailer.sent_today()
+        _mailer.send(to=person["email"], kind="invite", subject="s",
+                     text="t")
+        assert _mailer.sent_today() == before + 1
+
+
+class TestHeadersCannotBeSmuggled:
+    """A subject built from a name somebody typed.
+
+    Under Resend the subject lands in a JSON string and a newline is just a
+    newline. Under SMTP the same newline ends ``Subject:`` and starts the
+    next header, and the invite subject is
+    ``f"You have been invited to {org_name} on TestForTge"``.
+    """
+
+    def test_a_newline_in_the_subject_does_not_become_a_header(self, smtp,
+                                                               person):
+        _mailer.send(
+            to=person["email"], kind="invite", text="t",
+            subject="Join Acme\r\nBcc: harvester@example.test")
+
+        message = smtp.sole_message()
+        assert message["Bcc"] is None
+        assert "\n" not in message["Subject"]
+        assert "harvester@example.test" in message["Subject"], (
+            "flattened, not dropped — the subject still has to read")
+
+    def test_the_flattener_leaves_an_ordinary_subject_alone(self):
+        assert _mailer._header_safe("You have been invited to Acme") == \
+            "You have been invited to Acme"
+
+    def test_the_address_pattern_does_not_end_at_a_newline(self):
+        # strip() in send() is what closes this today; the pattern should
+        # not depend on somebody else's strip.
+        assert _mailer._PLAUSIBLE.match("a@b.test\n") is None
 
 
 # ── E0.4: the provider, and life without one ─────────────────────────
