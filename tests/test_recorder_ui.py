@@ -9,6 +9,19 @@ Pins the contract:
 * TCs with recorded steps (``automation_steps_json`` non-empty) surface
   a "Has recorded steps ✓" badge — testers see at a glance which TCs
   already have a capture.
+
+PR-E's session banner is pinned by ``TestTheSessionBannerIsReachable``,
+and it is a separate contract from the per-TC block above. The per-TC
+``<details>`` genuinely needs a case to attach to; the session banner is
+a way to *create* the first cases, and it shipped inside the same
+``has_data and test_cases`` gate as the case list — so the entry point
+sat behind the thing it produces and a new project never saw it.
+
+``TestTheBlockedPopupIsRecoverable`` pins the other half. The launch
+handler opens the recording tab with ``window.open`` after an await,
+which is exactly where a browser blocks a popup, and it used to announce
+success without reading the return value: green tick, modal closed, no
+tab, token spent, nothing on screen to recover from.
 """
 from __future__ import annotations
 
@@ -197,3 +210,83 @@ class TestCliCommandPrefill:
         # And the JS data-attribute carries the same so the click
         # handler's dynamic-rebuild path produces the same command.
         assert f'data-project="{pid}"' in body
+
+
+# ── PR-E: the session banner ─────────────────────────────────────────
+
+@pytest.fixture
+def empty_project(client):
+    """A project with no test cases — a new project, in other words."""
+    pid = db.upsert_project(
+        name=f"recorder-empty-{os.urandom(4).hex()}",
+        base_url="https://app.example.com",
+    )
+    with client.session_transaction() as s:
+        s["project_id"] = pid
+        s["test_cases_data"] = []
+        s["_session_active_since"] = 9_999_999_999
+    yield pid
+    db.delete_project(pid)
+
+
+class TestTheSessionBannerIsReachable:
+    def test_it_renders_before_any_test_case_exists(self, client,
+                                                    empty_project):
+        """The reported bug, pinned at the case that hit it.
+
+        Recording a session is how a project with nothing in it gets its
+        first cases. Gating the button on cases already existing made it
+        unreachable exactly then.
+        """
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            body = client.get("/test-cases").get_data(as_text=True)
+        assert 'id="ext-recorder-start"' in body
+        assert 'id="ext-recorder-modal"' in body
+
+    def test_it_still_renders_once_cases_exist(self, client,
+                                               seeded_session):
+        # Moving the block must not have moved it out of the page.
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            body = client.get("/test-cases").get_data(as_text=True)
+        assert 'id="ext-recorder-start"' in body
+
+    def test_the_flag_still_governs_it(self, client, empty_project):
+        # The surface stays invisible on a host that is not in the pilot.
+        env = {k: v for k, v in os.environ.items()
+               if k != "RECORDER_ENABLED"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            body = client.get("/test-cases").get_data(as_text=True)
+        assert 'id="ext-recorder-start"' not in body
+
+
+class TestTheBlockedPopupIsRecoverable:
+    """The markup half. The behaviour is JS and is walked in a browser.
+
+    Asserting on script text is weak evidence, so this checks the two
+    things a server test can actually establish: the element the recovery
+    link is written into exists and ships hidden, and the handler reads
+    what ``window.open`` returned instead of assuming it worked.
+    """
+
+    def test_the_page_carries_a_hidden_slot_for_the_manual_link(
+            self, client, empty_project):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            body = client.get("/test-cases").get_data(as_text=True)
+        assert 'id="ext-recorder-manual"' in body
+        # Ships hidden: an empty paragraph reserving space under the
+        # status line would read as a rendering fault.
+        slot = body[body.index('id="ext-recorder-manual"'):][:120]
+        assert "hidden" in slot
+
+    def test_the_handler_reads_the_window_open_result(self, client,
+                                                      empty_project):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            body = client.get("/test-cases").get_data(as_text=True)
+        assert "const opened = window.open(handoffUrl" in body
+        assert "if (!opened)" in body
+        # And does not claim success before knowing.
+        opened_at = body.index("const opened = window.open(handoffUrl")
+        success_at = body.index("Opening recording tab")
+        assert opened_at < success_at, (
+            "the success message is painted before the result is read")
+

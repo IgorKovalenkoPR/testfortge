@@ -511,59 +511,13 @@
 </div>
 {% endif %}
 
-{% if has_data and test_cases %}
-<div class="stats-grid stats-grid-4">
-    <div class="stat-card">
-        <div class="stat-number">{{ test_cases|length }}</div>
-        <div class="stat-label">{{ t.nav_test_cases }}</div>
-    </div>
-    <div class="stat-card stat-positive">
-        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Positive')|list|length }}</div>
-        <div class="stat-label">{{ t.positive }}</div>
-    </div>
-    <div class="stat-card stat-negative">
-        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Negative')|list|length }}</div>
-        <div class="stat-label">{{ t.negative }}</div>
-    </div>
-    <div class="stat-card stat-edge">
-        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Edge Case')|list|length + test_cases|selectattr('category', 'equalto', 'Security')|list|length }}</div>
-        <div class="stat-label">{{ t.edge_case }} / {{ t.security }}</div>
-    </div>
-</div>
-
-<!-- Tabs -->
-<div class="tabs">
-    <button class="tab active" onclick="showTab('testcases')">{{ t.nav_test_cases }}</button>
-    <button class="tab" onclick="showTab('traceability')">{{ t.traceability_matrix }}</button>
-</div>
-
-<!-- Test Cases Tab -->
-<div id="testcases" class="tab-content active">
-    <div class="filter-bar">
-        <label>{{ t.filter }}:</label>
-        <button class="filter-btn active" onclick="filterTC('all', this)">{{ t.all }}</button>
-        <button class="filter-btn" onclick="filterTC('Positive', this)">{{ t.positive }}</button>
-        <button class="filter-btn" onclick="filterTC('Negative', this)">{{ t.negative }}</button>
-        <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
-        <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
-    </div>
-    {# PR-D suite filter — sits separately from the category chips
-       above so the two axes compose (e.g. Positive ∩ Smoke). The
-       "All suites" reset is the default. #}
-    <div class="filter-bar" style="margin-top:8px;">
-        <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
-        <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Regression', this)">Regression</button>
-        <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
-    </div>
-
-    {# PR-E browser-extension trigger. Visible only when RECORDER_ENABLED
-       so the surface stays invisible on hosts that aren't in the pilot.
-       Click opens a modal with Start URL input + install instructions
-       — the JS handler hits /api/recorder-session/start, then opens the
-       SUT in a new tab with the token in the URL fragment so the
-       extension's content-script picks it up automatically. #}
+{# PR-E browser-extension trigger. Deliberately OUTSIDE the
+   ``has_data and test_cases`` gate below: recording a session is a way
+   to CREATE the first cases, so hiding it until cases already exist put
+   the entry point behind the thing it produces. A new project — the case
+   it helps most — never saw it. The per-TC "Record steps" panel further
+   down stays inside the loop, because that one genuinely needs a case to
+   attach to. #}
     {% if recorder_enabled %}
     <style>
       /* Recorder modal overlay. Scoped to :not([hidden]) so the JS
@@ -685,6 +639,15 @@
                 <p id="ext-recorder-status"
                    style="font-size:0.82em;color:#94a3b8;
                           min-height:1.2em;margin:0 0 12px 0;"></p>
+                {# Shown only when the browser refused to open the tab.
+                   The recording token lives in worker memory and is still
+                   valid at that point, so handing the operator the URL is
+                   a real recovery rather than an apology — see the
+                   launch handler. Populated by JS; empty and hidden
+                   otherwise. #}
+                <p id="ext-recorder-manual" hidden
+                   style="font-size:0.82em;margin:0 0 12px 0;
+                          word-break:break-all;"></p>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button type="button" id="ext-recorder-cancel"
                             class="btn btn-secondary"
@@ -701,6 +664,60 @@
         </div>
     </div>
     {% endif %}
+
+{% if has_data and test_cases %}
+<div class="stats-grid stats-grid-4">
+    <div class="stat-card">
+        <div class="stat-number">{{ test_cases|length }}</div>
+        <div class="stat-label">{{ t.nav_test_cases }}</div>
+    </div>
+    <div class="stat-card stat-positive">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Positive')|list|length }}</div>
+        <div class="stat-label">{{ t.positive }}</div>
+    </div>
+    <div class="stat-card stat-negative">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Negative')|list|length }}</div>
+        <div class="stat-label">{{ t.negative }}</div>
+    </div>
+    <div class="stat-card stat-edge">
+        <div class="stat-number">{{ test_cases|selectattr('category', 'equalto', 'Edge Case')|list|length + test_cases|selectattr('category', 'equalto', 'Security')|list|length }}</div>
+        <div class="stat-label">{{ t.edge_case }} / {{ t.security }}</div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('testcases')">{{ t.nav_test_cases }}</button>
+    <button class="tab" onclick="showTab('traceability')">{{ t.traceability_matrix }}</button>
+</div>
+
+<!-- Test Cases Tab -->
+<div id="testcases" class="tab-content active">
+    <div class="filter-bar">
+        <label>{{ t.filter }}:</label>
+        <button class="filter-btn active" onclick="filterTC('all', this)">{{ t.all }}</button>
+        <button class="filter-btn" onclick="filterTC('Positive', this)">{{ t.positive }}</button>
+        <button class="filter-btn" onclick="filterTC('Negative', this)">{{ t.negative }}</button>
+        <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
+        <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
+    </div>
+    {# PR-D suite filter — sits separately from the category chips
+       above so the two axes compose (e.g. Positive ∩ Smoke). The
+       "All suites" reset is the default. #}
+    <div class="filter-bar" style="margin-top:8px;">
+        <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
+        <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
+        <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
+        <button class="filter-btn-suite" onclick="filterSuite('Regression', this)">Regression</button>
+        <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
+    </div>
+
+    {# PR-E browser-extension trigger. Visible only when RECORDER_ENABLED
+       so the surface stays invisible on hosts that aren't in the pilot.
+       Click opens a modal with Start URL input + install instructions
+       — the JS handler hits /api/recorder-session/start, then opens the
+       SUT in a new tab with the token in the URL fragment so the
+       extension's content-script picks it up automatically. #}
 
     {%- if editors_enabled() %}
     {# Requirement 5's other half: a case somebody writes by hand, next to
@@ -1257,6 +1274,7 @@ function filterSuite(suite, btn) {
     const launchBtn = document.getElementById('ext-recorder-launch');
     const cancelBtn = document.getElementById('ext-recorder-cancel');
     const statusEl = document.getElementById('ext-recorder-status');
+    const manualEl = document.getElementById('ext-recorder-manual');
     const installLink = document.getElementById('ext-recorder-install-link');
     if (!startBtn || !modal || !urlInput || !launchBtn) return;
 
@@ -1300,6 +1318,12 @@ function filterSuite(suite, btn) {
             return;
         }
         launchBtn.disabled = true;
+        // A previous attempt's link must not sit under a new attempt's
+        // status — it points at a different, older token.
+        if (manualEl) {
+            manualEl.hidden = true;
+            manualEl.textContent = '';
+        }
         setStatus('Requesting recording token…');
         try {
             const resp = await fetch('/api/recorder-session/start', {
@@ -1325,8 +1349,40 @@ function filterSuite(suite, btn) {
             const handoffUrl = startUrl + sep +
                 `testfortge-recorder-token=${encodeURIComponent(token)}` +
                 `&testfortge-finish-url=${encodeURIComponent(finishUrl)}`;
+
+            // The return value is the whole point. window.open yields
+            // null when the browser blocks the popup, and this call sits
+            // after an await — outside the user gesture, which is exactly
+            // where blocking is most likely. Announcing success without
+            // looking left the operator with a green tick, a closed
+            // modal, no tab, and a spent token: the failure was
+            // invisible from every direction.
+            const opened = window.open(handoffUrl, '_blank');
+            if (!opened) {
+                setStatus('Your browser blocked the recording tab. '
+                          + 'Open this link yourself to start recording:',
+                          '#dc2626');
+                // The token is still live in worker memory, so this link
+                // is a working session and not a consolation prize. Built
+                // as a node rather than innerHTML: the page runs under a
+                // CSP with a nonce and no inline handlers.
+                if (manualEl) {
+                    manualEl.textContent = '';
+                    const a = document.createElement('a');
+                    a.href = handoffUrl;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    a.textContent = handoffUrl;
+                    a.style.color = '#0369a1';
+                    manualEl.appendChild(a);
+                    manualEl.hidden = false;
+                }
+                // Modal stays open and Launch stays usable: closing it
+                // would take the only copy of the link with it.
+                launchBtn.disabled = false;
+                return;
+            }
             setStatus('✓ Opening recording tab…', '#16a34a');
-            window.open(handoffUrl, '_blank');
             setTimeout(() => {
                 modal.hidden = true;
                 launchBtn.disabled = false;
