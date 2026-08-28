@@ -2330,6 +2330,10 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .invite-note { margin: .8rem 0 0; font-size: .82rem; line-height: 1.5; }
 .inline-form { display: inline-flex; gap: .4rem; align-items: center; }
 .col-actions { text-align: right; white-space: nowrap; }
+/* A pending invitation offers two actions, so two forms share one cell.
+   Both are inline-flex, which leaves the markup's own whitespace as the
+   only thing between the buttons — not enough to read as two choices. */
+.col-actions .inline-form + .inline-form { margin-left: .4rem; }
 .pill {
     display: inline-block;
     margin-left: .4rem;

@@ -642,10 +642,21 @@ TRANSLATIONS = {
     'om_role_user': 'User — works with everything',
     'om_role_admin': 'Admin — also creates projects and changes settings',
     'om_invite_submit': 'Create invitation',
-    'om_invite_note': 'You will get a link to send them yourself — '
-                      'TestForTge does not send email on this plan. Links '
-                      'are valid for 7 days, and inviting the same address '
-                      'again cancels the earlier link.',
+    # Two notes, one per state of the mail provider, chosen in the
+    # template. A single sentence cannot be true on both: this instance
+    # may or may not have RESEND_API_KEY set, and the version that said
+    # 'TestForTge does not send email on this plan' outlived the release
+    # that built sending — blaming the plan for what is a server setting,
+    # and lying outright anywhere the setting is filled in.
+    'om_invite_note': 'This instance cannot send email, so you will get a '
+                      'link to send them yourself. Links are valid for '
+                      '7 days, and inviting the same address again cancels '
+                      'the earlier link.',
+    'om_invite_note_mail': 'They will be emailed the link, and you will be '
+                           'shown it as well so you can pass it on yourself '
+                           'if the message does not arrive. Links are valid '
+                           'for 7 days, and inviting the same address again '
+                           'cancels the earlier link.',
     'om_members_heading': 'Members',
     'om_col_name': 'Name',
     'om_col_email': 'Email',
@@ -663,6 +674,11 @@ TRANSLATIONS = {
     'om_pending_heading': 'Pending invitations',
     'om_col_expires': 'Expires',
     'om_cancel': 'Cancel',
+    'om_resend': 'New link',
+    'om_resend_note': 'The link is shown once, when the invitation is '
+                      'created. New link issues a fresh one for that '
+                      'address — and retires the previous one, so use it '
+                      'only when the first link did not reach them.',
 
     # ── Settings (M-2) ─────────────────────────────────────────────
     # Whole sentences rather than fragments wherever the English builds

@@ -38,10 +38,13 @@
     </div>
   </form>
   <p class="text-muted invite-note">
-    {# Honest about the mechanism: promising an email while delivery is
-       unbuilt (E0.4) would leave the admin waiting for a message that
-       never arrives. #}
-    {{ t.om_invite_note }}
+    {# Honest about the mechanism, which means asking what the mechanism
+       currently is. E0.4 built sending, but it only runs where the server
+       has RESEND_API_KEY and MAIL_FROM — so a fixed sentence is wrong on
+       one kind of instance or the other, and an admin waiting for a
+       message that was never going to be sent is the bug this replaces. #}
+    {% if mail_configured %}{{ t.om_invite_note_mail }}
+    {% else %}{{ t.om_invite_note }}{% endif %}
   </p>
 </div>
 {% endif %}
@@ -122,9 +125,17 @@
           <td>{{ inv.role }}</td>
           <td>{{ (inv.expires_at or '')[:10] }}</td>
           <td class="col-actions">
-            {# Keyed on the address, not the token: the token is a bearer
-               credential for this person's seat, so it never reaches the
-               page. The server scopes the lookup to this organisation. #}
+            {# Both keyed on the address, not the token: the token is a
+               bearer credential for this person's seat, so it never
+               reaches the page — which is also why the first button
+               issues a new link rather than showing the one that exists.
+               The server scopes both lookups to this organisation. #}
+            <form method="post" action="{{ url_for('org_reissue_invite') }}"
+                  class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="email" value="{{ inv.email }}">
+              <button type="submit" class="btn btn-secondary btn-sm">{{ t.om_resend }}</button>
+            </form>
             <form method="post" action="{{ url_for('org_revoke_invite') }}"
                   class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -137,6 +148,12 @@
       </tbody>
     </table>
   </div>
+  <p class="text-muted invite-note">
+    {# Said here rather than discovered by pressing it: the button costs
+       the previous link, and an admin who thinks it re-sends the same one
+       would break a link that was already on its way. #}
+    {{ t.om_resend_note }}
+  </p>
 </div>
 {% endif %}
 {% endif %}
