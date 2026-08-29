@@ -227,6 +227,44 @@
     return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
   }
 
+  // What a tester means when they say they clicked something.
+  //
+  // e.target is the deepest element under the pointer, which on a real
+  // site is usually a <span>, an <svg> or a text wrapper inside the
+  // actual control. Those carry no role, no id and no accessible name,
+  // so deriveCandidates below had nothing to work with and fell all the
+  // way to its CSS last resort: a click on a nav link recorded as
+  // "ul > li:nth-of-type(1) > a > span:nth-of-type(1)", which breaks on
+  // any markup change and tells a reader nothing. The ladder was never
+  // the problem — it was being handed the wrong element.
+  const ACTIONABLE_SELECTOR = [
+    'a[href]', 'button', 'input', 'select', 'textarea', 'label',
+    'summary', 'option', '[role]', '[onclick]', '[tabindex]',
+    '[data-testid]', '[data-test]', '[data-qa]',
+    '[contenteditable=""]', '[contenteditable="true"]',
+  ].join(',');
+
+  // How far up to look. A control's inner markup is one to three levels
+  // (a > span > svg); past that we would be guessing, and the guess gets
+  // worse the further it goes — a page that wraps its content in
+  // [role="main"] would swallow every click on plain text.
+  const ACTIONABLE_MAX_DEPTH = 4;
+
+  function actionableTarget(el) {
+    let node = el;
+    for (let depth = 0; node && depth <= ACTIONABLE_MAX_DEPTH; depth++) {
+      if (node.nodeType === 1 && typeof node.matches === 'function'
+          && node.matches(ACTIONABLE_SELECTOR)) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    // Nothing actionable within reach: keep what was clicked. A CSS path
+    // to the real target beats a role locator for a container that only
+    // happens to be nearby.
+    return el;
+  }
+
   function deriveCandidates(el) {
     // Returns a ranked candidate list for one element: same shape as
     // engine.locator_registry.LocatorCandidate. Higher score first.
@@ -486,7 +524,9 @@
     if (!isActive) return;
     if (isOverlayEvent(e.target)) return;
     if (isDuplicate(e, '')) return;
-    const cands = deriveCandidates(e.target);
+    // Resolved before deriving: the ladder can only be as good as the
+    // element it is given.
+    const cands = deriveCandidates(actionableTarget(e.target));
     if (!cands.length) return;
     const primary = cands[0].value;
     const alternates = cands.slice(1, 5).map(c => c.value);
