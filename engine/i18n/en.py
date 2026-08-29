@@ -667,6 +667,15 @@ TRANSLATIONS = {
     'om_role_for': 'Role for %s',
     'om_save': 'Save',
     'om_remove': 'Remove',
+    # Admin-set passwords. The wording says what it costs the
+    # member (signed out everywhere) and what it does not do
+    # (tell them) — an admin who assumes the product notifies
+    # them leaves somebody locked out believing help arrived.
+    'om_set_password': 'Set password',
+    'om_set_password_new': 'New password',
+    'om_set_password_confirm': 'Repeat it',
+    'om_set_password_submit': 'Set',
+    'om_set_password_note': 'For somebody locked out when password reset cannot reach them. They are signed out everywhere and the password is never shown again, so tell them yourself.',
     'om_only_admin': 'You are the only admin. Promote someone else before '
                      'changing your own role or removing yourself — '
                      'otherwise nobody could create projects or change '

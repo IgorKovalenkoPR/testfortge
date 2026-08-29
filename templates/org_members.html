@@ -95,6 +95,27 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-danger btn-sm">{{ t.om_remove }}</button>
             </form>
+            {# Collapsed by default: this is a recovery path, not a
+               routine one, and two password fields per member would
+               otherwise dominate a table people read to see roles. #}
+            <details class="set-password">
+              <summary>{{ t.om_set_password }}</summary>
+              <form method="post"
+                    action="{{ url_for('org_set_password', user_id=m.user_id) }}"
+                    class="set-password-form" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label class="sr-only" for="pw-{{ m.user_id }}">{{ t.om_set_password_new }}</label>
+                <input type="password" id="pw-{{ m.user_id }}" name="password"
+                       required autocomplete="new-password"
+                       placeholder="{{ t.om_set_password_new }}">
+                <label class="sr-only" for="pw2-{{ m.user_id }}">{{ t.om_set_password_confirm }}</label>
+                <input type="password" id="pw2-{{ m.user_id }}" name="password_confirm"
+                       required autocomplete="new-password"
+                       placeholder="{{ t.om_set_password_confirm }}">
+                <button type="submit" class="btn btn-secondary btn-sm">{{ t.om_set_password_submit }}</button>
+              </form>
+              <p class="text-muted set-password-note">{{ t.om_set_password_note }}</p>
+            </details>
           </td>
           {% endif %}
         </tr>

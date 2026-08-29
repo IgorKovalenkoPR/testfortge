@@ -4,6 +4,7 @@
   * POST /org/members/invite                — admin: invite an address
   * POST /org/members/<user_id>/role        — admin: change a role
   * POST /org/members/<user_id>/remove      — admin: remove a member
+  * POST /org/members/<user_id>/password    — admin: set a password
   * POST /org/invites/revoke                — admin: cancel an invitation
   * POST /org/invites/reissue               — admin: new link for one
 
@@ -40,6 +41,22 @@ create a project, change settings, or promote anyone back. Both are
 refused in ``engine.db``, so no route can forget, and both are refused
 here with a message that says what to do instead.
 
+**An admin can set a member's password**, and that is a recovery path
+rather than a convenience. ``/auth/forgot`` already tells a locked-out
+user to "ask whoever runs the server to reset your password for you" —
+and until this route existed, that person had no way to do it: the only
+``set_password_hash`` call in the application sat behind a reset token
+that arrives by email, and this instance may have no mail transport
+configured. Re-inviting is not a way round it either, because
+``accept_invite`` creates the account and refuses when the address
+already has one. So an account whose password was forgotten on a
+mail-less instance was locked out permanently, while the page told the
+user to ask for help that could not be given.
+
+The password is never logged, never flashed back, and the same three
+cleanups the email reset performs run here too — see
+``org_set_password``.
+
 The page is readable by every member and writable only by admins — the
 owner's decision (§5.1 #4): a plain user seeing the team read-only
 produces fewer "where do I look" messages than a 403 does.
@@ -48,6 +65,7 @@ from __future__ import annotations
 
 from flask import (Flask, flash, redirect, render_template, request, url_for)
 
+from engine import auth as _auth
 from engine import db as _db
 from engine import mailer as _mailer
 from engine import permissions as _perm
@@ -339,6 +357,81 @@ def register(app: Flask) -> None:
         # and a deleted row turns an audit trail into orphaned ids.
         flash("Removed from the team. Their test cases and bug reports "
               "stay, still attributed to them.", "success")
+        return _members_redirect()
+
+    @app.route("/org/members/<user_id>/password", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_set_password(user_id):
+        """Set a team member's password, for when no link can reach them.
+
+        Scoped to this organisation through ``get_org_role``: without
+        that check an admin of one team could set the password of any
+        account whose id they could name, which is every account.
+
+        Allowed on another admin deliberately. Within a team admins are
+        peers, and the alternative — nobody can help a locked-out admin —
+        is the state this route exists to end.
+        """
+        org_id = _perm.current_org_id()
+        if not org_id:
+            flash("Create an organisation before managing members.",
+                  "error")
+            return _members_redirect()
+
+        if _db.get_org_role(org_id, user_id) is None:
+            # Also the answer for a user id from another team: they are
+            # not on this one, and saying more would confirm the id
+            # exists somewhere.
+            flash("That person is not on this team.", "error")
+            return _members_redirect()
+
+        password = request.form.get("password") or ""
+        confirm = request.form.get("password_confirm") or ""
+        if password != confirm:
+            # Checked before the policy so the admin fixes the typo they
+            # made rather than a policy complaint about the wrong one of
+            # two different strings.
+            flash("The two passwords do not match.", "error")
+            return _members_redirect()
+
+        member = _db.get_user(user_id) or {}
+        try:
+            # email= so the same policy applies as on the self-service
+            # paths: a password equal to the address is refused here too.
+            pwd_hash = _auth.hash_password(
+                password, email=member.get("email"))
+        except _auth.PasswordPolicyError as exc:
+            flash(str(exc), "error")
+            return _members_redirect()
+
+        if not _db.set_password_hash(user_id, pwd_hash):
+            flash("That password could not be saved — see server logs.",
+                  "error")
+            return _members_redirect()
+
+        # The same three cleanups the email reset performs, for the same
+        # reasons — a password change that leaves the old cookie working
+        # is ceremony, a reset link still in flight was issued to whoever
+        # asked for it, and leaving somebody locked out after their
+        # password was just fixed is a support ticket.
+        dropped = _db.delete_sessions_for_user(user_id)
+        _db.revoke_auth_tokens(user_id)
+        _db.clear_login_failures(user_id)
+
+        # The audit row records that it happened and who did it. It does
+        # NOT record the password, and neither does the log line: an
+        # audit trail is read by more people than an inbox is.
+        _db.append_audit(entity="user", action="password_set",
+                         user_id=_perm.current_user_id(), org_id=org_id,
+                         entity_id=user_id,
+                         diff={"email": member.get("email", ""),
+                               "sessions_ended": dropped, "via": "admin"})
+        log.info("password set by admin for %s; %d session(s) ended",
+                 user_id[:8], dropped)
+        flash(f"Password set for {member.get('email') or 'that member'}. "
+              f"They have been signed out everywhere and can sign in with "
+              f"the new one — tell them yourself, this page will not show "
+              f"it again.", "success")
         return _members_redirect()
 
     @app.route("/org/invites/revoke", methods=["POST"])

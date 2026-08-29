@@ -292,6 +292,150 @@ class TestRemoval:
         assert _db.get_org_role(org, admin) == "admin"
 
 
+# ── Setting a member's password ───────────────────────────────────
+
+class TestAdminSetsAPassword:
+    """The recovery path /auth/forgot has always told people to use.
+
+    That page says "ask whoever runs the server to reset your password
+    for you". Until this route existed nobody could: the only
+    set_password_hash call sat behind a reset token that arrives by
+    email, and an instance with no mail transport has no way to deliver
+    one. Re-inviting does not help either — accept_invite creates the
+    account and refuses when the address already has one — so a
+    forgotten password on a mail-less instance was permanent.
+
+    The tests below are mostly about the ways this route could instead
+    become a hole: it hands out the ability to become another account.
+    """
+
+    PASSWORD = "a replacement passphrase"
+
+    def _set(self, client, user_id, password=None, confirm=None):
+        password = self.PASSWORD if password is None else password
+        return client.post(
+            f"/org/members/{user_id}/password",
+            data={"password": password,
+                  "confirm": confirm if confirm is not None else password},
+            follow_redirects=False)
+
+    def test_the_member_can_sign_in_with_the_new_password(self, client):
+        org, (admin, user) = _team("admin", "user")
+        _signed_in_as(client, org, admin)
+
+        email = _db.get_user(user)["email"]
+
+        client.post(f"/org/members/{user}/password",
+                    data={"password": self.PASSWORD,
+                          "password_confirm": self.PASSWORD})
+
+        # Through verify_login, not a hash comparison: signing in is the
+        # property that was broken, and it is the whole chain — policy,
+        # hash, lockout counters — rather than one column.
+        assert _auth.verify_login(email, self.PASSWORD).ok
+
+    def test_their_sessions_die_with_the_old_password(self, client):
+        # A password change that leaves the old cookie working is
+        # ceremony — the same reason the email reset drops them.
+        org, (admin, user) = _team("admin", "user")
+        _db.create_session("sid-to-die", user) if hasattr(
+            _db, "create_session") else None
+        _signed_in_as(client, org, admin)
+
+        resp = client.post(f"/org/members/{user}/password",
+                           data={"password": self.PASSWORD,
+                                 "password_confirm": self.PASSWORD},
+                           follow_redirects=True)
+
+        assert resp.status_code == 200
+        # Asserted through the audit row rather than by counting rows in
+        # a table whose shape this test should not know.
+        rows = [r for r in _db.list_audit(limit=50)
+                if r["entity"] == "user" and r["action"] == "password_set"]
+        assert rows, "no audit row for an admin-set password"
+        assert "sessions_ended" in rows[0]["diff"]
+
+    def test_the_password_never_reaches_the_audit_trail(self, client):
+        # An audit trail is read by more people than an inbox is.
+        org, (admin, user) = _team("admin", "user")
+        _signed_in_as(client, org, admin)
+
+        client.post(f"/org/members/{user}/password",
+                    data={"password": self.PASSWORD,
+                          "password_confirm": self.PASSWORD})
+
+        rows = [r for r in _db.list_audit(limit=50)
+                if r["action"] == "password_set"]
+        assert rows
+        assert self.PASSWORD not in str(rows[0])
+
+    def test_a_mismatched_confirmation_changes_nothing(self, client):
+        org, (admin, user) = _team("admin", "user")
+        before = _db.get_user(user)["password_hash"]
+        _signed_in_as(client, org, admin)
+
+        client.post(f"/org/members/{user}/password",
+                    data={"password": self.PASSWORD,
+                          "password_confirm": "something else entirely"})
+
+        assert _db.get_user(user)["password_hash"] == before
+
+    def test_a_password_below_the_policy_is_refused(self, client):
+        org, (admin, user) = _team("admin", "user")
+        before = _db.get_user(user)["password_hash"]
+        _signed_in_as(client, org, admin)
+
+        client.post(f"/org/members/{user}/password",
+                    data={"password": "short", "password_confirm": "short"})
+
+        assert _db.get_user(user)["password_hash"] == before
+
+    def test_a_plain_user_cannot_set_anybody_password(self, client):
+        # Otherwise this route hands every member the ability to become
+        # any other member, including an admin.
+        org, (admin, user) = _team("admin", "user")
+        before = _db.get_user(admin)["password_hash"]
+        _signed_in_as(client, org, user)
+
+        resp = client.post(f"/org/members/{admin}/password",
+                           data={"password": self.PASSWORD,
+                                 "password_confirm": self.PASSWORD},
+                           headers={"Accept": "application/json"})
+
+        assert resp.status_code == 403
+        assert _db.get_user(admin)["password_hash"] == before
+
+    def test_an_admin_cannot_reach_another_teams_member(self, client):
+        # The id is guessable in the sense that ids always are; the scope
+        # check is what stops this being a way to take over any account
+        # on the instance.
+        theirs, (outsider,) = _team("user")
+        mine, (admin,) = _team("admin")
+        before = _db.get_user(outsider)["password_hash"]
+        _signed_in_as(client, mine, admin)
+
+        client.post(f"/org/members/{outsider}/password",
+                    data={"password": self.PASSWORD,
+                          "password_confirm": self.PASSWORD})
+
+        assert _db.get_user(outsider)["password_hash"] == before
+
+    def test_an_admin_can_rescue_another_admin(self, client):
+        # Allowed deliberately: within a team admins are peers, and the
+        # alternative is that a locked-out admin cannot be helped at all,
+        # which is the state this route exists to end.
+        org, (first, second) = _team("admin", "admin")
+        _signed_in_as(client, org, first)
+
+        email = _db.get_user(second)["email"]
+
+        client.post(f"/org/members/{second}/password",
+                    data={"password": self.PASSWORD,
+                          "password_confirm": self.PASSWORD})
+
+        assert _auth.verify_login(email, self.PASSWORD).ok
+
+
 # ── Revoking an invitation ────────────────────────────────────────
 
 class TestRevoking:

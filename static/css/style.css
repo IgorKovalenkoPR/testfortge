@@ -2334,6 +2334,23 @@ input[type="text"]:focus, textarea:focus, select:focus {
    Both are inline-flex, which leaves the markup's own whitespace as the
    only thing between the buttons — not enough to read as two choices. */
 .col-actions .inline-form + .inline-form { margin-left: .4rem; }
+/* Admin password recovery, collapsed in the actions cell. The cell sets
+   white-space: nowrap for the button row, so the panel turns it back on
+   — two stacked inputs and a sentence need to wrap. */
+.set-password { margin-top: .5rem; white-space: normal; text-align: left; }
+.set-password > summary {
+    cursor: pointer;
+    font-size: .82rem;
+    color: var(--muted, #64748b);
+}
+.set-password-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .5rem;
+}
+.set-password-form input { flex: 1 1 11rem; min-width: 0; }
+.set-password-note { margin: .5rem 0 0; font-size: .78rem; line-height: 1.5; }
 .pill {
     display: inline-block;
     margin-left: .4rem;
