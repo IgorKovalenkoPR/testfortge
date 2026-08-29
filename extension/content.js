@@ -510,23 +510,34 @@
   const DUPLICATE_WINDOW_MS = 50;
   let lastEvent = {type: '', target: null, value: '', at: -Infinity};
 
-  function isDuplicate(e, value) {
+  // ``target`` is the RESOLVED element, not e.target, and that
+  // distinction is the whole guard.
+  //
+  // Measured on staging 2026-08-29: clicking the <span> inside a nav
+  // link produced two events with two DIFFERENT raw targets — the span,
+  // then the <a>, because the site forwards the click to the anchor.
+  // Keyed on e.target they looked like two separate interactions and
+  // both were recorded; resolved, they are one control clicked once.
+  // Clicking the <a> directly never showed it, which is why the first
+  // version of this guard looked complete.
+  function isDuplicate(e, target, value) {
     const at = typeof e.timeStamp === 'number' ? e.timeStamp : Date.now();
     const same = lastEvent.type === e.type
-      && lastEvent.target === e.target
+      && lastEvent.target === target
       && lastEvent.value === (value || '')
       && (at - lastEvent.at) < DUPLICATE_WINDOW_MS;
-    lastEvent = {type: e.type, target: e.target, value: value || '', at};
+    lastEvent = {type: e.type, target, value: value || '', at};
     return same;
   }
 
   document.addEventListener('click', (e) => {
     if (!isActive) return;
     if (isOverlayEvent(e.target)) return;
-    if (isDuplicate(e, '')) return;
-    // Resolved before deriving: the ladder can only be as good as the
-    // element it is given.
-    const cands = deriveCandidates(actionableTarget(e.target));
+    // Resolve first, then dedupe: the ladder can only be as good as the
+    // element it is given, and so can the duplicate check.
+    const target = actionableTarget(e.target);
+    if (isDuplicate(e, target, '')) return;
+    const cands = deriveCandidates(target);
     if (!cands.length) return;
     const primary = cands[0].value;
     const alternates = cands.slice(1, 5).map(c => c.value);
@@ -557,7 +568,7 @@
     // Same guard as the click path: a doubled fill writes the value
     // twice on replay, which an input with an append behaviour turns
     // into corrupt test data rather than a redundant step.
-    if (isDuplicate(e, value)) return;
+    if (isDuplicate(e, el, value)) return;
     const action = tag === 'select' ? 'select' : 'fill';
     emitStep({
       action,

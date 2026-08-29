@@ -93,6 +93,26 @@ class TestTheDuplicateWindow:
             f"{match.group(1)} ms is long enough to eat a real "
             f"double-click")
 
+    def test_it_compares_the_resolved_control_not_the_raw_target(
+            self, source):
+        """The second shape of the duplicate, found by walking again.
+
+        Clicking the <span> inside a nav link produced two events with
+        two DIFFERENT raw targets — the span, then the <a>, because the
+        site forwards the click to the anchor. Keyed on e.target they
+        looked like two interactions and both were recorded. Clicking the
+        <a> directly never showed it, which is why the first version of
+        this guard looked complete.
+        """
+        handler = source[source.index("document.addEventListener('click'"):]
+        body = handler[:handler.index("}, true);")]
+        resolved = body.index("actionableTarget(e.target)")
+        deduped = body.index("isDuplicate(")
+        assert resolved < deduped, (
+            "the duplicate check runs before the target is resolved, so it "
+            "compares spans instead of controls")
+        assert "isDuplicate(e, target, '')" in body
+
     def test_it_compares_the_element_not_just_its_locator(self, source):
         """Two different elements can share a CSS path.
 
@@ -102,7 +122,10 @@ class TestTheDuplicateWindow:
         """
         window = source[source.index("function isDuplicate"):]
         window = window[:window.index("\n  }")]
-        assert "lastEvent.target === e.target" in window
+        assert "lastEvent.target === target" in window
+        # Identity, not a derived string: comparing locators would
+        # collapse two controls that happen to share a CSS path.
+        assert "deriveCandidates" not in window
 
 
 class TestTheClickTargetIsResolved:
@@ -124,8 +147,13 @@ class TestTheClickTargetIsResolved:
     def test_the_click_handler_resolves_before_deriving(self, source):
         handler = source[source.index("document.addEventListener('click'"):]
         body = handler[:handler.index("}, true);")]
-        assert "deriveCandidates(actionableTarget(e.target))" in body, (
+        # The property, not one spelling of it: the ladder must never be
+        # handed e.target directly.
+        assert "actionableTarget(e.target)" in body
+        assert "deriveCandidates(e.target)" not in body, (
             "the raw event target is being handed to the ladder again")
+        assert body.index("actionableTarget(e.target)") < body.index(
+            "deriveCandidates(")
 
     def test_the_walk_is_bounded(self, source):
         """An unbounded closest() is worse than the bug it fixes.
