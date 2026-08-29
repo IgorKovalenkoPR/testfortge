@@ -43,6 +43,18 @@
             {{ t.get('pp_none', 'No projects yet — create one →') }}
           </option>
           {% else %}
+          {# A select with no selected option displays its first one, and
+             a browser doing that is not the server having chosen it. With
+             projects listed and nothing active, this box showed a project
+             name while every endpoint correctly answered "no active
+             project" — reported from staging on 2026-08-28 as a page whose
+             header named a project next to a button denying there was one.
+             Say it instead of letting the first option imply it. #}
+          {% if not active_project_id %}
+          <option value="" disabled selected>
+            {{ t.get('pp_unselected', 'No project selected — pick one →') }}
+          </option>
+          {% endif %}
           {% for p in projects %}
           <option value="{{ p.id }}"
                   {% if active_project_id and p.id == active_project_id %}selected{% endif %}>

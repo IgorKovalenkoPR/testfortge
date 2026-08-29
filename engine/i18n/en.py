@@ -923,6 +923,7 @@ TRANSLATIONS = {
     'pp_active_project': 'Active project:',
     'pp_none': 'No projects yet — create one →',
     'pp_switch': 'Switch',
+    'pp_unselected': 'No project selected — pick one →',
     'pp_new_placeholder': 'New project name…',
     'pp_create': 'Create',
     'pp_hint': 'All activities (estimations, test cases, checklist items, '

@@ -390,6 +390,55 @@ def set_persistent_sid_cookie(response):
 
 # ── Active-project resolver (Phase 2) ────────────────────────────
 
+def recoverable_project(session_obj=None) -> str:
+    """The project a caller with no session pick may be *given back*.
+
+    Recovery, not adoption — and the distinction is the whole function.
+    Both resolvers below run when ``session["project_id"]`` is empty,
+    which happens for two very different reasons:
+
+    * the session store was wiped (Render's free plan does this on every
+      restart) and the caller's own project is sitting in Postgres. Handing
+      it back is the point of this code path;
+    * the caller has genuinely never picked one — a new member of a team,
+      or somebody who just cleared their session. Handing them *anything*
+      is wrong.
+
+    ``owner_sid`` separates the two, because every creation path writes it:
+    ``routes/projects.py`` passes ``owner_sid=get_session_id()`` on both
+    routes, and so does ``ensure_active_project``'s own auto-create. A
+    project the caller's browser created is a project the caller may be
+    given back without being asked.
+
+    It is then intersected with :func:`visible_projects`, so a project this
+    browser once created but whose organisation the caller has since left
+    cannot come back through the side door.
+
+    Returns "" when there is nothing to recover, which callers must treat
+    as "no active project" rather than as a reason to pick one.
+    """
+    from engine import db as _db
+
+    sess = session_obj if session_obj is not None else session
+    if not hasattr(_db, "list_projects"):
+        return ""
+    sid = get_session_id(sess)
+    if not sid:
+        return ""
+    own = _db.list_projects(owner_sid=sid) or []
+    if not own:
+        return ""
+    allowed = {p.get("id") for p in (visible_projects(sess) or [])
+               if isinstance(p, dict)}
+    for pick in own:                      # list_projects sorts recent-first
+        if not isinstance(pick, dict):
+            continue
+        pid = pick.get("id")
+        if pid and pid in allowed:
+            return pid
+    return ""
+
+
 def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
     """Active project id, or "" — never creating one as a side effect.
 
@@ -418,22 +467,25 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
     try:
         if not hasattr(_db, "list_projects"):
             return ""
-        # visible_projects, not list_projects(owner_sid=...) — the same
-        # correction that function's own docstring records, which was
-        # applied to the *list* and not to the resolver behind it. Under
-        # ORG_MODE a team's projects belong to the organisation and carry
-        # no owner_sid at all, so a cookie-scoped lookup could never match
-        # one: the picker rendered the team's projects while this returned
-        # "" and every caller behaved as though no project existed.
+        # The caller's own project, never the first one they can see.
         #
-        # Measured on staging 2026-08-28: the page header named an active
-        # project and "Start session recording" answered
-        # "no_active_project" in the same breath.
-        existing = visible_projects(sess) or []
-        if not existing:
-            return ""
-        pick = existing[0]
-        pid = pick.get("id") if isinstance(pick, dict) else None
+        # This briefly did take the first *visible* project, to make the
+        # picker and the endpoints agree after staging showed a page whose
+        # header named a project next to a button answering
+        # "no_active_project". The diagnosis was wrong: the header named
+        # nothing. ``_project_picker.html`` renders every visible project as
+        # an <option> and marks none of them selected when there is no
+        # active id, so the browser displays the first — a select box
+        # impersonating a choice the server had not made. Making the
+        # endpoints adopt that first project made them agree with the
+        # display instead of with the truth, and the cost was silent: a new
+        # member of a team was handed a colleague's project without asking,
+        # and the empty state became unreachable under ORG_MODE.
+        #
+        # The fix belongs in the picker, which now says "no project
+        # selected" out loud. See recoverable_project for why owner_sid is
+        # the right scope here even under ORG_MODE.
+        pid = recoverable_project(sess)
         if not pid:
             return ""
         # Cache it so the rest of the request behaves as if the session
@@ -453,8 +505,7 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
                  "sid=%s (session store was wiped)", pid, sid[:8])
         return pid
     except Exception as exc:
-        log.debug("resolve_active_project: visible-project lookup "
-                  "failed: %s", exc)
+        log.debug("resolve_active_project: recovery lookup failed: %s", exc)
         return ""
 
 
@@ -489,40 +540,33 @@ def ensure_active_project(session_obj=None) -> str:
 
     sid = get_session_id(sess)
 
-    # Recovery path: pick the most recent project the caller can see
+    # Recovery path: give the caller back their own most recent project
     # before falling back to auto-create — otherwise the user gets an
     # empty "Untitled project" while their actual TC pack lives under the
     # old project_id.
     #
-    # Scoped through visible_projects for the reason spelled out in
-    # resolve_active_project: in the legacy era that is this session's own
-    # projects (the cookie carries the same SID across Render restarts),
-    # and under ORG_MODE it is the team's — which have no owner_sid at
-    # all, so the cookie-scoped lookup this replaced auto-created a fresh
-    # empty project for a team that already had one.
+    # Their own, not the first one they can see: see recoverable_project.
+    # Adopting a visible project here would be the louder half of the same
+    # mistake — this function *writes*, so a new member of a team would
+    # have had a colleague's project pinned into their session by the mere
+    # act of opening a page.
     try:
-        if hasattr(_db, "list_projects"):
-            existing = visible_projects(sess) or []
-            if existing:
-                # list_projects returns most-recent-first per its sort.
-                # Defensive: also accept created_at desc if present.
-                pick = existing[0]
-                pid = pick.get("id") if isinstance(pick, dict) else None
-                if pid:
-                    log.info(
-                        "ensure_active_project: rehydrated project_id=%s "
-                        "for sid=%s (session was empty)",
-                        pid, sid[:8])
-                    sess["project_id"] = pid
-                    setup = sess.get("project_setup") or {}
-                    if isinstance(pick, dict) and pick.get("name"):
-                        setup.setdefault("project_name", pick["name"])
-                    sess["project_setup"] = setup
-                    sess.modified = (True if hasattr(sess, "modified")
-                                     else None)
-                    return pid
+        pid = recoverable_project(sess)
+        if pid:
+            log.info(
+                "ensure_active_project: rehydrated project_id=%s "
+                "for sid=%s (session was empty)", pid, sid[:8])
+            sess["project_id"] = pid
+            setup = sess.get("project_setup") or {}
+            row = _db.get_project(pid) if hasattr(_db, "get_project") else None
+            if isinstance(row, dict) and row.get("name"):
+                setup.setdefault("project_name", row["name"])
+            sess["project_setup"] = setup
+            sess.modified = (True if hasattr(sess, "modified")
+                             else None)
+            return pid
     except Exception as exc:
-        log.debug("ensure_active_project: owner_sid lookup failed: %s",
+        log.debug("ensure_active_project: recovery lookup failed: %s",
                   exc)
 
     name = "Untitled project " + _dt.now().strftime("%Y-%m-%d %H:%M")
