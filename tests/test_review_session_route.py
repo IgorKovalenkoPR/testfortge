@@ -440,3 +440,101 @@ class TestSuiteFilterUI:
         assert 'value="Smoke"' in body
         assert 'value="Regression"' in body
         assert 'value="E2E"' in body
+
+
+class TestDiscardingARecording:
+    """"Cancel — discard recording" has to discard the recording.
+
+    It was an ``<a href="/test-cases">``: it navigated away and threw
+    nothing away, while its label promised deletion. The draft stayed in
+    the pending banner and stayed savable by anyone holding the link for
+    the whole 24 h TTL, so an operator who pressed it and saw the
+    recording still listed could only read that as the product being
+    broken. Found by pressing it during the first end-to-end walk of the
+    recorder, 2026-08-29.
+    """
+
+    def _discard(self, client, token):
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            return client.post(
+                f"/test-cases/review-session/{token}/discard",
+                follow_redirects=False)
+
+    def test_it_leaves_the_pending_list(self, client, staged_draft):
+        pid, token = staged_draft["project_id"], staged_draft["token"]
+        assert db.list_pending_session_drafts(pid), "nothing to discard"
+
+        resp = self._discard(client, token)
+
+        assert resp.status_code in (302, 303), resp.status_code
+        assert db.list_pending_session_drafts(pid) == []
+
+    def test_the_recording_can_no_longer_be_saved(self, client,
+                                                  staged_draft):
+        """The half that makes this a defect rather than an untidy list.
+
+        A draft that is merely hidden is still a live review URL, and
+        anyone holding it could still turn a discarded recording into
+        test cases.
+        """
+        token = staged_draft["token"]
+        self._discard(client, token)
+
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            resp = client.post(
+                f"/test-cases/review-session/{token}",
+                json={"selected": [{"idx": 0, "suite": "Smoke"}]})
+
+        assert resp.status_code in (404, 410, 403), resp.status_code
+
+    def test_nothing_is_added_to_the_pack(self, client, staged_draft):
+        pid, token = staged_draft["project_id"], staged_draft["token"]
+        before = len(db.load_test_cases(pid))
+
+        self._discard(client, token)
+
+        assert len(db.load_test_cases(pid)) == before
+
+    def test_discarding_twice_is_harmless(self, client, staged_draft):
+        # A double-submitted form should not scold, and the operator's
+        # intent is satisfied either way.
+        token = staged_draft["token"]
+        self._discard(client, token)
+        resp = self._discard(client, token)
+        assert resp.status_code in (302, 303)
+
+    def test_the_button_on_the_page_actually_reaches_the_route(
+            self, client, staged_draft):
+        """The defect was the control, not a missing endpoint.
+
+        Every other test in this class POSTs to the route directly, so
+        all of them pass with the button reverted to the plain link that
+        caused this — measured, not assumed. This one reads the rendered
+        page: a form targeting the discard endpoint, and no anchor
+        wearing the discard label while going somewhere else.
+        """
+        token = staged_draft["token"]
+        with mock.patch.dict(os.environ, {"RECORDER_ENABLED": "1"}):
+            body = client.get(
+                f"/test-cases/review-session/{token}").get_data(as_text=True)
+
+        assert f"/test-cases/review-session/{token}/discard" in body, (
+            "the page never mentions the discard route")
+
+        # An <a> carrying the discard label is the exact shape of the bug.
+        import re as _re
+        for anchor in _re.findall(r"<a[^>]*>(.*?)</a>", body, _re.S):
+            assert "discard" not in anchor.lower(), (
+                f"a link is offering to discard: {anchor.strip()[:60]!r}")
+
+    def test_a_host_outside_the_pilot_discards_nothing(self, client,
+                                                       staged_draft):
+        pid, token = staged_draft["project_id"], staged_draft["token"]
+        env = {k: v for k, v in os.environ.items()
+               if k != "RECORDER_ENABLED"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            resp = client.post(
+                f"/test-cases/review-session/{token}/discard")
+        assert resp.status_code == 403
+        assert db.list_pending_session_drafts(pid)
+

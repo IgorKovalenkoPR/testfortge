@@ -88,6 +88,10 @@ OPEN: dict[str, str] = {
     "test_cases_review_session": "reached by a one-time token in the URL, "
                                  "from a browser that may never sign in",
     "test_cases_review_session_save": "same one-time token",
+    "test_cases_review_session_discard": "same one-time token; throwing a "
+                                         "recording away must be reachable "
+                                         "by exactly whoever could have "
+                                         "saved it",
 }
 
 
@@ -125,6 +129,7 @@ MACHINE: frozenset[str] = frozenset({
     "api_backup_run",
     "test_cases_review_session",
     "test_cases_review_session_save",
+    "test_cases_review_session_discard",
 })
 
 

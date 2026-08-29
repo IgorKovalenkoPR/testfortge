@@ -1947,6 +1947,52 @@ def register(app: Flask) -> None:
                                 token=token,
                                 error_message=None)
 
+    @app.route("/test-cases/review-session/<token>/discard",
+               methods=["POST"])
+    def test_cases_review_session_discard(token: str):
+        """Throw a recording away, for real.
+
+        The control offering this was an ``<a href="/test-cases">`` — it
+        navigated away and discarded nothing, while its label said
+        "Cancel — discard recording". The draft stayed in the pending
+        banner, still openable and still savable by anyone holding the
+        link, for the whole 24 h TTL. An operator who pressed it and saw
+        the recording still listed had no way to read that except as the
+        product not working.
+
+        Sealing rather than deleting: ``consume_session_draft`` is the
+        same call the save path makes, so a discarded recording behaves
+        exactly like a saved one — gone from the banner, refusing a
+        replay of the review URL — and the row remains for the sweeper
+        and for anyone asking what happened to a capture.
+        """
+        if not _recorder_enabled():
+            return jsonify({"error": "recorder_disabled"}), 403
+
+        draft = _db.get_session_draft(token)
+        if draft is None:
+            # Already discarded, already saved, or expired. Not an error
+            # worth a page: the operator wanted it gone and it is gone.
+            flash("That recording is no longer pending.", "info")
+            return redirect(url_for("test_cases_page"))
+
+        # Same scope check as the save path: a draft belongs to the
+        # project it was captured in, and a stale link must not reach
+        # into whichever project happens to be active now.
+        active_pid = resolve_active_project()
+        if active_pid and active_pid != draft["project_id"]:
+            return jsonify({"error": "wrong_project"}), 403
+
+        _db.consume_session_draft(token)
+        from engine import permissions as _perm
+        _db.append_audit(entity="session_draft", action="discard",
+                         org_id=_perm.current_org_id(),
+                         user_id=_perm.current_user_id(),
+                         diff={"project_id": draft["project_id"]})
+        flash("Recording discarded. Nothing was added to the pack.",
+              "success")
+        return redirect(url_for("test_cases_page"))
+
     @app.route("/test-cases/review-session/<token>", methods=["POST"])
     def test_cases_review_session_save(token: str):
         """POST — consume the draft and create the selected ProposedTCs
