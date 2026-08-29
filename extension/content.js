@@ -205,6 +205,28 @@
       const label = document.querySelector(`label[for="${cssEscape(el.id)}"]`);
       if (label) return (label.textContent || '').trim();
     }
+    // Implicit label — <label>Textarea <textarea></textarea></label>.
+    // A wrapping label names its control under ARIA exactly as `for=`
+    // does, and looking only for `for=` lost the name on a control that
+    // plainly had one. Measured on staging 2026-08-29: a textarea inside
+    // a wrapping label recorded as a bare `role=textbox`, which on that
+    // page matched five elements.
+    const implicit = el.closest ? el.closest('label') : null;
+    if (implicit) {
+      // The control's own content is not part of its name — a <select>
+      // inside a label would otherwise contribute every option's text.
+      let text = '';
+      for (const node of implicit.childNodes) {
+        if (node.nodeType === 3) {                       // text node
+          text += node.textContent;
+        } else if (node.nodeType === 1 &&
+                   !node.matches('input,textarea,select,button')) {
+          text += node.textContent || '';
+        }
+      }
+      text = text.replace(/\s+/g, ' ').trim();
+      if (text && text.length <= 80) return text;
+    }
     // For buttons + links, fall back to text. Limit length so we don't
     // capture a 300-char paragraph as the "name".
     const tag = el.tagName.toLowerCase();
@@ -265,6 +287,37 @@
     return el;
   }
 
+  // Every element pickRole() can return a role for. Kept in step with
+  // that function: a tag missing here would be counted as absent and a
+  // non-unique role would pass the check below.
+  const ROLE_BEARING_SELECTOR =
+    '[role],button,a[href],input,textarea,select,img';
+
+  function roleIsUnique(el, role) {
+    // A bare `role=textbox` is only a locator if exactly one element on
+    // the page carries that role. Otherwise it is a locator-shaped
+    // guess: Playwright's strict mode rejects it, and a non-strict
+    // runner silently takes the first match — which on the Selenium
+    // practice form meant a fill aimed at the textarea landing in the
+    // text input two fields above it. A CSS path is uglier and right.
+    //
+    // Counted rather than assumed, because uniqueness is a property of
+    // the page and the recorder is standing in it. Bounded by an early
+    // exit: the answer is known at the second match.
+    let seen = 0;
+    let matchedSelf = false;
+    for (const cand of document.querySelectorAll(ROLE_BEARING_SELECTOR)) {
+      if (pickRole(cand) !== role) continue;
+      if (cand === el) matchedSelf = true;
+      seen += 1;
+      if (seen > 1) return false;
+    }
+    // matchedSelf guards the case the count alone cannot see: an element
+    // inside a shadow root or an iframe is invisible to this query, so a
+    // count of one would be about some *other* element entirely.
+    return seen === 1 && matchedSelf;
+  }
+
   function deriveCandidates(el) {
     // Returns a ranked candidate list for one element: same shape as
     // engine.locator_registry.LocatorCandidate. Higher score first.
@@ -290,12 +343,17 @@
                    value: `role=${role}[name="${name.replace(/"/g, '\\"')}"]`,
                    score: STRATEGY_SCORE.role});
       // role-only relaxation — cheaper fallback when the visible name
-      // changes (e.g. translation, A/B test).
-      cands.push({strategy: 'role', value: `role=${role}`,
-                   score: STRATEGY_SCORE.role - 5});
+      // changes (e.g. translation, A/B test). Only when the role alone
+      // identifies the element: otherwise this fallback fires precisely
+      // when the name stopped matching and then picks whichever element
+      // of that role comes first.
+      if (roleIsUnique(el, role)) {
+        cands.push({strategy: 'role', value: `role=${role}`,
+                     score: STRATEGY_SCORE.role - 5});
+      }
       cands.push({strategy: 'text', value: `text=${name}`,
                    score: STRATEGY_SCORE.text});
-    } else if (role) {
+    } else if (role && roleIsUnique(el, role)) {
       cands.push({strategy: 'role', value: `role=${role}`,
                    score: STRATEGY_SCORE.role});
     }

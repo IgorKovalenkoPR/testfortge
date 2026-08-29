@@ -312,3 +312,19 @@ jobs:
             python -m pytest tests/test_e2e_golden_paths.py -q --no-header \
               -p no:cacheprovider || exit 1
           done
+
+      # The recorder's locator ladder, executed rather than grepped.
+      # `extension/content.js` had no behavioural coverage at all — the
+      # matrix job has no browser, so its tests could only search the
+      # source for strings, and a locator that matched five elements
+      # passed every one of them. This is the same Chromium, so the file
+      # costs seconds; kept out of the ten-run gate above because that
+      # gate is about the golden paths' determinism, not about this.
+      #
+      # Same grep as the golden paths: a browser suite that skips is a
+      # browser suite that does not exist.
+      - name: Recorder locator ladder (real browser)
+        run: >-
+          python -m pytest tests/test_recorder_locator_ladder_browser.py
+          -q --no-header -p no:cacheprovider | tee /tmp/ladder.txt;
+          grep -qE "[1-9][0-9]* passed" /tmp/ladder.txt

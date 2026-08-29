@@ -278,6 +278,34 @@ def _is_locator_drift(exc: BaseException) -> bool:
                 "waiting for"))
 
 
+#: A role locator carrying no name — ``role=textbox``, not
+#: ``role=textbox[name="Textarea"]``. Only these are checked for
+#: ambiguity: a named role, a CSS path or an id that happens to match
+#: twice is the page's own doing and has always resolved to the first
+#: match, so widening the check would change behaviour for every pack in
+#: the database rather than fixing the one thing that is broken.
+_BARE_ROLE_RE = re.compile(r"^role=[A-Za-z]+$")
+
+
+def _is_ambiguous_bare_role(target: str, base) -> bool:
+    """True when *target* is a bare role that matches several elements.
+
+    *base* must be the **un-narrowed** locator: ``.first`` has already
+    thrown the ambiguity away, and counting it would always answer one.
+
+    Best-effort — any error here means "not provably ambiguous", because
+    refusing a candidate on a failed count would break a chain that
+    works.
+    """
+    if not _BARE_ROLE_RE.match((target or "").strip()):
+        return False
+    try:
+        return int(base.count()) > 1
+    except Exception as exc:
+        _logger.debug("ambiguity check skipped for %s: %s", target, exc)
+        return False
+
+
 # ---------- Selector resolution ----------
 
 def _locator(page, target: str):
@@ -1374,7 +1402,25 @@ class AutomationRunner:
         tried: list[str] = []
         for target in targets:
             try:
-                loc = _locator(page, target).first
+                base = _locator(page, target)
+                if _is_ambiguous_bare_role(target, base):
+                    # ``.first`` is what makes a bare ``role=textbox``
+                    # dangerous rather than merely weak: it turns "this
+                    # matches five elements" into "click the top one",
+                    # with nothing in the report to say a choice was
+                    # made. Measured on staging 2026-08-29 — a fill
+                    # aimed at a textarea would have landed in the text
+                    # input two fields above it, and the step would have
+                    # passed.
+                    #
+                    # A role that no longer identifies one element has
+                    # drifted, which is exactly what the rest of the
+                    # chain is for. The capture side no longer emits
+                    # these; this is for the recordings that already
+                    # carry them.
+                    tried.append(target)
+                    continue
+                loc = base.first
                 loc.wait_for(state="visible", timeout=per_cand_ms)
             except Exception as exc:
                 # Only locator-drift signals (timeout / not visible) get

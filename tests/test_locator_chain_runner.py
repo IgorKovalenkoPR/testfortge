@@ -29,14 +29,21 @@ class _FakeLocator:
     succeeds. ``.first`` returns self so the runner's existing
     ``_locator(page, target).first`` chain composes unchanged.
     """
-    def __init__(self, selector: str, visible: bool):
+    def __init__(self, selector: str, visible: bool, matches: int = 1):
         self.selector = selector
         self.visible = visible
+        #: How many elements the selector resolves to. One unless a test
+        #: says otherwise, which keeps every case written before the
+        #: ambiguity check byte-identical.
+        self.matches = matches
         self.wait_calls = 0
 
     @property
     def first(self):
         return self
+
+    def count(self):
+        return self.matches
 
     def wait_for(self, state: str = "visible", timeout: int = 0):
         self.wait_calls += 1
@@ -58,14 +65,19 @@ class _FakePage:
     runner picks. ``locator_calls`` keeps the chronological list of
     every selector the runner asked about, for promotion-order asserts.
     """
-    def __init__(self, mapping: dict[str, bool]):
+    def __init__(self, mapping: dict[str, bool],
+                 matches: dict[str, int] | None = None):
         self._mapping = dict(mapping)
+        #: Selectors that resolve to more than one element. Separate from
+        #: ``mapping`` so no existing test has to say anything about it.
+        self._matches = dict(matches or {})
         self.locator_calls: list[str] = []
 
     def locator(self, selector: str):
         self.locator_calls.append(selector)
         visible = self._mapping.get(selector, False)
-        return _FakeLocator(selector, visible)
+        return _FakeLocator(selector, visible,
+                            matches=self._matches.get(selector, 1))
 
     def get_by_role(self, role, name=None):
         if name is not None:
@@ -416,3 +428,107 @@ class TestLocatorDecoder:
         method, args, _kw = page.calls[0]
         assert method == "locator"
         assert args[0] == ".btn-primary"
+
+
+class TestAnAmbiguousBareRoleIsNotUsed:
+    """The replay half of the staging defect of 2026-08-29.
+
+    The recorder no longer emits a bare ``role=textbox`` when several
+    elements carry that role, but every pack recorded before that fix
+    still does, and the chain walk is where they are cashed in.
+
+    ``.first`` is what makes it dangerous rather than merely weak: it
+    turns "this matches five elements" into "take the top one", with
+    nothing in the run report to say a choice was made. On the Selenium
+    practice form that would have put a fill meant for the textarea into
+    the text input two fields above it — and the step would have passed,
+    which is the worst available outcome.
+    """
+
+    def test_a_bare_role_matching_several_elements_is_skipped(self,
+                                                               tmp_path):
+        page = _FakePage({"role=textbox": True, "textarea.form-control": True},
+                         matches={"role=textbox": 5})
+        step = AutomationStep(action="click", target="role=textbox",
+                              target_alternates=["textarea.form-control"],
+                              raw="click role=textbox")
+        loc = _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert loc.selector == "textarea.form-control", loc.selector
+
+    def test_a_bare_role_matching_one_element_is_still_used(self, tmp_path):
+        """The check is about ambiguity, not about bare roles.
+
+        A role that identifies exactly one element is a good locator —
+        it survives a renamed label. Refusing those too would pass the
+        test above while quietly deleting the fallback.
+        """
+        page = _FakePage({"role=button": True, ".btn": True})
+        step = AutomationStep(action="click", target="role=button",
+                              target_alternates=[".btn"],
+                              raw="click role=button")
+        loc = _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert loc.selector == "role=button"
+
+    def test_a_named_role_matching_several_is_left_alone(self, tmp_path):
+        """Scope, pinned.
+
+        Widening the check to every selector would change behaviour for
+        every pack in the database: a CSS path that happens to match
+        twice has always resolved to the first match, and quietly
+        starting to skip those would break working recordings to fix a
+        problem they do not have.
+        """
+        page = _FakePage({'role=button[name="Save"]': True, ".btn": True},
+                         matches={'role=button[name="Save"]': 3})
+        step = AutomationStep(action="click", target='role=button[name="Save"]',
+                              target_alternates=[".btn"],
+                              raw="click Save")
+        loc = _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert loc.selector == 'role=button[name="Save"]'
+
+    def test_a_css_path_matching_several_is_left_alone(self, tmp_path):
+        page = _FakePage({"div.row > a": True, ".btn": True},
+                         matches={"div.row > a": 4})
+        step = AutomationStep(action="click", target="div.row > a",
+                              target_alternates=[".btn"],
+                              raw="click div.row > a")
+        loc = _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert loc.selector == "div.row > a"
+
+    def test_a_skipped_candidate_is_named_in_the_failure(self, tmp_path):
+        """When nothing else resolves, the error must say what was tried.
+
+        A step that fails with "All locators failed" and an empty list
+        sends the reader looking for a missing element, when the truth is
+        that a candidate was refused on purpose.
+        """
+        page = _FakePage({"role=textbox": True}, matches={"role=textbox": 2})
+        step = AutomationStep(action="click", target="role=textbox",
+                              target_alternates=["#nope"],
+                              raw="click role=textbox")
+        with pytest.raises(AssertionError) as excinfo:
+            _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert "role=textbox" in str(excinfo.value)
+
+    def test_a_locator_that_cannot_be_counted_is_not_refused(self, tmp_path):
+        """Best-effort, in the safe direction.
+
+        A page object that raises on ``count()`` must not cost the step
+        its primary locator — an ambiguity check that breaks a working
+        chain is worse than the ambiguity.
+        """
+        class _NoCount(_FakeLocator):
+            def count(self):
+                raise RuntimeError("counting not supported here")
+
+        class _Page(_FakePage):
+            def locator(self, selector: str):
+                self.locator_calls.append(selector)
+                return _NoCount(selector, self._mapping.get(selector, False))
+
+        page = _Page({"role=textbox": True, "#fallback": True})
+        step = AutomationStep(action="click", target="role=textbox",
+                              target_alternates=["#fallback"],
+                              raw="click role=textbox")
+        loc = _make_runner(tmp_path)._try_locator_chain(page, step)
+        assert loc.selector == "role=textbox"
