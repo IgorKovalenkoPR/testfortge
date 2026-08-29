@@ -101,14 +101,18 @@ def segment(steps: list[AutomationStep]) -> list[ProposedTC]:
 
     flows = _call_llm(steps)
     if not flows:
-        # LLM unavailable / malformed — fallback to a single proposed
-        # TC covering the whole session. Operator can manually split
-        # in v2 (out of scope for MVP).
-        return [_single_flow(
-            steps,
-            summary=_fallback_summary(steps),
-            intent="LLM segmentation unavailable — manual review needed.",
-        )]
+        # No API key, or the call failed. This used to hand back the
+        # whole session as one card and say "manual review needed",
+        # which on an instance with no key is every recording ever
+        # made — the segmenter's entire job, declined.
+        #
+        # The recording marks its own boundaries: the content script
+        # emits a synthetic submit step *specifically* so a segmenter
+        # can see one ("we record a synthetic 'form submitted' comment
+        # so the segmenter sees a natural flow boundary"), and a goto
+        # that no click caused is somebody starting somewhere new.
+        # Splitting on those needs no model.
+        return _segment_deterministically(steps)
 
     out: list[ProposedTC] = []
     for flow in flows:
@@ -237,6 +241,143 @@ def _validate_flows(payload: dict, total_steps: int) -> list[dict]:
 
 
 # ── Helpers ─────────────────────────────────────────────────────
+
+
+#: How the deterministic split describes itself. Never dressed up as a
+#: model's reasoning: an operator deciding whether to trust a proposed
+#: boundary needs to know what drew it.
+_DETERMINISTIC_INTENT = ("Split at navigation and form-submit "
+                          "boundaries, without an LLM.")
+
+#: The comment engine/../extension/content.js stamps on the synthetic
+#: step it emits when a form is submitted. It exists to be a boundary.
+_SUBMIT_COMMENT = "form submitted"
+
+
+def _is_submit(step: AutomationStep) -> bool:
+    if (step.comment or "").strip().lower() == _SUBMIT_COMMENT:
+        return True
+    # Belt and braces: the raw line is the other half of the same
+    # signal, and a future capture path might set only one of them.
+    return ".submit()" in (step.raw or "")
+
+
+def _is_goto(step: AutomationStep) -> bool:
+    return (step.action or "").lower() == "goto"
+
+
+def _boundaries(steps: list[AutomationStep]) -> list[int]:
+    """Indices where a new flow starts. Always includes 0.
+
+    Two rules, both read off the recording rather than guessed:
+
+    * **after a submit** — a submitted form is a scenario that
+      finished. Whatever follows is the next one;
+    * **before a goto that no click caused** — a click that navigates
+      produces ``click`` then ``goto``, and splitting between them
+      would cut a single action in half. A goto after anything else
+      (another goto, a fill, a submit) is somebody starting again.
+    """
+    starts = [0]
+    for i in range(1, len(steps)):
+        prev, cur = steps[i - 1], steps[i]
+        if _is_submit(prev):
+            starts.append(i)
+            continue
+        if _is_goto(cur):
+            if (prev.action or "").lower() == "click":
+                # click → goto: the navigation that click caused, so the
+                # two belong to one action rather than to two flows.
+                continue
+            starts.append(i)
+    # Deduplicate while keeping order — a submit immediately followed by
+    # a goto would otherwise open two flows at the same index.
+    seen, out = set(), []
+    for idx in starts:
+        if idx not in seen:
+            seen.add(idx)
+            out.append(idx)
+    return out
+
+
+def _merge_short_runs(slices: list[list[AutomationStep]]
+                       ) -> list[list[AutomationStep]]:
+    """A one-step flow is not a test case.
+
+    A lone ``goto`` between two scenarios is the seam, not a scenario,
+    and handing an operator a card containing a single navigation wastes
+    the review it asks for. Merged backwards where there is a previous
+    flow, forwards when it is the first.
+    """
+    if not slices:
+        return slices
+    merged: list[list[AutomationStep]] = []
+    for slice_ in slices:
+        if len(slice_) < 2 and merged:
+            merged[-1].extend(slice_)
+        else:
+            merged.append(list(slice_))
+    # A short first flow has nothing behind it — fold it forward.
+    if len(merged) > 1 and len(merged[0]) < 2:
+        merged[1][:0] = merged[0]
+        merged.pop(0)
+    return merged
+
+
+def _flow_summary(steps: list[AutomationStep]) -> str:
+    """Name a flow by what it did, not by its position in the list.
+
+    "Flow 2 of 4" tells a reviewer nothing they cannot see; the page it
+    happened on and whether it submitted anything is what they need to
+    decide whether the boundary is right.
+    """
+    anchor = ""
+    for step in steps:
+        if _is_goto(step) and step.target:
+            anchor = step.target
+            break
+    if not anchor:
+        for step in steps:
+            label = (step.locator_label or "").strip()
+            if label:
+                anchor = label
+                break
+    if any(_is_submit(s) for s in steps):
+        return (f"Recorded flow — form submitted on {anchor}"[:200]
+                if anchor else "Recorded flow — form submitted")
+    if anchor:
+        return f"Recorded flow — {anchor}"[:200]
+    return f"Recorded flow — {len(steps)} step(s)"
+
+
+def _segment_deterministically(steps: list[AutomationStep]
+                                ) -> list[ProposedTC]:
+    """Split a session without a model. Never returns an empty list."""
+    starts = _boundaries(steps)
+    slices = [steps[a:b] for a, b in zip(starts, starts[1:] + [len(steps)])]
+    slices = _merge_short_runs([s for s in slices if s])
+
+    if len(slices) <= 1:
+        # Genuinely one scenario — a short browse with no submit and no
+        # fresh start. Say so, rather than implying the segmenter was
+        # unavailable: it ran, and one flow is its answer.
+        return [_single_flow(
+            steps,
+            summary=_fallback_summary(steps),
+            intent=f"{_DETERMINISTIC_INTENT} The session held one flow.",
+        )]
+
+    out: list[ProposedTC] = []
+    for slice_ in slices:
+        verdict: SuiteVerdict = classify(slice_)
+        out.append(ProposedTC(
+            summary=_flow_summary(slice_),
+            intent=_DETERMINISTIC_INTENT,
+            steps=slice_,
+            suggested_suite=verdict.tag,
+            rationale=verdict.rationale,
+        ))
+    return out
 
 
 def _single_flow(steps: list[AutomationStep], *, summary: str,

@@ -5,8 +5,12 @@ suite has no real network dependency. We pin three contracts:
 
   1. **Happy path** — LLM returns valid JSON → segmenter slices the
      steps accordingly and runs each slice through the classifier.
-  2. **Fallback** — LLM unavailable / malformed → ONE proposed TC
-     covering the whole session (better than dropping the recording).
+  2. **Fallback** — LLM unavailable / malformed → the deterministic
+     split below. It used to be one card carrying the whole session and
+     the words "manual review needed", which on an instance with no API
+     key is every recording ever made: the segmenter declining its own
+     job and saying so politely. The recording marks its own
+     boundaries, and splitting on them needs no model.
   3. **Index hygiene** — out-of-range / duplicate / inverted indices
      from the LLM are dropped instead of crashing the call.
 """
@@ -165,3 +169,180 @@ class TestToDict:
         assert out["summary"] == "x"
         assert out["suggested_suite"] == "Smoke"
         assert len(out["steps"]) == 1
+
+
+# ── The deterministic split (no API key, which is every free instance)
+
+def _no_llm():
+    from engine.llm_client import LLMUnavailable
+    return mock.patch("engine.session_segmenter.call_messages",
+                      side_effect=LLMUnavailable("no api key"))
+
+
+def _submit(target="css=form"):
+    return AutomationStep(action="click", target=target,
+                          raw='page.locator("form").submit()',
+                          comment="form submitted")
+
+
+class TestSplittingWithoutAModel:
+    def test_a_submit_ends_a_flow(self):
+        """The boundary the recorder was already emitting for nobody.
+
+        extension/content.js stamps a synthetic submit step and says in
+        its own comment that it does so "so the segmenter sees a natural
+        flow boundary". Nothing read it until now.
+        """
+        steps = [
+            AutomationStep(action="goto", target="https://app/contact"),
+            AutomationStep(action="fill", target="label=Email",
+                            value="a@b.test"),
+            _submit(),
+            AutomationStep(action="fill", target="label=Search",
+                            value="widgets"),
+            AutomationStep(action="click",
+                            target='role=button[name="Search"]'),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 2, [o.summary for o in out]
+        assert len(out[0].steps) == 3
+        assert len(out[1].steps) == 2
+        assert "form submitted" in out[0].summary
+
+    def test_a_goto_nobody_clicked_starts_a_flow(self):
+        steps = [
+            AutomationStep(action="goto", target="https://app/one"),
+            AutomationStep(action="fill", target="label=A", value="1"),
+            # Not caused by a click — somebody went somewhere new.
+            AutomationStep(action="goto", target="https://app/two"),
+            AutomationStep(action="fill", target="label=B", value="2"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 2
+        assert out[0].steps[0].target.endswith("/one")
+        assert out[1].steps[0].target.endswith("/two")
+
+    def test_a_goto_a_click_caused_does_not_split_the_click_off(self):
+        """The rule that keeps this from shredding every session.
+
+        A link click produces click → goto. Splitting between them would
+        cut one action in half and leave a card holding a lone
+        navigation — which is what the walk on staging actually
+        recorded.
+        """
+        # Long enough that _merge_short_runs cannot hide a wrong split:
+        # with the rule removed this becomes two flows of two and three
+        # steps, and neither is short enough to be folded back. The
+        # three-step version of this test passed either way — caught by
+        # mutation, not by reading it.
+        steps = [
+            AutomationStep(action="goto", target="https://app/services"),
+            AutomationStep(action="click",
+                            target='role=link[name="Company"]'),
+            AutomationStep(action="goto", target="https://app/company"),
+            AutomationStep(action="click",
+                            target='role=link[name="Team"]'),
+            AutomationStep(action="fill", target="label=Search",
+                            value="qa"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 1, [o.summary for o in out]
+        assert len(out[0].steps) == 5
+
+    def test_a_lone_step_is_folded_into_a_neighbour(self):
+        # A single navigation is a seam, not a test case, and a card
+        # holding one wastes the review it asks for.
+        steps = [
+            AutomationStep(action="goto", target="https://app/one"),
+            AutomationStep(action="fill", target="label=A", value="1"),
+            _submit(),
+            AutomationStep(action="goto", target="https://app/two"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 1, [o.summary for o in out]
+        assert len(out[0].steps) == 4
+
+    def test_every_step_survives_the_split(self):
+        """Nothing may be dropped on the floor.
+
+        A segmenter that loses a step turns a recording into a test case
+        that cannot reproduce what was recorded — worse than not
+        splitting at all.
+        """
+        steps = [
+            AutomationStep(action="goto", target="https://app/a"),
+            AutomationStep(action="fill", target="label=A", value="1"),
+            _submit(),
+            AutomationStep(action="goto", target="https://app/b"),
+            AutomationStep(action="click", target='role=button[name="Go"]'),
+            AutomationStep(action="goto", target="https://app/c"),
+            AutomationStep(action="fill", target="label=C", value="3"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        rebuilt = [st for flow in out for st in flow.steps]
+        assert rebuilt == steps
+
+    def test_it_says_how_it_split_rather_than_posing_as_a_model(self):
+        steps = [
+            AutomationStep(action="goto", target="https://app/one"),
+            AutomationStep(action="fill", target="label=A", value="1"),
+            _submit(),
+            AutomationStep(action="goto", target="https://app/two"),
+            AutomationStep(action="fill", target="label=B", value="2"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        for flow in out:
+            assert "without an LLM" in flow.intent
+            assert "unavailable" not in flow.intent.lower()
+
+    def test_one_real_flow_is_reported_as_one_flow_not_as_a_failure(self):
+        """The wording matters on the commonest session of all.
+
+        A short browse with no submit and no fresh start genuinely is
+        one flow. Saying "manual review needed" there told the operator
+        the tool had given up when it had in fact answered.
+        """
+        steps = [
+            AutomationStep(action="goto", target="https://app/services"),
+            AutomationStep(action="click",
+                            target='role=link[name="Company"]'),
+            AutomationStep(action="goto", target="https://app/company"),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 1
+        assert "one flow" in out[0].intent
+        assert "manual review needed" not in out[0].intent
+
+    def test_each_flow_is_classified_on_its_own_content(self):
+        # The suite tag belongs to the flow, not to the session: a login
+        # flow and a search flow should not inherit one tag.
+        steps = [
+            AutomationStep(action="goto", target="https://app/login"),
+            AutomationStep(action="fill", target="label=Password",
+                            value="x"),
+            _submit(),
+            AutomationStep(action="goto", target="https://app/home"),
+            AutomationStep(action="click",
+                            target='role=link[name="About"]'),
+        ]
+        with _no_llm():
+            out = segment(steps)
+
+        assert len(out) == 2
+        assert all(f.suggested_suite for f in out)
+        assert all(f.rationale for f in out)
+
