@@ -99,6 +99,17 @@ async def run(playwright):
 
 
 def test_check_and_uncheck():
+    """Unchecking is its own action, not a check carrying a flag.
+
+    This test used to assert ``action == "check"`` with
+    ``value == "false"``, matching a comment in the parser that said the
+    runner's "single check-handling branch covers both". It did not: that
+    branch calls ``loc.check()`` and reads no value, so a recorded
+    uncheck ticked the box it was supposed to clear and the step passed.
+
+    The test was green throughout, because it pinned the plan written in
+    the comment rather than what the runner does with the result.
+    """
     src = '''
 async def run(playwright):
     await page.get_by_label("Subscribe").check()
@@ -109,9 +120,28 @@ async def run(playwright):
     assert steps[0].action == "check"
     assert steps[0].target == "label=Subscribe"
     assert steps[0].value == ""
-    assert steps[1].action == "check"
+    assert steps[1].action == "uncheck"
     assert steps[1].target == "label=Marketing"
-    assert steps[1].value == "false"
+    assert steps[1].value == ""
+
+
+def test_the_runner_can_perform_every_action_the_parser_emits():
+    """The gap this pair of defects lived in.
+
+    A verb the runner has no branch for is a verb some layer will
+    mistranslate — ``uncheck`` became ``check`` for exactly that reason.
+    Reading the runner's source rather than a list keeps the two from
+    drifting apart again.
+    """
+    import pathlib
+    import re as _re
+    from engine.recorder_parser import _ACTION_MAP
+
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "engine" / "automation_runner.py").read_text(encoding="utf-8")
+    handled = set(_re.findall(r'step\.action == "([a-z_]+)"', src))
+    missing = sorted(set(_ACTION_MAP.values()) - handled)
+    assert not missing, f"the runner has no branch for: {missing}"
 
 
 def test_ignores_browser_lifecycle():

@@ -532,3 +532,121 @@ class TestAnAmbiguousBareRoleIsNotUsed:
                               raw="click role=textbox")
         loc = _make_runner(tmp_path)._try_locator_chain(page, step)
         assert loc.selector == "role=textbox"
+
+
+class TestTheRunnerCanPerformWhatTheRecorderRecords:
+    """Replay through ``_run_step``, in a real browser.
+
+    The checkbox defect was not a wrong label — it was a step Playwright
+    refuses to execute, so a pack containing a checkbox failed on that
+    step every time. Asserting the verb the recorder writes proves half
+    of it; this asserts the other half.
+
+    **Through ``_run_step``, not by calling ``loc.check()``.** The first
+    version of this class resolved the locator and invoked the method
+    itself, which passes with the runner's whole dispatch deleted — it
+    was a test of Playwright wearing the runner's name. Deleting the
+    ``uncheck`` branch left all 31 tests green; that is what a harness
+    rebuilding the chain instead of calling the entry point buys.
+    """
+
+    @staticmethod
+    def _page(browser_ctx, html):
+        page = browser_ctx.new_page()
+        page.set_content(html)
+        return page
+
+    @staticmethod
+    def _chromium(p):
+        try:
+            return p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"chromium unavailable: {exc}")
+
+    def test_playwright_refuses_to_fill_a_toggle(self, tmp_path):
+        """The premise, taken from Playwright rather than from memory.
+
+        If ``fill`` ever starts working on a checkbox, the recorder fix
+        is no longer load-bearing and this file should say so.
+        """
+        pw = pytest.importorskip("playwright.sync_api")
+        with pw.sync_playwright() as p:
+            b = self._chromium(p)
+            try:
+                page = self._page(b, '<input id="c" type="checkbox">')
+                with pytest.raises(Exception) as excinfo:
+                    page.locator("#c").fill("on")
+                assert "cannot be filled" in str(excinfo.value)
+            finally:
+                b.close()
+
+    def test_a_fill_step_on_a_checkbox_is_what_it_used_to_record(self,
+                                                                  tmp_path):
+        """The defect itself, run through the runner.
+
+        This is what every recorded pack containing a checkbox did until
+        today: a failed step, not a wrong one.
+        """
+        pw = pytest.importorskip("playwright.sync_api")
+        with pw.sync_playwright() as p:
+            b = self._chromium(p)
+            try:
+                page = self._page(b, '<input id="c" type="checkbox">')
+                sr = _make_runner(tmp_path)._run_step(
+                    page,
+                    AutomationStep(action="fill", target="#c", value="on",
+                                    raw="page.locator('#c').fill('on')"),
+                    1, str(tmp_path))
+                assert sr.status == "failed", sr.status
+                assert "cannot be filled" in sr.comment
+            finally:
+                b.close()
+
+    @pytest.mark.parametrize("action,html,expected", [
+        ("check", '<input id="c" type="checkbox">', True),
+        ("uncheck", '<input id="c" type="checkbox" checked>', False),
+    ])
+    def test_a_toggle_step_replays(self, tmp_path, action, html, expected):
+        pw = pytest.importorskip("playwright.sync_api")
+        with pw.sync_playwright() as p:
+            b = self._chromium(p)
+            try:
+                page = self._page(b, html)
+                sr = _make_runner(tmp_path)._run_step(
+                    page,
+                    AutomationStep(action=action, target="#c",
+                                    raw=f"page.locator('#c').{action}()"),
+                    1, str(tmp_path))
+                assert sr.status == "passed", sr.comment
+                assert page.is_checked("#c") is expected
+            finally:
+                b.close()
+
+    def test_a_press_step_replays(self, tmp_path):
+        """``press`` had no branch at all.
+
+        An unmatched action falls through the whole chain to the
+        screenshot, so the step did nothing and was reported as passed —
+        the Enter that never submitted the form, with a green tick.
+        Codegen emits it whenever a form is submitted that way.
+        """
+        pw = pytest.importorskip("playwright.sync_api")
+        with pw.sync_playwright() as p:
+            b = self._chromium(p)
+            try:
+                page = self._page(b, (
+                    '<input id="t"><div id="out"></div>'
+                    '<script>document.getElementById("t").addEventListener('
+                    '"keydown", e => { if (e.key === "Enter") '
+                    'document.getElementById("out").textContent = "submitted"; '
+                    '});</script>'))
+                sr = _make_runner(tmp_path)._run_step(
+                    page,
+                    AutomationStep(action="press", target="#t", value="Enter",
+                                    raw="page.locator('#t').press('Enter')"),
+                    1, str(tmp_path))
+                assert sr.status == "passed", sr.comment
+                assert page.text_content("#out") == "submitted", (
+                    "the step passed without doing anything")
+            finally:
+                b.close()

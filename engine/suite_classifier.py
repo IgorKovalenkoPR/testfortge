@@ -71,7 +71,7 @@ _REGRESSION_RE = re.compile(
 # recorder + heuristic parser both emit ``"click"`` for submits — the
 # E2E rule pairs that with a preceding ``"fill"`` to distinguish a
 # real form-flow from a casual nav-click.
-_SUBMIT_LIKE = {"click", "press", "check"}
+_SUBMIT_LIKE = {"click", "press", "check", "uncheck"}
 _FILL_LIKE = {"fill", "select"}
 
 

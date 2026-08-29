@@ -440,3 +440,102 @@ class TestALabelClickIsOneInteraction:
         steps = _clicks(self._record(browser, html,
                                       lambda pg: pg.click("a")))
         assert steps[0]["target"] == 'role=link[name="Read them"]', steps
+
+
+class TestAToggleIsCheckedNotFilled:
+    """A checkbox is toggled, not filled.
+
+    The change handler emitted ``fill`` for everything that was not a
+    ``<select>``, so a recorded checkbox produced ``fill #my-check-2 =
+    "on"``. Playwright refuses that outright — ``Input of type
+    "checkbox" cannot be filled`` — and the runner's fill branch calls
+    ``loc.fill("")`` before anything else, so **every pack containing a
+    checkbox or a radio failed at that step on replay**.
+
+    Measured on the Selenium practice form on 2026-08-29. It had been
+    there since the recorder shipped; the first walk simply never
+    touched a checkbox.
+    """
+
+    BOXES = ('<label class="a" for="one">One</label>'
+             '<input id="one" type="checkbox">'
+             '<label class="b" for="two">Two</label>'
+             '<input id="two" type="checkbox" checked>'
+             '<input id="r" type="radio" name="g">'
+             '<input id="txt" type="text">')
+
+    @staticmethod
+    def _steps(browser, html, actions):
+        page = browser.new_page()
+        try:
+            page.set_content(html)
+            page.evaluate(STUB)
+            page.add_script_tag(content=CONTENT_JS.read_text(encoding="utf-8"))
+            page.wait_for_timeout(200)
+            actions(page)
+            page.wait_for_timeout(200)
+            return page.evaluate("window.__steps") or []
+        finally:
+            page.close()
+
+    def _toggle_steps(self, browser, html, actions):
+        return [s for s in self._steps(browser, html, actions)
+                if s.get("action") in ("check", "uncheck", "fill")]
+
+    def test_ticking_a_box_records_check(self, browser):
+        steps = self._toggle_steps(browser, self.BOXES,
+                                    lambda pg: pg.click("#one"))
+        assert [s["action"] for s in steps] == ["check"], steps
+
+    def test_clearing_a_box_records_uncheck(self, browser):
+        """The half that has to exist for the other half to be honest.
+
+        Recording both directions as ``check`` would replay an untick as
+        a tick — the opposite action, reported as a pass.
+        """
+        steps = self._toggle_steps(browser, self.BOXES,
+                                    lambda pg: pg.click("#two"))
+        assert [s["action"] for s in steps] == ["uncheck"], steps
+
+    def test_a_radio_records_check(self, browser):
+        steps = self._toggle_steps(browser, self.BOXES,
+                                    lambda pg: pg.click("#r"))
+        assert [s["action"] for s in steps] == ["check"], steps
+
+    def test_a_text_input_still_records_fill(self, browser):
+        # The verb only changes for the controls that are toggled.
+        def walk(pg):
+            pg.click("#txt")
+            pg.fill("#txt", "hello")
+            pg.click("#one")          # blur, so change fires
+
+        steps = self._toggle_steps(browser, self.BOXES, walk)
+        assert steps[0]["action"] == "fill", steps
+        assert steps[0]["value"] == "hello"
+
+    def test_the_recorded_call_is_one_playwright_would_accept(self, browser):
+        """``raw`` is read back by engine/recorder_parser.
+
+        ``check("")`` is not the call it claims to be: check() and
+        uncheck() take no argument.
+        """
+        steps = self._toggle_steps(browser, self.BOXES,
+                                    lambda pg: pg.click("#one"))
+        assert steps[0]["raw"].endswith('.check()'), steps[0]["raw"]
+        assert steps[0]["value"] == ""
+
+    def test_the_recorded_call_parses_back_to_the_same_action(self, browser):
+        """Round-trip, because the two halves are maintained apart.
+
+        The extension writes the line and the Python parser reads it; a
+        verb either side does not know about is where this whole family
+        of defects lives.
+        """
+        from engine.recorder_parser import parse_codegen_output
+
+        steps = self._toggle_steps(browser, self.BOXES,
+                                    lambda pg: pg.click("#two"))
+        src = ("async def run(playwright):\n"
+               f"    await {steps[0]['raw']}\n")
+        parsed = parse_codegen_output(src)
+        assert parsed and parsed[0].action == "uncheck", parsed

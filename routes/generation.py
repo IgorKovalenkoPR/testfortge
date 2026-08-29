@@ -324,6 +324,7 @@ def _human_steps_preview(steps: list[dict]) -> str:
             "fill":   "Fill",
             "select": "Select",
             "check":  "Check",
+            "uncheck": "Uncheck",
             "press":  "Press key",
         }
         verb = verb_map.get(action, action.title() or "Step")

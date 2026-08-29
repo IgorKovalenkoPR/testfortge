@@ -26,15 +26,20 @@ from engine.locator_registry import (LocatorCandidate, candidates_to_targets,
 
 
 # Codegen action methods on a locator → internal action label.
-# uncheck is rare; map it to ``check`` with value="false" so the runner's
-# single check-handling branch covers both.
+#
+# ``uncheck`` used to map onto ``check``, with a comment saying it
+# carried value="false" "so the runner's single check-handling branch
+# covers both". The branch reads no value, so it did not: a recorded
+# uncheck replayed as a check, performing the opposite action and
+# reporting success. A plan written in a comment is not a plan the code
+# is following.
 _ACTION_MAP = {
     "click": "click",
     "fill": "fill",
     "press": "press",
     "select_option": "select",
     "check": "check",
-    "uncheck": "check",
+    "uncheck": "uncheck",
 }
 
 # Navigation methods called directly on ``page``.
@@ -135,8 +140,6 @@ def _process_expr(expr: ast.Expr, steps: List[AutomationStep]) -> None:
         alternates = [a for a in alternates if a and a != target]
         label = _label_from_chain(call.func.value)
         value = _first_string_arg(call)
-        if method == "uncheck":
-            value = "false"
         steps.append(AutomationStep(
             action=_ACTION_MAP[method],
             target=target,

@@ -1110,6 +1110,35 @@ class AutomationRunner:
                 self._live_pump(page, tc_dir, idx, "pre_check")
                 self._move_cursor_to(page, target_bbox)
                 loc.check()
+            elif step.action == "press":
+                # Found by the consistency test in
+                # tests/test_recorder_parser.py, not by a run: the parser
+                # has emitted `press` since PR-B, Playwright codegen
+                # produces it whenever a form is submitted with Enter,
+                # and no branch here matched it. An unmatched action
+                # falls through the whole chain to the screenshot below,
+                # so the step did nothing and was reported as passed —
+                # the submit that never happened, with a green tick.
+                loc = self._try_locator_chain(page, step)
+                self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_press")
+                self._move_cursor_to(page, target_bbox)
+                loc.press(step.value or "Enter")
+            elif step.action == "uncheck":
+                # Its absence is why engine/recorder_parser mapped
+                # ``uncheck`` onto ``check`` "with value='false' so the
+                # runner's single check-handling branch covers both" —
+                # except the branch above reads no value, so a recorded
+                # uncheck replayed as the opposite action. A verb the
+                # runner cannot perform is a verb the rest of the system
+                # will quietly mistranslate.
+                loc = self._try_locator_chain(page, step)
+                self._scroll_and_highlight(page, loc)
+                target_bbox = self._safe_bbox(loc)
+                self._live_pump(page, tc_dir, idx, "pre_uncheck")
+                self._move_cursor_to(page, target_bbox)
+                loc.uncheck()
             elif step.action == "expect_text":
                 # Slow visual scan so the video shows the bot actually
                 # looking for something — without this the .webm sits on

@@ -703,17 +703,46 @@
     if (!cands.length) return;
     const primary = cands[0].value;
     const alternates = cands.slice(1, 5).map(c => c.value);
-    const value = (el.value || '').slice(0, 500);
+    // A checkbox is toggled, not filled. Emitting `fill` for one was not
+    // merely inelegant: Playwright refuses it outright — `Input of type
+    // "checkbox" cannot be filled` — and the runner's fill branch calls
+    // `loc.fill("")` before anything else, so every recorded pack
+    // containing a checkbox or a radio failed at that step on replay.
+    // Measured on the Selenium practice form on 2026-08-29, where the
+    // change handler recorded `fill #my-check-2 = "on"`.
+    //
+    // `check` / `uncheck` rather than one verb carrying the state in
+    // `value`: the runner's branch acts on the verb alone, so a state
+    // smuggled into `value` would be read by nobody — which is exactly
+    // how engine/recorder_parser already lost `uncheck`.
+    //
+    // Both are idempotent in Playwright, so the click step this pairs
+    // with (clicking the box or its label toggles it too) replays as a
+    // no-op rather than toggling it back.
+    const toggle = tag === 'input' &&
+        ['checkbox', 'radio'].includes(
+            (el.getAttribute('type') || '').toLowerCase());
+    const value = toggle ? '' : (el.value || '').slice(0, 500);
     // Same guard as the click path: a doubled fill writes the value
     // twice on replay, which an input with an append behaviour turns
     // into corrupt test data rather than a redundant step.
     if (isDuplicate(e, el, value)) return;
-    const action = tag === 'select' ? 'select' : 'fill';
+    let action;
+    if (toggle) {
+      action = el.checked ? 'check' : 'uncheck';
+    } else {
+      action = tag === 'select' ? 'select' : 'fill';
+    }
     emitStep({
       action,
       target: primary,
       value,
-      raw: `page.locator("${primary.replace(/"/g, '\\"')}").${action}("${value.replace(/"/g, '\\"')}")`,
+      // check() and uncheck() take no argument, and the raw line is read
+      // back by engine/recorder_parser — a stray "" would not parse as
+      // the Playwright call it claims to be.
+      raw: toggle
+        ? `page.locator("${primary.replace(/"/g, '\\"')}").${action}()`
+        : `page.locator("${primary.replace(/"/g, '\\"')}").${action}("${value.replace(/"/g, '\\"')}")`,
       comment: '',
       target_alternates: alternates,
       locator_label: labelFromCandidates(cands),
