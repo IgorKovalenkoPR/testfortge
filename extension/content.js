@@ -318,6 +318,49 @@
     return seen === 1 && matchedSelf;
   }
 
+  function isInertClick(el) {
+    // A click that landed on the page rather than on a control is not an
+    // interaction. Measured on staging 2026-08-29: clicking empty space
+    // beside a form recorded `click html.h-100 > body.d-flex.flex-column`
+    // — a step that replays as a click on the document and asserts
+    // nothing.
+    //
+    // `el` is what actionableTarget() resolved to, so "it matches
+    // ACTIONABLE_SELECTOR" means the bounded walk found a real control
+    // and there is nothing to decide.
+    //
+    // Otherwise the page's own statement about clickability is the
+    // cursor. That is not a proxy for the truth, it is the same signal
+    // the tester acted on: they clicked because the pointer said they
+    // could. A layout <div> filling the empty half of a form says
+    // `cursor: default` and gets dropped; a custom control built out of
+    // a <div> says `pointer` and is kept, even though it carries no
+    // role, no onclick attribute and no tabindex.
+    //
+    // The first version of this guard checked only for <body>/<html>, on
+    // the grounds that dropping a step is worse than keeping a noisy
+    // one. Re-running the walk showed that rule firing on almost
+    // nothing: the same stray click lands on a container <div> the
+    // moment a page has one, which is most pages. What it does cost is a
+    // control with a listener, no ARIA, no tabindex and no pointer
+    // cursor — one that is invisible to assistive technology and offers
+    // the mouse no affordance either. That is rare and is itself a
+    // defect; the noise was neither.
+    if (!el || el.nodeType !== 1) return true;
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'body' || tag === 'html') return true;
+    if (typeof el.matches === 'function' && el.matches(ACTIONABLE_SELECTOR)) {
+      return false;
+    }
+    try {
+      return window.getComputedStyle(el).cursor !== 'pointer';
+    } catch (err) {
+      // Detached node, cross-origin quirk: keep the step. An unreadable
+      // style is not evidence that nothing was clicked.
+      return false;
+    }
+  }
+
   function deriveCandidates(el) {
     // Returns a ranked candidate list for one element: same shape as
     // engine.locator_registry.LocatorCandidate. Higher score first.
@@ -594,6 +637,7 @@
     // Resolve first, then dedupe: the ladder can only be as good as the
     // element it is given, and so can the duplicate check.
     const target = actionableTarget(e.target);
+    if (isInertClick(target)) return;
     if (isDuplicate(e, target, '')) return;
     const cands = deriveCandidates(target);
     if (!cands.length) return;

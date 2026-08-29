@@ -16,7 +16,10 @@ spot. Rules:
      ``invoice``, ``order``, ``subscription``, ``login``, ``signin``,
      ``signup``, ``register``, ``password``, ``reset``, ``mfa``,
      ``2fa``, ``otp``, ``token``). These flows tend to be the
-     business-critical ones release-gates orbit around.
+     business-critical ones release-gates orbit around. A URL's **query
+     string is not searched** — a GET form echoes every field name into
+     it on submit, so a page nobody typed a password into arrives
+     carrying the word. See :func:`_without_query`.
   2. **E2E** when the flow walks ``≥ 2`` distinct URL paths AND
      contains at least one form-submission gesture (``fill`` followed
      by ``click`` on a submit-shaped element, or any ``submit`` action).
@@ -72,6 +75,44 @@ _SUBMIT_LIKE = {"click", "press", "check"}
 _FILL_LIKE = {"fill", "select"}
 
 
+# A URL anywhere in a step's target or raw line.
+_URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+
+
+def _without_query(url: str) -> str:
+    """Drop a URL's query string, keeping scheme, host, path, fragment.
+
+    A GET form puts **every field name** into the query on submit,
+    whether or not the field was touched. Measured on 2026-08-29: a
+    recorded walk of the Selenium practice form landed on
+    ``…/submitted-form.html?my-text=…&my-password=&my-textarea=…`` and
+    the classifier called the flow business-critical because it found
+    the word "password" — in an empty parameter belonging to a field
+    nobody had typed into. It was reading the page's form definition and
+    reporting it as evidence about the flow.
+
+    The path survives, because that is where a route lives, and so does
+    the fragment, because a hash-routed SPA keeps its route there and
+    dropping it would lose the real signal along with the noise.
+
+    What this gives up is a keyword that only ever appears in a query —
+    ``?next=/checkout``. That is a flow announcing where it intends to
+    go; if it arrives, the next step's *path* says so.
+    """
+    parts = urlparse(url)
+    if not parts.query:
+        return url
+    rebuilt = f"{parts.scheme}://{parts.netloc}{parts.path}"
+    return f"{rebuilt}#{parts.fragment}" if parts.fragment else rebuilt
+
+
+def _searchable(text: str) -> str:
+    """*text* with every URL's query string removed."""
+    if not text or "://" not in text:
+        return text or ""
+    return _URL_IN_TEXT.sub(lambda m: _without_query(m.group(0)), text)
+
+
 @dataclass
 class SuiteVerdict:
     """Classifier output. ``tag`` is one of :data:`VALID_SUITES`,
@@ -98,9 +139,9 @@ def classify(steps: Iterable[AutomationStep]) -> SuiteVerdict:
     # surrounding raw line will).
     for step in step_list:
         haystack = " ".join(filter(None, (
-            getattr(step, "target", "") or "",
+            _searchable(getattr(step, "target", "") or ""),
             getattr(step, "value", "") or "",
-            getattr(step, "raw", "") or "",
+            _searchable(getattr(step, "raw", "") or ""),
         )))
         m = _REGRESSION_RE.search(haystack)
         if m:

@@ -209,3 +209,110 @@ class TestTheChainStaysUsable:
         assert any(c.startswith("css=") or c.startswith("#") or
                    c.startswith("textarea") or "textarea" in c
                    for c in chain), chain
+
+
+class TestAClickOnNothingIsNotAStep:
+    """Also from the staging walk of 2026-08-29.
+
+    A click on empty space beside the form recorded
+    ``click html.h-100 > body.d-flex.flex-column`` — a step that replays
+    as a click on the document and asserts nothing.
+
+    **What decides it is the cursor**, once the bounded walk has found no
+    control. That is not a proxy for the truth: it is the same signal the
+    tester acted on, since they clicked because the pointer said they
+    could.
+
+    The first attempt at this guard checked only for ``<body>`` and
+    ``<html>``, reasoning that dropping a real step is worse than keeping
+    a noisy one. Re-running the walk against the real page refuted it —
+    the same stray click landed on ``div.col-md-4`` and was recorded, and
+    a page without a container is the exception. The rule was widened on
+    that evidence.
+    """
+
+    @staticmethod
+    def _record_clicks(browser, html, actions):
+        page = browser.new_page()
+        try:
+            page.set_content(html)
+            page.evaluate(STUB)
+            page.add_script_tag(content=CONTENT_JS.read_text(encoding="utf-8"))
+            page.wait_for_timeout(200)
+            actions(page)
+            page.wait_for_timeout(200)
+            return _clicks(page.evaluate("window.__steps") or [])
+        finally:
+            page.close()
+
+    def test_clicking_the_page_background_records_nothing(self, browser):
+        html = '<button type="button" style="width:60px">Real</button>'
+        steps = self._record_clicks(
+            browser, html, lambda pg: pg.mouse.click(600, 400))
+        assert steps == [], [s["target"] for s in steps]
+
+    def test_clicking_a_layout_container_records_nothing(self, browser):
+        """The case the narrow first rule missed, and the reason for this one.
+
+        On the real page the stray click never reached <body>: a
+        full-width column was in the way.
+        """
+        html = ('<div style="height:400px;width:100%">'
+                '<button type="button">Real</button></div>')
+        steps = self._record_clicks(
+            browser, html, lambda pg: pg.mouse.click(600, 300))
+        assert steps == [], [s["target"] for s in steps]
+
+    def test_a_div_that_looks_clickable_is_recorded(self, browser):
+        """A custom control built from a <div>.
+
+        No role, no onclick attribute, no tabindex — invisible to
+        ACTIONABLE_SELECTOR — but it declares itself to the mouse, and
+        that declaration is what the guard reads.
+        """
+        html = ('<div id="custom" style="width:120px;height:40px;'
+                'cursor:pointer">Tap</div>')
+        steps = self._record_clicks(browser, html,
+                                     lambda pg: pg.click("#custom"))
+        assert steps and steps[0]["target"] == "#custom", steps
+
+    def test_the_cost_of_the_rule_is_stated_rather_than_hidden(self, browser):
+        """What the widened rule gives up, asserted so it stays visible.
+
+        A control with a listener, no ARIA, no tabindex and no pointer
+        cursor is dropped. It is rare, and it is a control that offers
+        assistive technology nothing and the mouse nothing either — but
+        the loss is real, and a comment is easier to lose than a test.
+        """
+        html = ('<div id="custom" style="width:120px;height:40px">Tap</div>'
+                '<script>document.getElementById("custom")'
+                '.addEventListener("click", function () {});</script>')
+        steps = self._record_clicks(browser, html,
+                                     lambda pg: pg.click("#custom"))
+        assert steps == [], (
+            "if this now records the step, the guard has been narrowed "
+            "again — update the reasoning above, do not delete this test")
+
+    def test_a_real_control_is_still_recorded_afterwards(self, browser):
+        """Dropping a click must not wedge what follows.
+
+        A guard that returned before the duplicate bookkeeping would
+        leave the recorder's idea of the last event stale.
+        """
+        html = '<button type="button" style="width:60px">Real</button>'
+
+        def walk(pg):
+            pg.mouse.click(600, 400)
+            pg.click("button")
+
+        steps = self._record_clicks(browser, html, walk)
+        assert [s["target"] for s in steps] == ['role=button[name="Real"]']
+
+    def test_an_anchor_inside_a_plain_container_still_records(self, browser):
+        # The walk resolves to the <a>, so the cursor question never
+        # arises — the common case must stay untouched.
+        html = '<div><span><a href="#x">Company</a></span></div>'
+        steps = self._record_clicks(browser, html,
+                                     lambda pg: pg.click("span"))
+        assert steps and steps[0]["target"] == 'role=link[name="Company"]', (
+            steps)
