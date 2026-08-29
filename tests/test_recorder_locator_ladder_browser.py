@@ -150,6 +150,20 @@ class TestAWrappingLabelNamesItsControl:
         assert steps[0]["target"] == 'role=combobox[name="Country"]', (
             steps[0]["target"])
 
+    def test_only_the_controls_a_label_actually_names_are_named_by_it(
+            self, browser):
+        """Scope, and a defect this file caught in its own earlier fix.
+
+        The first version asked ``closest('label')`` about *any*
+        element, so a button inside a label was named after the label's
+        whole text rather than after itself. A label labels one control;
+        everything else inside it is just content.
+        """
+        html = ('<label class="lbl">Terms '
+                '<button type="button">Read them</button></label>')
+        steps = _clicks(_record(browser, html, "button"))
+        assert steps[0]["target"] == 'role=button[name="Read them"]', steps
+
     def test_an_explicit_label_still_wins(self, browser):
         # for= is the case that already worked; it must not regress.
         html = ('<label for="a">Explicit</label>'
@@ -316,3 +330,113 @@ class TestAClickOnNothingIsNotAStep:
                                      lambda pg: pg.click("span"))
         assert steps and steps[0]["target"] == 'role=link[name="Company"]', (
             steps)
+
+
+class TestALabelClickIsOneInteraction:
+    """The third duplicate shape, found while verifying the second.
+
+    Clicking a ``<label>`` fires a click on the label and then a
+    synthetic click on the control it labels. Both are real events on
+    two genuinely different elements, so the duplicate window — which
+    compares the *resolved* element — could not see them as one. On the
+    Selenium practice form a click on a checkbox's label recorded
+    ``click label.form-check-label`` followed by ``click #my-check-2``,
+    and a replay of that pack ticks the box and immediately unticks it.
+
+    Resolving the label to its control is the same correction the
+    span-to-anchor duplicate needed: record what was interacted with,
+    not what the pointer was over.
+    """
+
+    CHECKBOX = ('<label class="lbl" for="agree">I agree</label>'
+                '<input id="agree" type="checkbox">')
+
+    @staticmethod
+    def _record(browser, html, actions):
+        page = browser.new_page()
+        try:
+            page.set_content(html)
+            page.evaluate(STUB)
+            page.add_script_tag(content=CONTENT_JS.read_text(encoding="utf-8"))
+            page.wait_for_timeout(200)
+            actions(page)
+            page.wait_for_timeout(200)
+            return page.evaluate("window.__steps") or []
+        finally:
+            page.close()
+
+    def test_clicking_a_label_records_one_click_on_the_control(self, browser):
+        steps = _clicks(self._record(browser, self.CHECKBOX,
+                                      lambda pg: pg.click("label.lbl")))
+        assert [s["target"] for s in steps] == ["#agree"], (
+            [s["target"] for s in steps])
+
+    def test_a_wrapping_label_behaves_the_same(self, browser):
+        html = '<label class="lbl">I agree <input id="agree" type="checkbox"></label>'
+        steps = _clicks(self._record(browser, html,
+                                      lambda pg: pg.click("label.lbl")))
+        assert [s["target"] for s in steps] == ["#agree"], (
+            [s["target"] for s in steps])
+
+    def test_the_box_is_toggled_once(self, browser):
+        """The consequence, not just the step count.
+
+        Two recorded clicks replay as tick-then-untick, which is why a
+        duplicated click on a checkbox is worse than noise.
+        """
+        page = browser.new_page()
+        try:
+            page.set_content(self.CHECKBOX)
+            page.evaluate(STUB)
+            page.add_script_tag(content=CONTENT_JS.read_text(encoding="utf-8"))
+            page.wait_for_timeout(200)
+            page.click("label.lbl")
+            page.wait_for_timeout(200)
+            assert page.is_checked("#agree")
+            assert len(_clicks(page.evaluate("window.__steps"))) == 1
+        finally:
+            page.close()
+
+    def test_clicking_the_control_directly_still_records(self, browser):
+        steps = _clicks(self._record(browser, self.CHECKBOX,
+                                      lambda pg: pg.click("#agree")))
+        assert [s["target"] for s in steps] == ["#agree"]
+
+    def test_two_different_labels_are_two_interactions(self, browser):
+        """The window must not swallow a genuine second click.
+
+        Both resolve to controls, but to *different* ones, so neither is
+        a duplicate of the other however fast they arrive.
+        """
+        html = ('<label class="a" for="one">One</label>'
+                '<input id="one" type="checkbox">'
+                '<label class="b" for="two">Two</label>'
+                '<input id="two" type="checkbox">')
+
+        def walk(pg):
+            pg.click("label.a")
+            pg.click("label.b")
+
+        steps = _clicks(self._record(browser, html, walk))
+        assert [s["target"] for s in steps] == ["#one", "#two"], (
+            [s["target"] for s in steps])
+
+    def test_a_label_that_names_nothing_is_still_recorded(self, browser):
+        """``.control`` is null — the label is all there is.
+
+        Dropping the step because the mapping found nothing would lose a
+        click the tester really made.
+        """
+        html = '<label class="lbl" style="cursor:pointer">Orphan</label>'
+        steps = _clicks(self._record(browser, html,
+                                      lambda pg: pg.click("label.lbl")))
+        assert steps, "an orphaned label click was dropped"
+
+    def test_a_control_inside_a_label_wins_over_the_label(self, browser):
+        # The walk starts at the deepest node, so a link inside a label
+        # is found before the label and must not be remapped.
+        html = ('<label class="lbl">Terms '
+                '<a href="#x">Read them</a></label>')
+        steps = _clicks(self._record(browser, html,
+                                      lambda pg: pg.click("a")))
+        assert steps[0]["target"] == 'role=link[name="Read them"]', steps

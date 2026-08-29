@@ -211,25 +211,34 @@
     // plainly had one. Measured on staging 2026-08-29: a textarea inside
     // a wrapping label recorded as a bare `role=textbox`, which on that
     // page matched five elements.
-    const implicit = el.closest ? el.closest('label') : null;
-    if (implicit) {
-      // The control's own content is not part of its name — a <select>
-      // inside a label would otherwise contribute every option's text.
-      let text = '';
-      for (const node of implicit.childNodes) {
-        if (node.nodeType === 3) {                       // text node
-          text += node.textContent;
-        } else if (node.nodeType === 1 &&
-                   !node.matches('input,textarea,select,button')) {
-          text += node.textContent || '';
+    //
+    // Only for the three controls a label actually names. The first
+    // version of this asked `closest('label')` about *any* element, so
+    // `<label>Terms <a href=…>Read them</a></label>` named the link
+    // "Terms Read them" — the label's text, for an element the label
+    // does not label. A <button> is labelable but names itself from its
+    // own contents, which the branch below already does.
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+      const implicit = el.closest ? el.closest('label') : null;
+      if (implicit) {
+        // The control's own content is not part of its name — a <select>
+        // inside a label would otherwise contribute every option's text.
+        let text = '';
+        for (const node of implicit.childNodes) {
+          if (node.nodeType === 3) {                       // text node
+            text += node.textContent;
+          } else if (node.nodeType === 1 &&
+                     !node.matches('input,textarea,select,button')) {
+            text += node.textContent || '';
+          }
         }
+        text = text.replace(/\s+/g, ' ').trim();
+        if (text && text.length <= 80) return text;
       }
-      text = text.replace(/\s+/g, ' ').trim();
-      if (text && text.length <= 80) return text;
     }
     // For buttons + links, fall back to text. Limit length so we don't
     // capture a 300-char paragraph as the "name".
-    const tag = el.tagName.toLowerCase();
     if (tag === 'button' || tag === 'a') {
       const text = (el.textContent || '').trim();
       if (text && text.length <= 80) return text;
@@ -272,12 +281,40 @@
   // [role="main"] would swallow every click on plain text.
   const ACTIONABLE_MAX_DEPTH = 4;
 
+  function labelledControl(node) {
+    // A <label> is not a control; it is a handle on one, and clicking it
+    // is how the browser is asked to click the control.
+    //
+    // That is also why it produced two steps. Clicking a label fires the
+    // click on the label and then a second, synthetic click on the
+    // control it labels — two events, two genuinely different elements,
+    // so the duplicate window (which compares the resolved element)
+    // could not see them as one. Measured on the Selenium practice form
+    // on 2026-08-29: a click on a checkbox's label recorded
+    // `click label.form-check-label` followed by `click #my-check-2`, so
+    // a replay ticks the box and immediately unticks it.
+    //
+    // Resolving the label to its control is the same correction the
+    // span-to-anchor duplicate needed — record what was interacted with,
+    // not what the pointer happened to be over — and it makes the
+    // existing window sufficient, because both events now resolve to one
+    // element.
+    //
+    // `.control` covers both `for=` and a wrapped control, and is null
+    // when the label names nothing; then the label is all there is.
+    if (node && node.tagName && node.tagName.toLowerCase() === 'label') {
+      const control = node.control;
+      if (control) return control;
+    }
+    return node;
+  }
+
   function actionableTarget(el) {
     let node = el;
     for (let depth = 0; node && depth <= ACTIONABLE_MAX_DEPTH; depth++) {
       if (node.nodeType === 1 && typeof node.matches === 'function'
           && node.matches(ACTIONABLE_SELECTOR)) {
-        return node;
+        return labelledControl(node);
       }
       node = node.parentElement;
     }
