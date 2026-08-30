@@ -13,7 +13,7 @@
               version=meta.row_version if meta else None,
               kind=kind, label=label, readonly=(meta is none)) }}
 {%- endmacro %}
-{% block title %}{{ t.get('bug_title', 'Bug Reports') }}{% endblock %}
+{% block title %}TestForTge — {{ t.get('bug_title', 'Bug Reports') }}{% endblock %}
 
 {% block content %}
 <h1>{{ t.get('bug_title', 'Bug Reports') }}</h1>
