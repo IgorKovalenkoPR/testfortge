@@ -33,6 +33,91 @@
   const HANDOFF_PARAM_FINISH = 'testfortge-finish-url';
   const HOST_ID = 'testfortge-recorder-host';
 
+  // ── 0. The bridge to the extension, and its death ─────────────
+  //
+  // Reloading or updating the extension orphans this script. The page
+  // is untouched — listeners, timers and the overlay all keep running —
+  // but `chrome.runtime` is now a corpse: `sendMessage` throws
+  // "Extension context invalidated." at the call site, synchronously,
+  // and `chrome.runtime.id` goes undefined. There is no event to
+  // subscribe to; those two are the whole signal.
+  //
+  // Every call went through a bare `chrome.runtime.sendMessage` before,
+  // so the first throw took out whatever came after it. In `emitStep`
+  // that was `updateOverlayCount`, which is why the badge on staging
+  // (2026-08-29 21:11:33) kept blinking REC over a counter frozen at
+  // the last number it had managed to fetch, with a Stop button that
+  // threw the same way and so never even reached its "Retry" fallback.
+  // The tester went on testing; nothing was being recorded.
+  //
+  // So: one door out to the extension, and when it shuts, say so.
+  let contextLost = false;
+
+  // Every event handler calls into this — when no recording is bound
+  // to this tab, returns false and the handler skips synthesising a
+  // step. Cheap fast-path so listening on every page is harmless.
+  //
+  // Declared here rather than beside the listener wiring below because
+  // `onContextLost` clears it, and the very first messages this script
+  // sends (the handoffs) go out before that point. A `let` read before
+  // its declaration is a ReferenceError, so an invalidated context at
+  // page load would have crashed inside the handler for the crash.
+  let isActive = false;
+  let lastStepUrl = '';
+
+  function isContextAlive() {
+    // The id is present on a live context and gone on a dead one.
+    // Reading it can itself throw depending on how far teardown got.
+    try {
+      return !!(chrome && chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function sendToBackground(msg, cb) {
+    // Returns whether the message was handed off. Never throws: a dead
+    // bridge must not take the page's event handlers down with it.
+    if (contextLost) return false;
+    try {
+      chrome.runtime.sendMessage(msg, (resp) => {
+        // Reading lastError is mandatory even when ignoring it —
+        // an unread one prints itself to the SUT's console.
+        const err = chrome.runtime.lastError;
+        if (err) {
+          // Not every lastError is fatal; a service worker that was
+          // asleep answers late and noisily. Only the missing id
+          // distinguishes "busy" from "gone", so ask.
+          if (!isContextAlive()) onContextLost();
+          return;
+        }
+        if (cb) cb(resp);
+      });
+      return true;
+    } catch (e) {
+      onContextLost();
+      return false;
+    }
+  }
+
+  function onContextLost() {
+    if (contextLost) return;
+    contextLost = true;
+    // Nothing can be recorded any more, so stop pretending to try.
+    // Every handler below is gated on isActive, which makes this one
+    // assignment the whole shutdown.
+    //
+    // It overlaps with the `contextLost` early-return above on purpose,
+    // and mutation testing says so: delete either one alone and the
+    // suite stays green, because the other still stops the calls. They
+    // are not the same statement. `contextLost` shuts the door;
+    // `isActive` stops the file's own notion of "we are recording"
+    // from being a lie to whatever reads it next. Neither is covered
+    // by the other's test — they are covered by each other.
+    isActive = false;
+    markOverlayLost();
+  }
+
   // ── 1. Handoff detection ──────────────────────────────────────
 
   function readHandoff() {
@@ -81,7 +166,7 @@
 
   const controlHandoff = readControlHandoff();
   if (controlHandoff) {
-    chrome.runtime.sendMessage({
+    sendToBackground({
       type: 'register_control',
       token: controlHandoff.token,
       poll_url: controlHandoff.poll_url,
@@ -104,7 +189,7 @@
   const handoff = readHandoff();
   if (handoff) {
     // Tell background to bind this tab to the recording session.
-    chrome.runtime.sendMessage({
+    sendToBackground({
       type: 'register_session',
       token: handoff.token,
       finish_url: handoff.finishUrl,
@@ -126,14 +211,10 @@
 
   // ── 2. Active-state check + listener wiring ───────────────────
 
-  // Every event handler calls into this — when no recording is bound
-  // to this tab, returns false and the handler skips synthesising a
-  // step. Cheap fast-path so listening on every page is harmless.
-  let isActive = false;
-  let lastStepUrl = '';
-
+  // `isActive` / `lastStepUrl` are declared up in section 0, next to
+  // the bridge that clears them.
   function refreshActiveFromBackground() {
-    chrome.runtime.sendMessage({type: 'is_active_for_tab'}, (resp) => {
+    sendToBackground({type: 'is_active_for_tab'}, (resp) => {
       isActive = !!(resp && resp.active);
       if (isActive) {
         mountOverlay();
@@ -531,7 +612,7 @@
 
   function emitStep(step) {
     if (!isActive) return;
-    chrome.runtime.sendMessage({type: 'append_step', step}, () => {
+    sendToBackground({type: 'append_step', step}, () => {
       // Refresh overlay counter — keep popup + overlay in sync.
       updateOverlayCount();
     });
@@ -616,7 +697,7 @@
     }
     const digest = (document.body.innerText || '')
         .replace(/\s+/g, ' ').trim().slice(0, 2000);
-    chrome.runtime.sendMessage({
+    sendToBackground({
       type: 'append_snapshot',
       snapshot: {
         url: window.location.href.split('#')[0],
@@ -626,7 +707,7 @@
         text_digest: digest,
         element_count: interactive.length,
       },
-    }, () => { void chrome.runtime.lastError; });
+    });   // fire and forget; sendToBackground reads lastError for us
   }
 
   // One physical interaction must produce one step.
@@ -820,6 +901,19 @@
       }
       .stop:hover { background: #ea580c; }
       .stop:disabled { opacity: 0.6; cursor: not-allowed; }
+
+      /* The bridge to the extension is gone. Nothing here is recording
+         any more, so nothing here may look like it is: the dot stops
+         blinking and drains to grey, and the label drops the orange it
+         shares with the live badge. */
+      .ov.lost .dot { animation: none; background: #94a3b8; }
+      .ov.lost .label { color: #94a3b8; }
+      .ov.lost .count { color: #cbd5e1; max-width: 220px; }
+      /* Orange is the colour of a running recording, on the dot, the
+         label and the Stop button alike. A dead badge keeps none of it,
+         Dismiss included — a tester reads the colour before the word. */
+      .ov.lost .stop { background: #475569; }
+      .ov.lost .stop:hover { background: #334155; }
     `;
     overlayShadow.appendChild(style);
 
@@ -828,7 +922,7 @@
     wrap.innerHTML =
         `<span class="dot"></span>` +
         `<div class="meta">` +
-        `  <span class="label">TestForTge REC</span>` +
+        `  <span class="label" id="tfg-rec-label">TestForTge REC</span>` +
         `  <span class="count" id="tfg-rec-count">0 steps</span>` +
         `</div>` +
         `<button class="stop" id="tfg-rec-stop">Stop</button>`;
@@ -839,7 +933,7 @@
       const btn = overlayShadow.getElementById('tfg-rec-stop');
       btn.disabled = true;
       btn.textContent = 'Saving…';
-      chrome.runtime.sendMessage({type: 'stop_recording'}, (resp) => {
+      sendToBackground({type: 'stop_recording'}, (resp) => {
         if (!resp || !resp.ok) {
           btn.disabled = false;
           btn.textContent = 'Retry';
@@ -848,9 +942,55 @@
     });
   }
 
+  function markOverlayLost() {
+    // Rewrite the badge into what is now true. Leaving it up matters:
+    // removing it would read as "the recording ended", which is the
+    // other half of the same lie, and the tester needs to know that the
+    // steps they have taken since the extension reloaded are gone.
+    //
+    // Everything here runs on the page alone. Whatever this function
+    // touches, it cannot need the extension — that is the one thing
+    // known to be unavailable at the moment it is called.
+    const host = document.getElementById(HOST_ID);
+    const shadow = overlayShadow || (host && host.shadowRoot);
+    if (!shadow) return;
+    const wrap = shadow.querySelector('.ov');
+    if (wrap) wrap.classList.add('lost');
+    const label = shadow.getElementById('tfg-rec-label');
+    if (label) label.textContent = 'Recording lost';
+    const count = shadow.getElementById('tfg-rec-count');
+    if (count) {
+      count.textContent = 'Extension reloaded — start a new session';
+    }
+    const btn = shadow.getElementById('tfg-rec-stop');
+    if (btn) {
+      // Stop cannot save; it has no one left to save through. Offer the
+      // only thing this page can still do by itself, and make sure it
+      // is a button that works rather than a second dead control.
+      btn.disabled = false;
+      btn.textContent = 'Dismiss';
+      // Cloning drops Stop's listener. Its effect is not observable
+      // today — Stop's first act is to blank itself into "Saving…", and
+      // the dismiss below removes the whole overlay in the same click,
+      // so nothing is ever painted — and mutation testing confirms no
+      // test here fails without it. It stays because a control that
+      // carries two meanings is how this defect looked in the first
+      // place, and the day dismissal stops being instant it would show.
+      btn.replaceWith(btn.cloneNode(true));
+      shadow.getElementById('tfg-rec-stop')
+          .addEventListener('click', () => {
+            const h = document.getElementById(HOST_ID);
+            if (h) h.remove();
+            overlayShadow = null;
+            stepCountEl = null;
+          });
+    }
+    stepCountEl = null;   // no further counter writes
+  }
+
   function updateOverlayCount() {
     if (!stepCountEl) return;
-    chrome.runtime.sendMessage({type: 'get_state'}, (resp) => {
+    sendToBackground({type: 'get_state'}, (resp) => {
       if (!resp || !resp.active) return;
       const n = (resp.steps_buffer || []).length;
       stepCountEl.textContent = `${n} step${n === 1 ? '' : 's'}`;

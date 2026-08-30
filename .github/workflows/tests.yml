@@ -328,3 +328,14 @@ jobs:
           python -m pytest tests/test_recorder_locator_ladder_browser.py
           -q --no-header -p no:cacheprovider | tee /tmp/ladder.txt;
           grep -qE "[1-9][0-9]* passed" /tmp/ladder.txt
+
+      # What the REC overlay says once the extension is gone. Same
+      # reasoning as the ladder above: the claim is about what a tester
+      # sees painted on the page, and only a browser can answer that.
+      # A source grep would have passed on every version of this file,
+      # including the one that blinked REC over a dead bridge.
+      - name: Recorder overlay after context loss (real browser)
+        run: >-
+          python -m pytest tests/test_recorder_context_invalidated_browser.py
+          -q --no-header -p no:cacheprovider | tee /tmp/invalidated.txt;
+          grep -qE "[1-9][0-9]* passed" /tmp/invalidated.txt
