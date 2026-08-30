@@ -99,17 +99,30 @@ READ_OVERLAY = """
     button: btn ? btn.textContent : null,
     button_disabled: btn ? btn.disabled : null,
     dot_animation: dot ? getComputedStyle(dot).animationName : '',
-    all_text: sr.textContent || '',
+    // The badge, not the stylesheet that dresses it -- see
+    // WAIT_LOST below for what reading the whole root cost.
+    all_text: (sr.querySelector('.ov') || {}).textContent || '',
   };
 }
 """
 
 # The overlay has settled into its dead state.
+#
+# Reads the badge, not the shadow root. A shadow root's textContent
+# includes its ``<style>`` element, and the dead state is styled by rules
+# named ``.ov.lost`` — so the first version of this matched "lost" in the
+# stylesheet and was true from the moment the overlay mounted. Eight
+# waits that never waited. Every test that used it still passed, because
+# each one clicked first and the click flipped the badge synchronously,
+# so the assertions afterwards were reading the right thing for the wrong
+# reason. The first test to actually need the wait — the one where
+# nothing is clicked and a timer does the work — is the one it failed.
 WAIT_LOST = """
 () => {
   const h = document.getElementById('testfortge-recorder-host');
   const sr = h && h.shadowRoot;
-  return !!sr && /lost|disconnect/i.test(sr.textContent);
+  const ov = sr && sr.querySelector('.ov');
+  return !!ov && /lost|disconnect/i.test(ov.textContent);
 }
 """
 
@@ -167,6 +180,67 @@ def test_overlay_is_honest_while_the_extension_is_alive(recorded):
     assert before["dot_animation"] == "blink"
     assert before["button"].strip() == "Stop"
     assert before["button_disabled"] is False
+    # And the condition the other tests wait on must be FALSE here.
+    # Without this line the wait can quietly become vacuous again — it
+    # already did once, matching ".ov.lost" inside the stylesheet — and a
+    # wait that returns immediately turns every timing assertion below it
+    # into a coin toss that usually lands the right way up.
+    assert recorded.evaluate(WAIT_LOST) is False, (
+        "WAIT_LOST is true on a live badge — the waits below wait for "
+        "nothing")
+
+
+def test_the_badge_corrects_itself_without_being_touched(recorded):
+    """Measured on staging 2026-08-30, walking the practice form.
+
+    The extension was reloaded mid-recording and the badge went on
+    saying ``REC`` over ``7 steps`` — until the next click, which
+    flipped it to ``Recording lost`` correctly. Detection was lazy: the
+    context is only found dead when something next tries to use it, and
+    every test in this file clicked first, so none of them could see the
+    window in between.
+
+    A tester who reloads their extension and then *looks* at the badge
+    gets the original lie for as long as they keep looking. Whether they
+    happen to click next is not a property of the fix. So the script
+    watches the bridge while the overlay is up: reading
+    ``chrome.runtime.id`` costs no message and no round trip, and it is
+    the same signal ``sendToBackground`` already trusts.
+    """
+    # Drain the content script's own pending work first. The DOM
+    # snapshot is debounced 500 ms behind the opening goto, and if it is
+    # still in flight when the context dies it throws, lands in
+    # `onContextLost`, and corrects the badge by itself. That is a real
+    # path and a welcome one -- but it is not the one under test, and
+    # the first version of this test could not tell the two apart: it
+    # passed with `startAliveWatch` deleted, riding a timer it never
+    # mentioned. Measured, not reasoned about.
+    recorded.wait_for_timeout(1200)
+    assert recorded.evaluate(WAIT_LOST) is False, (
+        "the badge died before the context did")
+
+    # Belt to that brace, and the sharper of the two. The watch reads
+    # `chrome.runtime.id`; it sends nothing. So a badge that corrects
+    # itself while this counter is still zero was corrected by the
+    # watch, and by nothing else that could have been in flight.
+    recorded.evaluate("""() => {
+      window.__calls = 0;
+      const inner = window.chrome.runtime.sendMessage;
+      window.chrome.runtime.sendMessage = function (m, cb) {
+        window.__calls++;
+        return inner(m, cb);
+      };
+    }""")
+    recorded.evaluate("window.__kill()")
+    # Deliberately no click, no keystroke, no scroll. The page is left
+    # exactly as the tester left it.
+    recorded.wait_for_function(WAIT_LOST, timeout=8000)
+    assert recorded.evaluate("window.__calls") == 0, (
+        "something tried to send and found the bridge gone -- that is "
+        "the lazy path, not the watch")
+    after = _overlay(recorded)
+    assert "TestForTge REC" not in after["label"], after
+    assert after["dot_animation"] == "none", after
 
 
 def test_overlay_stops_claiming_to_record_after_invalidation(recorded):

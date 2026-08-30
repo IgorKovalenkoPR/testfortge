@@ -100,9 +100,46 @@
     }
   }
 
+  //: How often the badge checks that the bridge is still there, in ms.
+  //  This is a property read, not a message — no IPC, no round trip, no
+  //  waking the service worker. Two seconds is chosen against a human
+  //  looking at a badge, not against a machine.
+  const ALIVE_POLL_MS = 2000;
+  let _aliveTimer = null;
+
+  function startAliveWatch() {
+    // Detection used to be purely lazy: the context was only found dead
+    // when something next tried to use it. Measured on staging while
+    // walking the practice form — the extension was reloaded mid-
+    // recording and the badge went on saying REC over "7 steps" until
+    // the next click, which corrected it. That is the original lie for
+    // as long as the tester looks without touching anything, and
+    // whether they click next is not a property this fix gets to rely
+    // on.
+    if (_aliveTimer) return;
+    _aliveTimer = setInterval(() => {
+      // Self-cancel, and `onContextLost` clears the timer too. Mutation
+      // testing says either alone is enough, so neither is covered by a
+      // test — they cover each other, like `contextLost` and `isActive`
+      // below. The pair is deliberate: this line stops a watch armed by
+      // any future path that sets the flag directly, the other stops it
+      // now rather than up to one tick from now.
+      if (contextLost) { stopAliveWatch(); return; }
+      if (!isContextAlive()) onContextLost();
+    }, ALIVE_POLL_MS);
+  }
+
+  function stopAliveWatch() {
+    if (_aliveTimer) {
+      clearInterval(_aliveTimer);
+      _aliveTimer = null;
+    }
+  }
+
   function onContextLost() {
     if (contextLost) return;
     contextLost = true;
+    stopAliveWatch();
     // Nothing can be recorded any more, so stop pretending to try.
     // Every handler below is gated on isActive, which makes this one
     // assignment the whole shutdown.
@@ -942,6 +979,7 @@
     overlayShadow.appendChild(wrap);
 
     stepCountEl = overlayShadow.getElementById('tfg-rec-count');
+    startAliveWatch();   // the badge is only honest while it is watched
     overlayShadow.getElementById('tfg-rec-stop').addEventListener('click', () => {
       const btn = overlayShadow.getElementById('tfg-rec-stop');
       btn.disabled = true;
@@ -1020,6 +1058,7 @@
       emitGotoIfNew();
     } else if (msg.type === 'session_stopped') {
       isActive = false;
+      stopAliveWatch();
       const host = document.getElementById(HOST_ID);
       if (host) host.remove();
       overlayShadow = null;
