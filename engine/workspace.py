@@ -215,8 +215,28 @@ def bug_row_to_dict(row: dict) -> dict:
     created = row.get("created_at")
     if not isinstance(created, str):
         created = created.isoformat() if created else ""
+    # A bug filed without a public id is stored with ``external_id =
+    # NULL`` on purpose — see ``db.save_bug``, where storing ``""``
+    # instead would collapse every id-less bug in a project into one
+    # collision the unique index cannot resolve.
+    #
+    # This line used to fill that gap with ``f"BUG-{db_id:03d}"``, which
+    # invents an id *in the same namespace as the stored ones* and
+    # downstream of every guarantee about it: neither
+    # ``_renumber_duplicate_public_ids`` nor
+    # ``ux_bug_report_project_external_id`` can see a value that was
+    # never written. Measured on staging 2026-08-30 — row 1 had no id,
+    # displayed as BUG-001, and the project's real BUG-001 was a
+    # different finding. Twenty-four cards, twenty-three ids.
+    #
+    # ``BUG-#12`` cannot collide: ``public_ids.split_id`` reads it as
+    # prefix ``BUG-#`` and renumbering only ever reuses a prefix it
+    # found, so nothing mints it. It is also honest — this bug has no
+    # assigned id, and the number is the row it lives in. Edits are
+    # keyed on ``db_id``, so nothing addresses a bug by this string.
+    row_id = int(row.get("id") or 0)
     return {
-        "id": row.get("external_id") or f"BUG-{int(row.get('id') or 0):03d}",
+        "id": row.get("external_id") or f"BUG-#{row_id}",
         "db_id": int(row.get("id") or 0),
         "title": row.get("title") or "",
         "severity": row.get("severity") or "Minor",
