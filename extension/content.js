@@ -127,17 +127,30 @@
       if (contextLost) { stopAliveWatch(); return; }
       checkAliveNow();
     }, ALIVE_POLL_MS);
-    // A timer alone is not enough, because the browser is allowed to
-    // stop running it. Chrome throttles timers in hidden tabs, and after
-    // five minutes out of sight throttles them *intensively* — once a
-    // minute. Reloading an extension is something you do on
-    // chrome://extensions, which means the recording tab is hidden at
-    // exactly the moment its context dies, and the tester's next act is
-    // to come back and look at the badge. A minute of blinking REC over
-    // a dead bridge is the defect this whole file exists to remove.
+    // Belt and braces, and honestly labelled as such.
     //
-    // So check on the way back in as well. `visibilitychange` covers
-    // returning to the tab; `focus` covers returning to the window.
+    // The argument for adding this was that a hidden tab's timers are
+    // throttled — Chrome slows them in background tabs and, after five
+    // minutes out of sight, can freeze the tab outright — and that
+    // reloading an extension happens on chrome://extensions, so the
+    // recording tab is hidden at exactly the moment its context dies.
+    //
+    // That argument was not borne out by the one measurement taken of
+    // it (staging, 2026-08-30). A recording tab left hidden, running
+    // the timer-only build, corrected its badge within about three
+    // seconds of the reload — the timer ran on time. The severity the
+    // listener was written for was predicted, not observed, and the
+    // note in its commit message reads more confidently than the data
+    // underneath it.
+    //
+    // It stays because it costs nothing, because tab freezing does stop
+    // timers outright and that case is untested by anything else, and
+    // because arriving on `visibilitychange` cannot be late for the
+    // reason a timer can. It should not be read as the fix for a
+    // measured defect. It is insurance.
+    //
+    // `visibilitychange` covers returning to the tab; `focus` covers
+    // returning to the window.
     // Both are free, and neither can fire late for the reason the timer
     // can — the browser is done throttling by the time it tells you the
     // page is visible again.
