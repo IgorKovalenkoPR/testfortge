@@ -1205,6 +1205,20 @@ class AutomationRunner:
                         f"Expected URL to contain {expected!r}, "
                         f"got {actual!r}"
                     )
+            elif step.action == "submit":
+                # A marker, not an instruction. The recorder emits one
+                # when a form's submit event fires, purely so the
+                # segmenter can see a flow boundary — the click or
+                # keypress that *caused* the submit is already in the
+                # stream a step earlier, and replaying it does the
+                # submitting. Acting on this one would do it twice.
+                #
+                # Explicit rather than left to fall off the end of this
+                # chain. An unknown action silently reports "passed"
+                # here, and a step that quietly does nothing while
+                # claiming success is indistinguishable from one that
+                # was meant to act and didn't.
+                pass
             elif step.action == "wait":
                 # Long waits get periodic live frames so the operator
                 # doesn't think the bot is frozen.

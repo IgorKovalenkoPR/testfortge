@@ -209,6 +209,13 @@
                         <strong>{{ step.action }}</strong>
                         {% if step.target %}<span style="color:#94a3b8;">{{ step.target|truncate(60) }}</span>{% endif %}
                         {% if step.value %}<em style="color:#0369a1;">= "{{ step.value|truncate(40) }}"</em>{% endif %}
+                        {# The recorder stamps a comment on steps that
+                           describe something rather than instruct it —
+                           today only the synthetic form-submit marker,
+                           which addresses no element and so would
+                           otherwise render as a bare verb with nothing
+                           after it. #}
+                        {% if step.comment %}<span style="color:#64748b;">— {{ step.comment|truncate(40) }}</span>{% endif %}
                     </li>
                     {% endfor %}
                 </ol>

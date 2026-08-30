@@ -839,9 +839,22 @@
     // record a synthetic "form submitted" comment so the segmenter
     // sees a natural flow boundary. The runner doesn't need to replay
     // it — the click that triggered the submit already covers replay.
+    //
+    // Which is why it must not *look* replayable. This marker used to
+    // go out as `click` on `css=form`, and "the runner doesn't need to"
+    // was doing a lot of work in that sentence: nothing skipped it, so
+    // AutomationRunner resolved the form and called `.click()` on it —
+    // which lands on whatever child sits at the form's centre point. On
+    // a four-field form that is a checkbox, and replay silently ticked
+    // a box the tester never touched. A note about the past does not
+    // get to be an instruction about the future.
+    //
+    // `submit` is a verb the rest of the pipeline already knows
+    // (suite_classifier counts it as a form submission on its own), and
+    // no target, because this addresses no element.
     emitStep({
-      action: 'click',
-      target: 'css=form',
+      action: 'submit',
+      target: '',
       value: '',
       raw: 'page.locator("form").submit()',
       comment: 'form submitted',

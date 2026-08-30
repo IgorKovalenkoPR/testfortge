@@ -179,8 +179,14 @@ def _no_llm():
                       side_effect=LLMUnavailable("no api key"))
 
 
-def _submit(target="css=form"):
-    return AutomationStep(action="click", target=target,
+def _submit(target=""):
+    # The shape extension/content.js actually emits, pinned against the
+    # real content script in tests/test_recorder_submit_marker.py. It
+    # was `action="click"` on `css=form` until that turned out to be a
+    # note the runner replayed as a click on the form -- the segmenter
+    # never cared which verb it wore, and this fixture said "click"
+    # long after the recorder stopped saying it.
+    return AutomationStep(action="submit", target=target,
                           raw='page.locator("form").submit()',
                           comment="form submitted")
 
