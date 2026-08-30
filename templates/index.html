@@ -114,7 +114,22 @@
             <span class="picker-active-badge">
                 <i data-lucide="folder-open" class="icon-sm"></i>
                 {{ t.get('active_project_label', 'Active') }}:
-                <strong>{{ session.get('project_setup', {}).get('project_name', '—') }}</strong>
+                {# Name it from the same source the branch above
+                   tested. This read `session['project_setup']`,
+                   the pre-E3 store that Postgres replaced, while
+                   the guard reads `active_project_id` from the DB.
+                   `project_setup` is in GENERATED_KEYS, which
+                   app.py wipes on the first request after a
+                   restart; `project_id` is not. So every deploy
+                   left this panel saying a project was active and
+                   naming it with an em dash. `projects` comes from
+                   the same context processor as the guard. #}
+                {%- set _active_project =
+                    projects | selectattr('id', 'equalto', active_project_id)
+                             | list | first %}
+                <strong>{{ _active_project.name if _active_project
+                          else session.get('project_setup', {})
+                                    .get('project_name', '—') }}</strong>
             </span>
         {% else %}
             <span class="picker-empty">
