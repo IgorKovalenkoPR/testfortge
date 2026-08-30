@@ -243,6 +243,98 @@ def test_the_badge_corrects_itself_without_being_touched(recorded):
     assert after["dot_animation"] == "none", after
 
 
+#: Neuters `setInterval` before the content script loads, so the watch
+#: registers a timer that can never fire. Whatever corrects the badge
+#: after this is not the timer -- which is the whole point, because in
+#: the browser the timer is exactly what stops being allowed to run.
+NO_TIMERS = """
+window.__intervalsRegistered = 0;
+window.setInterval = function () { window.__intervalsRegistered++; return 0; };
+void 0;
+"""
+
+
+@pytest.fixture()
+def recorded_without_timers(browser):
+    """Mid-recording, with the watch's heartbeat disabled."""
+    page = browser.new_page()
+    try:
+        page.set_content(PAGE)
+        page.evaluate(STUB)
+        page.evaluate(NO_TIMERS)
+        page.add_script_tag(content=CONTENT_JS.read_text(encoding="utf-8"))
+        page.click("#one")
+        page.wait_for_function("window.__steps.length > 0", timeout=5000)
+        page.wait_for_timeout(1200)          # drain the snapshot debounce
+        assert page.evaluate("window.__intervalsRegistered") >= 1, (
+            "the watch registered no timer at all -- this fixture proves "
+            "nothing about the listener if the watch never armed")
+        assert page.evaluate(WAIT_LOST) is False
+        yield page
+    finally:
+        page.close()
+
+
+def test_coming_back_to_the_tab_corrects_the_badge_at_once(
+        recorded_without_timers):
+    """The timer is not allowed to be the only answer.
+
+    Reloading an extension happens on chrome://extensions, so the
+    recording tab is hidden at the moment its context dies -- and Chrome
+    throttles timers in hidden tabs, intensively so (once a minute)
+    after five minutes out of sight. Measured while setting up the live
+    check on 2026-08-30: the tab sat at ``visibilityState: "hidden"``
+    and even synthetic clicks stopped landing on it.
+
+    The tester's next act is to come back and look. That is when the
+    badge has to be right, and returning to a tab is not a click.
+    """
+    page = recorded_without_timers
+    page.evaluate("window.__kill()")
+    # Returning to the tab. Not an interaction with the page: no
+    # listener the recorder installs for capturing steps hears this.
+    page.evaluate("""() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    }""")
+    page.wait_for_function(WAIT_LOST, timeout=3000)
+    after = _overlay(page)
+    assert "TestForTge REC" not in after["label"], after
+    assert after["dot_animation"] == "none", after
+
+
+def test_coming_back_to_the_window_counts_too(recorded_without_timers):
+    # `visibilitychange` does not fire when the tab was already the
+    # active one and the whole *window* lost focus -- alt-tabbing to
+    # Chrome's own extensions window and back, which is the exact route
+    # a tester takes to reload an extension. Without this the badge
+    # waits for the throttled timer in the one workflow that produces
+    # this bug most often.
+    page = recorded_without_timers
+    page.evaluate("window.__kill()")
+    page.evaluate("() => window.dispatchEvent(new Event('focus'))")
+    page.wait_for_function(WAIT_LOST, timeout=3000)
+    assert _overlay(page)["dot_animation"] == "none"
+
+
+def test_a_hidden_page_is_not_mistaken_for_a_visible_one(
+        recorded_without_timers):
+    # `visibilitychange` fires on the way out as well as the way in.
+    # Checking on the way out is harmless but pointless, and a handler
+    # that ignores the state is a handler that will do the wrong thing
+    # when something else is hung off it later.
+    page = recorded_without_timers
+    page.evaluate("""() => {
+      window.__checked = 0;
+      Object.defineProperty(document, 'visibilityState',
+          {configurable: true, get: () => 'hidden'});
+    }""")
+    page.evaluate("window.__kill()")
+    page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    assert page.evaluate(WAIT_LOST) is False, (
+        "the badge was corrected while the page was still hidden")
+
+
 def test_overlay_stops_claiming_to_record_after_invalidation(recorded):
     recorded.evaluate("window.__kill()")
     recorded.click("#two")

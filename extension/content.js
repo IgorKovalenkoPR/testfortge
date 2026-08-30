@@ -125,8 +125,34 @@
       // any future path that sets the flag directly, the other stops it
       // now rather than up to one tick from now.
       if (contextLost) { stopAliveWatch(); return; }
-      if (!isContextAlive()) onContextLost();
+      checkAliveNow();
     }, ALIVE_POLL_MS);
+    // A timer alone is not enough, because the browser is allowed to
+    // stop running it. Chrome throttles timers in hidden tabs, and after
+    // five minutes out of sight throttles them *intensively* — once a
+    // minute. Reloading an extension is something you do on
+    // chrome://extensions, which means the recording tab is hidden at
+    // exactly the moment its context dies, and the tester's next act is
+    // to come back and look at the badge. A minute of blinking REC over
+    // a dead bridge is the defect this whole file exists to remove.
+    //
+    // So check on the way back in as well. `visibilitychange` covers
+    // returning to the tab; `focus` covers returning to the window.
+    // Both are free, and neither can fire late for the reason the timer
+    // can — the browser is done throttling by the time it tells you the
+    // page is visible again.
+    document.addEventListener('visibilitychange', onPageShown);
+    window.addEventListener('focus', onPageShown);
+  }
+
+  function onPageShown() {
+    if (document.visibilityState === 'hidden') return;
+    checkAliveNow();
+  }
+
+  function checkAliveNow() {
+    if (contextLost) return;
+    if (!isContextAlive()) onContextLost();
   }
 
   function stopAliveWatch() {
@@ -134,6 +160,8 @@
       clearInterval(_aliveTimer);
       _aliveTimer = null;
     }
+    document.removeEventListener('visibilitychange', onPageShown);
+    window.removeEventListener('focus', onPageShown);
   }
 
   function onContextLost() {
