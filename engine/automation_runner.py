@@ -1816,6 +1816,13 @@ class AutomationRunner:
             cases_per_min = round((done / (elapsed_ms / 60000.0)), 2) if elapsed_ms > 0 and done > 0 else 0
             payload = {
                 "run_id": getattr(self, "_live_run_id", ""),
+                # Who this run belongs to. The live directory is one per
+                # instance, so without an owner stamped here the routes
+                # over it cannot tell one tenant's run from another's —
+                # and they served the frame, the filmstrip and this very
+                # payload (which names base_url and current_tc) to
+                # anyone signed in.
+                "project_id": self.project_id or "",
                 "status": status,
                 "step": getattr(self, "_live_step", 0),
                 "cases_done": done,

@@ -2432,7 +2432,6 @@ def register(app: Flask) -> None:
         return redirect(_back_to_caller(default="checklist_page"))
 
     @app.route("/export/<fmt>")
-    @app.route("/export/<fmt>")
     def export(fmt):
         stories = reconstruct_stories(session.get("user_stories", []))
         tc_list = reconstruct_test_cases(_tc_rows())

@@ -15,9 +15,11 @@ move — file size at the source goes down by ~140 LOC.
 
 from __future__ import annotations
 
-from flask import Flask, Response, render_template
+from flask import Flask, Response, render_template, session
 
 from engine.log import get_logger
+
+from ._shared import resolve_active_project
 
 log = get_logger(__name__)
 
@@ -32,6 +34,48 @@ _TINY_PNG = (
     b"\x02\xfe\xa75\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
+
+#: The live directory is one per instance, not one per project — the
+#: runner writes ``automation_runs/_live/`` and nothing else. So these
+#: routes showed whoever asked the frames, the filmstrip and the
+#: progress JSON of whichever run was executing on the machine,
+#: including another organisation's. The JSON is the worse half: it
+#: carries ``base_url`` and ``current_tc``, so it names their site and
+#: the case being run against it. route_policy marks these "user",
+#: which asks for a signed-in caller and says nothing about which
+#: tenant.
+#:
+#: Scoping the directory itself would be the deeper fix and a much
+#: larger one. This is the narrow one: the runner stamps the owning
+#: project into info.json, and a request from anywhere else is answered
+#: as if the instance were idle — the shape the poller already handles
+#: when no run exists.
+def _live_owner_project(live_dir) -> str:
+    """The project whose run wrote this live directory, or ""."""
+    import json
+    import os
+    try:
+        with open(os.path.join(live_dir, "info.json"), "r",
+                  encoding="utf-8") as f:
+            return str((json.load(f) or {}).get("project_id") or "")
+    except Exception:
+        return ""
+
+
+def _live_is_mine(live_dir) -> bool:
+    """Whether the caller's active project owns the run in progress.
+
+    Two empties match on purpose: a run with no project (and a caller
+    with none either) is the single-user case, and refusing it would
+    take the live view away from an instance that has no tenants to
+    separate. A run stamped with a project is visible only to that
+    project.
+    """
+    try:
+        mine = resolve_active_project(session) or ""
+    except Exception:      # pragma: no cover — no session context
+        mine = ""
+    return _live_owner_project(live_dir) == mine
 
 def register(app: Flask) -> None:
     @app.route("/test-execution/live", methods=["GET"])
@@ -107,7 +151,7 @@ def register(app: Flask) -> None:
         from routes.automation import STORAGE_ROOT
         live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
         path = os.path.join(live_dir, "latest.png")
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or not _live_is_mine(live_dir):
             resp = Response(_TINY_PNG, mimetype="image/png")
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             return resp
@@ -127,9 +171,9 @@ def register(app: Flask) -> None:
             r = Response(_TINY_PNG, mimetype="image/png")
             r.headers["Cache-Control"] = "no-store"
             return r
-        path = os.path.join(STORAGE_ROOT, "automation_runs", "_live",
-                            "strip", f"{slot:02d}.png")
-        if not os.path.isfile(path):
+        live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
+        path = os.path.join(live_dir, "strip", f"{slot:02d}.png")
+        if not os.path.isfile(path) or not _live_is_mine(live_dir):
             r = Response(_TINY_PNG, mimetype="image/png")
             r.headers["Cache-Control"] = "no-store"
             return r
@@ -145,7 +189,7 @@ def register(app: Flask) -> None:
         from routes.automation import STORAGE_ROOT
         live_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_live")
         path = os.path.join(live_dir, "info.json")
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or not _live_is_mine(live_dir):
             payload = {"status": "idle", "step": 0, "cases_done": 0,
                        "cases_total": 0, "current_tc": "", "ts": 0}
         else:

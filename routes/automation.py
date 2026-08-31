@@ -407,6 +407,16 @@ def register(app: Flask) -> None:
         if (".." in path.split("/") or ".." in path.split("\\")
                 or "\x00" in path or not SAFE_ASSET_RE.fullmatch(path)):
             abort(400)
+        # The live directory is off-limits here. It is one directory per
+        # instance rather than per project, so its contents belong to
+        # whichever run is executing — and /test-execution/live/{frame,
+        # strip,info} now check that the caller's project owns that run
+        # before serving it. This route takes a path and asks nobody, so
+        # leaving it open would be a second door to the bytes the other
+        # three just started guarding: the frame of another
+        # organisation's run, reachable by a fixed, guessable name.
+        if "_live" in path.split("/"):
+            abort(404)
         # Confirm the resolved path still lives under STORAGE_ROOT.
         asset_root = os.path.realpath(STORAGE_ROOT)
         target = os.path.realpath(os.path.join(asset_root, path))
