@@ -78,6 +78,13 @@ def current_user() -> dict | None:
     Re-checks ``is_active`` on every call rather than trusting the
     session. Deactivating an account has to take effect on the next
     request, not whenever the session happens to expire.
+
+    And re-checks the revocation cut-off, for the same reason: ending
+    somebody's sessions has to take effect on their next request, and on
+    the default session backend there are no server-side rows to delete —
+    see :func:`engine.db.delete_sessions_for_user`. Here rather than in a
+    hook of its own because the row is already being read: every gate in
+    the product goes through this function, and it costs no extra query.
     """
     uid = current_user_id()
     if not uid:
@@ -89,7 +96,59 @@ def current_user() -> dict | None:
     if not row.get("is_active", True):
         log.info("session for deactivated user %s rejected", uid[:8])
         return None
+    if _revoked_before(row.get("sessions_valid_from")):
+        log.info("session for %s rejected: signed in before the account's "
+                 "revocation cut-off", uid[:8])
+        return None
     return row
+
+
+def _revoked_before(cut_off) -> bool:
+    """Whether *this* session predates the account's revocation cut-off.
+
+    The comparison is against the instant the session was signed in, which
+    ``engine.session_timeout`` stamps on the way in.
+
+    A session with **no** stamp is refused once a cut-off exists, and that
+    is the opposite of what ``session_timeout.classify`` does with a missing
+    stamp — deliberately. There, an absent stamp means "predates the deploy
+    that added timeouts" and throwing the session out would sign everybody
+    out on one release. Here an absent stamp means the session cannot show
+    it was created after the revocation, and a revocation that keeps
+    sessions it cannot vouch for has not revoked anything. It only ever
+    applies to an account somebody actually revoked.
+    """
+    if cut_off is None:
+        return False
+    from datetime import datetime, timezone
+
+    from engine import session_timeout as _timeout
+    try:
+        from flask import session
+        auth_at = session.get(_timeout.AUTH_AT_KEY)
+    except Exception:          # outside a request context
+        return False
+    if isinstance(cut_off, str):
+        # ``db.get_user`` hands back ISO strings, not datetimes — every
+        # timestamp in this codebase crosses that boundary as text. Parsed
+        # here rather than by asking the DB layer to stop doing that: a
+        # dozen callers read those fields as strings today.
+        try:
+            cut_off = datetime.fromisoformat(cut_off)
+        except ValueError:
+            log.error("unreadable revocation cut-off %r — refusing the "
+                      "session", cut_off)
+            return True
+    if cut_off.tzinfo is None:
+        cut_off = cut_off.replace(tzinfo=timezone.utc)
+    if auth_at is None:
+        return True
+    try:
+        signed_in = datetime.fromtimestamp(float(auth_at), tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        # An unreadable stamp is no better than a missing one.
+        return True
+    return signed_in < cut_off
 
 
 def current_org_id() -> str | None:

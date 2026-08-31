@@ -530,7 +530,7 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     # 'get'`` — on upgraded deployments only, never on a fresh install.
     ("project", "settings",
      "ALTER TABLE project ADD COLUMN settings JSON NOT NULL DEFAULT '{}'"),
-    # ``TIMESTAMP WITH TIME ZONE`` on the datetime columns, matching
+    # ``TIMESTAMP WITH TIME ZONE`` on the five datetime columns, matching
     # the ``DateTime(timezone=True)`` the models declare. A bare
     # ``TIMESTAMP`` is ``timestamp without time zone`` on Postgres, so the
     # same column ended up aware on a fresh install and naive on an upgraded
@@ -541,6 +541,18 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     # statement keep the naive column — the ALTER is skipped once the
     # column exists — which is cosmetic today because nothing compares
     # these values, only writes and serialises them.
+    #
+    # ── Session revocation ────────────────────────────────────────
+    #
+    # Not editing metadata like the rest of this table, but the same
+    # mechanism: an idempotent ADD COLUMN on an existing database. It has to
+    # be here rather than left to ``create_all``, because every deployment
+    # that already has accounts is exactly the one where revocation matters.
+    # Nullable and with no default on purpose — "never revoked" is the
+    # normal state and must not read as "revoked at the epoch".
+    ("app_user", "sessions_valid_from",
+     "ALTER TABLE app_user ADD COLUMN sessions_valid_from "
+     "TIMESTAMP WITH TIME ZONE"),
 )
 
 
@@ -1643,6 +1655,23 @@ class User(Base):
                                                 default=0)
     locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # No session signed in before this instant may act.
+    #
+    # Ending somebody's sessions used to mean deleting their
+    # ``ServerSession`` rows, and those exist only under
+    # ``SESSION_BACKEND=db``. On the filesystem backend — the default, and
+    # what production runs — there were no rows to delete, so
+    # ``delete_sessions_for_user`` returned 0 and every caller that depends
+    # on it was ceremony: a password reset left the intruder signed in, and
+    # "sign out on all devices" signed nobody out. Measured, not guessed;
+    # see ``tests/test_session_revocation.py``.
+    #
+    # A timestamp on the account works whatever holds the session, because
+    # the session carries the instant it was signed in and ``current_user``
+    # already re-reads this row on every request.
+    sessions_valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     identities = relationship("Identity", back_populates="user",
                               cascade="all, delete-orphan",
                               passive_deletes=True)
@@ -3120,6 +3149,19 @@ def delete_sessions_for_user(user_id: str, *, except_sid: str | None = None) -> 
         rows = q.all()
         for row in rows:
             sess.delete(row)
+        # And the account's own cut-off, which is what makes this work on a
+        # backend that has no rows to delete. Deleting rows stays: it frees
+        # the storage and it stops a replayed cookie from resolving at all,
+        # which is a stronger property than being refused after it resolves.
+        # ``except_sid`` cannot be honoured by a timestamp, which cannot
+        # name one session. No caller needs it to be: the only one that
+        # passes it is ``permissions.logout_user``, which has already
+        # cleared its own session dict by then — the argument spares it a
+        # row it was discarding anyway. A future caller that really must
+        # survive its own sweep has to re-stamp its session afterwards.
+        user = sess.get(User, user_id)
+        if user is not None:
+            user.sessions_valid_from = _utcnow()
         return len(rows)
 
 

@@ -222,10 +222,21 @@ def _sign_in(test_client) -> None:
     session — all three are its own subject matter, tested in
     ``tests/test_auth_*.py``. A fixture that went through it would couple
     every test in the suite to the sign-in flow's internals.
+
+    The **timeout stamps** are written, though, because those are not
+    internals of the flow — they are part of the shape of a signed-in
+    session, and two things read them. ``session_timeout.classify`` tolerates
+    their absence (a session predating that feature must not be thrown out on
+    one deploy) but ``permissions._revoked_before`` does not: a session that
+    cannot show when it began cannot show it began after a revocation. Without
+    the stamps here, one test performing a password reset on the suite's
+    shared identity signed out every test that ran after it in the same
+    worker — which is how this line got written.
     """
     if not _auth_active():
         return
     from engine import permissions as _perm
+    from engine import session_timeout as _timeout
     identity = _test_identity()
     if not identity.get("user_id"):
         return
@@ -233,6 +244,7 @@ def _sign_in(test_client) -> None:
         sess[_perm.SESSION_USER_KEY] = identity["user_id"]
         if identity.get("org_id"):
             sess[_perm.SESSION_ORG_KEY] = identity["org_id"]
+        _timeout.stamp(sess)
 
 
 @pytest.fixture
