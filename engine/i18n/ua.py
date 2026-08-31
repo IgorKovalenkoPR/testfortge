@@ -226,6 +226,9 @@ TRANSLATIONS = {
 
     # Чек-ліст
     "cl_title": "Чек-ліст",
+    "checklist_gaps_partial": ("Частину перевірок не вдалося вивести — "
+                               "аркуш тонший за сайт: "),
+    "checklist_gaps_more": "(ще %(n)d не перелічено)",
     "cl_subtitle": "Чек-ліст у форматі TestFort з префіксами секцій",
     "cl_objective": "Мета перевірки",
     "cl_comments": "Коментарі / Issues",

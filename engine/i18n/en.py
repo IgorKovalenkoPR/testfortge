@@ -180,6 +180,12 @@ TRANSLATIONS = {
 
     # Checklist
     "cl_title": "Checklist",
+    # What the builders could not derive. Named a limitation rather
+    # than an error: nothing failed, the site simply did not carry
+    # what these checks would have been evidence for.
+    "checklist_gaps_partial": ("Some checks could not be derived — the "
+                               "sheet is thinner than the site: "),
+    "checklist_gaps_more": "(+%(n)d more not listed)",
     "cl_subtitle": "TestFort-format checklist with section prefixes",
     "cl_objective": "Objective",
     "cl_comments": "Comments / Issues",

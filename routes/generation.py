@@ -1169,6 +1169,7 @@ def register(app: Flask) -> None:
                 stories = (generate_user_stories(parsed, custom_prompt)
                            if parsed else [])
                 crawl_errors: list[str] = []
+                checklist_gaps: list[str] = []
                 cll = generate_checklist(stories, custom_prompt,
                                          raw_requirements=raw_for_persona,
                                          crawl_errors_out=crawl_errors)
@@ -1184,6 +1185,16 @@ def register(app: Flask) -> None:
                         for e in site_out.get("crawl_errors") or []:
                             if e and e not in crawl_errors:
                                 crawl_errors.append(e)
+                        # The builders work out what they left out and
+                        # say so; until now the answer was collected
+                        # here and dropped. `checklist_gaps` appeared
+                        # once in the whole codebase — on the line that
+                        # built it — so a thin sheet read as the whole
+                        # product, which is the one thing the comment
+                        # over that line says must not happen.
+                        for gp in site_out.get("checklist_gaps") or []:
+                            if gp and gp not in checklist_gaps:
+                                checklist_gaps.append(gp)
                         site_aware_meta = {
                             "profile":         site_out.get("profile") or {},
                             "strategy_source": (site_out.get("strategy") or {})
@@ -1198,6 +1209,7 @@ def register(app: Flask) -> None:
                         "stories": [story_to_dict(s) for s in stories],
                         "raw_requirements": raw_for_persona,
                         "crawl_errors": crawl_errors,
+                        "checklist_gaps": checklist_gaps,
                         **site_aware_meta}
 
             sid = get_session_id(session)
@@ -1255,6 +1267,27 @@ def register(app: Flask) -> None:
                         "Some pages could not be crawled — generation "
                         "continued on available data: "
                     ) + "; ".join(_crawl_errors[:3]),
+                    "warning",
+                )
+
+            # What the builders could not cover. Deliberately not
+            # truncated the way crawl_errors is: a report of what was
+            # missed that itself misses things reads as complete, which
+            # is the failure it exists to prevent. Long lists get a
+            # count instead of a silent cut.
+            _cl_gaps = [gp for gp in (r.get("checklist_gaps") or []) if gp]
+            if _cl_gaps:
+                shown, rest = _cl_gaps[:3], _cl_gaps[3:]
+                tail = ("" if not rest else
+                        " " + g.t.get(
+                            "checklist_gaps_more",
+                            "(+%(n)d more not listed)") % {"n": len(rest)})
+                flash(
+                    g.t.get(
+                        "checklist_gaps_partial",
+                        "Some checks could not be derived — the sheet is "
+                        "thinner than the site: "
+                    ) + "; ".join(shown) + tail,
                     "warning",
                 )
 
