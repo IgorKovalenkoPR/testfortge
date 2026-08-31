@@ -77,7 +77,13 @@ OPEN: dict[str, str] = {
     # Each carries its own bearer/token check and is csrf-exempt for that
     # reason. A session role gate is the wrong control for a caller that
     # has no session at all — the Chrome extension, CI, the MCP service.
-    "api_recorder_session_start": "extension token auth",
+    # api_recorder_session_start is deliberately absent. It was here with
+    # the same reason as its sibling, and it is the one route on this
+    # surface that has no token to check — it mints it. The extension never
+    # calls it (extension/popup.js explains why: the project comes from the
+    # session cookie), so it is role-gated at the view instead, and an
+    # anonymous caller can no longer authorise itself against a project it
+    # names. Measured: tests/test_recorder_token_scope.py.
     "api_recorder_session_finish": "extension token auth",
     "api_browser_poll": "extension short-poll, token auth",
     "api_browser_result": "extension result post, token auth",
@@ -121,7 +127,9 @@ OPEN: dict[str, str] = {
 MACHINE: frozenset[str] = frozenset({
     "healthz",
     "readyz",
-    "api_recorder_session_start",
+    # api_recorder_session_start is absent for the same reason it left
+    # OPEN: its caller is a signed-in page, which reached the Basic gate
+    # to load that page in the first place.
     "api_recorder_session_finish",
     "api_browser_poll",
     "api_browser_result",

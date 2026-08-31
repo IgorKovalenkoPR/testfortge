@@ -179,8 +179,15 @@ class TestMachineCallersReachTheirOwnTokenCheck:
     #: (endpoint, path, method). Kept as literals so a renamed rule shows
     #: up here as a failure rather than as a silently skipped test — the
     #: harness class below asserts every one of them still exists.
+    #: ``api_recorder_session_start`` used to head this list and no longer
+    #: belongs on it. It is not a machine caller: it mints the recording
+    #: token rather than presenting one, and ``extension/popup.js`` routes
+    #: Start through the TestForTge page precisely because the project comes
+    #: from the session cookie. It is role-gated now — see
+    #: ``tests/test_recorder_token_scope.py`` for what it allowed while it
+    #: was exempt — and its caller is a browser that passed this gate to
+    #: load the page it calls from.
     CALLERS = [
-        ("api_recorder_session_start", "/api/recorder-session/start", "post"),
         ("api_recorder_session_finish", "/api/recorder-session/finish",
          "post"),
         ("api_browser_poll", "/api/browser/poll", "post"),

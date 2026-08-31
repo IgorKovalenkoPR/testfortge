@@ -1338,7 +1338,17 @@ function filterSuite(suite, btn) {
         try {
             const resp = await fetch('/api/recorder-session/start', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                // Accept matters, not just Content-Type. The endpoint is
+                // role-gated now, and engine.permissions answers an
+                // unauthenticated caller with a 401 JSON only when the
+                // request asked for JSON — otherwise it redirects to the
+                // sign-in page, fetch follows the redirect, resp.ok is true
+                // and this handler reads an undefined token off the HTML.
+                // On the free plan a wiped session store makes that the
+                // ordinary case for a tab left open, so the honest 401 is
+                // what this header buys.
+                headers: {'Content-Type': 'application/json',
+                          'Accept': 'application/json'},
                 credentials: 'same-origin',
                 body: JSON.stringify({}),
             });

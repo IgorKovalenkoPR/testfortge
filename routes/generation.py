@@ -36,6 +36,7 @@ from engine.job_queue import get_queue, DONE, FAILED
 
 from engine import db as _db
 from engine import gherkin as _gherkin
+from engine import permissions as _perm
 from engine.log import get_logger
 
 from ._shared import (
@@ -212,9 +213,19 @@ def _recorder_cors_headers() -> dict:
 
     The extension's content-script runs in the SUT's origin (whatever
     site the operator is recording against). Since we can't pre-list
-    every SUT, we accept ``*`` — the endpoints carry their own auth
-    (the per-session token from /start) so a public origin can still
-    only act on a project it was authorised against.
+    every SUT, we accept ``*``.
+
+    The sentence that used to end this paragraph — "the endpoints carry
+    their own auth (the per-session token from /start) so a public origin
+    can still only act on a project it was authorised against" — was true
+    of ``/finish`` and false of ``/start``, which is the endpoint that
+    *issues* the authorisation and had none of its own. ``/start`` now
+    requires a session role, so the claim holds for both.
+
+    The wildcard stays on both. On ``/start`` it grants nothing now: ``*``
+    forbids credentials, so a cross-origin fetch cannot carry the cookie the
+    role gate needs, and SameSite=Lax would not send it anyway. Removing it
+    would mean unpicking the shared preflight for no reachable gain.
     """
     return {
         "Access-Control-Allow-Origin": "*",
@@ -1699,8 +1710,23 @@ def register(app: Flask) -> None:
         return response
 
     @app.route("/api/recorder-session/start", methods=["POST", "OPTIONS"])
+    @_perm.require_role("user")
     def api_recorder_session_start():
         """Mint a fresh recording token for the active project.
+
+        **Session-authenticated, unlike its sibling.** This route sat in
+        ``route_policy.OPEN`` with the reason "extension token auth", and it
+        is the one route on the recorder surface with no token to check —
+        it is the route that *mints* the token. The extension does not call
+        it either: ``extension/popup.js`` says so out loud and routes Start
+        through the page precisely because the project comes from the
+        session cookie a cross-site fetch could not carry. So the only
+        caller is a signed-in, same-origin page, and until this decorator
+        the consequence was measured, not supposed: an anonymous caller who
+        knew a project id got a token for it, posted steps to ``/finish``,
+        and saved a test case into that organisation's project through the
+        review flow. Four requests, no credentials. See
+        ``tests/test_recorder_token_scope.py``.
 
         Called from the /test-cases trigger button. The token returned
         is appended to the SUT URL as ``#testfortge-recorder-token=<t>``
@@ -1732,8 +1758,18 @@ def register(app: Flask) -> None:
         # the page showed an active project while this endpoint answered
         # "no_active_project" — found by walking the recorder end to end
         # on staging, which nothing had done before.
-        pid = ((payload.get("project_id") or "").strip()
-               or resolve_active_project())
+        pid = (payload.get("project_id") or "").strip()
+        if pid:
+            # A caller-named project is a caller-named *write capability*,
+            # so it is checked rather than taken. Nothing sends it today —
+            # the page posts an empty body — but it is documented above, and
+            # a documented parameter that skips the gate every other
+            # project-scoped write honours is the gap itself.
+            from ._shared import belongs_to_another_org
+            if belongs_to_another_org(pid) or _db.get_project(pid) is None:
+                return _json_with_cors({"error": "unknown_project"}, 404)
+        else:
+            pid = resolve_active_project()
         if not pid:
             return _json_with_cors({"error": "no_active_project"}, 400)
         # Token is the same shape as PR-D's draft tokens — secrets-grade
@@ -2048,6 +2084,15 @@ def register(app: Flask) -> None:
         if draft is None:
             return jsonify({"error": "draft_not_found"}), 404
 
+        # A *mismatch* guard, not an ownership guard, and the difference is
+        # load-bearing: ``active_pid`` is empty for a caller who has no
+        # project, so the condition never fires for one — which is every
+        # anonymous caller, and this route is deliberately open ("the token
+        # IS the credential", for a browser that may never sign in).
+        # Ownership therefore lives upstream, where the recording token is
+        # minted: /api/recorder-session/start is role-gated and checks a
+        # caller-named project, so a draft can only name a project its
+        # creator was entitled to. Do not read this line as the boundary.
         active_pid = resolve_active_project()
         if active_pid and active_pid != draft["project_id"]:
             return jsonify({"error": "wrong_project"}), 403

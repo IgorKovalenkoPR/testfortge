@@ -352,7 +352,8 @@ class TestUiTrigger:
         assert 'id="ext-recorder-modal"' in body
         assert "/api/recorder-session/start" in body
 
-    def test_csrf_protection_does_not_block_endpoints(self, app, ext_project):
+    def test_csrf_protection_does_not_block_endpoints(self, app, ext_project,
+                                                      sign_in):
         """Regression for PR-E hotfix: production has CSRFProtect on
         every POST, but recorder endpoints must be exempt because:
         * /finish is called cross-origin from the extension (no CSRF
@@ -365,6 +366,12 @@ class TestUiTrigger:
         app.config["WTF_CSRF_ENABLED"] = True
         try:
             with app.test_client() as csrf_client:
+                # This client is built here rather than taken from the
+                # fixture, so it has to be signed in here too: /start is
+                # role-gated now (see tests/test_recorder_token_scope.py)
+                # and an anonymous caller gets a redirect, which reads
+                # exactly like the CSRF rejection this test is about.
+                sign_in(csrf_client)
                 with csrf_client.session_transaction() as s:
                     s["project_id"] = ext_project
                     s["active_project_id"] = ext_project
