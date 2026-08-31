@@ -2203,12 +2203,19 @@ def register(app: Flask) -> None:
             # screenshot. If the latest ts is older than 120 s, the
             # subprocess is almost certainly dead. Surface as "stalled"
             # so the UI can stop spinning.
-            live_info = os.path.join(STORAGE_ROOT, "automation_runs",
-                                      "_live", "info.json")
+            # Only when the run holding the live directory is this
+            # caller's. It is one directory per instance, so reading it
+            # unconditionally meant another organisation's heartbeat decided
+            # whether *this* run looked alive — and the message below quoted
+            # their phase and case counters to whoever polled. An empty
+            # answer falls through to "running", which is what this route
+            # already says when no run is live at all; see
+            # ``routes.execution_live.live_info_if_mine`` for what that
+            # costs and what the durable fix is.
+            from routes.execution_live import live_info_if_mine
             try:
-                if os.path.isfile(live_info):
-                    with open(live_info, "r", encoding="utf-8") as f:
-                        live = json.load(f) or {}
+                live = live_info_if_mine(STORAGE_ROOT)
+                if live:
                     ts = int(live.get("ts") or 0) / 1000.0
                     age = time.time() - ts if ts else 0
                     if ts and age > 120:

@@ -77,6 +77,60 @@ def _live_is_mine(live_dir) -> bool:
         mine = ""
     return _live_owner_project(live_dir) == mine
 
+
+def live_heartbeat_if_mine(storage_root) -> int:
+    """The live run's ``ts``, or 0 when the run in progress is not ours.
+
+    Public because two **more** readers of ``_live/info.json`` exist outside
+    the four routes above, and neither asked whose run it was: the stall
+    check in ``/test-execution/run-status/<run_id>`` and the recent-runs
+    list on ``/test-execution/live``. Both compare that timestamp against a
+    120-second window to decide whether a worker has died — so with another
+    organisation's run executing, one tenant's heartbeat decided another
+    tenant's verdict. The run-status branch also quoted ``phase`` and the
+    case counters straight out of it, into a message the wrong caller read.
+
+    0 means **no evidence**, which both callers already treat as "running" —
+    the answer they give when no run is live at all. That is a real loss and
+    it is the honest one: while somebody else's run holds the directory, a
+    genuinely stalled run of ours is no longer detected. Detecting it needs
+    a per-run heartbeat, which is the instance-wide ``_live/`` directory
+    again; scoping that directory is the deeper fix this stops short of.
+    """
+    import os
+    live_dir = os.path.join(storage_root, "automation_runs", "_live")
+    if not _live_is_mine(live_dir):
+        return 0
+    import json
+    try:
+        with open(os.path.join(live_dir, "info.json"), "r",
+                  encoding="utf-8") as f:
+            return int((json.load(f) or {}).get("ts") or 0)
+    except Exception:
+        return 0
+
+
+def live_info_if_mine(storage_root) -> dict:
+    """The whole live payload, or ``{}`` when the run is not ours.
+
+    Same rule as :func:`live_heartbeat_if_mine`; separate because the
+    run-status route quotes ``phase`` and the case counters as well as the
+    timestamp, and reading them from a live directory we do not own is how
+    they reached the wrong caller.
+    """
+    import json
+    import os
+    live_dir = os.path.join(storage_root, "automation_runs", "_live")
+    if not _live_is_mine(live_dir):
+        return {}
+    try:
+        with open(os.path.join(live_dir, "info.json"), "r",
+                  encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
 def register(app: Flask) -> None:
     @app.route("/test-execution/live", methods=["GET"])
     def test_execution_live():
@@ -89,16 +143,11 @@ def register(app: Flask) -> None:
         import os, glob, time, json
         from routes.automation import STORAGE_ROOT
         pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
-        live_info_path = os.path.join(STORAGE_ROOT, "automation_runs",
-                                       "_live", "info.json")
-        # Read live info.json once so per-run stall checks share its ts.
-        live_ts = 0
-        try:
-            if os.path.isfile(live_info_path):
-                with open(live_info_path, "r", encoding="utf-8") as f:
-                    live_ts = int((json.load(f) or {}).get("ts", 0))
-        except Exception:
-            pass
+        # Read live info.json once so per-run stall checks share its ts —
+        # and only when the run in progress is this caller's. It used to be
+        # read unconditionally, so another organisation's heartbeat decided
+        # whether this caller's runs looked alive.
+        live_ts = live_heartbeat_if_mine(STORAGE_ROOT)
         recent_runs: list[dict] = []
         try:
             if os.path.isdir(pending_dir):
@@ -126,6 +175,17 @@ def register(app: Flask) -> None:
                         # almost always means OOM-kill on free tier.
                         # Without this the table claimed "running" for
                         # a 9-min-dead worker (operator-reported).
+                        # ``live_ts`` is 0 both when nothing is live and
+                        # when what *is* live belongs to another
+                        # organisation, and both land on "stalled" — which
+                        # offers "import partial results", an idempotent
+                        # read. Conservative on purpose rather than
+                        # considered: this heartbeat is one global value
+                        # judged against up to five pending runs, so it was
+                        # only ever meaningful when exactly one run was live
+                        # and it was the one being judged. The operator-
+                        # reported complaint was the opposite error — a
+                        # nine-minute-dead worker still reading "running".
                         live_age = (time.time() - live_ts / 1000.0
                                      if live_ts else 9999)
                         rstatus = "stalled" if live_age > 120 else "running"

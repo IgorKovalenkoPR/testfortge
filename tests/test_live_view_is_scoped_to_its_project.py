@@ -26,12 +26,26 @@ runs, where "a project-A run rendered project B".
 ``/automation/asset/`` is a second door to the same bytes with its own
 path, so scoping the three live routes and leaving it open would fix
 nothing.
+
+**Amended on a second walk.** The enumeration above is of routes that
+*serve* the live bytes, and two more read the same file to *judge* with it:
+
+    /test-execution/run-status/<run_id>   info.json's ts, phase, counters
+    /test-execution/live (no run_id)      info.json's ts
+
+Neither asked whose run it was. So one tenant's heartbeat decided another
+tenant's "has the worker died?" verdict, and the run-status branch quoted
+their ``phase`` and case counters into a message the wrong caller read. The
+lesson the first pass wrote down — after scoping N routes, look for another
+address to the same bytes — was right and did not go far enough: a reader
+that never returns the bytes is still a reader.
 """
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import time
 import uuid
 
 import pytest
@@ -124,6 +138,92 @@ class TestSomebodyElsesRun:
             "/automation/asset/automation_runs/_live/latest.png")
         assert resp.get_data() != FRAME_PNG, (
             "the live frame was reachable by path, bypassing the scoping")
+
+
+class TestTheStallCheckReadsOnlyItsOwnHeartbeat:
+    """The two readers that judge rather than serve."""
+
+    @staticmethod
+    def _pending(rid: str, *, started: bool = True) -> pathlib.Path:
+        from routes.automation import STORAGE_ROOT
+        d = pathlib.Path(STORAGE_ROOT) / "automation_runs" / "_pending"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{rid}.json").write_text(json.dumps({"cases": []}),
+                                       encoding="utf-8")
+        if started:
+            (d / f"{rid}.started.flag").write_text("1", encoding="utf-8")
+        return d
+
+    @pytest.fixture
+    def pending_run(self):
+        rid = "zz" + uuid.uuid4().hex[:10]
+        d = self._pending(rid)
+        yield rid
+        for suffix in (".json", ".started.flag"):
+            try:
+                (d / f"{rid}{suffix}").unlink()
+            except OSError:
+                pass
+
+    def test_run_status_does_not_quote_another_runs_progress(self, client,
+                                                            pending_run):
+        """``current_tc`` and ``base_url`` were already guarded on
+        ``/live/info``. The counters and the phase went out through here."""
+        _project(client, "mine-status")
+        _write_live(OTHER, base_url="https://theirs.example",
+                    current_tc="Their case")
+        got = client.get(f"/test-execution/run-status/{pending_run}")
+        assert got.status_code == 200
+        payload = got.get_json()
+        # ``ts`` is 1 in the fixture, so a run this caller owned would read
+        # as stalled — which is exactly what makes this assertion sharp.
+        assert payload["status"] == "running", payload
+        assert "cases_done" not in payload
+        assert "phase" not in payload
+        assert "9" not in json.dumps(payload)      # cases_total
+
+    def test_my_own_stale_heartbeat_still_reports_a_stall(self, client,
+                                                          pending_run):
+        """The control. Without it the fix above is indistinguishable from
+        deleting the stall detector, which is the thing an operator noticed
+        the absence of: a nine-minute-dead worker still reading "running".
+        """
+        mine = _project(client, "mine-stall")
+        _write_live(mine, base_url="https://mine.example",
+                    current_tc="My case")
+        payload = client.get(
+            f"/test-execution/run-status/{pending_run}").get_json()
+        assert payload["status"] == "stalled", payload
+        assert payload["cases_total"] == 9
+
+    def test_an_idle_instance_still_reports_running(self, client,
+                                                    pending_run):
+        """No live directory at all — the shape the poller has always
+        handled, and the shape a foreign run now produces too."""
+        payload = client.get(
+            f"/test-execution/run-status/{pending_run}").get_json()
+        assert payload["status"] == "running", payload
+
+    def test_the_recent_runs_list_does_not_borrow_their_heartbeat(
+            self, client, pending_run):
+        """A fresh foreign heartbeat used to make this caller's started run
+        read "running". It now reads "stalled", which is the same answer the
+        list has always given when no heartbeat is visible — conservative,
+        and it offers an idempotent partial import rather than hiding a dead
+        worker. See the note at the call site."""
+        _project(client, "mine-list")
+        d = _live_dir()
+        (d / "info.json").write_text(json.dumps({
+            "project_id": OTHER, "run_id": "r", "status": "running",
+            "cases_done": 1, "cases_total": 9,
+            "ts": int(time.time() * 1000),          # very much alive
+        }), encoding="utf-8")
+        body = client.get("/test-execution/live").get_data(as_text=True)
+        assert pending_run in body
+        # The status the row carries, read from the rendered page rather
+        # than from the route's locals.
+        row = body.split(pending_run)[1][:600]
+        assert "⚠" in row, row
 
 
 class TestTheRunnerStampsTheOwner:
