@@ -33,7 +33,9 @@ from engine.log import get_logger
 
 from ._shared import (
     GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
-    mirror_pack, org_for_new_project, resolve_active_project, tc_to_dict,
+    is_valid_project_id as _shared_is_valid_project_id, mirror_pack,
+    org_for_new_project, project_access_with_meta, resolve_active_project,
+    tc_to_dict,
 )
 
 log = get_logger(__name__)
@@ -41,14 +43,10 @@ log = get_logger(__name__)
 
 # A project_id is a 32-char uuid hex string. The validator keeps the
 # url-routing decoupled from the DB layer — bad input is short-circuited
-# before any query runs.
-_PROJECT_ID_LEN = 32
-
-
-def _is_valid_project_id(s: str | None) -> bool:
-    if not s or len(s) != _PROJECT_ID_LEN:
-        return False
-    return all(c in "0123456789abcdef" for c in s)
+# before any query runs. It lives in ``_shared`` now, next to the access
+# rule that uses it, and is re-exported here because half a dozen routes
+# in this file call it by this name.
+_is_valid_project_id = _shared_is_valid_project_id
 
 
 def _require_project_owner(project_id: str) -> dict | None:
@@ -74,44 +72,21 @@ def _require_project_owner(project_id: str) -> dict | None:
       * Returns ``None`` when the project does not exist, so the caller can
         choose its own 404 / flash UX (some redirect, some abort).
 
-    Reads ownership before hydrating the full meta, so a failed check
-    costs one narrow query rather than a whole row.
+    The rule itself is :func:`routes._shared.project_access_with_meta`,
+    which the active-project resolvers also consult — they used to trust a
+    pinned ``session["project_id"]`` forever while this gate re-checked on
+    every request, and two answers to one question is what let a removed
+    colleague keep editing.
     """
-    if not _is_valid_project_id(project_id):
+    verdict, meta = project_access_with_meta(project_id)
+    if verdict == "malformed":
         abort(400)
-
-    meta = _db.get_project(project_id)
-    if not meta:
+    if verdict == "missing":
         return None
-
-    from engine import permissions as _perm
-
-    project_org = meta.get("org_id")
-    if _perm.org_active() and project_org:
-        # The project belongs to an organisation: membership decides.
-        user_id = _perm.current_user_id()
-        role = _db.get_org_role(project_org, user_id) if user_id else None
-        if role is None:
-            log.warning(
-                "project access denied pid=%s org=%s user=%s — not a member",
-                project_id[:8], project_org[:8], (user_id or "-")[:8])
-            abort(403)
-        return meta
-
-    # Legacy: the anonymous session that made it is the only claimant.
-    owner = meta.get("owner_sid")
-    if owner is None:
-        # No owner at all. Pre-dates owner_sid being recorded; there is
-        # nobody to compare against, so allow and log so the size of the
-        # gap stays visible in ops until E1.6 has claimed them.
-        log.info("project pid=%s has NULL owner_sid — allowing (legacy)",
-                 project_id[:8])
-        return meta
-    sid = get_session_id()
-    if owner != sid:
-        log.warning(
-            "project access denied pid=%s owner=%s sid=%s",
-            project_id[:8], (owner or "")[:8], (sid or "")[:8])
+    if verdict.startswith("forbidden"):
+        # Both refusals are the same answer here. They are two verdicts
+        # because the *pin* check honours only one of them — see
+        # ``routes._shared._pin_revoked``.
         abort(403)
     return meta
 

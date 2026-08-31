@@ -460,8 +460,17 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
 
     sess = session_obj if session_obj is not None else session
     pid = sess.get("project_id")
-    if pid:
+    if pid and not _pin_revoked(pid, sess):
         return pid
+    if pid:
+        # The pick is no longer the caller's to act on. Fall through rather
+        # than return it: ``recoverable_project`` below already intersects
+        # with what the caller may see, so the same request may still land
+        # on a project they own. The stale key is left in the session —
+        # ``pin=False`` means this call does not write, and an unhonoured
+        # pin is harmless once nothing reads it as authority.
+        log.warning("resolve_active_project: dropping pinned project_id=%s "
+                    "— the caller may no longer act on it", pid[:8])
 
     sid = get_session_id(sess)
     try:
@@ -535,8 +544,18 @@ def ensure_active_project(session_obj=None) -> str:
 
     sess = session_obj if session_obj is not None else session
     pid = sess.get("project_id")
-    if pid:
+    if pid and not _pin_revoked(pid, sess):
         return pid
+    if pid:
+        # Same refusal as :func:`resolve_active_project`, and here the key
+        # is actually cleared: this function writes to the session anyway,
+        # and leaving a pick nothing honours makes the picker keep naming a
+        # project every route refuses.
+        log.warning("ensure_active_project: clearing pinned project_id=%s "
+                    "— the caller may no longer act on it", pid[:8])
+        sess.pop("project_id", None)
+        if hasattr(sess, "modified"):
+            sess.modified = True
 
     sid = get_session_id(sess)
 
@@ -716,6 +735,118 @@ def org_for_new_project() -> str | None:
     except Exception as exc:  # pragma: no cover — defensive
         log.debug("org_for_new_project unavailable (%s)", exc)
         return None
+
+
+# A project_id is a 32-char uuid hex string. Validated before any query
+# runs, so a malformed id is short-circuited rather than looked up.
+_PROJECT_ID_LEN = 32
+
+
+def is_valid_project_id(s: str | None) -> bool:
+    if not s or len(s) != _PROJECT_ID_LEN:
+        return False
+    return all(c in "0123456789abcdef" for c in s)
+
+
+def project_access_with_meta(project_id: str | None,
+                            session_obj=None) -> tuple[str, dict | None]:
+    """May this caller act on *project_id*? A verdict and the row.
+
+    ``"ok"`` — yes, and *meta* is the project. ``"missing"`` — no such
+    project. ``"malformed"`` — not an id at all. And two refusals, because
+    the two callers of this function want different amounts of it:
+
+    * ``"forbidden_org"`` — the project belongs to an organisation the
+      caller is not in.
+    * ``"forbidden_owner"`` — a project from before organisations, and
+      another browser's session created it.
+
+    Both are a 403 to ``routes.projects._require_project_owner``. Only the
+    first revokes a *pinned* project — see :func:`_pin_revoked`, which is
+    where the difference is argued.
+
+    The rule itself is the one E2.3 settled on, and it lives here rather
+    than in ``routes.projects`` so that the pin check and the route gate
+    cannot answer the same question differently. They already did:
+    ``session["project_id"]`` was checked once, when it was picked, and
+    trusted on every request after that, while the gate re-checked every
+    time — measured, see ``tests/test_project_pin_revocation.py``.
+
+    Two eras, decided per project rather than per instance:
+
+    * **Organisation** — ``ORG_MODE`` is on and the project has an
+      ``org_id``: membership in that organisation decides.
+    * **Legacy** — everything else: ``owner_sid`` is the only claim
+      anyone has to the project, and a NULL one means there is nobody to
+      compare against, so it is allowed and logged.
+    """
+    from engine import db as _db
+
+    if not is_valid_project_id(project_id):
+        return "malformed", None
+
+    sess = session_obj if session_obj is not None else session
+    meta = _db.get_project(project_id)
+    if not meta:
+        return "missing", None
+
+    from engine import permissions as _perm
+
+    project_org = meta.get("org_id")
+    if _perm.org_active() and project_org:
+        user_id = _perm.current_user_id()
+        role = _db.get_org_role(project_org, user_id) if user_id else None
+        if role is None:
+            log.warning(
+                "project access denied pid=%s org=%s user=%s — not a member",
+                project_id[:8], project_org[:8], (user_id or "-")[:8])
+            return "forbidden_org", None
+        return "ok", meta
+
+    owner = meta.get("owner_sid")
+    if owner is None:
+        log.info("project pid=%s has NULL owner_sid — allowing (legacy)",
+                 project_id[:8])
+        return "ok", meta
+    sid = get_session_id(sess)
+    if owner != sid:
+        log.warning("project access denied pid=%s owner=%s sid=%s",
+                    project_id[:8], (owner or "")[:8], (sid or "")[:8])
+        return "forbidden_owner", None
+    return "ok", meta
+
+
+def _pin_revoked(project_id: str, session_obj=None) -> bool:
+    """Whether a pinned ``session["project_id"]`` may no longer be honoured.
+
+    ``"forbidden_org"`` **only**, and the narrowness is the design rather
+    than a shortcut. The other refusal ``project_access_with_meta`` can
+    return — a legacy project whose ``owner_sid`` is another browser's — must
+    not revoke a pin, because under ``WORKSPACE_DB_FIRST`` a project is the
+    team's shared work and a colleague's browser legitimately holds a pin on
+    a project somebody else's browser created.
+    ``tests/test_generation_db_first.py::TestSharedProject`` says so out
+    loud, and it is what caught this when the first version of this function
+    refused on any verdict but ``"ok"``.
+
+    ``"missing"`` does not revoke a pin either: a pin naming a deleted
+    project keeps resolving to its id, because every caller downstream
+    already answers "no such item" for it, and turning that into "no active
+    project" would change what a dozen pages render for something that is
+    not a security question.
+
+    Best-effort by design: this is a *re*-check, the pin having been
+    approved once already, so a database that cannot answer honours it
+    rather than taking the product away from everybody who is entitled to
+    it.
+    """
+    try:
+        return project_access_with_meta(project_id,
+                                        session_obj)[0] == "forbidden_org"
+    except Exception as exc:      # pragma: no cover — defensive
+        log.debug("pin revocation check unavailable (%s) — honouring the "
+                  "pin", exc)
+        return False
 
 
 def visible_projects(session_obj=None) -> list:
