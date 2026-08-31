@@ -128,10 +128,36 @@ def export_markdown(project_name: str, stories: list[UserStory],
     return "\n".join(lines)
 
 
+def _escape(value) -> str:
+    """``html.escape`` for values that may be absent or not strings.
+
+    ``html.escape`` calls ``.replace`` on what it is handed, so ``None``
+    raises ``AttributeError`` and a number does too. Both reach this
+    module: ``db.load_test_cases`` returns ``user_story_id``, ``issues``
+    and ``comment`` as ``None`` even where the column holds ``''``, and
+    ``story_points_hint`` is a number.
+
+    ``/export/html`` returned 500 for a project holding one ordinary test
+    case because of the first of those — a pack generated from
+    requirements text carries no user stories, which is the default, and
+    both /test-cases and /checklist show an "Export HTML" button pointing
+    at it. The exporter guarded ``issues`` and ``comment`` with
+    ``or '—'`` at their call sites and not ``user_story_id``: a guard
+    repeated twenty times is the shape where one copy is missing, and
+    that is what this was.
+
+    ``None`` becomes empty rather than ``"None"``. Zero does not: it is a
+    value, and ``value or ""`` would swallow it.
+    """
+    if value is None:
+        return ""
+    return html_mod.escape(value if isinstance(value, str) else str(value))
+
+
 def export_html(project_name: str, stories: list[UserStory],
                 test_cases: list[TestCase], checklist: list[ChecklistItem],
                 traceability: list[dict], recommendations: dict) -> str:
-    h = html_mod.escape
+    h = _escape
     p: list[str] = []
     a = p.append
 
