@@ -616,6 +616,14 @@ def register(app: Flask) -> None:
         except _editable.ValidationFailed as exc:
             return jsonify({"error": "validation_failed",
                             "message": str(exc)}), 400
+        except _editable.EntityNotFound as exc:
+            # "No active project" — the same answer the other three
+            # endpoints on this surface give. This one had no clause for it
+            # and raised out of the handler, so the toolbar's Delete
+            # answered 500 where its Edit answered 400, for a caller who had
+            # merely cleared their session.
+            return jsonify({"error": "no_project",
+                            "message": str(exc)}), 400
 
         _invalidate(project_id)
         return jsonify({"entity": entity, "deleted": result.changed,

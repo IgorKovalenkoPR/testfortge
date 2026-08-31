@@ -418,6 +418,43 @@ class TestEndpointsForEveryEntity:
             assert resp.status_code == 404, path
             assert resp.get_json()["error"] == "editors_disabled"
 
+    @pytest.mark.parametrize("entity_name", ENTITIES)
+    def test_every_write_endpoint_names_a_missing_project(self, client,
+                                                          project, editing_on,
+                                                          entity_name):
+        """"No active project" is a 400 that says so — on every endpoint.
+
+        Enumerated rather than listed, because the one that was wrong looked
+        exactly like the three that were right: ``bulk-delete`` had no clause
+        for ``EntityNotFound`` and raised out of the handler, so the toolbar's
+        Delete answered **500** where its Edit answered 400 — for a caller who
+        had done nothing worse than clear their session. Reached by walking
+        the surface with no project pinned, not by a test that named it.
+
+        Every path here is one a browser can post with no active project.
+        Deleting a single row is absent on purpose: it needs an entity id,
+        which a caller with no project has no way to have.
+        """
+        entity_id = _seed(project, entity_name)
+        headers = self._headers(client, project)
+        with client.session_transaction() as sess:
+            sess.pop("project_id", None)
+
+        paths = [
+            ("post", f"/api/edit/{entity_name}/bulk",
+             {"ids": [entity_id], "changes": dict([_safe_field(entity_name)])}),
+            ("post", f"/api/edit/{entity_name}/bulk-delete",
+             {"ids": [entity_id]}),
+            ("post", f"/api/edit/{entity_name}", {"values": {}}),
+        ]
+        for method, path, body in paths:
+            resp = getattr(client, method)(path, json=body, headers=headers)
+            assert resp.status_code < 500, (
+                f"{path} raised instead of answering: {resp.status_code}")
+            if resp.status_code == 400:
+                assert resp.get_json().get("error") in (
+                    "no_project", "bad_request", "validation_failed"), path
+
     def test_the_shared_front_end_is_loaded_by_every_editor_page(self, client,
                                                                  project,
                                                                  editing_on):
