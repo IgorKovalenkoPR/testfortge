@@ -26,7 +26,8 @@ import pytest
 from engine import db as _db
 from engine import manual_run as mr
 from engine.testcase_generator import ChecklistItem, TestCase
-from routes._shared import SERVER_START_TIME, cl_to_dict, tc_to_dict
+from routes._shared import (SERVER_START_TIME, cl_to_dict,
+                            reconstruct_test_cases, tc_to_dict)
 
 
 def _seed(pid, summary, *, tc_id="TC_001", cl_id="HDR_001",
@@ -158,6 +159,124 @@ class TestRunsAreScopedToTheirProject:
                     data={"external_id": "TC_001", "kind": "test_case",
                           "verdict": "Passed"})
         assert len(_db.list_case_results(run_id)) == 1
+
+
+class TestAdoptionStopsAtTheOrganisation:
+    """The hand-off above is a real workflow; it was also a way in.
+
+    ``adopt`` answers *which of your own projects becomes active*, and it
+    was standing in for a membership check it never made. The rest of
+    ``_authorise`` did not cover the gap: the assignee check passes when
+    nobody is named, which is every run started while authentication was
+    off — so on the day an instance turns ``AUTH_ENABLED`` on, its existing
+    runs are readable by any member of any team who has no project
+    selected. Measured: the page rendered the other team's walk, summaries
+    and all, and left their project pinned in the reader's session.
+
+    All of it needs ``ORG_MODE`` on, and that is the point — with it off
+    the check is a no-op, which is what makes it safe to add to a route
+    production is already serving.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _org_mode(self, monkeypatch):
+        monkeypatch.setenv("AUTH_ENABLED", "1")
+        monkeypatch.setenv("ORG_MODE", "1")
+
+    @pytest.fixture
+    def two_teams(self, app, request):
+        from engine import auth as _auth
+        from engine import permissions as _perm
+        from engine import session_timeout as _timeout
+
+        pwd = _auth.hash_password("a perfectly good passphrase")
+        mine = _db.create_organization(f"mine-{request.node.name}"[:120])
+        theirs = _db.create_organization(f"theirs-{request.node.name}"[:120])
+        alice = _db.create_user(f"a-{request.node.name}@iso.test"[:200],
+                                password_hash=pwd)
+        _db.add_org_member(mine, alice, "user")
+        their_pid = _db.upsert_project(f"iso-T-{request.node.name}",
+                                       org_id=theirs)
+        _seed(their_pid, "TTT the summary that belongs to the other team")
+
+        # Their run, started by nobody in particular — the state every run
+        # created before authentication was switched on is in.
+        run_id = _db.start_execution_run(their_pid, {
+            "mode": "manual",
+            "manual_queue": mr.queue_to_payload(mr.build_queue(
+                reconstruct_test_cases(_db.load_test_cases(their_pid)),
+                [], [])),
+            "environment": "", "tester": "somebody", "assignee_id": "",
+        })
+
+        c = app.test_client()
+        with c.session_transaction() as sess:
+            sess[_perm.SESSION_USER_KEY] = alice
+            sess[_perm.SESSION_ORG_KEY] = mine
+            sess["_session_active_since"] = SERVER_START_TIME
+            sess.pop("project_id", None)
+            _timeout.stamp(sess)
+        return {"client": c, "run_id": run_id, "pid": their_pid,
+                "mine": mine, "alice": alice}
+
+    def test_the_run_is_not_readable(self, two_teams):
+        got = two_teams["client"].get(
+            f"/test-execution/manual/{two_teams['run_id']}")
+        assert got.status_code == 404
+        assert "TTT the summary" not in got.get_data(as_text=True)
+
+    def test_their_project_is_not_pinned_into_the_readers_session(self,
+                                                                 two_teams):
+        """The half a status code cannot show. Adoption is a *write* to the
+        caller's session, so a route that refuses after adopting has still
+        handed them the project."""
+        two_teams["client"].get(
+            f"/test-execution/manual/{two_teams['run_id']}")
+        with two_teams["client"].session_transaction() as sess:
+            assert sess.get("project_id") != two_teams["pid"]
+
+    def test_no_verdict_can_be_written(self, two_teams):
+        """Green with this check removed, and left in anyway.
+
+        The write is stopped one layer down: adoption writes the pin, and
+        ``resolve_active_project`` re-checks the pin on the *next* request,
+        so the POST arrives with nothing active and ``adopt=False`` refuses.
+        Two independent guards, which is the arrangement worth having — but
+        a reader should not mistake this test for the one that measures the
+        check above. Those are the two before it.
+        """
+        two_teams["client"].post(
+            f"/test-execution/manual/{two_teams['run_id']}/verdict",
+            data={"external_id": "TC_001", "kind": "test_case",
+                  "verdict": "Failed"})
+        assert _db.list_case_results(two_teams["run_id"]) == []
+
+    def test_a_member_of_the_owning_team_still_gets_the_hand_off(self,
+                                                                app,
+                                                                two_teams):
+        """The control, and the reason the check is org-scoped rather than
+        stricter: the colleague-on-another-machine flow has to survive."""
+        from engine import auth as _auth
+        from engine import permissions as _perm
+        from engine import session_timeout as _timeout
+
+        theirs = _db.get_project(two_teams["pid"])["org_id"]
+        colleague = _db.create_user("colleague@iso.test",
+                                    password_hash=_auth.hash_password(
+                                        "a perfectly good passphrase"))
+        _db.add_org_member(theirs, colleague, "user")
+        c = app.test_client()
+        with c.session_transaction() as sess:
+            sess[_perm.SESSION_USER_KEY] = colleague
+            sess[_perm.SESSION_ORG_KEY] = theirs
+            sess["_session_active_since"] = SERVER_START_TIME
+            sess.pop("project_id", None)
+            _timeout.stamp(sess)
+        got = c.get(f"/test-execution/manual/{two_teams['run_id']}")
+        assert got.status_code == 200
+        assert "TTT the summary" in got.get_data(as_text=True)
+        with c.session_transaction() as sess:
+            assert sess.get("project_id") == two_teams["pid"]
 
 
 class TestAnItemIsIdentifiedByKindAndId:

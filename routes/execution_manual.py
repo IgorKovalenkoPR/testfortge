@@ -29,9 +29,9 @@ from engine import manual_run as mr
 from engine import permissions as _perm
 from engine.log import get_logger
 
-from ._shared import (pack_checklist, pack_test_cases,
-                      reconstruct_checklist, reconstruct_test_cases,
-                      resolve_active_project)
+from ._shared import (belongs_to_another_org, pack_checklist,
+                      pack_test_cases, reconstruct_checklist,
+                      reconstruct_test_cases, resolve_active_project)
 
 log = get_logger(__name__)
 
@@ -125,12 +125,24 @@ def _authorise(run: dict, *, adopt: bool = False) -> None:
       per-person boundary; without authentication there is no identity to
       enforce one against, and claiming otherwise would overstate what the
       deployment can promise.
+    * **Another organisation's run → 404,** before any of the above can
+      adopt it. This is the one the rest of the rule could not cover: the
+      assignee check passes when nobody is named, which is every run
+      started while authentication was off, and "no project active → adopt
+      it on a read" then wrote another organisation's project into the
+      caller's session and rendered its pack. Measured — a member of one
+      team read the other team's walk, summaries and all. The adopt
+      argument is about *which of your own* projects becomes active, and it
+      was standing in for a membership check it never made.
 
     404 rather than 403 for the project mismatch: whether a run id exists
     in a project the caller cannot see is not something to confirm.
     """
     run_pid = run.get("project_id")
     if not run_pid:
+        abort(404)
+
+    if belongs_to_another_org(run_pid):
         abort(404)
 
     if _perm.auth_active():
