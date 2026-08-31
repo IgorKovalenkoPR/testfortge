@@ -233,6 +233,9 @@ def register(app: Flask) -> None:
             yield _sse("meta", {"intent": "ai_generic", "lang": lang})
 
             chunks: list[str] = []
+            # Bound before the try so the GeneratorExit handler below
+            # can reach the stream without introspecting locals().
+            stream = None
             try:
                 # Lazy import — keeps the route loadable in environments
                 # without the SDK installed, matching how
@@ -317,6 +320,35 @@ def register(app: Flask) -> None:
                 })
             except GeneratorExit:
                 _logger.info("SSE client disconnected mid-stream")
+                # Meter what was spent before the hang-up. Everything
+                # after the delta loop — `get_final_message`,
+                # `_meter_stream`, the transcript append — is skipped when
+                # GeneratorExit lands on the yield, so an abandoned stream
+                # used to cost tokens and record nothing. The tokens were
+                # generated and billed upstream either way; closing a tab
+                # does not refund them, so the meter would under-report by
+                # exactly the abandoned streams — the one thing the
+                # comment on `_meter_stream` says it must not do.
+                #
+                # Not exotic, either: closing the tab, navigating away and
+                # losing the network all land here, and Render's proxy
+                # kills idle connections at 30 s, which is why this route
+                # emits heartbeats at all.
+                #
+                # `current_message_snapshot` is the SDK's accessor for the
+                # partial message, and `llm_cost.extract_usage` reads
+                # every field optionally, so a snapshot meters through the
+                # same path as a completed reply — with whatever counts
+                # the stream had received by then, and zeros for the rest.
+                # `_meter_stream` swallows its own errors, and this must
+                # not disturb the unwind, so the raise is unconditional.
+                try:
+                    snapshot = getattr(stream, "current_message_snapshot",
+                                       None)
+                    if snapshot is not None:
+                        _meter_stream(snapshot)
+                except Exception as exc:      # pragma: no cover — defensive
+                    _logger.debug("disconnect metering skipped: %s", exc)
                 raise
             except Exception as exc:
                 _logger.warning("chat stream failed: %s", exc)
