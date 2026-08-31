@@ -478,7 +478,8 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("test_case", "edited_by",
      "ALTER TABLE test_case ADD COLUMN edited_by VARCHAR(32)"),
     ("test_case", "edited_at",
-     "ALTER TABLE test_case ADD COLUMN edited_at TIMESTAMP"),
+     "ALTER TABLE test_case ADD COLUMN edited_at "
+     "TIMESTAMP WITH TIME ZONE"),
     ("checklist_item", "row_version",
      "ALTER TABLE checklist_item ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("checklist_item", "ai_generated",
@@ -486,7 +487,8 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("checklist_item", "edited_by",
      "ALTER TABLE checklist_item ADD COLUMN edited_by VARCHAR(32)"),
     ("checklist_item", "edited_at",
-     "ALTER TABLE checklist_item ADD COLUMN edited_at TIMESTAMP"),
+     "ALTER TABLE checklist_item ADD COLUMN edited_at "
+     "TIMESTAMP WITH TIME ZONE"),
     ("bug_report", "row_version",
      "ALTER TABLE bug_report ADD COLUMN row_version INTEGER NOT NULL DEFAULT 1"),
     ("bug_report", "ai_generated",
@@ -494,7 +496,8 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("bug_report", "edited_by",
      "ALTER TABLE bug_report ADD COLUMN edited_by VARCHAR(32)"),
     ("bug_report", "edited_at",
-     "ALTER TABLE bug_report ADD COLUMN edited_at TIMESTAMP"),
+     "ALTER TABLE bug_report ADD COLUMN edited_at "
+     "TIMESTAMP WITH TIME ZONE"),
     # ── Estimation (E4.6) ─────────────────────────────────────────
     #
     # The same four, plus one the other entities do not need.
@@ -512,7 +515,8 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("estimation", "edited_by",
      "ALTER TABLE estimation ADD COLUMN edited_by VARCHAR(32)"),
     ("estimation", "edited_at",
-     "ALTER TABLE estimation ADD COLUMN edited_at TIMESTAMP"),
+     "ALTER TABLE estimation ADD COLUMN edited_at "
+     "TIMESTAMP WITH TIME ZONE"),
     ("estimation", "original_payload",
      "ALTER TABLE estimation ADD COLUMN original_payload TEXT"),
     # ── Dashboard (E7.3) ──────────────────────────────────────────
@@ -526,6 +530,17 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     # 'get'`` — on upgraded deployments only, never on a fresh install.
     ("project", "settings",
      "ALTER TABLE project ADD COLUMN settings JSON NOT NULL DEFAULT '{}'"),
+    # ``TIMESTAMP WITH TIME ZONE`` on the datetime columns, matching
+    # the ``DateTime(timezone=True)`` the models declare. A bare
+    # ``TIMESTAMP`` is ``timestamp without time zone`` on Postgres, so the
+    # same column ended up aware on a fresh install and naive on an upgraded
+    # one, and ``_row_to_dict`` then serialised it with an offset on one
+    # deployment and without on the other. Same class as the boolean and
+    # JSON traps above, in a third form; ``tests/test_migration_populated_
+    # copy.py`` now guards all three. Instances that already ran the old
+    # statement keep the naive column — the ALTER is skipped once the
+    # column exists — which is cosmetic today because nothing compares
+    # these values, only writes and serialises them.
 )
 
 
@@ -1628,7 +1643,6 @@ class User(Base):
                                                 default=0)
     locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
-
     identities = relationship("Identity", back_populates="user",
                               cascade="all, delete-orphan",
                               passive_deletes=True)

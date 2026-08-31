@@ -563,6 +563,35 @@ class TestTheAltersAgreeWithTheModel:
             f"declared JSON by the model, added as something else: "
             f"{offenders}")
 
+    def test_a_tz_aware_column_is_added_tz_aware(self):
+        """A bare ``TIMESTAMP`` is *without* time zone on Postgres.
+
+        The third form of the same trap as the two above, and it was live in
+        four statements: ``edited_at`` is declared
+        ``DateTime(timezone=True)`` and was added as ``TIMESTAMP``, so the
+        column came out ``timestamptz`` on a fresh install and
+        ``timestamp without time zone`` on an upgraded one. ``_row_to_dict``
+        then serialised the same field with an offset on one deployment and
+        without on the other — and any future reader that parses it and
+        compares against an aware datetime would raise ``TypeError`` on
+        exactly one of them.
+        """
+        import re
+        offenders = []
+        for table, column, statement in _db._EDITABLE_COLUMN_MIGRATIONS:
+            declared = self._declared_type(table, column)
+            if not isinstance(declared, _db.DateTime):
+                continue
+            if not getattr(declared, "timezone", False):
+                continue
+            added = re.search(rf"ADD COLUMN {column} (.+)$", statement)
+            if added and "WITH TIME ZONE" not in added.group(1).upper():
+                offenders.append(f"{table}.{column}: {added.group(1)}")
+        assert not offenders, (
+            f"declared tz-aware by the model, added without a time zone; on "
+            f"Postgres the column differs between a fresh install and an "
+            f"upgrade: {offenders}")
+
     def test_the_matcher_would_notice(self):
         """Guards the guards.
 
