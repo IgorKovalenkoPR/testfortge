@@ -43,8 +43,9 @@ from engine import automation_codegen as codegen
 from engine import db as _db
 from engine import gherkin
 
-from ._shared import (SAFE_ASSET_RE, get_session_id, pack_test_cases,
-                      reconstruct_test_cases, resolve_active_project)
+from ._shared import (SAFE_ASSET_RE, belongs_to_another_org, get_session_id,
+                      pack_test_cases, reconstruct_test_cases,
+                      resolve_active_project)
 
 log = get_logger(__name__)
 
@@ -105,10 +106,19 @@ def register(app: Flask) -> None:
             else None
 
         runs: list[dict] = []
-        try:
-            runs = _db.list_automation_runs(pid, limit=20)
-        except Exception as exc:  # pragma: no cover — best-effort
-            log.warning("automation: run history failed: %s", exc)
+        # Only when there *is* a project. ``list_automation_runs(None)``
+        # means "every run on this instance" — it adds no WHERE clause — so
+        # with no active project this page rendered every organisation's run
+        # history, labels and failure messages included. Nothing asked for
+        # that view; it was the falsy-argument default showing through.
+        # ``routes/dashboard.py`` guards the same helper by hand for the same
+        # reason, which is one hand-guard too many for one footgun: see the
+        # note on the helper itself.
+        if pid:
+            try:
+                runs = _db.list_automation_runs(pid, limit=20)
+            except Exception as exc:  # pragma: no cover — best-effort
+                log.warning("automation: run history failed: %s", exc)
 
         return render_template(
             "automation.html",
@@ -163,6 +173,16 @@ def register(app: Flask) -> None:
         is a CI job with no browser and no cookie. Disabled outright when
         no token is configured — an open ingest endpoint would let anyone
         write run history into someone's project.
+
+        The token is **per instance**, and ``project_id`` comes from the
+        form with only an existence check, so the secret authorises a write
+        into *any* project on the instance including another organisation's.
+        That is authentication standing in for authorisation, and it is
+        stated here rather than left to be discovered: closing it needs a
+        per-project ingest token, which is an ops decision about where the
+        secret lives and how a team rotates it, not something to invent in
+        this function. Single-tenant today (``ORG_MODE`` is off in
+        production), which is why it is recorded rather than patched.
         """
         expected = _ingest_token()
         if not expected:
@@ -222,13 +242,33 @@ def register(app: Flask) -> None:
 
     @app.route("/automation/runs/<int:run_id>", methods=["GET"])
     def automation_run_detail(run_id):
-        """Drill-down for one ingested run."""
+        """Drill-down for one ingested run.
+
+        Scoped to the run's own project, which it was not: the route took a
+        sequential integer and asked nobody, so any signed-in member of any
+        team could read any run's label, case names and failure messages by
+        counting upwards. The listing it is reached from is project-scoped,
+        so nothing legitimate depended on the wider answer.
+
+        404 rather than 403, matching ``/api/edit/*``: telling a caller that
+        run 41 exists but is not theirs is the one thing this route should
+        not say.
+
+        A run with **no** project is still served. Nothing owns it — it was
+        ingested without one — and it appears in no listing either, so
+        refusing it would take away the only way to reach a run somebody
+        just posted and got a ``run_id`` back for. That is the same answer
+        ``project_access_with_meta`` gives a project with a NULL
+        ``owner_sid``, for the same reason.
+        """
         run = None
         try:
             run = _db.get_automation_run(run_id)
         except Exception as exc:  # pragma: no cover — best-effort
             log.warning("automation run detail failed: %s", exc)
         if run is None:
+            abort(404)
+        if belongs_to_another_org(run.get("project_id")):
             abort(404)
         return render_template("automation_run.html", run=run,
                               summary=run.get("summary") or {})

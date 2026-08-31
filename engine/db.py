@@ -4893,7 +4893,19 @@ def save_automation_run(project_id: str | None, summary: dict, *,
 
 def list_automation_runs(project_id: str | None = None,
                          limit: int = 30) -> list[dict]:
-    """Most recent automation runs, newest first."""
+    """Most recent automation runs, newest first.
+
+    ``project_id=None`` means **every run on this instance**, across every
+    project and organisation. That is a trap in the shape of a default: an
+    empty string is falsy, so a caller that passes an unresolved active
+    project asks for the wide answer while reading like it asked for the
+    narrow one. ``/automation`` did exactly that and rendered another
+    organisation's run history; ``routes/dashboard.py`` had already grown a
+    hand-written ``if not project_id: return None`` against the same edge.
+    Both now guard, and any third caller must too — there is no
+    ops-wide view that wants this, so if one is ever added it should say so
+    at the call site.
+    """
     with session_scope() as sess:
         stmt = select(AutomationRun)
         if project_id:

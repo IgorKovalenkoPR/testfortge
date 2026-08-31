@@ -86,7 +86,7 @@ def _require_project_owner(project_id: str) -> dict | None:
     if verdict.startswith("forbidden"):
         # Both refusals are the same answer here. They are two verdicts
         # because the *pin* check honours only one of them — see
-        # ``routes._shared._pin_revoked``.
+        # ``routes._shared.belongs_to_another_org``.
         abort(403)
     return meta
 

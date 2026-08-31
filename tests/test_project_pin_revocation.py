@@ -329,4 +329,4 @@ class TestTheRuleItself:
 
         monkeypatch.setattr(_db_mod, "get_project", _boom)
         with app.test_request_context("/"):
-            assert _shared._pin_revoked(pid) is False
+            assert _shared.belongs_to_another_org(pid) is False

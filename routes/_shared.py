@@ -460,7 +460,7 @@ def resolve_active_project(session_obj=None, *, pin: bool = True) -> str:
 
     sess = session_obj if session_obj is not None else session
     pid = sess.get("project_id")
-    if pid and not _pin_revoked(pid, sess):
+    if pid and not belongs_to_another_org(pid, sess):
         return pid
     if pid:
         # The pick is no longer the caller's to act on. Fall through rather
@@ -544,7 +544,7 @@ def ensure_active_project(session_obj=None) -> str:
 
     sess = session_obj if session_obj is not None else session
     pid = sess.get("project_id")
-    if pid and not _pin_revoked(pid, sess):
+    if pid and not belongs_to_another_org(pid, sess):
         return pid
     if pid:
         # Same refusal as :func:`resolve_active_project`, and here the key
@@ -762,7 +762,8 @@ def project_access_with_meta(project_id: str | None,
       another browser's session created it.
 
     Both are a 403 to ``routes.projects._require_project_owner``. Only the
-    first revokes a *pinned* project — see :func:`_pin_revoked`, which is
+    first revokes a *pinned* project — see
+    :func:`belongs_to_another_org`, which is
     where the difference is argued.
 
     The rule itself is the one E2.3 settled on, and it lives here rather
@@ -816,36 +817,37 @@ def project_access_with_meta(project_id: str | None,
     return "ok", meta
 
 
-def _pin_revoked(project_id: str, session_obj=None) -> bool:
-    """Whether a pinned ``session["project_id"]`` may no longer be honoured.
+def belongs_to_another_org(project_id, session_obj=None) -> bool:
+    """The project is an organisation's, and the caller is not in it.
 
     ``"forbidden_org"`` **only**, and the narrowness is the design rather
     than a shortcut. The other refusal ``project_access_with_meta`` can
-    return — a legacy project whose ``owner_sid`` is another browser's — must
-    not revoke a pin, because under ``WORKSPACE_DB_FIRST`` a project is the
-    team's shared work and a colleague's browser legitimately holds a pin on
-    a project somebody else's browser created.
+    return — a legacy project whose ``owner_sid`` is another browser's —
+    would break a feature if it counted here: under ``WORKSPACE_DB_FIRST`` a
+    project is the team's shared work, so a colleague's browser legitimately
+    holds a pin on a project somebody else's browser created.
     ``tests/test_generation_db_first.py::TestSharedProject`` says so out
     loud, and it is what caught this when the first version of this function
-    refused on any verdict but ``"ok"``.
+    refused on any verdict but ``"ok"``. It also means this predicate is a
+    no-op while ``ORG_MODE`` is off, which is what makes it safe to add to
+    an existing route.
 
-    ``"missing"`` does not revoke a pin either: a pin naming a deleted
-    project keeps resolving to its id, because every caller downstream
-    already answers "no such item" for it, and turning that into "no active
-    project" would change what a dozen pages render for something that is
-    not a security question.
+    ``"missing"`` does not count either: an id naming a deleted project
+    keeps resolving, because callers downstream already answer "no such
+    item" for it, and that is not a security question.
 
-    Best-effort by design: this is a *re*-check, the pin having been
-    approved once already, so a database that cannot answer honours it
-    rather than taking the product away from everybody who is entitled to
-    it.
+    Two callers, both re-checks of something approved once already: the
+    pinned ``session["project_id"]`` in the resolvers above, and a run id in
+    ``routes/automation.py`` that names the project it belongs to. So a
+    database that cannot answer fails **open** rather than taking the
+    product away from everybody who is entitled to it.
     """
     try:
         return project_access_with_meta(project_id,
                                         session_obj)[0] == "forbidden_org"
     except Exception as exc:      # pragma: no cover — defensive
-        log.debug("pin revocation check unavailable (%s) — honouring the "
-                  "pin", exc)
+        log.debug("project ownership re-check unavailable (%s) — allowing",
+                  exc)
         return False
 
 
