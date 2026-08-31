@@ -324,10 +324,26 @@ def compute_session_metrics(
         cl_by_priority[pri] = cl_by_priority.get(pri, 0) + 1
 
     # ── Execution status ratios ───────────────────────────────
+    #
+    # ``engine.manual_run`` owns the definition and documents it:
+    # ``EXECUTED_VERDICTS`` is Passed / Passed but / Failed / Blocked, and
+    # the pass rate counts Passed *plus Passed but* over those. A skip is
+    # neither, because nobody looked at it.
+    #
+    # This loop summed only passed / failed / blocked, so a "Passed but"
+    # verdict left the numerator and the denominator at once — it stopped
+    # existing. Measured on a five-item manual walk: the run page said
+    # 25.0% and the dashboard said 0.0% about the same run, which is not
+    # a rounding disagreement.
+    #
+    # ``or 0`` on every read, and a missing key counted as zero, so the
+    # runs recorded before "Passed but" existed keep the numbers they
+    # have always had.
     exec_passed = exec_failed = exec_blocked = 0
     for run in test_runs:
         stats = run.get("stats", {}) or {}
-        exec_passed += stats.get("passed", 0) or 0
+        exec_passed += (stats.get("passed", 0) or 0) \
+            + (stats.get("passed_but", 0) or 0)
         exec_failed += stats.get("failed", 0) or 0
         exec_blocked += stats.get("blocked", 0) or 0
     exec_total = exec_passed + exec_failed + exec_blocked

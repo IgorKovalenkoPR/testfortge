@@ -420,6 +420,28 @@ def register(app: Flask) -> None:
         # earlier one returns the tester to where they were rather than
         # restarting the walk.
         refreshed = mr.compute_progress(queue, _db.list_case_results(run_id))
+
+        # A correction to a run that is already closed has to reach the
+        # totals it was closed with. The page invites exactly this —
+        # "step back through any item to correct a verdict" — and
+        # ``ExecutionRun.stats`` was written once, at finish, and never
+        # again. ``test_metrics_generator._aggregate_from_db_rows`` reads
+        # those totals for the dashboard's execution pass rate, so the
+        # correction the product asked for never reached the number
+        # anyone looks at. Measured: a run showing 50.0% on its own page
+        # after a verdict that made it 25.0%.
+        #
+        # Only for a run that is already closed. An open run must not be
+        # closed by the act of judging one item, which is why this is not
+        # simply a call to finish on every verdict.
+        if (run.get("status") or "") in ("completed", "partial"):
+            try:
+                _db.finish_execution_run(
+                    run_id,
+                    status="completed" if refreshed.finished else "partial",
+                    stats=mr.run_stats(refreshed))
+            except Exception:      # pragma: no cover — best-effort
+                log.exception("could not refresh totals after a correction")
         if refreshed.finished:
             return redirect(url_for("manual_run_page", run_id=run_id))
         return redirect(url_for("manual_run_page", run_id=run_id,
