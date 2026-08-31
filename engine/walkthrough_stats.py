@@ -178,18 +178,47 @@ def format_summary(summary: dict) -> str:
     return "\n".join(out)
 
 
+#: Most a single ``result.json`` may be before it is skipped unread.
+#:
+#: A real one is tens of kilobytes; the largest measured walkthrough run is
+#: under two. The cap is not about those — it is about ``read_text()``
+#: having no upper bound at all, so *any* path handed to this function was
+#: pulled into memory in full before the JSON parse could reject it. On the
+#: 512 MB dyno that is one argument away from an OOM, and a file that never
+#: ends (a device, a fifo) is one away from a hang. Bounded the way
+#: ``engine.allure_ingest`` bounds an archive member: read one byte past the
+#: cap and skip on overflow, rather than asking ``stat()`` first — a size
+#: taken before the read is a size that can be wrong by the time of it, and
+#: on a fifo there is no size to take.
+MAX_RESULT_BYTES = 25 * 1024 * 1024
+
+
 def summarise_files(paths: Sequence[str | Path]) -> dict:
     """Load one or more ``result.json`` files and produce a combined
     summary. Files that don't parse or don't contain findings are
     silently skipped — the goal is "show me what I have", not strict
     schema validation.
+
+    Any path is accepted, deliberately: the module docstring's contract is
+    "or whichever paths the operator passes", and an operator at their own
+    shell pointing this at a result.json in Downloads is the normal case.
+    The caller that is *not* an operator at a shell —
+    ``mcp_server.walkthrough_findings_stats``, reached over the network by
+    an agent — confines the paths itself before calling here.
     """
     findings: list[dict] = []
     for raw_path in paths:
         path = Path(raw_path)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            with path.open("r", encoding="utf-8") as handle:
+                raw = handle.read(MAX_RESULT_BYTES + 1)
+        except OSError:
+            continue
+        if len(raw) > MAX_RESULT_BYTES:
+            continue
+        try:
+            payload = json.loads(raw)
+        except ValueError:
             continue
         if not isinstance(payload, dict):
             continue

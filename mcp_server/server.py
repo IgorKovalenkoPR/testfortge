@@ -60,6 +60,11 @@ MCP_SESSION_ID = "mcp-server"
 # boots without Flask config loaded.
 MCP_MAX_CONCURRENT_RUNS = 3
 
+# Most result.json files ``walkthrough_findings_stats`` will read in one
+# call. A tuning session looks at a handful; a list long enough to matter
+# is a client that has lost the plot, and each entry is a file read.
+MAX_STATS_FILES = 50
+
 # PR-F Phase 2 — active browser driver. The Flask instance base URL, used
 # to build the operator-facing handoff link so the extension knows where
 # to poll / post results. Optional: when unset, the extension falls back
@@ -244,18 +249,68 @@ def walkthrough_findings_stats(paths: list[str] | None = None) -> dict:
 
     Args:
         paths: List of paths to ``automation_runs/*.result.json`` files.
-            If omitted or empty, glob every ``*.result.json`` under the
-            repo's ``automation_runs/`` directory.
+            Confined to that directory and to that suffix — see below. If
+            omitted or empty, glob every ``*.result.json`` under it.
+
+    The paths are the caller's, and the caller here is an agent over a
+    network rather than the operator at their own shell. The sentence above
+    has always described the scope; nothing enforced it, so any
+    findings-shaped JSON anywhere the process could read was summarised and
+    its ``message`` strings came back in ``samples``. Measured, not
+    supposed. ``engine.walkthrough_stats.summarise_files`` still accepts any
+    path on purpose — the CLI's contract is "whichever paths the operator
+    passes" and an operator pointing it at a file in Downloads is the normal
+    case — so the confinement belongs here, at the boundary where the caller
+    stops being that operator.
+
+    A path outside the directory is **refused by name**, not skipped: a
+    client that believes it summarised a file the tool ignored is worse off
+    than one told it cannot.
 
     The :class:`collections.Counter` values are serialised as plain
     dicts so the MCP layer can JSON-encode the response.
     """
+    runs_dir = (Path(__file__).resolve().parent.parent
+                / "automation_runs").resolve()
     if not paths:
-        repo_root = Path(__file__).resolve().parent.parent
-        runs_dir = repo_root / "automation_runs"
         if not runs_dir.is_dir():
             return {"total": 0, "by_class": {}, "by_severity": {}, "by_url": {}}
         paths = [str(p) for p in sorted(runs_dir.glob("*.result.json"))]
+    else:
+        if len(paths) > MAX_STATS_FILES:
+            return {"error": "too_many_paths",
+                    "message": (f"At most {MAX_STATS_FILES} files per call; "
+                                f"{len(paths)} were given.")}
+        refused: list[str] = []
+        cleaned: list[str] = []
+        for raw in paths:
+            candidate = Path(str(raw))
+            if not candidate.is_absolute():
+                candidate = runs_dir / candidate
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                refused.append(str(raw))
+                continue
+            # ``resolve()`` first, so ``..`` and a symlink out of the
+            # directory are both settled before the comparison — the check
+            # ``routes/automation.py`` makes on its asset paths, for the
+            # same reason.
+            inside = (resolved == runs_dir
+                      or runs_dir in resolved.parents)
+            if not inside or not resolved.name.endswith(".result.json"):
+                refused.append(str(raw))
+                continue
+            cleaned.append(str(resolved))
+        if refused:
+            return {
+                "error": "path_not_allowed",
+                "message": ("Only *.result.json files under automation_runs/ "
+                            "can be summarised here. Refused: "
+                            + ", ".join(refused[:5])
+                            + ("…" if len(refused) > 5 else "")),
+            }
+        paths = cleaned
     summary = walkthrough_stats.summarise_files(paths)
     # Counter is dict-like but FastMCP's pydantic serialiser balks on
     # non-builtin types — coerce to plain dicts before returning.
