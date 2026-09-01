@@ -668,8 +668,12 @@ def main() -> int:
                 f.write(datetime.now(timezone.utc).isoformat())
         except Exception:
             pass
-        # S3.3: write a DashboardMetricSnapshot so the trend chart on
-        # /test-metrics gets a fresh data point on every completed run.
+        # S3.3: write a DashboardMetricSnapshot on every completed run.
+        # This was for the trend chart on /test-metrics, which is now a
+        # 404 — the template is on the unreachable list. The row is still
+        # written, deliberately: a trend has to have been recorded before
+        # anything can plot it, and /metrics/history serves them already.
+        # See the docstring of routes/dashboard.py.
         # Best-effort: a snapshot failure must not crash the worker —
         # the run result is already on disk, the dashboard can recover
         # on the next page load. Safe to call here because S3.4's WAL +

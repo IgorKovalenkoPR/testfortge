@@ -4,8 +4,21 @@ Renders the landing page with saved-project list and live session
 metrics (test cases, checklist, execution ratios, bug severity,
 environments covered).
 
-Also exposes the ``/metrics/history`` JSON endpoint that powers the
-trend chart on ``/test-metrics`` — see Sprint 3 task 3.3.
+Also exposes the ``/metrics/history`` JSON endpoint, written for the trend
+chart on ``/test-metrics`` (Sprint 3 task 3.3).
+
+**That page no longer exists.** ``templates/test_metrics.html`` is on the
+unreachable list in ``tests/test_every_template_is_reachable.py``, marked
+"superseded by the dashboard", and ``/test-metrics`` answers 404. So the
+endpoint is live and gated, its only in-repo consumer is a template no route
+renders, and the snapshots it reads are still written on every completed run
+(``engine/runner_worker.py``) and once a day for every project
+(``app._start_snapshot_catchup_thread``).
+
+Nothing here decides that. Wiring the chart into the dashboard or dropping
+the writers is the same open question as the rest of the unreachable
+templates, and it belongs to whoever owns the roadmap — this note exists so
+the next reader does not conclude from the code that the page is there.
 """
 
 from __future__ import annotations
@@ -263,7 +276,8 @@ def register(app: Flask) -> None:
           - ``project_id`` — defaults to ``session["project_id"]``.
             When neither is set we return an empty list rather than 4xx,
             because the trend chart's empty-state path is the
-            "anonymous visitor lands on /test-metrics" UX (no friction).
+            "anonymous visitor lands on the trend page" UX (no
+            friction) — see the module docstring on where that page went.
             When one *is* named, it is checked: the parameter used to be
             taken as given, so any signed-in member of any team could read
             any project's pass rate, defect density and volume over time by

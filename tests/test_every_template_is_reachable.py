@@ -51,6 +51,11 @@ UNREACHABLE = {
     "setup.html": "pre-E3 project setup page, replaced by the picker",
     "status_report.html": "pre-E3 status report; no route",
     "techniques.html": "pre-E3 techniques reference; no route",
+    # Its trend chart is the only in-repo consumer of /metrics/history,
+    # which is live and gated and reads snapshots still written on every
+    # completed run. Wiring this page back means the notes in
+    # routes/dashboard.py, routes/_shared.py and engine/runner_worker.py
+    # stop being true — they say the page is gone.
     "test_metrics.html": "superseded by the dashboard; /metrics is ops",
     "tools.html": "pre-E3 tools page; no route",
     "user_stories.html": "pre-E3 user-story list; no route",

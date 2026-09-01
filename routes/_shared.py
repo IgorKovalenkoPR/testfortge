@@ -1002,8 +1002,9 @@ def kpi_value(metrics: dict | None, key: str, default: float = 0.0) -> float:
     KPIs at the top level (``exec_pass_rate``, ``tc_total``,
     ``bug_total``, ``exec_total``, ...) rather than nested in a list
     of ``{name, value, formula}`` records — the ``KPI`` dataclass-
-    flavoured list lives on the *other* metrics object built for
-    ``/test-metrics``. So ``kpi_value`` is intentionally a thin
+    flavoured list lives on the *other* metrics object, the one built for
+    the retired ``/test-metrics`` page. So ``kpi_value`` is intentionally a
+    thin
     dict-getter with a defensive numeric coerce, not a list scanner.
     """
     if not isinstance(metrics, dict):
