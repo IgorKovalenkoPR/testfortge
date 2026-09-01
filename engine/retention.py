@@ -494,9 +494,69 @@ def _readme(notes: dict) -> str:
     return "\n".join(lines)
 
 
+# ── The rows that expire on their own ────────────────────────────────
+
+#: ``engine.db`` helper → the label its count is reported under.
+#:
+#: Every one of these was written, exported, documented, and called by
+#: nothing. ``purge_expired_session_drafts`` says "Sweeper for the snapshot
+#: worker" in its own docstring and the snapshot worker did not call it;
+#: ``purge_expired_auth_tokens`` documents a thirty-day retention window
+#: that nothing enforced, so reset tokens were kept for ever;
+#: ``engine.server_session`` had already noticed the class — "nothing in
+#: this codebase currently calls any of the ``purge_expired_*`` helpers, so
+#: expired rows have simply been accumulating" — and worked around it for
+#: its own table with an opportunistic vacuum rather than fixing it for the
+#: rest.
+#:
+#: None of this is an access-control question: every reader checks expiry
+#: for itself, and a draft somebody opens is deleted lazily on that read.
+#: What accumulates is precisely what nobody comes back to — on a free-tier
+#: 256 MB Postgres, with recorded step payloads in ``session_draft``, that
+#: is the database filling up.
+_SWEEPERS: tuple[tuple[str, str], ...] = (
+    ("purge_expired_session_drafts", "session drafts"),
+    ("purge_expired_browser_control", "browser control"),
+    ("purge_expired_auth_tokens", "auth tokens"),
+    ("purge_expired_sessions", "sessions"),
+)
+
+
+def sweep_expired() -> dict[str, int]:
+    """Run every expiry sweeper. ``{label: rows removed}``.
+
+    One caller, the daily thread in ``app.py``, so that adding a fifth
+    sweeper is one line in the table above rather than a second place to
+    forget. Each is guarded on its own: a helper that raises must not stop
+    the ones after it, and none of this is worth failing a boot over.
+
+    ``purge_expired_sessions`` is included even though
+    ``engine.server_session`` also vacuums opportunistically — that path
+    only exists under ``SESSION_BACKEND=db``, and running a delete against
+    an empty table costs nothing.
+    """
+    from engine import db as _db
+
+    out: dict[str, int] = {}
+    for helper, label in _SWEEPERS:
+        function = getattr(_db, helper, None)
+        if function is None:      # pragma: no cover — schema drift
+            log.debug("expiry sweep: %s is not available", helper)
+            continue
+        try:
+            out[label] = int(function() or 0)
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("expiry sweep: %s failed: %s", helper, exc)
+            out[label] = 0
+    removed = sum(out.values())
+    if removed:
+        log.info("expiry sweep removed %d row(s): %s", removed, out)
+    return out
+
+
 __all__ = [
     "EPHEMERAL_DAYS", "EPHEMERAL_MAX_RUNS", "DURABLE_DAYS", "DURABLE_MAX_RUNS",
     "EXPORT_MAX_BYTES", "CONTENT_TABLES", "KEPT_TABLES",
     "Policy", "policy_for", "DeletionReport", "survey",
-    "delete_project_data", "export_project_data",
+    "delete_project_data", "export_project_data", "sweep_expired",
 ]

@@ -126,6 +126,19 @@ def _start_snapshot_catchup_thread() -> None:
                 _time.sleep(SLEEP_SEC)
             except Exception:
                 return
+            # Expiry sweep first, and it belongs here rather than in a cron
+            # for the reason the snapshot pass does: on the free plan there
+            # is no cron. Every ``purge_expired_*`` helper in engine.db was
+            # written, exported, documented — one of them addressed to
+            # *this* thread by name — and called by nothing, so expired
+            # session drafts, browser-control commands and auth tokens had
+            # simply been accumulating on a 256 MB database. Before the
+            # snapshots, because a full database is what stops those too.
+            try:
+                from engine import retention as _retention
+                _retention.sweep_expired()
+            except Exception as exc:  # pragma: no cover — never fatal
+                log.warning("snapshot catch-up: expiry sweep failed: %s", exc)
             try:
                 projects = _db.list_projects()
             except Exception as exc:  # pragma: no cover — DB hiccup
