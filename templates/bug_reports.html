@@ -33,7 +33,19 @@
    returns ``0`` and the route flashes "0 bugs deleted"), so the
    only cost is one extra DOM node on empty pages and the upside
    is the feature stops looking conditional. Modal lives just below
-   so its DOM is always available too. #}
+   so its DOM is always available too.
+
+   Admin-only, which it was not: ``route_policy`` gates ``bugs_reset`` at
+   "admin", so a plain user who clicked this button, read a modal saying
+   how many bugs would be deleted and confirmed, got a bare 403 — no
+   flash, no explanation, and off the page. Two other places in this
+   codebase state the rule this breaks, one of them 160 lines below:
+   "the option is simply absent for a user — the server checks again,
+   because a hidden option is UX, not a permission", and the project
+   picker's "offering an action the server will refuse is a worse first
+   day than not offering it". ``is_admin`` is true whenever ORG_MODE is
+   off, so the single-tenant UI is unchanged. #}
+{% if is_admin %}
 <div class="bug-actions" style="margin-bottom:14px;">
     <button type="button" class="btn btn-secondary" id="bug-reset-open"
             style="color:#b91c1c; border-color:#fecaca;">
@@ -82,6 +94,7 @@
         </form>
     </div>
 </div>
+{% endif %}
 
 {% if bugs %}
 {# ── Stats Summary ── #}
@@ -458,7 +471,13 @@
         <option value="priority">{{ t.get('bug_bulk_priority', 'Set priority') }}</option>
         <option value="fix_version">{{ t.get('bug_bulk_fix_version', 'Set fix version') }}</option>
         <option value="assign">{{ t.get('bug_bulk_assign', 'Assign to') }}</option>
+        {# Admin-only in ``routes/bugs.py`` ("Deleting bug reports is
+           limited to admins"), so a user who picked it lost their whole
+           selection to a redirect and a flash. Same rule as the status
+           control below and the picker's create form. #}
+        {%- if is_admin %}
         <option value="delete">{{ t.get('bug_bulk_delete', 'Delete') }}</option>
+        {%- endif %}
     </select>
 
     {# Per-action value field; JS toggles which is visible based on the
