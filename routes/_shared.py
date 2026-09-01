@@ -888,6 +888,63 @@ def visible_projects(session_obj=None) -> list:
     return _db.list_projects(owner_sid=sid) or []
 
 
+# ── Download filenames ───────────────────────────────────────────
+
+#: What may appear in the ASCII ``filename`` parameter unquoted-safely.
+_FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+#: Cap on either filename form. Long enough for a real project name, short
+#: enough that the header stays a header.
+MAX_ATTACHMENT_STEM = 120
+
+
+def attachment_header(stem: str, suffix: str, *,
+                      fallback: str = "export") -> str:
+    """A ``Content-Disposition`` value for a download named after a project.
+
+    Six export routes built this header by interpolating the project name
+    straight into ``f"attachment; filename={name}{suffix}"``, with at most a
+    ``.replace(" ", "_")`` in front of it. A project name is free text from a
+    form, and three things followed — each measured, not reasoned about:
+
+    * a name containing a newline made **every** export answer 500.
+      Werkzeug refuses a header value with a newline in it, which is the
+      good news: there was no response splitting. There was also no export;
+    * a name containing ``;`` or ``"`` put a second parameter into the
+      header. ``Acme; filename=evil.sh`` produced ``filename=testfortge_Acme;
+      filename=evil.sh.md``, and which of the two a browser saves under is
+      the browser's business, not ours;
+    * a Cyrillic name — the ordinary case in this product's other language —
+      produced a value that is not latin-1 encodable, which PEP 3333 says a
+      WSGI header value must be. The Flask test client hands the string back
+      unencoded, so the suite saw 200 and the wire would not.
+
+    ``routes/projects.py``'s own export got this right on its own with a
+    regex and a quoted filename; that it was right in one place out of seven
+    is what pointed here. This is that rule, in one place, plus RFC 6266's
+    ``filename*`` so a Ukrainian project name reaches the person downloading
+    it instead of becoming a row of dashes.
+    """
+    from urllib.parse import quote
+
+    raw = re.sub(r"\s+", "_",
+                 str(stem or "").strip())[:MAX_ATTACHMENT_STEM]
+    ascii_stem = _FILENAME_UNSAFE.sub("-", raw)
+    # Collapse the runs the substitution leaves behind. A wholly non-ASCII
+    # name would otherwise fall back to a row of dashes, which is what the
+    # one call site that sanitised at all already produced — readable is
+    # better, and ``filename*`` below carries the real name regardless.
+    ascii_stem = re.sub(r"-{2,}", "-", ascii_stem).strip("-.") or fallback
+    header = f'attachment; filename="{ascii_stem}{suffix}"'
+    if raw and raw != ascii_stem:
+        # Percent-encoded, so a newline or a quote in the name cannot reach
+        # the header at all — ``quote`` with no safe characters is the whole
+        # defence, and it is why this branch needs no separate escaping.
+        header += ("; filename*=UTF-8''"
+                   + quote(f"{raw}{suffix}", safe=""))
+    return header
+
+
 def get_picker_context(session_obj=None) -> dict:
     """Build the ``projects`` + ``active_project_id`` template kwargs
     that ``_project_picker.html`` needs.

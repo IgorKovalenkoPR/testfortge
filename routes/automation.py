@@ -43,7 +43,8 @@ from engine import automation_codegen as codegen
 from engine import db as _db
 from engine import gherkin
 
-from ._shared import (SAFE_ASSET_RE, belongs_to_another_org, get_session_id,
+from ._shared import (SAFE_ASSET_RE, attachment_header,
+                      belongs_to_another_org, get_session_id,
                       pack_test_cases, reconstruct_test_cases,
                       resolve_active_project)
 
@@ -163,7 +164,7 @@ def register(app: Flask) -> None:
         return Response(
             payload, mimetype="application/zip",
             headers={"Content-Disposition":
-                     f"attachment; filename={name}_automation.zip"})
+                     attachment_header(f"{name}_automation", ".zip")})
 
     @app.route("/automation/allure-results", methods=["POST"])
     def automation_allure_results():

@@ -40,6 +40,7 @@ from engine import permissions as _perm
 from engine.log import get_logger
 
 from ._shared import (
+    attachment_header,
     reconstruct_stories, reconstruct_test_cases, reconstruct_checklist,
     tc_to_dict, cl_to_dict, story_to_dict, get_session_id,
     parse_page_input, extract_resource_urls, ensure_active_project,
@@ -2516,11 +2517,15 @@ def register(app: Flask) -> None:
         if fmt == "markdown":
             content = export_markdown(name, stories, tc_list, cl_list, trace, {})
             return Response(content, mimetype="text/markdown",
-                            headers={"Content-Disposition": f"attachment; filename=testfortge_{name}.md"})
+                            headers={"Content-Disposition":
+                                     attachment_header(
+                                         f"testfortge_{name}", ".md")})
         if fmt == "html":
             content = export_html(name, stories, tc_list, cl_list, trace, {})
             return Response(content, mimetype="text/html",
-                            headers={"Content-Disposition": f"attachment; filename=testfortge_{name}.html"})
+                            headers={"Content-Disposition":
+                                     attachment_header(
+                                         f"testfortge_{name}", ".html")})
         if fmt == "csv-testcases":
             content = export_csv_testcases(tc_list)
             return Response(content, mimetype="text/csv",
@@ -2556,7 +2561,7 @@ def register(app: Flask) -> None:
             return Response(
                 content, mimetype="application/zip",
                 headers={"Content-Disposition":
-                         f"attachment; filename={name}_features.zip"})
+                         attachment_header(f"{name}_features", ".zip")})
         return "Unknown format", 400
 
 

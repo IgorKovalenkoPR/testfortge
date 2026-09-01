@@ -39,7 +39,8 @@ from engine import workspace as _workspace
 # with = + - @ is executed as a formula by Excel on open.
 from engine.exporter import _sanitize_cell
 
-from ._shared import (ensure_active_project, get_session_id,
+from ._shared import (attachment_header, ensure_active_project,
+                      get_session_id,
                       mirror_pack as _mirror_pack,
                       pack_bugs as _pack_bugs, resolve_active_project)
 from .projects import _require_project_owner
@@ -660,7 +661,7 @@ def register(app: Flask) -> None:
         return Response(
             buf.getvalue(), mimetype="text/csv",
             headers={"Content-Disposition":
-                     f"attachment; filename=bug_reports_{name}.csv"})
+                     attachment_header(f"bug_reports_{name}", ".csv")})
 
     @app.route("/export-bug-reports")
     def export_bug_reports():
@@ -679,7 +680,8 @@ def register(app: Flask) -> None:
         name = session.get("project_setup", {}).get("project_name", "project").replace(" ", "_")
         return Response(
             content, mimetype="text/markdown",
-            headers={"Content-Disposition": f"attachment; filename=bug_reports_{name}.md"},
+            headers={"Content-Disposition":
+                     attachment_header(f"bug_reports_{name}", ".md")},
         )
 
 

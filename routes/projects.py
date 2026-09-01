@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hmac
 import os
-import re
 
 from flask import (Flask, Response, abort, flash, jsonify, redirect, request,
                    session, url_for)
@@ -32,7 +31,8 @@ from engine import workspace as _workspace
 from engine.log import get_logger
 
 from ._shared import (
-    GENERATED_KEYS, SERVER_START_TIME, cl_to_dict, get_session_id,
+    GENERATED_KEYS, SERVER_START_TIME, attachment_header, cl_to_dict,
+    get_session_id,
     is_valid_project_id as _shared_is_valid_project_id, mirror_pack,
     org_for_new_project, project_access_with_meta, resolve_active_project,
     tc_to_dict,
@@ -396,13 +396,16 @@ def register(app: Flask) -> None:
                          diff={"bytes": len(blob),
                                "truncated": bool(notes.get("truncated"))})
 
-        safe = re.sub(r"[^A-Za-z0-9_\-]", "-",
-                      (meta.get("name") or "project"))[:60] or "project"
+        # This route sanitised on its own, with a regex and a quoted
+        # filename, and was the only one of seven that did — which is what
+        # pointed at the other six. It uses the shared rule now and gains
+        # ``filename*``, so a Ukrainian project name stops arriving as a row
+        # of dashes.
         return Response(
             blob, mimetype="application/zip",
             headers={
-                "Content-Disposition":
-                    f'attachment; filename="{safe}-export.zip"',
+                "Content-Disposition": attachment_header(
+                    f"{meta.get('name') or 'project'}-export", ".zip"),
                 # The archive is complete or it says so inside; the header
                 # cannot, so nothing here implies completeness either.
                 "Content-Length": str(len(blob)),
