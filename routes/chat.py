@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 
 from engine import blobs as _blobs
 from engine import db as _db
+from engine import llm_client as _llm_client
 from engine import permissions as _perm
 
 from ._shared import (ensure_active_project, mirror_pack, pack_bugs,
@@ -46,6 +47,14 @@ def _meter_stream(final) -> None:
     accounting identical in effect, if not in code, is the point — a usage
     report that silently omitted the chattiest surface in the product would
     be worse than no report.
+
+    Reading ``session`` here is safe because the route wraps the generator
+    in ``stream_with_context``: the request context outlives the view, which
+    is what lets this attribute the spend at all. Checked rather than
+    assumed — without that wrapper every ``session.get`` below would raise
+    into the bare ``except`` and the chattiest surface in the product would
+    be metered to nothing, which is precisely what the paragraph above says
+    must not happen.
 
     Swallows everything. The user has already received their answer by the
     time this runs; an accounting error must not turn a delivered reply
@@ -140,8 +149,18 @@ def register(app: Flask) -> None:
         # here rather than read from the session inside the engine: that
         # module is importable without Flask, and the eval harness and the
         # MCP tool call it with no request at all.
+        #
+        # The organisation and the user travel the same way, and for the
+        # money rather than the answer: without them the usage row was
+        # written with no organisation, so this — the chattiest surface in
+        # the product — counted against no allowance and appeared in no
+        # usage panel, and ``llm_client``'s budget gate is conditioned on
+        # ``org_id``, so it was skipped outright. ``_meter_stream`` below
+        # attributed all three all along, which is what pointed here.
         reply = _chatbot_respond(message, lang,
-                                 project_id=resolve_active_project())
+                                 project_id=resolve_active_project(),
+                                 org_id=_perm.current_org_id(),
+                                 user_id=_perm.current_user_id())
 
         history = session.get("chat_history", [])
         history.append({"role": "user", "text": message})
@@ -220,9 +239,40 @@ def register(app: Flask) -> None:
                 _append_history(message, reply_dict)
                 return
 
-            # 2. LLM streaming path. Missing key → rule-based fallback.
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-            if not api_key:
+            # 2. LLM streaming path. No key, or no allowance left →
+            #    rule-based fallback, which is the same answer
+            #    ``engine.llm_client`` gives a generation run in either
+            #    state.
+            #
+            # The key is *resolved*, not read out of the environment. This
+            # line used to be ``os.environ.get("ANTHROPIC_API_KEY")``, which
+            # skipped ``engine.llm_keys`` entirely — so a team that had
+            # supplied its own key had its chat streamed on the platform's,
+            # and the platform paid for it. And with no budget check at all,
+            # a team over its monthly allowance kept streaming while
+            # generation was refused: two answers to "may I spend this?" in
+            # one product. ``check_budget`` is now the one rule, shared with
+            # ``call_messages``; ``key_source`` is what exempts a BYOK org
+            # from it, which is why resolving the key has to come first.
+            org_id = _perm.current_org_id()
+            try:
+                from engine import llm_keys as _llm_keys
+                api_key, key_source = _llm_keys.resolve_key(org_id)
+            except Exception as exc:  # pragma: no cover — never block chat
+                _logger.warning("chat stream: BYOK resolution failed: %s", exc)
+                api_key, key_source = (
+                    os.environ.get("ANTHROPIC_API_KEY", ""), "platform")
+            api_key = (api_key or "").strip()
+
+            refused = ""
+            if api_key:
+                try:
+                    _llm_client.check_budget(org_id, key_source=key_source)
+                except _llm_client.LLMBudgetExceeded as exc:
+                    _logger.info("chat stream over budget: %s", exc)
+                    refused = "budget"
+
+            if not api_key or refused:
                 fallback = _chatbot_mod.rule_based_fallback(message, lang)
                 reply_dict = _reply_to_dict(fallback)
                 yield _sse("full", reply_dict)

@@ -1483,7 +1483,10 @@ def _istqb_reply(topic: str, lang: str) -> ChatReply | None:
     )
 
 
-def _ai_respond(message: str, lang: str) -> ChatReply | None:
+def _ai_respond(message: str, lang: str, *,
+                org_id: str | None = None,
+                project_id: str | None = None,
+                user_id: str | None = None) -> ChatReply | None:
     """Try an Anthropic-backed reply. Returns None on any failure so the
     rule-based dispatcher can take over without the user noticing.
 
@@ -1491,6 +1494,21 @@ def _ai_respond(message: str, lang: str) -> ChatReply | None:
     which adds a 60 s per-attempt timeout and a 3-attempt exponential
     backoff retry. Any terminal failure surfaces as
     :class:`engine.llm_client.LLMUnavailable` and we fall through.
+
+    ``org_id`` / ``project_id`` / ``user_id`` are passed through to that
+    call, and both of the things they buy were missing. Without ``org_id``
+    the usage row is written with no organisation, so a team's chat spend
+    counted against nothing and appeared in no usage panel — while
+    ``routes/chat.py``'s streaming path attributed all three and said in its
+    own docstring that omitting the chattiest surface from the report "would
+    be worse than no report". And the budget gate in ``llm_client`` is
+    conditioned on ``org_id``, so with none passed it was skipped: a team
+    over its monthly allowance still got Tedgie on the platform key while
+    generation was refused.
+
+    Optional with ``None`` defaults, like ``project_id`` on
+    :func:`respond`, because this module is importable without Flask and
+    the eval harness and the MCP tool call it with no request at all.
     """
     if not _ANTHROPIC_OK:
         return None
@@ -1498,6 +1516,9 @@ def _ai_respond(message: str, lang: str) -> ChatReply | None:
         resp = call_messages(
             kind=_CHAT_KIND,
             max_tokens=_ANTHROPIC_MAX_TOKENS,
+            org_id=org_id,
+            project_id=project_id,
+            user_id=user_id,
             # System-blocks list (not a string) so the Anthropic API
             # honours ``cache_control`` on the persona block — see
             # Sprint 3 Task 3.2 for the full rationale.
@@ -1915,7 +1936,9 @@ def _project_facts_reply(message: str, lang: str,
 
 
 def respond(message: str, lang: str = "en", *,
-            project_id: str | None = None) -> ChatReply:
+            project_id: str | None = None,
+            org_id: str | None = None,
+            user_id: str | None = None) -> ChatReply:
     """Produce a :class:`ChatReply` for ``message``.
 
     Dispatch order:
@@ -1928,6 +1951,10 @@ def respond(message: str, lang: str = "en", *,
     ``project_id`` is what lets step 3 exist at all. It is optional and
     defaults to None so every existing caller — the eval harness, the MCP
     tool, the tests — keeps working and simply never reaches that step.
+
+    ``org_id`` and ``user_id`` are along for step 4, and for the same
+    reason: they are what let the reply be *billed* to somebody. See
+    :func:`_ai_respond` for what their absence cost.
     """
     raw = (message or "").strip()
 
@@ -1941,7 +1968,8 @@ def respond(message: str, lang: str = "en", *,
 
     # AI-backed reply (Anthropic Claude). Falls through to rule-based on
     # any failure.
-    ai = _ai_respond(raw, lang)
+    ai = _ai_respond(raw, lang, org_id=org_id, project_id=project_id,
+                     user_id=user_id)
     if ai is not None:
         return ai
 
@@ -1949,9 +1977,12 @@ def respond(message: str, lang: str = "en", *,
 
 
 def respond_dict(message: str, lang: str = "en", *,
-                 project_id: str | None = None) -> dict:
+                 project_id: str | None = None,
+                 org_id: str | None = None,
+                 user_id: str | None = None) -> dict:
     """JSON-ready wrapper used by the Flask route."""
-    r = respond(message, lang, project_id=project_id)
+    r = respond(message, lang, project_id=project_id, org_id=org_id,
+                user_id=user_id)
     return {
         "text": r.text,
         "intent": r.intent,

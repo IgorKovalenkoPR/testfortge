@@ -190,30 +190,7 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         api_key, key_source = None, "platform"
 
     # Budget gate, before the call rather than after it.
-    #
-    # The condition is "not the org's own key", not "is the platform key".
-    # Those differ when no key resolved at all, and gating on the narrower
-    # one meant an instance with no platform key skipped the check
-    # entirely — the guard was only armed when a key happened to be
-    # configured. Only a BYOK org is exempt; see LLMBudgetExceeded.
-    if org_id and key_source != "org":
-        try:
-            from engine import llm_cost
-            state = llm_cost.budget_state(org_id, _org_settings(org_id),
-                                          key_source=key_source)
-            if state["over"]:
-                raise LLMBudgetExceeded(
-                    f"organisation {org_id[:8]} has used "
-                    f"{llm_cost.format_usd(state['spent_micros'])} of its "
-                    f"{llm_cost.format_usd(state['limit_micros'])} monthly "
-                    f"allowance; falling back to the deterministic engine"
-                )
-        except LLMBudgetExceeded:
-            raise
-        except Exception as exc:  # pragma: no cover — fail open
-            # A metering outage must not lock every org out of generation.
-            # The budget is a cost guard, not a security control.
-            _logger.warning("budget check skipped: %s", exc)
+    check_budget(org_id, key_source=key_source)
 
     client = _build_client(api_key)
     retryable = _retryable_exception_types()
@@ -246,6 +223,44 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
     _meter(response, kind=kind, model=model, key_source=key_source,
            org_id=org_id, project_id=project_id, user_id=user_id)
     return response
+
+
+def check_budget(org_id: str | None, *, key_source: str = "platform") -> None:
+    """Raise :class:`LLMBudgetExceeded` when this org is over its allowance.
+
+    The condition is "not the org's own key", not "is the platform key".
+    Those differ when no key resolved at all, and gating on the narrower one
+    meant an instance with no platform key skipped the check entirely — the
+    guard was only armed when a key happened to be configured. Only a BYOK
+    org is exempt.
+
+    Public, and called from two places, because the streaming chat path
+    cannot go through :func:`call_messages` at all: the SDK's streaming
+    helper has no equivalent there, so ``routes/chat.py`` builds its own
+    client — and therefore skipped this gate by construction. Two surfaces
+    of one feature answered "may I spend this team's allowance?"
+    differently, and the non-streaming one skipped it too, for the separate
+    reason that ``engine.chatbot`` never passed an ``org_id`` at all.
+
+    Fails **open**: a metering outage must not lock every org out of
+    generation. The budget is a cost guard, not a security control.
+    """
+    if not org_id or key_source == "org":
+        return
+    try:
+        from engine import llm_cost
+        state = llm_cost.budget_state(org_id, _org_settings(org_id),
+                                      key_source=key_source)
+    except Exception as exc:  # pragma: no cover — fail open
+        _logger.warning("budget check skipped: %s", exc)
+        return
+    if state["over"]:
+        raise LLMBudgetExceeded(
+            f"organisation {org_id[:8]} has used "
+            f"{llm_cost.format_usd(state['spent_micros'])} of its "
+            f"{llm_cost.format_usd(state['limit_micros'])} monthly "
+            f"allowance; falling back to the deterministic engine"
+        )
 
 
 def _meter(response: Any, *, kind: str | None, model: str, key_source: str,
@@ -282,4 +297,4 @@ def _meter(response: Any, *, kind: str | None, model: str, key_source: str,
 
 
 __all__ = ["LLMUnavailable", "LLMBudgetExceeded", "call_messages",
-           "DEFAULT_TIMEOUT"]
+           "check_budget", "DEFAULT_TIMEOUT"]
