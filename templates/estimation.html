@@ -50,17 +50,17 @@
     <div class="form-row form-row-4">
       <div class="form-group">
         <label>{{ t.est_additional_platforms }}</label>
-        <input type="number" name="additional_platforms" min="0" max="50" step="1"
+        <input type="number" name="additional_platforms" min="0" max="{{ limits.additional_platforms }}" step="1"
                value="{{ last.additional_platforms or 9 }}">
       </div>
       <div class="form-group">
         <label>{{ t.est_minutes_per_tc }}</label>
-        <input type="number" name="minutes_per_tc" min="1" max="60" step="1"
+        <input type="number" name="minutes_per_tc" min="1" max="{{ limits.minutes_per_tc }}" step="1"
                value="{{ last.minutes_per_tc or 5 }}">
       </div>
       <div class="form-group">
         <label>{{ t.est_buffer }}</label>
-        <input type="number" name="buffer_percent" min="0" max="100" step="1"
+        <input type="number" name="buffer_percent" min="0" max="{{ limits.buffer_percent }}" step="1"
                value="{{ last.buffer_percent or 12 }}">
       </div>
       <div class="form-group">

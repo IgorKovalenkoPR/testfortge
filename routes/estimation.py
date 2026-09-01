@@ -282,6 +282,15 @@ def register(app: Flask) -> None:
             result=_pack_estimation(),
             last=session.get("estimation_form", {}),
             mockup_env=_mockup_env_state(),
+            # The form's bounds ARE the server's bounds. They were
+            # hard-coded in the template and disagreed with the clamps
+            # in ``_build_input`` in both directions: ``max="50"`` on a
+            # field the server cuts to 30 without a word, and
+            # ``max="60"`` on one the config allows 120 of, so raising
+            # ``EST_MAX_MINUTES_PER_TC`` changed nothing an operator
+            # could reach. Rendering the configured value means the
+            # browser's own message states the real limit.
+            limits=_form_limits(),
         )
 
     @app.route("/estimation/run", methods=["POST"])
@@ -304,6 +313,24 @@ def register(app: Flask) -> None:
                 "danger",
             )
             return redirect(url_for("estimation_page"))
+
+    def _form_limits() -> dict[str, int]:
+        """The maxima the form must offer, read from the same config the
+        server clamps to.
+
+        One source for both halves of the round trip. A number the form
+        accepts is a number the server honours, and a number the form
+        refuses is one the server would have refused too — neither of
+        which was true while the ceilings lived in an HTML attribute.
+        """
+        return {
+            "additional_platforms":
+                int(current_app.config["EST_MAX_ADDITIONAL_PLATFORMS"]),
+            "minutes_per_tc":
+                int(current_app.config["EST_MAX_MINUTES_PER_TC"]),
+            "buffer_percent":
+                int(current_app.config["EST_MAX_BUFFER_PERCENT"]),
+        }
 
     def _build_input(saved_attachment_path: str = "",
                      saved_mockup_paths: list[str] | None = None) -> EstimationInput:
