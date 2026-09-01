@@ -233,7 +233,15 @@ def register(app: Flask) -> None:
                                ("Bugs by status",
                                 metrics.get("bug_by_status"))):
             writer.writerow([label])
-            for key, count in sorted((mapping or {}).items()):
+            # Sorted by the key *as a string*. The aggregators normalise
+            # their buckets — ``engine.dashboard_metrics._counts`` folds
+            # ``None`` and ``""`` into "Unspecified", and the session
+            # aggregator now does the same — but this is the line that
+            # turns a stray one into a 500 rather than a slightly odd row,
+            # and an export that cannot be produced is worse than an export
+            # with an "Other" in it.
+            for key, count in sorted((mapping or {}).items(),
+                                     key=lambda kv: str(kv[0])):
                 writer.writerow(["", key, count])
             writer.writerow([])
         if filters.active:

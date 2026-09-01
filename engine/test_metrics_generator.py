@@ -307,10 +307,17 @@ def compute_session_metrics(
     tc_total = len(tc_data)
     tc_by_category: dict[str, int] = {}
     tc_by_priority: dict[str, int] = {}
+    # ``or`` and not just the ``get`` default, which the bug branch below
+    # already knew: ``dict.get(key, default)`` returns the default only when
+    # the key is *absent*, and a key present with ``None`` comes straight
+    # through. A pack hydrated from the database carries exactly that for a
+    # nullable column, and the ``None`` then became a bucket key — which
+    # ``/dashboard/export.csv`` sorts, and ``sorted`` cannot compare ``None``
+    # with a string. A 500 on the export, from a row the schema permits.
     for tc in tc_data:
-        cat = tc.get("category", "Other")
+        cat = tc.get("category") or "Other"
         tc_by_category[cat] = tc_by_category.get(cat, 0) + 1
-        pri = tc.get("priority", "Medium")
+        pri = tc.get("priority") or "Medium"
         tc_by_priority[pri] = tc_by_priority.get(pri, 0) + 1
 
     # ── Checklist breakdown ───────────────────────────────────
@@ -318,9 +325,9 @@ def compute_session_metrics(
     cl_by_category: dict[str, int] = {}
     cl_by_priority: dict[str, int] = {}
     for cl in cl_data:
-        cat = cl.get("category", "Other")
+        cat = cl.get("category") or "Other"
         cl_by_category[cat] = cl_by_category.get(cat, 0) + 1
-        pri = cl.get("priority", "Medium")
+        pri = cl.get("priority") or "Medium"
         cl_by_priority[pri] = cl_by_priority.get(pri, 0) + 1
 
     # ── Execution status ratios ───────────────────────────────
