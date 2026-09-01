@@ -436,8 +436,17 @@
   <p class="text-muted settings-note">
     {{ t.os_storage_not_configurable }}
   </p>
-  {% else %}
+  {% elif is_admin %}
 
+  {# Admins only, for the reason the BYOK card above already gives: this
+     is a credential management surface, not information a member needs.
+     It was the one section of this page that did not say so — five
+     others are gated, and both of its POSTs are "admin" in
+     ``route_policy``. Measured with STORAGE_BACKEND_CONFIGURABLE=1: a
+     plain member was shown the whole form, secret-key field included,
+     and got a bare 403 on submit. Typing a secret into a form that was
+     never going to take it is the worst version of offering an action
+     the server will refuse. #}
   <h3>{{ t.os_storage_own_heading }}</h3>
   <p class="text-muted">
     {{ t.os_storage_own_intro }}
