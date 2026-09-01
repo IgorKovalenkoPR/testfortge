@@ -179,16 +179,92 @@ def _row_to_checklist_item(row: list, col_map: dict[str, int], idx: int) -> Chec
 
 # ── Format-specific readers ───────────────────────────────────────
 
+class ImportTooLarge(ValueError):
+    """More rows than this instance will parse in one request.
+
+    A ``ValueError`` so the upload routes' existing ``except Exception`` turns
+    it into the flash they already show — and the message names the cap and
+    what to do, because "import failed" without a number is not a diagnosis.
+
+    **Refused rather than truncated**, deliberately. Half a test pack that
+    looks complete is worse than an upload that did not happen: the operator
+    would have to notice the missing rows themselves, and cases that silently
+    vanished are indistinguishable from cases nobody wrote.
+    """
+
+
+#: Rows one upload may carry. Bounded because the reader below is fed
+#: directly by a browser upload and nothing else bounded it.
+#:
+#: Measured on a **2.5 MB** file of 200 000 rows, which ``MAX_CONTENT_LENGTH``
+#: (64 MB) would accept twenty-five times over:
+#:
+#:   * ``load_workbook`` + ``list(iter_rows())`` — 175 MB peak, 56 s;
+#:   * ``read_only=True``, streamed — 16 MB, 47 s;
+#:   * ``read_only=True`` with this cap — 2 MB, 5.8 s;
+#:   * and :func:`read_headers`, which wants *one row*, paid 190 MB and 75 s,
+#:     because it went through the same full parse.
+#:
+#: The upload route calls ``read_headers`` and then parses again, so that one
+#: file cost roughly 365 MB of peak allocation and over two minutes — on a
+#: 512 MB dyno running ``--workers 1`` behind a proxy that closes idle
+#: connections at 30 s. The worker dies and takes every other request with it.
+#:
+#: 20 000 against a measured reference plan of 4 808 cases: four times the
+#: largest real pack this project has seen.
+MAX_IMPORT_ROWS = int(os.environ.get("MAX_IMPORT_ROWS", "20000"))
+
+
+def _too_large() -> ImportTooLarge:
+    return ImportTooLarge(
+        f"this file has more than {MAX_IMPORT_ROWS:,} rows. Split it and "
+        f"upload the parts, or raise MAX_IMPORT_ROWS on the service.")
+
+
 def _read_xlsx(file_path: str) -> tuple[list[str], list[list]]:
-    """Return (header_row, [data_rows]) from the active sheet of an XLSX file."""
-    wb = load_workbook(file_path, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
+    """Return (header_row, [data_rows]) from the active sheet of an XLSX file.
+
+    ``read_only=True`` streams the sheet instead of building every cell
+    object first — 175 MB against 16 MB on the file measured above. It also
+    yields only the rows that exist, so an inflated ``<dimension>`` costs
+    nothing; checked rather than assumed, which is what lets the cap count
+    yielded rows without worrying about padding.
+    """
+    wb = load_workbook(file_path, data_only=True, read_only=True)
+    try:
+        header: list[str] = []
+        data: list[list] = []
+        for index, row in enumerate(wb.active.iter_rows(values_only=True)):
+            if index == 0:
+                header = [str(c) if c is not None else "" for c in row]
+                continue
+            if not any(c is not None and str(c).strip() for c in row):
+                continue
+            if len(data) >= MAX_IMPORT_ROWS:
+                raise _too_large()
+            data.append(list(row))
+    finally:
+        wb.close()
+    if not header:
         return ([], [])
-    header = [str(c) if c is not None else "" for c in rows[0]]
-    data = [list(r) for r in rows[1:] if any(c is not None and str(c).strip() for c in r)]
     return (header, data)
+
+
+def _read_xlsx_header(file_path: str) -> list[str]:
+    """The header row alone, without parsing the sheet behind it.
+
+    :func:`read_headers` called :func:`_read_xlsx` and threw away everything
+    but ``[0]``. On the measured file that was 190 MB and 75 s to learn two
+    column names; this is 0.7 MB and 0.02 s.
+    """
+    wb = load_workbook(file_path, data_only=True, read_only=True)
+    try:
+        first = next(iter(wb.active.iter_rows(values_only=True)), None)
+    finally:
+        wb.close()
+    if first is None:
+        return []
+    return [str(c) if c is not None else "" for c in first]
 
 
 def _read_csv(file_path: str) -> tuple[list[str], list[list]]:
@@ -201,8 +277,13 @@ def _read_csv(file_path: str) -> tuple[list[str], list[list]]:
             delim = dialect.delimiter
         except csv.Error:
             delim = ","
-        reader = csv.reader(f, delimiter=delim)
-        rows = [r for r in reader if any((c or "").strip() for c in r)]
+        rows: list[list] = []
+        for row in csv.reader(f, delimiter=delim):
+            if not any((c or "").strip() for c in row):
+                continue
+            if len(rows) > MAX_IMPORT_ROWS:      # the header plus the cap
+                raise _too_large()
+            rows.append(row)
     if not rows:
         return ([], [])
     return (rows[0], rows[1:])
@@ -379,7 +460,7 @@ def read_headers(file_path: str, filename: str = "") -> list[str]:
     ext = (filename or os.path.basename(file_path)).rsplit(".", 1)[-1].lower()
     try:
         if ext == "xlsx":
-            return list(_read_xlsx(file_path)[0] or [])
+            return list(_read_xlsx_header(file_path) or [])
         if ext == "csv":
             return list(_read_csv(file_path)[0] or [])
         if ext == "json":
