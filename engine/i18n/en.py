@@ -418,13 +418,19 @@ TRANSLATIONS = {
 
     # PR-A: walkthrough-bug "no attachments" banner (EN)
     "bug_no_attachments_title": "No attachments captured",
+    # Reason (2) — "the page screenshot was captured but did not reach the
+    # finding (known wiring gap)" — is gone because the gap is. The fan-out
+    # in ``engine.live_executor`` injects the page shot into every finding
+    # that has none, and its own comment names this banner as the thing it
+    # was making misleading. Telling an operator to suspect a fixed defect
+    # sends them looking in the wrong place, and it buries the two reasons
+    # that are still true.
     "bug_no_attachments_body": (
         "No screenshot or video was linked to this bug. Possible reasons: "
         "(1) the run was started without a Base URL, so Playwright was "
-        "skipped; (2) the page screenshot was captured but did not reach "
-        "the finding (known wiring gap); (3) the run terminated before "
-        "evidence could be saved. Re-run with a Base URL set to maximise "
-        "the chance of attached evidence."
+        "skipped; (2) the run terminated before evidence could be saved. "
+        "Re-run with a Base URL set to maximise the chance of attached "
+        "evidence."
     ),
     "bug_no_attachments_link": "Open Test Execution",
 

@@ -374,7 +374,7 @@
                     <strong>{{ t.get('bug_no_attachments_title', 'No attachments captured') }}</strong>
                     <p style="margin:4px 0 0 0;">
                         {{ t.get('bug_no_attachments_body',
-                            'No screenshot or video was linked to this bug. Possible reasons: (1) the run was started without a Base URL, so Playwright was skipped; (2) the page screenshot was captured but did not reach the finding (known wiring gap); (3) the run terminated before evidence could be saved. Re-run with a Base URL set to maximise the chance of attached evidence.') }}
+                            'No screenshot or video was linked to this bug. Possible reasons: (1) the run was started without a Base URL, so Playwright was skipped; (2) the run terminated before evidence could be saved. Re-run with a Base URL set to maximise the chance of attached evidence.') }}
                     </p>
                     <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary"
                        style="margin-top:8px;font-size:0.78em;padding:4px 10px;">
