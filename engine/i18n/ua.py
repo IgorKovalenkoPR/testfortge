@@ -971,7 +971,10 @@ TRANSLATIONS = {
     # ── Останні три рядки, які не проходили через словник (M-2) ──
     'brand_aria': 'Testfort + Forge',
     'chat_aria': 'Testfort QA Assistant',
-    'pp_counts': '(%(tc)d TC · %(cl)d CL · %(bugs)d багів)',
+    # Ukrainian is where this mattered most: the hardcoded form made every
+    # page header say "1 багів", and the language needs three forms, which
+    # ``dm_unit_bugs`` already declares.
+    'pp_counts': '(%(tc)d TC · %(cl)d CL · %(bugs)d %(bugs_word)s)',
     'ie_edited_title': 'Змінено людиною — повторна генерація це не '
                        'перезапише',
     # ── Рядки, які жили лише як запасні значення в шаблонах (M-2) ──

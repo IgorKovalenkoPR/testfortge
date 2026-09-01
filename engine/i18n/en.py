@@ -974,7 +974,12 @@ TRANSLATIONS = {
     # ── The last three strings that never reached the dictionary (M-2) ──
     'brand_aria': 'Testfort + Forge',
     'chat_aria': 'Testfort QA Assistant',
-    'pp_counts': '(%(tc)d TC · %(cl)d CL · %(bugs)d bugs)',
+    # The bug noun comes in already agreeing with the number — see the
+    # picker template. It used to be hardcoded plural here, so every page
+    # header read "1 bugs" while the dashboard strip four lines away read
+    # "1 bug" through engine.i18n.plural. TC and CL are abbreviations and
+    # do not inflect in either language.
+    'pp_counts': '(%(tc)d TC · %(cl)d CL · %(bugs)d %(bugs_word)s)',
     'ie_edited_title': 'Changed by a person — a regeneration will not '
                        'overwrite it',
 

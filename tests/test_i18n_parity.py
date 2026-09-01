@@ -83,6 +83,10 @@ DELIBERATELY_ENGLISH = {
     "te_mode_walkthrough": "QA walkthrough — the mode's name in this product",
     "chat_aria": "the assistant's own name and tagline",
     "dm_unit_tc": "TC", "dm_unit_cl": "CL",
+    "pp_counts": ("nothing translatable is left in it: TC and CL are "
+                  "abbreviations and the bug noun moved out to "
+                  "dm_unit_bugs, which has Ukrainian's three forms — the "
+                  "hardcoded one made every page header read '1 багів'"),
     "te_col_id": "ID",
     "te_env_web": "Web is the platform's name",
     "te_formats": "a list of file extensions",
