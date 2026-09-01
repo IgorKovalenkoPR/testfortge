@@ -31,6 +31,7 @@ from engine import workspace as _workspace
 from engine.log import get_logger
 
 from ._shared import (
+    AUTOCREATED_KEY,
     GENERATED_KEYS, SERVER_START_TIME, attachment_header, cl_to_dict,
     get_session_id,
     is_valid_project_id as _shared_is_valid_project_id, mirror_pack,
@@ -105,6 +106,12 @@ def _set_active_project(project_id: str, name: str,
     # "New session": drop the marker so /test-cases and /checklist are
     # allowed to restore this project's saved pack again.
     session.pop("_pack_cleared_boot", None)
+    # And it supersedes the auto-create stamp. Every caller of this
+    # function got here because the operator said which project they
+    # wanted; ``_maybe_restore_pack_from_db`` may overrule the product's
+    # own guess, never theirs — including when they deliberately pick the
+    # placeholder it invented earlier.
+    session.pop(AUTOCREATED_KEY, None)
 
 
 def _safe_next_target(default_endpoint: str = "index") -> str:

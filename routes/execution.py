@@ -41,7 +41,8 @@ from engine.test_credentials import (
 
 from engine import db as _db
 
-from ._shared import (extract_resource_urls, ensure_active_project,
+from ._shared import (AUTOCREATED_KEY, extract_resource_urls,
+                      ensure_active_project,
                       get_session_id, pack_bugs, pack_checklist,
                       pack_runs, pack_test_cases, mirror_pack)
 # ``_persist_bug`` lives in routes/bugs.py since the Stage 7 refactor.
@@ -738,8 +739,19 @@ def _maybe_restore_pack_from_db() -> None:
     this owner's other projects, prefer ones with content, and re-pin. The
     accessors then read the pack from the project we just chose.
 
+    Only over a project **this session invented**. Walked 2026-09-01:
+    create a project from the picker, open /test-execution once, and the
+    active project was silently back to the previous one — on the execution
+    page and on every page after it. The flash had just said "Project 'X'
+    created and activated". Emptiness was the wrong trigger: a project the
+    operator has only just made is always empty, and that is not a mistake
+    to correct. ``AUTOCREATED_KEY`` names the pin nobody chose, and it is
+    the only one this function may overrule.
+
     Best-effort — never raises. Failures are debug-logged.
     """
+    if session.get("project_id") != session.get(AUTOCREATED_KEY):
+        return
     if pack_test_cases() or pack_checklist():
         return
 

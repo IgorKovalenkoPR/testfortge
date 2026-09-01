@@ -286,6 +286,16 @@ def _persistent_sid_cookie_value(sid: str) -> str:
     return _make_sid_serializer().dumps(sid)
 
 
+#: Session key naming the project this session auto-created for itself.
+#:
+#: ``ensure_active_project`` invents an "Untitled project …" when the caller
+#: has nowhere to write. That pin is the product's guess, not the operator's
+#: choice, and it is the only one anything may silently replace — a project
+#: the operator created or picked in the picker must survive every page they
+#: open. ``routes/execution._maybe_restore_pack_from_db`` is the consumer.
+AUTOCREATED_KEY = "_project_autocreated"
+
+
 def get_session_id(session_obj=None) -> str:
     """Return a stable identifier for the caller's session.
 
@@ -596,6 +606,11 @@ def ensure_active_project(session_obj=None) -> str:
         log.warning("ensure_active_project: auto-create failed: %s", exc)
         return ""
     sess["project_id"] = pid
+    # Stamped because nobody asked for this project. It is the placeholder
+    # a page auto-creates so the caller has somewhere to write, and it is
+    # the only pin the product is entitled to overrule later — see
+    # ``AUTOCREATED_KEY``.
+    sess[AUTOCREATED_KEY] = pid
     setup = sess.get("project_setup") or {}
     setup.setdefault("project_name", name)
     sess["project_setup"] = setup
@@ -1035,7 +1050,7 @@ __all__ = [
     # The active project's pack — the one way route modules read it.
     "pack_cleared", "pack_test_cases", "pack_checklist", "pack_bugs",
     "pack_runs", "pack_estimation", "mirror_pack", "pack_version",
-    "ensure_active_project",
+    "ensure_active_project", "AUTOCREATED_KEY",
     # dashboard metric helpers
     "kpi_value", "kpi_defect_density",
 ]
