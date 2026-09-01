@@ -1006,6 +1006,34 @@ def features_from_site_analysis(analysis) -> list[Feature]:
 
 # ── XLSX export ──────────────────────────────────────────────────
 
+def compatibility_note(count: int, platforms: Iterable[str] | None) -> str:
+    """The compatibility line for the exported estimate.
+
+    It used to contradict itself. Both callers build the list by slicing
+    a nine-name reference list — ``_DEFAULT_COMPAT_PLATFORMS[:count]`` —
+    and a slice past the end returns what there is, silently. Ask for 20
+    additional platforms, which the config allows up to 30 of, and the
+    quote read "20 additional combinations:" above nine bullets. The price
+    was for twenty. A client reading that sentence has to decide which
+    half of it is wrong.
+
+    The tool cannot invent the other eleven names, so it says so. Named is
+    named, agreed later is agreed later, and the count stays the count —
+    the number the estimate was priced on must not shrink to fit the list
+    of names that happens to be on hand.
+    """
+    named = [p for p in (platforms or []) if p]
+    lead = (f"** Compatibility testing will be performed on {count} "
+            f"additional combinations")
+    if not named:
+        return lead + "."
+    bullets = "\n- " + "\n- ".join(named)
+    if len(named) >= count:
+        # The usual case, and the one the sentence was written for.
+        return lead + ":" + bullets
+    return (f"{lead}. {len(named)} are proposed below; the remaining "
+            f"{count - len(named)} are to be agreed:" + bullets)
+
 def export_estimation_xlsx(result: EstimationResult, output_path: str) -> str:
     """Export an EstimationResult to a workbook matching the reference layout."""
     from openpyxl import Workbook
@@ -1136,11 +1164,8 @@ def export_estimation_xlsx(result: EstimationResult, output_path: str) -> str:
 
     # A34 — number of additional platforms
     ws["A34"] = result.additional_platforms
-    ws["C34"] = (f"** Compatibility testing will be performed on "
-                  f"{result.additional_platforms} additional combinations:\n- "
-                  + "\n- ".join(result.platforms_list) if result.platforms_list else
-                  f"** Compatibility testing will be performed on "
-                  f"{result.additional_platforms} additional combinations.")
+    ws["C34"] = compatibility_note(result.additional_platforms,
+                                   result.platforms_list)
     ws["C33"] = (f"* Functional Testing & UX Testing will be performed on the "
                   f"following most popular combination: {result.primary_platform}.")
     ws["C32"] = "Notes:"
