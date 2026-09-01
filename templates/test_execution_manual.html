@@ -153,8 +153,14 @@
                'File a bug from this item (Failed / Passed but only)') }}
         </label>
 
+        {# The item's own list, not the run's. An unjudgeable card — deleted
+           from the pack, or created by the editors' "add" button and never
+           written — offers Skipped alone: the two warnings above already say
+           there is nothing to judge, and one of them says to record it as
+           Skipped. Offering Passed underneath that is how a blank case ends
+           up in the coverage figure. #}
         <div class="verdict-row">
-            {% for verdict in all_verdicts %}
+            {% for verdict in current.allowed_verdicts %}
             <button type="submit" name="verdict" value="{{ verdict }}"
                     class="btn verdict-btn verdict-{{ verdict|lower|replace(' ', '-') }}">
                 {{ verdict }}

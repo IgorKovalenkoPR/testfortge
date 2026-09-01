@@ -20,8 +20,8 @@ belongs beside it, not inside it.
 """
 from __future__ import annotations
 
-from flask import (Flask, abort, flash, redirect, render_template, request,
-                   session, url_for)
+from flask import (Flask, abort, flash, g, redirect, render_template,
+                   request, session, url_for)
 
 from engine import bug_report as _bug_report
 from engine import db as _db
@@ -397,6 +397,21 @@ def register(app: Flask) -> None:
         if item is None or not verdict:
             flash("That verdict could not be recorded — unknown item or "
                   "status.", "warning")
+            return redirect(url_for("manual_run_page", run_id=run_id))
+
+        # The buttons are the interface, not the rule. An unjudgeable item
+        # offers Skipped alone on screen, and a form that posts anything
+        # else — a stale tab, a resubmitted page, a script — must not be
+        # able to put a blank card into the passed count. Same reasoning as
+        # everywhere else here: what the page renders is a convenience, and
+        # the thing that decides is the check on the way in.
+        if verdict not in item.allowed_verdicts:
+            flash(g.t.get(
+                "manual_run_verdict_refused",
+                "That item has nothing to judge, so it can only be recorded "
+                "as Skipped — which keeps the run's coverage figure honest. "
+                "Write the item in Test Cases or Checklist, then reload this "
+                "page."), "warning")
             return redirect(url_for("manual_run_page", run_id=run_id))
 
         bug_id = None

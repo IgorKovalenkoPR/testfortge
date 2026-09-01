@@ -96,6 +96,28 @@ class QueueItem:
                         self.steps))
 
     @property
+    def allowed_verdicts(self) -> tuple[str, ...]:
+        """The verdicts this item may honestly take.
+
+        Both unjudgeable states — :attr:`missing` and :attr:`empty` — used
+        to render their warning and then the full five buttons underneath
+        it. The page said "there is nothing here to judge" and offered
+        Passed; the ``missing`` copy went further and said "Record it as
+        Skipped" with Passed sitting right there. Measured on a real walk:
+        clicking Passed on a case with no steps and no expected result took
+        the run from "2 / 3 judged" to "3 / 3 judged · 66.7% passed", which
+        is coverage that never happened — the exact thing the same screen's
+        close-early notice promises never to report.
+
+        ``Skipped`` is the honest one and the only one offered, because it
+        is excluded from :data:`EXECUTED_VERDICTS`: the run keeps its
+        original total and the percentage stays true.
+        """
+        if self.missing or self.empty:
+            return ("Skipped",)
+        return VERDICTS
+
+    @property
     def key(self) -> tuple[str, str]:
         """The identity of a row in the walk.
 

@@ -1700,6 +1700,11 @@ TRANSLATIONS = {
                                "check. Record it as Skipped — the run keeps "
                                "its original total, so the coverage number "
                                "stays honest.",
+    "manual_run_verdict_refused": (
+        "That item has nothing to judge, so it can only be recorded as "
+        "Skipped — which keeps the run's coverage figure honest. Write the "
+        "item in Test Cases or Checklist, then reload this page."
+    ),
     "manual_run_empty_title": "This item has no steps and no expected "
                               "result yet.",
     "manual_run_empty_body": "There is nothing here to judge. Write it in "
