@@ -76,8 +76,7 @@
             {% if p.updated_at %}
             <div style="margin-top:4px;font-size:0.75em;color:#94a3b8;">
                 {{ t.get('recent_projects_updated', 'Last activity:') }}
-                {{ p.updated_at[:16] if p.updated_at|length > 16
-                   else p.updated_at }}
+                {{ p.updated_at | when }}
             </div>
             {% endif %}
         </div>
@@ -280,7 +279,7 @@
         {%- for run in dash_options.runs %}
         <option value="{{ run.id }}"
                 {% if dash_filters.run_id == run.id %}selected{% endif %}>
-          #{{ run.id }}{% if run.started_at %} · {{ run.started_at[:10] }}{% endif %}
+          #{{ run.id }}{% if run.started_at %} · {{ run.started_at | when }}{% endif %}
           {%- if run.tester %} · {{ run.tester }}{% endif %}
         </option>
         {%- endfor %}
@@ -726,7 +725,7 @@
                 <td>{{ p.get('test_cases_count', 0) }}</td>
                 <td>{{ p.get('checklist_count', 0) }}</td>
                 <td>{{ p.get('bug_count', 0) }}</td>
-                <td class="meta-text">{{ p.saved_at[:16] }}</td>
+                <td class="meta-text">{{ p.saved_at | when }}</td>
                 <td>
                     {% if p.folder != active_project_id %}
                     <form method="POST" action="{{ url_for('db_select_project', project_id=p.folder) }}" style="display:inline">

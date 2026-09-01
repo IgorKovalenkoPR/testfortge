@@ -555,7 +555,7 @@
                timestamps as `started_at[:10]`, and a microsecond-precision
                ISO string in a table cell is noise. Minutes are the useful
                resolution for "which walk did I leave open". #}
-            <td>{{ (r.started_at or '')[:16] | replace('T', ' ') }}</td>
+            <td>{{ r.started_at | when }}</td>
             <td>{{ (r.env_payload or {}).get('tester') or '—' }}</td>
             <td>
                 <a class="btn btn-sm"

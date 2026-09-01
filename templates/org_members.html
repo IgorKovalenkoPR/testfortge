@@ -144,7 +144,10 @@
         <tr>
           <td>{{ inv.email }}</td>
           <td>{{ inv.role }}</td>
-          <td>{{ (inv.expires_at or '')[:10] }}</td>
+          {# The whole instant, not ``[:10]``. An invite expiring at
+             23:00 UTC lapses after midnight for a reader three hours east,
+             so the date alone was a day early for them. #}
+          <td>{{ inv.expires_at | when }}</td>
           <td class="col-actions">
             {# Both keyed on the address, not the token: the token is a
                bearer credential for this person's seat, so it never

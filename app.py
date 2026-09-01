@@ -536,6 +536,48 @@ def safe_display_filter(s):
     return strip_display(s)
 
 
+@app.template_filter('when')
+def when_filter(value, seconds: bool = False):
+    """A stored timestamp, rendered as the UTC it is.
+
+    Found by walking the dashboard and reading the clock: it said "Last
+    activity: 2026-09-01T15:39" while the wall clock said 18:39. Every
+    timestamp in this product is written by ``engine.db._utcnow()`` and
+    displayed with ``[:16]`` — and the slice is what removes the evidence.
+    On Postgres the stored string ends ``+00:00`` and the slice cuts it off;
+    on SQLite the offset is dropped on round-trip and was never there. Either
+    way a reader in Kyiv, which is who uses this, sees every timestamp three
+    hours in the past with nothing to suggest it.
+
+    One template got it right — ``test_cases.html`` writes ``… }} UTC`` after
+    its slice — so the authors knew. Six others did not, which is the
+    asymmetry that pointed here.
+
+    Local time would be friendlier and is a different change: it needs the
+    reader's zone, which the server does not have, so it belongs in the
+    browser. Marking the value is what stops it being *wrong*, and that is
+    this filter's whole job.
+
+    Accepts the ISO strings ``engine.db._row_to_dict`` produces, a real
+    ``datetime``, or nothing — an empty value renders empty so the
+    ``{% if %}`` guards around these fields keep working.
+    """
+    if not value:
+        return ""
+    text = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    # Cut at the offset rather than by character count: "+00:00" and "Z" are
+    # what a length-based slice used to eat, and a stored value with no
+    # offset at all has to come out the same way.
+    for marker in ("+", "Z"):
+        head = text.split("T")[0]
+        rest = text[len(head):]
+        if marker in rest:
+            text = head + rest.split(marker)[0]
+            break
+    keep = 19 if seconds else 16
+    return f"{text[:keep].replace('T', ' ')} UTC"
+
+
 @app.template_filter('bug_field')
 def bug_field_filter(s):
     """Render a free-text bug-report field, auto-splitting numbered lists.

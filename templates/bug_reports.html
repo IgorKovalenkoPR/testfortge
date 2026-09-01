@@ -431,7 +431,7 @@
             <tr><td class="label">{{ t.get('bug_labels', 'Labels') }}</td><td>{% for l in bug.labels %}<span class="bug-label">{{ l }}</span>{% endfor %}</td></tr>
             {% endif %}
             {% if bug.created_at %}
-            <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at[:19] }}</td></tr>
+            <tr><td class="label">{{ t.get('bug_created', 'Created') }}</td><td>{{ bug.created_at | when(seconds=True) }}</td></tr>
             {% endif %}
             {# Shown while editing even when empty: otherwise a bug with no
                comment offers no way to add one, which is the only way this
