@@ -169,6 +169,39 @@ class TestTheDictionariesAgree:
             f"DELIBERATELY_ENGLISH with the reason — a term kept in English "
             f"on purpose and one nobody got to look the same from here.")
 
+    def test_no_value_was_cut_short_by_an_escape(self):
+        r"""A value ending in a backslash is a sentence that lost its tail.
+
+        Two were live when this was written, both English, both cut at an
+        apostrophe: "… it feeds Brooks\" on the Estimation form and
+        "… please don\" in the overlay a tester watches while a run
+        executes. The cause is the same in both — the text was moved out of
+        a template fallback, where it was written for a single-quoted
+        literal, into a double-quoted one: the escape before the apostrophe
+        became a literal backslash and swallowed the rest of the edit.
+
+        The fallbacks still carried the whole sentence, which is how the
+        intended wording was recovered — and is why nothing noticed. The
+        page reads fine until the key exists.
+        """
+        offenders = []
+        for lang in ("en", "ua"):
+            for key, value in TRANSLATIONS[lang].items():
+                if isinstance(value, str) and value.rstrip().endswith("\\"):
+                    offenders.append(f"{lang}.{key}: ...{value[-40:]!r}")
+        assert not offenders, (
+            "a translation ends in a backslash, which means an escape ate "
+            "the rest of the sentence: " + "; ".join(offenders))
+
+    def test_that_scanner_would_notice(self):
+        """Guards the guard: the check above is one ``endswith``, and it
+        passes trivially if the dictionaries are empty or the values stop
+        being strings."""
+        sample = {"broken": "a sentence that stops at an apostrophe\\",
+                  "whole": "a sentence that does not."}
+        caught = [k for k, v in sample.items() if v.rstrip().endswith("\\")]
+        assert caught == ["broken"], caught
+
     def test_the_allowlist_has_no_stale_entries(self):
         """The opposite failure: an allowlist that outlives its reason.
 

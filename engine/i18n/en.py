@@ -1215,7 +1215,8 @@ TRANSLATIONS = {
     "est_team_override": "Override",
     "est_team_size_hint": "TestForTge suggests a headcount from the "
                           "estimate. Override only if you have a fixed team "
-                          "— it feeds Brooks\\",
+                          "— it feeds Brooks's-law communication "
+                          "overhead.",
     "est_tab_text": "Requirements text",
     "est_tab_mockups": "Mockups",
     "est_tab_url": "URL crawl",
@@ -1646,7 +1647,8 @@ TRANSLATIONS = {
     "te_overlay_title": "Live automation view — run in progress",
     "te_overlay_body": "TestForTge is running your selected items across "
                        "every chosen environment. This tab will reload "
-                       "automatically once the run completes — please don\\",
+                       "automatically once the run completes — please "
+                       "don't close it.",
     "te_overlay_live_link": "Open live frame-by-frame view in a new tab ↗",
 
     # test_execution_live.html
