@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from flask import (Flask, flash, g, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (Flask, abort, flash, g, jsonify, redirect,
+                   render_template, request, session, url_for)
 
 from engine import db as _db
 from engine import permissions as _perm
@@ -22,7 +22,8 @@ from engine.test_metrics_generator import compute_session_metrics
 
 log = get_logger(__name__)
 
-from ._shared import (get_session_id, kpi_value, kpi_defect_density,
+from ._shared import (belongs_to_another_org, get_session_id, kpi_value,
+                      kpi_defect_density,
                       pack_bugs, pack_checklist, pack_runs,
                       pack_test_cases, visible_projects)
 
@@ -263,6 +264,11 @@ def register(app: Flask) -> None:
             When neither is set we return an empty list rather than 4xx,
             because the trend chart's empty-state path is the
             "anonymous visitor lands on /test-metrics" UX (no friction).
+            When one *is* named, it is checked: the parameter used to be
+            taken as given, so any signed-in member of any team could read
+            any project's pass rate, defect density and volume over time by
+            naming its id. No-friction is about the caller who names
+            nothing, not about the caller who names somebody else's.
           - ``days`` — clamped to [1, 365]. Default 30.
 
         Response shape::
@@ -283,6 +289,13 @@ def register(app: Flask) -> None:
                or session.get("project_id") or "").strip()
         if not pid:
             return jsonify({"snapshots": []})
+        # 404, matching ``/automation/runs/<id>`` and ``/api/edit/*``:
+        # telling a caller that the project exists but is not theirs is the
+        # one thing this route should not say. The chart already renders
+        # its empty state for any non-200 (``r.ok ? r.json() : {snapshots:
+        # []}``), so the honest status costs the page nothing.
+        if belongs_to_another_org(pid):
+            abort(404)
         # Clamp ``days`` to [1, 365]. A "?days=0" request defaults to
         # 1 day — the chart never receives a zero-width window.
         try:
