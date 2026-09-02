@@ -275,7 +275,16 @@ def register(app: Flask) -> None:
         if _perm.current_user() is not None:
             return redirect(_safe_next(request.args.get("next")))
 
-        if request.method == "GET":
+        # ``!= "POST"`` and not ``== "GET"``. Werkzeug routes HEAD to a
+        # GET rule, so the equality form let a HEAD request fall through
+        # to the sign-in logic below and be processed as an attempt with
+        # an empty address: 401 instead of 200, a "login failed for ''"
+        # line in the log for every probe, and — measured — 115 ms
+        # against 5 ms, because ``verify_login`` spends
+        # ``_burn_equivalent_time()`` on an address it cannot find. On one
+        # worker that is an unauthenticated request costing a password
+        # hash. Only a real POST is a login attempt.
+        if request.method != "POST":
             return render_template("auth_login.html",
                                    next_url=request.args.get("next", ""),
                                    google_enabled=oauth is not None,
