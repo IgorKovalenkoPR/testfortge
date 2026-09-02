@@ -63,7 +63,8 @@ produces fewer "where do I look" messages than a 403 does.
 """
 from __future__ import annotations
 
-from flask import (Flask, flash, redirect, render_template, request, url_for)
+from flask import (Flask, flash, g, redirect, render_template, request,
+                   url_for)
 
 from engine import auth as _auth
 from engine import db as _db
@@ -162,7 +163,9 @@ def register(app: Flask) -> None:
     def org_invite():
         org_id = _perm.current_org_id()
         if not org_id:
-            flash("Create an organisation before inviting people.", "error")
+            flash(g.t.get("om_no_org_invite",
+                          "Create an organisation before inviting "
+                          "people."), "error")
             return _members_redirect()
 
         email = _db.normalize_email(request.form.get("email"))
@@ -173,16 +176,19 @@ def register(app: Flask) -> None:
         # theatre. What it catches is a typo'd or empty field.
         if not email or "@" not in email or email.startswith("@") \
                 or email.endswith("@") or " " in email:
-            flash("Enter a valid email address.", "error")
+            flash(g.t.get("om_bad_email",
+                          "Enter a valid email address."), "error")
             return _members_redirect()
         if role not in _db.ORG_ROLES:
-            flash("Pick a valid role.", "error")
+            flash(g.t.get("om_bad_role",
+                          "Pick a valid role."), "error")
             return _members_redirect()
 
         existing = _db.get_user_by_email(email)
         if existing is not None and _db.get_org_role(org_id, existing["id"]):
-            flash(f"{email} is already on this team. Change their role "
-                  f"below instead.", "info")
+            flash(g.t.get("om_already_member",
+                          "%(email)s is already on this team. Change their "
+                          "role below instead.") % {"email": email}, "info")
             return _members_redirect()
 
         return _issue_invite(org_id, email, role, action="create")
@@ -211,7 +217,8 @@ def register(app: Flask) -> None:
         org_id = _perm.current_org_id()
         email = _db.normalize_email(request.form.get("email"))
         if not (org_id and email):
-            flash("That invitation is no longer active.", "info")
+            flash(g.t.get("om_invite_inactive",
+                          "That invitation is no longer active."), "info")
             return _members_redirect()
 
         # The pending list is the authority on both "is there one" and "at
@@ -223,8 +230,10 @@ def register(app: Flask) -> None:
             # Claimed, cancelled, expired, or never existed. One message:
             # the difference does not change what the admin does next,
             # which is to invite the address again from the form above.
-            flash("That invitation is no longer active. Invite the address "
-                  "again to send a new link.", "info")
+            flash(g.t.get("om_invite_inactive_reissue",
+                          "That invitation is no longer active. Invite the "
+                          "address "
+                  "again to send a new link."), "info")
             return _members_redirect()
 
         role = pending.get("role") or "user"
@@ -246,7 +255,9 @@ def register(app: Flask) -> None:
         # the reissue path safe to press twice.
         if not _db.create_invite(org_id, email, role, token,
                                  invited_by_user_id=actor):
-            flash("That invitation could not be created — see server logs.",
+            flash(g.t.get("om_invite_failed",
+                          "That invitation could not be created — see server "
+                          "logs."),
                   "error")
             return _members_redirect()
 
@@ -301,26 +312,31 @@ def register(app: Flask) -> None:
         org_id = _perm.current_org_id()
         role = (request.form.get("role") or "").strip()
         if not org_id or role not in _db.ORG_ROLES:
-            flash("Pick a valid role.", "error")
+            flash(g.t.get("om_bad_role",
+                          "Pick a valid role."), "error")
             return _members_redirect()
 
         before = _db.get_org_role(org_id, user_id)
         if before is None:
-            flash("That person is not on this team.", "error")
+            flash(g.t.get("om_not_a_member",
+                          "That person is not on this team."), "error")
             return _members_redirect()
 
         if not _db.change_org_role(org_id, user_id, role):
             # The only way this fails with a valid role is the last-admin
             # guard. Say what to do rather than what rule fired.
-            flash("You are the only admin on this team. Promote someone "
-                  "else to admin first, then change your own role.", "error")
+            flash(g.t.get("om_only_admin_role",
+                          "You are the only admin on this team. Promote "
+                          "someone "
+                  "else to admin first, then change your own role."), "error")
             return _members_redirect()
 
         _db.append_audit(entity="org_member", action="role_change",
                          user_id=_perm.current_user_id(), org_id=org_id,
                          entity_id=user_id,
                          diff={"role": [before, role]})
-        flash("Role updated.", "success")
+        flash(g.t.get("om_role_updated",
+                      "Role updated."), "success")
         return _members_redirect()
 
     @app.route("/org/members/<user_id>/remove", methods=["POST"])
@@ -334,12 +350,15 @@ def register(app: Flask) -> None:
         if before is None:
             # Idempotent: removing someone who is already gone is a no-op,
             # not an error — a double-submitted form should not scold.
-            flash("That person is not on this team.", "info")
+            flash(g.t.get("om_not_a_member",
+                          "That person is not on this team."), "info")
             return _members_redirect()
 
         if not _db.remove_org_member(org_id, user_id):
-            flash("You are the only admin on this team. Promote someone "
-                  "else to admin before removing yourself.", "error")
+            flash(g.t.get("om_only_admin_remove",
+                          "You are the only admin on this team. Promote "
+                          "someone "
+                  "else to admin before removing yourself."), "error")
             return _members_redirect()
 
         # Their sessions die with their access. Leaving them alive would
@@ -355,8 +374,10 @@ def register(app: Flask) -> None:
         # The account itself survives on purpose. Their name still has to
         # resolve on every test case they wrote and every bug they filed,
         # and a deleted row turns an audit trail into orphaned ids.
-        flash("Removed from the team. Their test cases and bug reports "
-              "stay, still attributed to them.", "success")
+        flash(g.t.get("om_removed",
+                      "Removed from the team. Their test cases and bug "
+                      "reports "
+              "stay, still attributed to them."), "success")
         return _members_redirect()
 
     @app.route("/org/members/<user_id>/password", methods=["POST"])
@@ -374,7 +395,8 @@ def register(app: Flask) -> None:
         """
         org_id = _perm.current_org_id()
         if not org_id:
-            flash("Create an organisation before managing members.",
+            flash(g.t.get("om_no_org_manage",
+                          "Create an organisation before managing members."),
                   "error")
             return _members_redirect()
 
@@ -382,7 +404,8 @@ def register(app: Flask) -> None:
             # Also the answer for a user id from another team: they are
             # not on this one, and saying more would confirm the id
             # exists somewhere.
-            flash("That person is not on this team.", "error")
+            flash(g.t.get("om_not_a_member",
+                          "That person is not on this team."), "error")
             return _members_redirect()
 
         password = request.form.get("password") or ""
@@ -391,7 +414,8 @@ def register(app: Flask) -> None:
             # Checked before the policy so the admin fixes the typo they
             # made rather than a policy complaint about the wrong one of
             # two different strings.
-            flash("The two passwords do not match.", "error")
+            flash(g.t.get("auth_passwords_differ",
+                          "The two passwords do not match."), "error")
             return _members_redirect()
 
         member = _db.get_user(user_id) or {}
@@ -405,7 +429,9 @@ def register(app: Flask) -> None:
             return _members_redirect()
 
         if not _db.set_password_hash(user_id, pwd_hash):
-            flash("That password could not be saved — see server logs.",
+            flash(g.t.get("om_password_failed",
+                          "That password could not be saved — see server "
+                          "logs."),
                   "error")
             return _members_redirect()
 
@@ -428,10 +454,12 @@ def register(app: Flask) -> None:
                                "sessions_ended": dropped, "via": "admin"})
         log.info("password set by admin for %s; %d session(s) ended",
                  user_id[:8], dropped)
-        flash(f"Password set for {member.get('email') or 'that member'}. "
-              f"They have been signed out everywhere and can sign in with "
-              f"the new one — tell them yourself, this page will not show "
-              f"it again.", "success")
+        flash(g.t.get("om_password_set",
+                      "Password set for %(who)s. They have been signed out "
+                      "everywhere and can sign in with the new one — tell "
+                      "them yourself, this page will not show it again.")
+              % {"who": member.get("email")
+                 or g.t.get("om_that_member", "that member")}, "success")
         return _members_redirect()
 
     @app.route("/org/invites/revoke", methods=["POST"])
@@ -450,7 +478,8 @@ def register(app: Flask) -> None:
         org_id = _perm.current_org_id()
         email = _db.normalize_email(request.form.get("email"))
         if not (org_id and email):
-            flash("That invitation is no longer active.", "info")
+            flash(g.t.get("om_invite_inactive",
+                          "That invitation is no longer active."), "info")
             return _members_redirect()
 
         revoked = _db.revoke_invites_for_email(org_id, email)
@@ -458,13 +487,16 @@ def register(app: Flask) -> None:
             # Already claimed, already cancelled, or never existed. One
             # message: an admin does not need the difference, and a
             # double-submitted form should not scold.
-            flash("That invitation is no longer active.", "info")
+            flash(g.t.get("om_invite_inactive",
+                          "That invitation is no longer active."), "info")
             return _members_redirect()
 
         _db.append_audit(entity="invite", action="revoke",
                          user_id=_perm.current_user_id(), org_id=org_id,
                          diff={"email": email, "count": revoked})
-        flash(f"Invitation for {email} cancelled.", "success")
+        flash(g.t.get("om_invite_cancelled",
+                      "Invitation for %(email)s cancelled.")
+              % {"email": email}, "success")
         return _members_redirect()
 
 

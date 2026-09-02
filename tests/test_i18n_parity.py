@@ -528,7 +528,13 @@ class TestNoRouteGrowsMoreEnglishFlashes:
         "execution.py": 15,
         "execution_manual.py": 12,
         "generation.py": 13,
-        "members.py": 24,
+        # 24 → 2. The two left take no literal: the invitation flash is
+        # composed from the module-level ``_LEAD`` table and one of two
+        # ``tail`` branches (with ``_undelivered`` inside them), which is
+        # four templates and a helper rather than a key; and ``str(exc)``
+        # is a ``PasswordPolicyError`` whose messages live in
+        # ``engine/auth.py``, the same one ``auth.py`` still has.
+        "members.py": 2,
         "projects.py": 38,
         "settings.py": 31,
     }

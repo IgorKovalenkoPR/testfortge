@@ -2055,4 +2055,51 @@ TRANSLATIONS = {
                            "had expired. Ask an admin to invite you again.",
     "auth_account_exists": "An account for that address already exists. "
                            "Sign in instead.",
+    # ── The Team page's flashes (rule 6, members.py) ──────────────
+    # 21 of members.py's 24 come through here. With registration
+    # invite-only this page is the only door into the platform, so its
+    # messages are the first prose a new colleague's admin reads — and
+    # every one of them was English in both languages.
+    #
+    # Values are each call site's fallback verbatim, extracted from the
+    # source. "The two passwords do not match." is not here: it is the
+    # same sentence the sign-in flow already has, and shares
+    # ``auth_passwords_differ`` rather than growing a second key that
+    # could drift from it.
+    "om_no_org_invite": "Create an organisation before inviting people.",
+    "om_no_org_manage": "Create an organisation before managing members.",
+    "om_bad_email": "Enter a valid email address.",
+    "om_bad_role": "Pick a valid role.",
+    "om_already_member": "%(email)s is already on this team. Change their "
+                         "role below instead.",
+    "om_invite_failed": "That invitation could not be created \u2014 see "
+                        "server logs.",
+    "om_invite_inactive": "That invitation is no longer active.",
+    # A different sentence from the one above, and it was the same key's
+    # fallback in three places while this one said more. Separate keys,
+    # because a dictionary can only answer for one of them.
+    "om_invite_inactive_reissue": "That invitation is no longer active. "
+                                  "Invite the address again to send a new "
+                                  "link.",
+    "om_invite_cancelled": "Invitation for %(email)s cancelled.",
+    "om_role_updated": "Role updated.",
+    "om_not_a_member": "That person is not on this team.",
+    "om_only_admin_role": "You are the only admin on this team. Promote "
+                          "someone else to admin first, then change your "
+                          "own role.",
+    "om_only_admin_remove": "You are the only admin on this team. Promote "
+                            "someone else to admin before removing "
+                            "yourself.",
+    "om_removed": "Removed from the team. Their test cases and bug reports "
+                  "stay, still attributed to them.",
+    "om_password_failed": "That password could not be saved \u2014 see "
+                          "server logs.",
+    "om_password_set": "Password set for %(who)s. They have been signed out "
+                       "everywhere and can sign in with the new one \u2014 "
+                       "tell them yourself, this page will not show it "
+                       "again.",
+    # The fallback inside ``om_password_set``'s own interpolation, for a
+    # member whose address is somehow blank. A key rather than a literal
+    # so the sentence does not end up half-translated.
+    "om_that_member": "that member",
 }
