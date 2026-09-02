@@ -195,7 +195,11 @@ class TestTheManualJourney:
     def test_the_runs_page_shows_it_as_reviewable(self, client, walked):
         client.post(f"/test-execution/manual/{walked['run_id']}/finish")
         page = client.get("/test-execution/runs").get_data(as_text=True)
-        assert f"#{walked['run_id']}" in page
+        # The table cell, not a substring: `#3` matches `&#39;` in the
+        # chat greeting, so the loose form passes whether or not the run
+        # is listed. See tests/test_execute_assignment.py::_rows.
+        assert walked["run_id"] in {
+            int(n) for n in re.findall(r"<td>#(\d+)</td>", page)}
         assert "Review" in page
 
     def test_the_walk_is_resumable_after_the_browser_is_lost(

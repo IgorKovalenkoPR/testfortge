@@ -224,7 +224,10 @@ class TestTheRouteRefusesPolitely:
                            follow_redirects=True)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert f"#{blocker}" in body
+        # ``#id (mode)`` is how run_limits.py writes it. The bare
+        # ``f"#{blocker}"`` also matches `&#39;` and a CSS colour, so it
+        # could pass without the message naming this run at all.
+        assert f"#{blocker} (tc_driven)" in body
         assert "already in progress" in body
 
     def test_the_manual_walk_is_not_refused(self, client, project,

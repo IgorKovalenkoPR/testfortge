@@ -19,7 +19,7 @@ else, and worse:
   agreed about them perfectly, because both were equally missing them.
   That last one is the biggest, and it is the one rule 3 below exists for.
 
-Hence six rules, each derived from the code rather than from a list
+Hence seven rules, each derived from the code rather than from a list
 somebody has to remember to extend:
 
 1. the key sets are equal **in both directions**;
@@ -50,6 +50,12 @@ somebody has to remember to extend:
    gap is named and cannot grow. ``auth.py`` went first — the sign-in
    flow is the one place a reader has no way to avoid — and is down from
    27 to 3.
+7. every ``g.t.get(key, …) % {…}`` supplies the names **either** language
+   asks for. Rule 4 compares en and ua to each other and nothing compared
+   either to the call site, so a Ukrainian value wanting ``%(who)s`` where
+   the call sends ``email`` is a ``KeyError`` on a rendered page — in one
+   language only, which is why using the product in English cannot find
+   it.
 """
 from __future__ import annotations
 
@@ -477,6 +483,119 @@ class TestEveryKeyARouteAsksForExists:
             "one key is the fallback for more than one sentence, so the "
             "dictionary can only render one of them and the other call "
             f"sites change meaning silently: {overloaded}")
+
+
+def _is_translations_get(call: ast.Call) -> bool:
+    """True for ``g.t.get(...)`` with at least a key argument."""
+    return (isinstance(call.func, ast.Attribute)
+            and call.func.attr == "get"
+            and bool(call.args)
+            and _is_translations(call.func.value))
+
+
+class TestEveryInterpolationSiteSuppliesBothLanguages:
+    """Rule 7. Rule 4 compares the two languages to each other; nothing
+    compared either of them to the **call site**.
+
+    A route reads its text as
+
+        g.t.get("om_invite_cancelled",
+                "Invitation for %(email)s cancelled.") % {"email": email}
+
+    and ``%`` raises ``KeyError`` for a name the mapping does not hold. So a
+    Ukrainian value that asks for ``%(who)s`` where the call sends
+    ``email`` is a 500 on a rendered page — **and only in Ukrainian**. That
+    is the sharp end of it: the failure is invisible in the language the
+    people writing the code read, so no amount of clicking the product in
+    English can find it. Rule 4 would pass too, because it only asks
+    whether en and ua agree with one another.
+
+    Zero mismatches when this was written, which is the point of adding it
+    now: forty-odd interpolated values arrived in two commits and the next
+    one is a typo away.
+
+    A positional ``%s`` in a value used with a mapping is the same class of
+    failure (``TypeError: format requires a mapping``), so it is refused
+    here as well.
+    """
+
+    #: ``%(name)s`` / ``%(name)d`` — the named form these values use.
+    NAMED = re.compile(r"%\((\w+)\)")
+    #: A positional ``%s`` / ``%d``, i.e. not ``%%`` and not ``%(``.
+    POSITIONAL = re.compile(r"(?<!%)%[-+ #0-9.]*[sdifr]")
+
+    @staticmethod
+    def _sites():
+        """(file, line, key, names the call supplies) per interpolation."""
+        out = []
+        for path in sorted(ROUTES.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            for node in ast.walk(ast.parse(source)):
+                if not (isinstance(node, ast.BinOp)
+                        and isinstance(node.op, ast.Mod)):
+                    continue
+                left = node.left
+                if not (isinstance(left, ast.Call)
+                        and _is_translations_get(left)
+                        and isinstance(left.args[0], ast.Constant)):
+                    continue
+                supplied = None
+                if isinstance(node.right, ast.Dict):
+                    supplied = {k.value for k in node.right.keys
+                                if isinstance(k, ast.Constant)}
+                out.append((path.name, node.lineno,
+                            left.args[0].value, supplied))
+        return out
+
+    def test_there_are_sites_to_check(self):
+        sites = self._sites()
+        assert len(sites) >= 10, (
+            f"only {len(sites)} interpolated translations found; the "
+            f"pattern has stopped matching how routes format them")
+
+    def test_every_name_either_language_asks_for_is_supplied(self):
+        wrong = []
+        for name, lineno, key, supplied in self._sites():
+            if supplied is None:
+                # A mapping built elsewhere. Nothing to compare, and
+                # guessing would report the honest cases as broken.
+                continue
+            for lang, table in (("en", EN), ("ua", UA)):
+                missing = sorted(set(self.NAMED.findall(table.get(key, "")))
+                                 - supplied)
+                if missing:
+                    wrong.append(f"{name}:{lineno} {key} [{lang}] needs "
+                                 f"{missing}, call supplies "
+                                 f"{sorted(supplied)}")
+        assert not wrong, (
+            "these values ask for a name the call site does not send, "
+            "which is a KeyError on a rendered page — and in only one "
+            "language, so it cannot be found by using the product in "
+            "English:\n  " + "\n  ".join(wrong))
+
+    def test_no_value_used_with_a_mapping_takes_a_positional(self):
+        """``"%s" % {"a": 1}`` is ``TypeError: format requires a mapping``.
+        Same failure, same invisibility."""
+        wrong = []
+        for name, lineno, key, supplied in self._sites():
+            if supplied is None:
+                continue
+            for lang, table in (("en", EN), ("ua", UA)):
+                value = table.get(key, "")
+                if self.POSITIONAL.search(value):
+                    wrong.append(f"{name}:{lineno} {key} [{lang}] has a "
+                                 f"positional placeholder: {value[:60]!r}")
+        assert not wrong, wrong
+
+    def test_the_check_would_catch_a_planted_mismatch(self):
+        """Measured rather than trusted: the same predicate, run against a
+        value that asks for a name nothing sends."""
+        supplied = {"email"}
+        missing = sorted(set(self.NAMED.findall("cancelled for %(who)s"))
+                         - supplied)
+        assert missing == ["who"]
+        assert not (set(self.NAMED.findall("cancelled for %(email)s"))
+                    - supplied)
 
 
 class TestNoRouteGrowsMoreEnglishFlashes:

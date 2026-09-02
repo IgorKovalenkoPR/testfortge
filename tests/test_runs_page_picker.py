@@ -95,6 +95,23 @@ def _page(client, query="?scope=all"):
     return response.get_data(as_text=True)
 
 
+def _listed(page: str) -> set[int]:
+    """The run ids this page actually lists, read out of the table cell.
+
+    Not ``f"#{run_id}" in page``. An empty runs page already contains
+    ``#0`` and ``#64748`` from CSS colours and ``#34`` / ``#39`` from the
+    ``&#34;`` / ``&#39;`` entities in the chat greeting, so with the small
+    ids a fresh scratch database hands out, the substring form both passes
+    when nothing is listed and fails when something is. Measured: this
+    file flaked under ``-n auto`` for exactly that reason.
+
+    ``tests/test_execute_assignment.py::_rows`` solved this once and its
+    docstring names the same entity; three other call sites had not
+    caught up.
+    """
+    return {int(n) for n in re.findall(r"<td>#(\d+)</td>", page)}
+
+
 class TestThePageNamesItsProject:
 
     def test_the_picker_is_there(self, two_projects):
@@ -107,7 +124,7 @@ class TestThePageNamesItsProject:
 
     def test_the_runs_are_still_listed(self, two_projects):
         """A fix that broke the page would satisfy the tests above."""
-        assert f"#{two_projects['run_id']}" in _page(two_projects["client"])
+        assert two_projects["run_id"] in _listed(_page(two_projects["client"]))
 
     def test_the_list_is_still_scoped_to_the_active_project(self,
                                                             two_projects):
@@ -116,7 +133,7 @@ class TestThePageNamesItsProject:
         with client.session_transaction() as sess:
             sess["project_id"] = two_projects["quiet"]
         body = _page(client)
-        assert f"#{two_projects['run_id']}" not in body
+        assert two_projects["run_id"] not in _listed(body)
         assert "no runs yet" in body.lower(), body[:300]
 
 
