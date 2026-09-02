@@ -57,6 +57,26 @@ MAX_CONCURRENT_GEN_JOBS = 2
 _log = get_logger(__name__)
 
 
+def _no_input_message(errors: list[str]) -> str:
+    """"Nothing to work with", and *why* when the parser knows.
+
+    ``parse_page_input`` returns a list of ``"<file>: <reason>"`` strings
+    and both async routes used to drop it, so a ``.doc`` upload — accepted
+    by ``allowed_file``, refused by the parser with "save the file as
+    .docx" — was answered with "Please enter requirements or upload
+    files.". The operator had uploaded a file, the product knew exactly
+    why it could not use it, and said neither thing.
+
+    Measured on the auth preview: the page named no file, showed no
+    warning, and the message it did show was untrue.
+    """
+    base = g.t.get("mvp_no_input",
+                   "Please enter requirements or upload files.")
+    if not errors:
+        return base
+    return base + " " + " ".join(errors)
+
+
 def _recorder_enabled() -> bool:
     """Match the same env-var gate the recorder CLI + MCP tool use."""
     return os.environ.get("RECORDER_ENABLED", "0").strip().lower() in (
@@ -2209,9 +2229,16 @@ def register(app: Flask) -> None:
     def test_cases_run_async():
         raw_lines, errors, custom_prompt = parse_page_input()
         if not raw_lines:
-            return jsonify({"error": "no_input",
-                            "message": g.t.get("mvp_no_input",
-                                "Please enter requirements or upload files.")}), 400
+            # ``errors`` names the files the parser could not use, and
+            # this is the one place the operator will look for it. It was
+            # destructured here and dropped: uploading a .doc produced
+            # ".doc format is not supported directly. Please save the
+            # file as .docx", which nothing rendered — so the answer to
+            # "here is my file" was "Please enter requirements or upload
+            # files.", which is not true and hides a fixable reason.
+            return jsonify({
+                "error": "no_input",
+                "message": _no_input_message(errors)}), 400
 
         sid = get_session_id(session)
         active = get_queue().count_active_by_meta(
@@ -2363,9 +2390,16 @@ def register(app: Flask) -> None:
     def checklist_run_async():
         raw_lines, errors, custom_prompt = parse_page_input()
         if not raw_lines:
-            return jsonify({"error": "no_input",
-                            "message": g.t.get("mvp_no_input",
-                                "Please enter requirements or upload files.")}), 400
+            # ``errors`` names the files the parser could not use, and
+            # this is the one place the operator will look for it. It was
+            # destructured here and dropped: uploading a .doc produced
+            # ".doc format is not supported directly. Please save the
+            # file as .docx", which nothing rendered — so the answer to
+            # "here is my file" was "Please enter requirements or upload
+            # files.", which is not true and hides a fixable reason.
+            return jsonify({
+                "error": "no_input",
+                "message": _no_input_message(errors)}), 400
 
         sid = get_session_id(session)
         active = get_queue().count_active_by_meta(

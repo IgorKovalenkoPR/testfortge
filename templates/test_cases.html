@@ -34,6 +34,22 @@
     <p class="subtitle">{{ t.tc_subtitle }}</p>
 </div>
 
+{# The parser's own account of a file it could not use. Both this page and
+   /checklist are handed ``errors`` by ``parse_page_input`` and neither
+   rendered it — the only template that ever did is ``user_stories.html``,
+   which is on the unreachable list ("pre-E3 user-story list; no route").
+   So a .doc upload was answered with "Please enter requirements or upload
+   files.", which is untrue, while the reason ("save the file as .docx")
+   was collected and thrown away. The async path says it in its JSON
+   message now; this is the no-JavaScript half. #}
+{% if errors %}
+<div class="alert alert-warning">
+    {% for err in errors %}
+    <p>{{ err }}</p>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% include '_project_picker.html' %}
 
 <!-- Input form: files + text + prompt. The submit handler intercepts
