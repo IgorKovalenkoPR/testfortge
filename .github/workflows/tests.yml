@@ -148,12 +148,44 @@ jobs:
       # nobody looks at is the same as no coverage, and this whole service
       # container exists to stop the migration being verified on the wrong
       # engine.
+      #
+      # The exit code decides, and the grep only answers "did anything run
+      # at all". They were the other way round: the step was
+      #
+      #     python -m pytest … | tee /tmp/pg.txt; grep -qE "… passed" …
+      #
+      # and a `;` makes the *grep* the step's exit status. So "1 failed, 2
+      # passed" matched "2 passed" and the step went green — measured. A
+      # guard written to catch a silent skip had quietly replaced the check
+      # for a failure. Exit 5 is its own branch because "no tests
+      # collected" and "tests failed" call for different messages.
+      # ``|| rc=$?`` and not a bare pipeline: this shell runs with ``-e``,
+      # so a failing pytest would end the step on that line and none of the
+      # annotating below would happen. ``pipefail`` makes the pipeline carry
+      # pytest's code rather than tee's.
       - name: Verify the Postgres leg actually runs
-        run: >-
-          python -m pytest tests/test_schema_migration.py -q
-          -k postgres --no-header -p no:cacheprovider
-          | tee /tmp/pg.txt;
-          grep -qE "[1-9][0-9]* passed" /tmp/pg.txt
+        run: |
+          set -o pipefail
+          rc=0
+          python -m pytest tests/test_schema_migration.py -q \
+            -k postgres --no-header -p no:cacheprovider 2>&1 \
+            | tee /tmp/pg.txt || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            grep -qE "[1-9][0-9]* passed" /tmp/pg.txt || {
+              echo "::error::Postgres leg: every test skipped, nothing ran"
+              exit 1
+            }
+          elif [ "$rc" -eq 5 ]; then
+            echo "::error::Postgres leg: no tests collected — the service"\
+                 "container, the migration, or the -k filter"
+            exit 1
+          else
+            sed -n '/short test summary info/,$p' /tmp/pg.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done || true
+            echo "::error::Postgres leg failed (pytest exit $rc)"
+            exit 1
+          fi
 
       # Failing test names are echoed as ``::error::`` workflow commands so
       # they land in the run's *annotations*. Without that the only thing a
@@ -167,11 +199,30 @@ jobs:
       # Postgres step above exists: tests/test_storage_failures.py is the
       # only place the S3 adapter touches a socket, and it importorskips on
       # moto. A skipped file nobody looks at is the same as no coverage.
+      # Same shape as the Postgres step above, and the same reason: this
+      # one also made the grep its exit status, so a failing S3 test
+      # alongside a passing one was green.
       - name: Verify the S3 leg actually runs
-        run: >-
-          python -m pytest tests/test_storage_failures.py -q
-          --no-header -p no:cacheprovider | tee /tmp/s3.txt;
-          grep -qE "[1-9][0-9]* passed" /tmp/s3.txt
+        run: |
+          set -o pipefail
+          rc=0
+          python -m pytest tests/test_storage_failures.py -q \
+            --no-header -p no:cacheprovider 2>&1 | tee /tmp/s3.txt || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            grep -qE "[1-9][0-9]* passed" /tmp/s3.txt || {
+              echo "::error::S3 leg: every test skipped — moto is missing"
+              exit 1
+            }
+          elif [ "$rc" -eq 5 ]; then
+            echo "::error::S3 leg: no tests collected"
+            exit 1
+          else
+            sed -n '/short test summary info/,$p' /tmp/s3.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done || true
+            echo "::error::S3 leg failed (pytest exit $rc)"
+            exit 1
+          fi
 
       - name: Run test suite
         run: |
@@ -179,7 +230,7 @@ jobs:
           python run_tests.py 2>&1 | tee /tmp/suite.txt || {
             sed -n '/short test summary info/,$p' /tmp/suite.txt \
               | grep -E "^(FAILED|ERROR)" | head -40 \
-              | while IFS= read -r line; do echo "::error::$line"; done
+              | while IFS= read -r line; do echo "::error::$line"; done || true
             exit 1
           }
 
@@ -247,7 +298,7 @@ jobs:
             2>&1 | tee /tmp/authon.txt || {
             sed -n '/short test summary info/,$p' /tmp/authon.txt \
               | grep -E "^(FAILED|ERROR)" | head -40 \
-              | while IFS= read -r line; do echo "::error::auth-on $line"; done
+              | while IFS= read -r line; do echo "::error::auth-on $line"; done || true
             exit 1
           }
 
@@ -299,18 +350,53 @@ jobs:
 
       # Skipping is how this file behaves when the browser is missing, and
       # a silently skipped browser suite is the same as not having one.
+      # Third instance of the guard-as-exit-status bug fixed in the matrix
+      # job above; see the Postgres step there for what it did.
       - name: Verify the browser leg actually runs
-        run: >-
-          python -m pytest tests/test_e2e_golden_paths.py -q --no-header
-          -p no:cacheprovider | tee /tmp/e2e.txt;
-          grep -qE "[1-9][0-9]* passed" /tmp/e2e.txt
+        run: |
+          set -o pipefail
+          rc=0
+          python -m pytest tests/test_e2e_golden_paths.py -q --no-header \
+            -p no:cacheprovider 2>&1 | tee /tmp/e2e.txt || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            grep -qE "[1-9][0-9]* passed" /tmp/e2e.txt || {
+              echo "::error::golden paths: every test skipped — no browser"
+              exit 1
+            }
+          elif [ "$rc" -eq 5 ]; then
+            echo "::error::golden paths: no tests collected"
+            exit 1
+          else
+            sed -n '/short test summary info/,$p' /tmp/e2e.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done || true
+            echo "::error::golden paths failed (pytest exit $rc)"
+            exit 1
+          fi
 
+      # The determinism gate. Its whole point is a failure a single run does
+      # not show, so the run number goes into the annotation: a flake on run
+      # 5 of 10 and a deterministic break on run 1 are different findings,
+      # and an exit code cannot tell them apart. Measured on 2026-09-01,
+      # when this step went red and the only published fact was "exit code
+      # 1" — the run it failed on had to be inferred from step durations,
+      # because a public repository's job log refuses an unauthenticated
+      # caller.
       - name: Ten consecutive runs
         run: |
+          set -o pipefail
           for i in $(seq 1 10); do
             echo "── run $i of 10 ─────────────────────────────"
             python -m pytest tests/test_e2e_golden_paths.py -q --no-header \
-              -p no:cacheprovider || exit 1
+              -p no:cacheprovider 2>&1 | tee /tmp/run-$i.txt || {
+                sed -n '/short test summary info/,$p' /tmp/run-$i.txt \
+                  | grep -E "^(FAILED|ERROR)" | head -40 \
+                  | while IFS= read -r line; do
+                      echo "::error::run $i of 10: $line"
+                    done || true
+                echo "::error::golden paths failed on run $i of 10"
+                exit 1
+              }
           done
 
       # The recorder's locator ladder, executed rather than grepped.
@@ -321,13 +407,31 @@ jobs:
       # costs seconds; kept out of the ten-run gate above because that
       # gate is about the golden paths' determinism, not about this.
       #
-      # Same grep as the golden paths: a browser suite that skips is a
-      # browser suite that does not exist.
+      # Same shape as the golden paths: a browser suite that skips is a
+      # browser suite that does not exist, and a browser suite that fails
+      # has to say which test.
       - name: Recorder locator ladder (real browser)
-        run: >-
-          python -m pytest tests/test_recorder_locator_ladder_browser.py
-          -q --no-header -p no:cacheprovider | tee /tmp/ladder.txt;
-          grep -qE "[1-9][0-9]* passed" /tmp/ladder.txt
+        run: |
+          set -o pipefail
+          rc=0
+          python -m pytest tests/test_recorder_locator_ladder_browser.py \
+            -q --no-header -p no:cacheprovider 2>&1 \
+            | tee /tmp/ladder.txt || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            grep -qE "[1-9][0-9]* passed" /tmp/ladder.txt || {
+              echo "::error::locator ladder: every test skipped"
+              exit 1
+            }
+          elif [ "$rc" -eq 5 ]; then
+            echo "::error::locator ladder: no tests collected"
+            exit 1
+          else
+            sed -n '/short test summary info/,$p' /tmp/ladder.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done || true
+            echo "::error::locator ladder failed (pytest exit $rc)"
+            exit 1
+          fi
 
       # What the REC overlay says once the extension is gone. Same
       # reasoning as the ladder above: the claim is about what a tester
@@ -335,7 +439,25 @@ jobs:
       # A source grep would have passed on every version of this file,
       # including the one that blinked REC over a dead bridge.
       - name: Recorder overlay after context loss (real browser)
-        run: >-
-          python -m pytest tests/test_recorder_context_invalidated_browser.py
-          -q --no-header -p no:cacheprovider | tee /tmp/invalidated.txt;
-          grep -qE "[1-9][0-9]* passed" /tmp/invalidated.txt
+        run: |
+          set -o pipefail
+          rc=0
+          python -m pytest \
+            tests/test_recorder_context_invalidated_browser.py \
+            -q --no-header -p no:cacheprovider 2>&1 \
+            | tee /tmp/invalidated.txt || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            grep -qE "[1-9][0-9]* passed" /tmp/invalidated.txt || {
+              echo "::error::recorder overlay: every test skipped"
+              exit 1
+            }
+          elif [ "$rc" -eq 5 ]; then
+            echo "::error::recorder overlay: no tests collected"
+            exit 1
+          else
+            sed -n '/short test summary info/,$p' /tmp/invalidated.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::error::$line"; done || true
+            echo "::error::recorder overlay failed (pytest exit $rc)"
+            exit 1
+          fi
