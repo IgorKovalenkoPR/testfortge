@@ -19,6 +19,19 @@
     </p>
 </div>
 
+{# This page says "in this project" three times and was the only module
+   page that did not show which one. Its route resolves the active project
+   and redirects with "Select or create a project first." when there is
+   none, so the page already depended on a fact it never displayed — and
+   switching meant leaving.
+
+   ``full_path`` rather than the partial's default ``path``: the scope
+   lives in the query string, and it is about the reader rather than the
+   project, so a switch that dropped it would answer with "nothing is
+   assigned to you" on a page the operator had deliberately set to All. #}
+{% set picker_next = request.full_path %}
+{% include '_project_picker.html' %}
+
 {% if can_switch_scope %}
 <div class="filter-row">
     <a class="btn btn-sm {% if scope == 'mine' %}btn-primary{% endif %}"

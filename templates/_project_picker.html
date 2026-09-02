@@ -9,6 +9,14 @@
    so the user stays on the module page they came from instead of
    bouncing to the dashboard like the legacy projects routes do.
 
+   A page whose state lives in the query string can override it with
+   ``{% set picker_next = request.full_path %}`` before the include.
+   ``request.path`` is the default because dropping the query string is
+   usually right — /bug-reports' ``?run=`` names a run belonging to the
+   project being left — and wrong on /test-execution/runs, where
+   ``?scope=all`` is about the reader, not the project, and losing it
+   answers a switch with "nothing is assigned to you".
+
    Usage:
        {% include '_project_picker.html' %}
 
@@ -34,7 +42,7 @@
             style="display:flex;gap:6px;flex:1;align-items:center;"
             data-base-action="{{ url_for('db_select_project', project_id='__ID__') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="next" value="{{ request.path }}">
+        <input type="hidden" name="next" value="{{ picker_next|default(request.path, true) }}">
         <select id="pp-select" name="project_id"
                 style="flex:1;min-width:200px;padding:6px 10px;
                        border:1px solid #cbd5e1;border-radius:4px;background:white;">
@@ -90,7 +98,7 @@
       <form method="POST" action="{{ url_for('db_create_project') }}"
             style="display:flex;gap:6px;align-items:center;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="next" value="{{ request.path }}">
+        <input type="hidden" name="next" value="{{ picker_next|default(request.path, true) }}">
         <input type="text" name="project_name" required
                placeholder="{{ t.get('pp_new_placeholder', 'New project name…') }}"
                style="flex:1;min-width:160px;padding:6px 10px;
