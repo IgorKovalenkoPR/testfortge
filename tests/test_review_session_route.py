@@ -523,7 +523,7 @@ class TestDiscardingARecording:
 
         # An <a> carrying the discard label is the exact shape of the bug.
         import re as _re
-        for anchor in _re.findall(r"<a[^>]*>(.*?)</a>", body, _re.S):
+        for anchor in _re.findall(r"<a\b[^>]*>(.*?)</a>", body, _re.S):
             assert "discard" not in anchor.lower(), (
                 f"a link is offering to discard: {anchor.strip()[:60]!r}")
 

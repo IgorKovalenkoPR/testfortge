@@ -760,7 +760,7 @@ _COMMENT = re.compile(r"\{#.*?#\}", re.S)
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 #: ``<code>`` and ``<pre>`` hold commands, identifiers and file names.
 #: Translating ``npm run upload`` would break it.
-_CODE = re.compile(r"(?is)<(code|pre)\b.*?</>")
+_CODE = re.compile(r"(?is)<(code|pre)\b.*?</\1>")
 _BLOCK = re.compile(r"\{%.*?%\}", re.S)
 _EXPR = re.compile(r"\{\{.*?\}\}", re.S)
 _SCRIPT = re.compile(r"<script\b.*?</script>", re.S | re.I)
