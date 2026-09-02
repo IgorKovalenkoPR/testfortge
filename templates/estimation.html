@@ -245,8 +245,16 @@
                        background:{{ '#10b981' if mockup_env.figma_pat else '#94a3b8' }};color:white;">
             FIGMA_PAT: {{ t.est_diag_set if mockup_env.figma_pat else t.est_diag_cover_only }}
           </span>
+          {# Admin-only: ``estimation_diag`` is "admin" in route_policy, and
+             this link was offered to everyone — in a new tab, so a member
+             clicking it landed on a bare 403 with the page they were
+             working on still open behind it. The strip's own badges stay:
+             they are already rendered, and knowing poppler is missing is
+             what stops a member re-running a pass that cannot work. #}
+          {% if is_admin %}
           <a href="{{ url_for('estimation_diag') }}" target="_blank"
              style="margin-left:auto;font-size:0.85em;">{{ t.est_diag_json }}</a>
+          {% endif %}
         </div>
         {% if not mockup_env.anthropic_key %}
         <p style="margin:8px 0 0 0;font-size:0.88em;">

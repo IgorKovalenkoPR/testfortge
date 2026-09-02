@@ -305,11 +305,19 @@ def register(app: Flask) -> None:
             return _estimation_run_inner()
         except Exception as exc:
             log.exception("estimation_run unhandled: %s", exc)
+            # The diagnostics URL is admin-only (route_policy), so
+            # telling a member to open it sends them to a 403 while they
+            # are already looking at a failure.
+            try:
+                from engine import permissions as _perm_mod
+                where = (" or open /estimation/diag for diagnostics"
+                         if _perm_mod.is_admin() else "")
+            except Exception:  # pragma: no cover — never break the flash
+                where = ""
             flash(
                 f"Estimation failed unexpectedly: "
                 f"{type(exc).__name__} — {str(exc)[:200]}. "
-                "Try a different source (Text / Mockups / URL) or "
-                "open /estimation/diag for diagnostics.",
+                f"Try a different source (Text / Mockups / URL){where}.",
                 "danger",
             )
             return redirect(url_for("estimation_page"))
