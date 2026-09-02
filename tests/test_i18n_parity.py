@@ -19,7 +19,7 @@ else, and worse:
   agreed about them perfectly, because both were equally missing them.
   That last one is the biggest, and it is the one rule 3 below exists for.
 
-Hence five rules, each derived from the code rather than from a list
+Hence six rules, each derived from the code rather than from a list
 somebody has to remember to extend:
 
 1. the key sets are equal **in both directions**;
@@ -42,6 +42,12 @@ somebody has to remember to extend:
    ``NEUTRAL_IN_MARKUP`` for strings identical in every language (a suite
    tag the database stores, a shell command, another product's button),
    and ``DEV_ONLY_TEMPLATES`` for a page no user can reach.
+6. no route file *grows* a ``flash()`` with a bare English string. Rule 5
+   for routes, and a ratchet for the same reason rule 5 was one first:
+   177 of the 220 ``flash()`` calls pass a literal, ``auth.py`` alone
+   holds 27 of them, and that is a piece of work with product copy in it
+   rather than a defect one commit closes. Per-file counts that may fall
+   and not rise, so the gap is named and cannot grow.
 """
 from __future__ import annotations
 
@@ -363,7 +369,7 @@ def _is_translations(owner: ast.expr) -> bool:
     ``t.get("section_num")``, and the first version of this scan demanded
     dictionary entries for both. Attribute lookups that merely *end* in
     ``t`` are the same trap one level down — ``input.get("type", "")`` in
-    the crawler matched a regex written as ``t\.get\(``.
+    the crawler matched a regex looking for a literal ``t.get(``.
     """
     return (isinstance(owner, ast.Attribute)
             and owner.attr == "t"
@@ -469,6 +475,113 @@ class TestEveryKeyARouteAsksForExists:
             "one key is the fallback for more than one sentence, so the "
             "dictionary can only render one of them and the other call "
             f"sites change meaning silently: {overloaded}")
+
+
+class TestNoRouteGrowsMoreEnglishFlashes:
+    """Rule 5's twin, and the largest localisation gap left in the product.
+
+    Rule 5 asks that no *template* render visible English that never passed
+    through ``t``. Routes render English too, through ``flash()``, and 177
+    of the 220 ``flash()`` calls in ``routes/`` pass a bare literal — no
+    dictionary lookup at all. Round 13 fixed the ``g.t.get(key, 'English')``
+    shape, where the key was simply missing; these never ask.
+
+    Measured 2026-09-02, by file::
+
+        projects 38   settings 31   auth 27   members 24   execution 15
+        generation 13   execution_manual 12   estimation 8
+        automation 5   bugs 3   dashboard 1
+
+    ``auth.py``'s twenty-seven are the whole of what this file's own
+    docstring calls the two unavoidable moments — "a Ukrainian user met
+    English at the two moments there is no way around — signing in, and
+    being refused".
+
+    A ratchet rather than a rule, for the reason rule 5 was a ratchet
+    first: 177 messages is a piece of work with product copy in it, not a
+    defect one commit closes, and a gate that fails today would be
+    switched off rather than fixed. The counts may **fall** and not rise,
+    so the gap is named, cannot grow, and each file can be cleared on its
+    own.
+
+    When a file reaches zero, delete its entry. When the table is empty,
+    this becomes a rule like rule 5 did.
+    """
+
+    #: file → how many bare-literal ``flash()`` calls it had when this was
+    #: written. Lower is fine. Higher is a new English message.
+    BASELINE = {
+        "auth.py": 27,
+        "automation.py": 5,
+        "bugs.py": 3,
+        "dashboard.py": 1,
+        "estimation.py": 8,
+        "execution.py": 15,
+        "execution_manual.py": 12,
+        "generation.py": 13,
+        "members.py": 24,
+        "projects.py": 38,
+        "settings.py": 31,
+    }
+
+    @staticmethod
+    def _bare_flashes(path: pathlib.Path) -> int:
+        """``flash()`` calls whose first argument never mentions ``t``.
+
+        AST, so a message built over several lines counts once and a
+        ``flash`` inside a comment or a docstring counts not at all. The
+        test is on the *first* argument only: the second is the category
+        ("error", "success"), which is not read by anyone.
+        """
+        source = path.read_text(encoding="utf-8")
+        count = 0
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "flash"
+                    and node.args):
+                continue
+            text = ast.get_source_segment(source, node.args[0]) or ""
+            if "t.get(" not in text and "g.t" not in text:
+                count += 1
+        return count
+
+    def _measured(self) -> dict[str, int]:
+        return {path.name: self._bare_flashes(path)
+                for path in sorted(ROUTES.glob("*.py"))
+                if self._bare_flashes(path)}
+
+    def test_no_file_gains_an_english_flash(self):
+        measured = self._measured()
+        grew = {name: (self.BASELINE.get(name, 0), n)
+                for name, n in measured.items()
+                if n > self.BASELINE.get(name, 0)}
+        assert not grew, (
+            "these route files gained a flash() with a bare English "
+            "string, which renders English in every language — pass it "
+            "through g.t.get(key, 'English') and add the key to both "
+            f"dictionaries. {{file: (was, now)}}: {grew}")
+
+    def test_the_baseline_has_no_stale_entries(self):
+        """The other direction, so the table tracks the work: a file that
+        has been cleared, or improved, should not keep claiming its old
+        number — otherwise the ratchet stops ratcheting."""
+        measured = self._measured()
+        stale = {name: (was, measured.get(name, 0))
+                 for name, was in self.BASELINE.items()
+                 if measured.get(name, 0) < was}
+        assert not stale, (
+            "these files now have fewer English flashes than the baseline "
+            "claims. Lower the numbers (or delete the entry at zero) so "
+            f"the ratchet keeps its grip: {{file: (was, now)}}: {stale}")
+
+    def test_the_counter_counts(self):
+        """Without this the two tests above pass on a scan that finds
+        nothing — a renamed helper, an import alias, a rewritten AST."""
+        total = sum(self._measured().values())
+        assert total > 100, (
+            f"the bare-flash scan found only {total}; it has stopped "
+            f"matching how routes flash messages")
 
 
 class TestNoKeyOutlivesItsUser:
