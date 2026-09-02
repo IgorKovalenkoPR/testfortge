@@ -25,6 +25,13 @@ Both paths say it now: the async routes append the parser's account to the
 message the page already displays for a 400, and the two templates render
 the list for the no-JavaScript form post.
 
+One consequence, fixed here rather than noted: ``_parse_video`` returned
+its metadata line with **no** message, while ``_parse_image`` next door has
+always told the operator its content is not read. The accept list offers
+fourteen video formats and none of them is watched — so a screen recording
+bought a full generation from one line of metadata, silently. That note had
+nowhere to appear until the channel above was rendered; now it does.
+
 Not fixed, and named rather than left silent: when a file fails *and* other
 input succeeds, generation proceeds and the async payload still carries no
 warnings. Adding a field nothing renders would be the same defect in a new
@@ -133,6 +140,48 @@ class TestTheAsyncPathSaysWhy:
         message = response.get_json()["message"]
         assert DOC not in message
         assert message.strip().endswith("."), message
+
+
+class TestAnAttachmentSaysItIsOnlyAnAttachment:
+    """The two branches that record a file without reading it. The image
+    one always spoke; the video one did not, and they sit ten lines
+    apart."""
+
+    def _told(self, tmp_path, name, payload):
+        from engine.file_parser import parse_file
+        path = tmp_path / name
+        path.write_bytes(payload)
+        lines, err = parse_file(str(path), name)
+        return lines, err
+
+    def test_a_video_says_its_frames_are_not_read(self, tmp_path):
+        # ``bytes(2048)`` rather than a literal: the first version of
+        # this file was written through a heredoc and ended up with
+        # real NUL bytes in the source.
+        lines, err = self._told(tmp_path, "demo.mp4", bytes(2048))
+        assert lines and "demo.mp4" in lines[0], lines
+        assert err, "the video branch said nothing"
+        assert "not read" in err, err
+        assert "Additional Instructions" in err, err
+
+    def test_an_image_still_says_the_same(self, tmp_path):
+        """The neighbour this copies, and the control: a change that made
+        the video speak by silencing the image would be no better."""
+        import base64
+        lines, err = self._told(tmp_path, "shot.png", base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+            "z8AAAwAB/AF/A2sAAAAASUVORK5CYII="))
+        assert lines, lines
+        assert err and "OCR" in err, err
+
+    def test_a_readable_file_says_nothing(self, tmp_path):
+        """A parser that returned a note for everything would turn a
+        clean upload into a warning."""
+        lines, err = self._told(
+            tmp_path, "reqs.txt",
+            "The cart must apply one discount.".encode("utf-8"))
+        assert lines, lines
+        assert err is None, err
 
 
 class TestTheNoJavaScriptPathSaysWhy:

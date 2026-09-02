@@ -320,7 +320,17 @@ def _parse_video(filepath: str, filename: str) -> tuple[list[str], str | None]:
             size_str = f"{file_size / (1024 * 1024 * 1024):.2f} GB"
 
         info = f"[Video attachment: {filename} ({ext}, {size_str})]"
-        return [info], None
+        # Say so, the way ``_parse_image`` next door already does. The
+        # accept list offers fourteen video formats and this function
+        # reads none of them — only the name, format and size reach the
+        # generator. Silence here meant an operator could upload a screen
+        # recording, wait for a full generation, and get a pack derived
+        # from one line of metadata with nothing to suggest why.
+        return [info], (
+            "Video uploaded as attachment — its frames are not read. Only "
+            "the filename, format and size reach the generator, so "
+            "describe what the recording shows in the text box or in "
+            "Additional Instructions.")
     except Exception as e:
         _logger.warning("read video file failed: %s", e)
         return [], f"Error reading video file: {e}"
