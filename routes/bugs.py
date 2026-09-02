@@ -34,6 +34,7 @@ from engine import db as _db
 from engine import bug_areas as _bug_areas
 from engine import bug_workflow as _bug_workflow
 from engine import permissions as _perm
+from engine.i18n import plural as _plural
 from engine import workspace as _workspace
 # CSV injection guard, shared with engine/exporter.py — a cell beginning
 # with = + - @ is executed as a formula by Excel on open.
@@ -404,7 +405,7 @@ def register(app: Flask) -> None:
                           "Pick or create a project first."), "error")
             return redirect(url_for("bug_reports_page"))
         if _require_project_owner(pid) is None:
-            flash(g.t.get("bug_attach_no_project", "Project not found."),
+            flash(g.t.get("bug_not_found", "Project not found."),
                   "error")
             return redirect(url_for("bug_reports_page"))
 
@@ -471,7 +472,7 @@ def register(app: Flask) -> None:
         # Same ownership gate every other write route honours. Returns
         # the project meta on success and ``abort(403)`` otherwise.
         if _require_project_owner(pid) is None:
-            flash(g.t.get("bug_bulk_no_project",
+            flash(g.t.get("bug_not_found",
                           "Project not found."), "error")
             return redirect(url_for("bug_reports_page"))
 
@@ -546,10 +547,13 @@ def register(app: Flask) -> None:
         except Exception:  # pragma: no cover — best-effort cache refresh
             pass
 
-        suffix = "s" if n != 1 else ""
-        flash(g.t.get("bug_bulk_ok",
-                      "Updated {n} bug{s}.").format(n=n, s=suffix),
-              "success")
+        # ``"s" if n != 1`` is an English plural written into a sentence
+        # that also has to be Ukrainian, where the rule has three forms.
+        # Same defect the project picker had — "1 bugs" in every language,
+        # four lines from a strip that got it right — and the same
+        # facility fixes it.
+        flash(g.t.get("bug_bulk_ok", "Updated %(n)d %(word)s.") % {
+            "n": n, "word": _plural(g.lang, n, "bug_word")}, "success")
         return redirect(url_for("bug_reports_page"))
 
     @app.route("/bugs/reset", methods=["POST"])
@@ -577,12 +581,12 @@ def register(app: Flask) -> None:
         """
         pid = ensure_active_project()
         if not pid:
-            flash(g.t.get("bug_bulk_no_project",
+            flash(g.t.get("bug_reset_no_project",
                           "Pick or create a project before resetting."),
                   "error")
             return redirect(url_for("bug_reports_page"))
         if _require_project_owner(pid) is None:
-            flash(g.t.get("bug_bulk_no_project",
+            flash(g.t.get("bug_not_found",
                           "Project not found."), "error")
             return redirect(url_for("bug_reports_page"))
         # Mandatory confirm token — the template's modal sets this.
@@ -606,10 +610,10 @@ def register(app: Flask) -> None:
         _workspace.invalidate(pid, "bugs")
         _mirror_pack("bug_reports_data", [])
 
-        suffix = "s" if n != 1 else ""
         flash(g.t.get(
             "bug_reset_ok",
-            "Project reset — {n} bug{s} deleted.").format(n=n, s=suffix),
+            "Project reset — %(n)d %(word)s deleted.") % {
+                "n": n, "word": _plural(g.lang, n, "bug_word")},
             "success")
         return redirect(url_for("bug_reports_page"))
 

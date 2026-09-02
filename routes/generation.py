@@ -1043,8 +1043,8 @@ def register(app: Flask) -> None:
                     g.t.get(
                         "crawl_partial",
                         "Some pages could not be crawled — generation "
-                        "continued on available data: "
-                    ) + "; ".join(_crawl_errors[:3]),
+                        "continued on available data: %(errors)s"
+                    ) % {"errors": "; ".join(_crawl_errors[:3])},
                     "warning",
                 )
 
@@ -1277,8 +1277,8 @@ def register(app: Flask) -> None:
                     g.t.get(
                         "crawl_partial",
                         "Some pages could not be crawled — generation "
-                        "continued on available data: "
-                    ) + "; ".join(_crawl_errors[:3]),
+                        "continued on available data: %(errors)s"
+                    ) % {"errors": "; ".join(_crawl_errors[:3])},
                     "warning",
                 )
 
@@ -1386,7 +1386,8 @@ def register(app: Flask) -> None:
         if ext not in _UPLOAD_EXTS:
             return (None, g.t.get(
                 "upload_bad_ext",
-                f"Unsupported file type ‘{ext}’. Use one of: xlsx, csv, md, json."))
+                "Unsupported file type ‘%(ext)s’. Use one of: xlsx, csv, "
+                "md, json.") % {"ext": ext})
         # Use a tempfile under UPLOAD_FOLDER so the existing 64 MB cap
         # and write-permission probes apply uniformly.
         upload_dir = app.config.get("UPLOAD_FOLDER") or tempfile.gettempdir()
@@ -1454,12 +1455,19 @@ def register(app: Flask) -> None:
         # that no longer exist.
         session.pop("traceability_data", None)
 
+        # Three keys, because the operator reads one sentence. The two
+        # fragments used to be appended as English f-strings *outside* the
+        # ``t.get``, so they stayed English whatever the dictionary said.
         flash(
             g.t.get("upload_tc_ok",
-                    f"Imported {len(incoming)} test case(s) from {filename}.")
-            + (f" Total now: {len(merged)}." if mode == "append" else "")
-            + (f" Skipped {len(skipped)} already in this project "
-               f"({', '.join(skipped[:5])})." if skipped else ""),
+                    "Imported %(n)d test case(s) from %(file)s.")
+            % {"n": len(incoming), "file": filename}
+            + (g.t.get("upload_total_now", " Total now: %(n)d.")
+               % {"n": len(merged)} if mode == "append" else "")
+            + (g.t.get("upload_skipped",
+                       " Skipped %(n)d already in this project (%(ids)s).")
+               % {"n": len(skipped), "ids": ", ".join(skipped[:5])}
+               if skipped else ""),
             "success",
         )
         # Stay on whatever page the form was POSTed from. The same
@@ -1531,7 +1539,8 @@ def register(app: Flask) -> None:
             })
         flash(
             g.t.get("tc_walkthrough_meta_saved",
-                    f"Walkthrough binding for {tc_id} saved."),
+                    "Walkthrough binding for %(tc)s saved.")
+            % {"tc": tc_id},
             "success",
         )
         return redirect(url_for("test_cases_page") + f"#{tc_id}")
@@ -2468,11 +2477,14 @@ def register(app: Flask) -> None:
 
         flash(
             g.t.get("upload_cl_ok",
-                    f"Imported {len(incoming)} checklist item(s) from "
-                    f"{filename}.")
-            + (f" Total now: {len(merged)}." if mode == "append" else "")
-            + (f" Skipped {len(skipped)} already in this project "
-               f"({', '.join(skipped[:5])})." if skipped else ""),
+                    "Imported %(n)d checklist item(s) from %(file)s.")
+            % {"n": len(incoming), "file": filename}
+            + (g.t.get("upload_total_now", " Total now: %(n)d.")
+               % {"n": len(merged)} if mode == "append" else "")
+            + (g.t.get("upload_skipped",
+                       " Skipped %(n)d already in this project (%(ids)s).")
+               % {"n": len(skipped), "ids": ", ".join(skipped[:5])}
+               if skipped else ""),
             "success",
         )
         return redirect(_back_to_caller(default="checklist_page"))

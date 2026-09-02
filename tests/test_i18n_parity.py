@@ -26,9 +26,13 @@ somebody has to remember to extend:
 2. a Ukrainian value that is byte-identical to the English one is either a
    term this product deliberately keeps in English (allowlisted here, with
    the reason) or an untranslated leftover;
-3. every key a template asks for exists in both dictionaries — the rule
-   that catches ``t.get('nav_runs', 'Runs')``, which no comparison of the
-   two files ever could;
+3. every key a template **or a route** asks for exists in both
+   dictionaries — the rule that catches ``t.get('nav_runs', 'Runs')``,
+   which no comparison of the two files ever could. It scanned
+   ``templates/*.html`` and nothing else for its first year, so the same
+   shape survived one directory over: 27 keys behind ``flash()`` calls in
+   ``routes/``, and a Ukrainian operator read English every time one
+   fired;
 4. ``%s``/``%(name)s`` placeholders match per plural form — a mismatch is
    not a typo, it is a ``TypeError`` on a rendered page;
 5. no template renders visible English that never passed through ``t``.
@@ -41,6 +45,7 @@ somebody has to remember to extend:
 """
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 
@@ -233,9 +238,19 @@ class TestOneVoice:
 
     #: Second-person-singular imperatives and possessives. Word-bounded, so
     #: «перевірка» and «додайте» do not match.
+    #: The second half was measured, not brainstormed: writing 32
+    #: route flashes in Ukrainian produced «вибери», «створи»,
+    #: «закрий», «попроси», «постав», «завантаж», «згенеруй»,
+    #: «задай», «використай», «запусти», «перемкни» — none of
+    #: which the original list caught, so four of them passed the gate
+    #: and the rest were never asked about. Adding them found exactly
+    #: one pre-existing string: ``te_empty_hint``, which read
+    #: «Згенеруй … можеш».
     INFORMAL = re.compile(
-        r"\b(запитуй|введи|натисни|обери|перевір|спробуй|додай|відкрий|"
-        r"дивись|скористайся|твій|твоя|твої|твоє|тебе|тобі)\b",
+        r"\b(запитуй|введи|натисни|обери|перевір|спробуй|додай|"
+        r"відкрий|дивись|скористайся|твій|твоя|твої|твоє|тебе|тобі|"
+        r"вибери|створи|закрий|попроси|постав|завантаж|згенеруй|"
+        r"задай|використай|запусти|перемкни|можеш|зможеш)\b",
         re.IGNORECASE)
 
     def test_no_ukrainian_string_uses_the_informal_you(self):
@@ -269,6 +284,18 @@ class TestOneVoice:
     def test_the_pattern_would_catch_something(self):
         assert self.INFORMAL.search("Запитуй про модулі")
         assert not self.INFORMAL.search("Перевірка вимог і додайте файл")
+
+    def test_the_widened_half_catches_its_own_forms(self):
+        """One per shape, because a word list is only as good as the
+        words in it — and these are the ones that got past it."""
+        for informal in ("Вибери проєкт", "згенеруй пакет",
+                         "завантаж файл", "Перемкни проєкт",
+                         "можеш запускати"):
+            assert self.INFORMAL.search(informal), informal
+        for formal in ("Виберіть проєкт", "згенеруйте пакет",
+                       "завантажте файл", "Перемкніть проєкт",
+                       "можна запускати"):
+            assert not self.INFORMAL.search(formal), formal
 
 
 class TestEveryKeyATemplateAsksForExists:
@@ -326,6 +353,122 @@ class TestEveryKeyATemplateAsksForExists:
             f"these keys are asked for by a template and exist in neither "
             f"dictionary, so their English fallback renders in every "
             f"language: {missing}")
+
+
+def _is_translations(owner: ast.expr) -> bool:
+    """True when *owner* is the request's translations object.
+
+    Only ``g.t``. A bare ``t`` is not enough: ``routes/generation.py`` uses
+    ``t`` for a walkthrough step dict and asks it for ``t.get("id")`` and
+    ``t.get("section_num")``, and the first version of this scan demanded
+    dictionary entries for both. Attribute lookups that merely *end* in
+    ``t`` are the same trap one level down — ``input.get("type", "")`` in
+    the crawler matched a regex written as ``t\.get\(``.
+    """
+    return (isinstance(owner, ast.Attribute)
+            and owner.attr == "t"
+            and isinstance(owner.value, ast.Name)
+            and owner.value.id == "g")
+
+
+class TestEveryKeyARouteAsksForExists:
+    """Rule 3, pointed at the other place that asks the dictionary.
+
+    ``TestEveryKeyATemplateAsksForExists`` walks ``templates/*.html`` and
+    nothing else, so the shape it was written to catch survived one
+    directory over — in ``routes/``, where every ``flash()`` reads
+
+        flash(g.t.get("upload_no_file", "No file selected."), "error")
+
+    Measured before the fix: **27 keys** used by a route and present in
+    neither dictionary, so a Ukrainian operator read English every time one
+    fired. The two dictionaries agreed about them perfectly, because both
+    were equally missing them — which is the same reason rule 3 had to
+    exist for templates.
+
+    Five of those were worse than untranslated: their fallback was an
+    f-string, already carrying the numbers and filenames, so the day a key
+    reached a dictionary the message would have kept its words and dropped
+    its figures. They use ``%(name)s`` placeholders now, and rule 4 checks
+    those.
+
+    AST rather than a regex, because ``t`` is a common variable name: a
+    pattern for ``t.get(`` also matches ``input.get("type", "")`` and
+    ``element.get("href", "")``. The first version of this scan reported
+    105 missing keys, 78 of them attribute lookups in the crawler.
+    """
+
+    @staticmethod
+    def _referenced() -> dict[str, str]:
+        """key → the route file that asks for it."""
+        keys: dict[str, str] = {}
+        for path in sorted(ROUTES.glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "get"
+                        and node.args):
+                    continue
+                if not _is_translations(node.func.value):
+                    continue
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(
+                        first.value, str):
+                    keys.setdefault(first.value, path.name)
+        return keys
+
+    def test_the_scanner_finds_the_references(self):
+        """The floor is a measurement, not a guess: 47 at the time this was
+        written, so 30 leaves room for keys to be retired without the gate
+        turning into a nuisance, and still fails loudly if ``g.t.get``
+        stops being how a route reads a translation."""
+        found = self._referenced()
+        assert len(found) > 30, (
+            f"the route scan found only {len(found)} references; the "
+            f"pattern has stopped matching how routes read translations")
+
+    def test_no_route_asks_for_a_key_that_does_not_exist(self):
+        missing = sorted((key, where) for key, where
+                         in self._referenced().items()
+                         if key not in EN or key not in UA)
+        assert not missing, (
+            f"these keys are asked for by a route and are missing from at "
+            f"least one dictionary, so a fallback renders instead of a "
+            f"translation: {missing}")
+
+    def test_no_key_answers_for_two_different_sentences(self):
+        """``bug_bulk_no_project`` was the fallback for four of them —
+        "before bulk editing", "before resetting" and "Project not found."
+        twice, in two routes. Invisible while each call site carried its
+        own English, and a behaviour change the moment the key reached the
+        dictionary: three of the four would have started saying something
+        else. Derived, so the next one is caught before it is written."""
+        fallbacks: dict[str, set] = {}
+        for path in sorted(ROUTES.glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "get"
+                        and len(node.args) == 2):
+                    continue
+                if not _is_translations(node.func.value):
+                    continue
+                if not isinstance(node.args[0], ast.Constant):
+                    continue
+                try:
+                    text = ast.literal_eval(node.args[1])
+                except Exception:       # an f-string — rule 4's business
+                    continue
+                if isinstance(text, str):
+                    fallbacks.setdefault(node.args[0].value, set()).add(text)
+        overloaded = {k: sorted(v) for k, v in fallbacks.items()
+                      if len(v) > 1}
+        assert not overloaded, (
+            "one key is the fallback for more than one sentence, so the "
+            "dictionary can only render one of them and the other call "
+            f"sites change meaning silently: {overloaded}")
 
 
 class TestNoKeyOutlivesItsUser:
@@ -456,6 +599,7 @@ class TestFormattingCannotBlowUpInOneLanguage:
 # ── Rule 4: no page goes straight to English ─────────────────────────
 
 TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
+ROUTES = pathlib.Path(__file__).resolve().parent.parent / "routes"
 
 #: Files that still carry hardcoded English, with how much of it.
 #:

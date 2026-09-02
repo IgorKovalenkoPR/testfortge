@@ -1933,4 +1933,81 @@ TRANSLATIONS = {
     "tc_col_action": "Action",
     "tc_walkthrough_note": "Walkthrough mode will fire this TC according to "
                            "its trigger.",
+    # ── Flashes that lived only as route fallbacks (M-2, second pass) ──
+    # The same shape M-2 swept out of ``templates/``, one directory over
+    # and never followed up: ``g.t.get('key', 'English')`` in a ``flash()``
+    # call, with the key in neither dictionary, so a Ukrainian operator
+    # read English. The parity gate could not see it — its reference scan
+    # walks ``templates/*.html`` and nothing else, which is exactly why
+    # this set survived the first pass.
+    #
+    # Five of them were worse than untranslated. Their fallback was an
+    # f-string, so it already carried the numbers and filenames; adding
+    # the key to a dictionary would have kept the words and dropped the
+    # figures. Those now use ``%(name)s`` placeholders and interpolate at
+    # the call site, and three fragments that were appended as English
+    # *outside* the ``t.get`` became keys of their own.
+    #
+    # English below is each fallback verbatim, so nothing changes for an
+    # English reader. The Ukrainian in ua.py is new.
+    "bug_bulk_no_project": "Pick or create a project before bulk editing.",
+    "bug_reset_no_project": "Pick or create a project before resetting.",
+    # One key used to answer for all four of these sentences, which is why
+    # adding it to the dictionary was never a one-line change: three call
+    # sites would have started saying something else.
+    "bug_not_found": "Project not found.",
+    "bug_bulk_invalid": "Pick at least one bug and a valid action.",
+    "bug_bulk_delete_admin": "Deleting bug reports is limited to admins. "
+                             "Close them instead, or ask an admin.",
+    "bug_bulk_status_role": "Closing bug reports is limited to admins — "
+                            "it is the sign-off that a fix was verified. "
+                            "Mark them Resolved instead, or ask an admin.",
+    "bug_bulk_failed": "Bulk update failed — see server logs.",
+    "bug_bulk_ok": "Updated %(n)d %(word)s.",
+    "bug_reset_unconfirmed": "Reset cancelled — confirmation missing.",
+    "bug_reset_failed": "Reset failed — see server logs.",
+    "bug_reset_ok": "Project reset — %(n)d %(word)s deleted.",
+    # The counted noun, so it agrees in a language with three forms. The
+    # two messages above used ``"s" if n != 1`` — an English plural
+    # inside a sentence that also has to be Ukrainian.
+    "bug_word": "bug|bugs",
+    "dash_layout_saved": "Dashboard layout saved.",
+    "dash_targets_saved": "KPI targets saved.",
+    "dash_no_project": "Pick a project before setting targets.",
+    "te_no_pack_for_autorun": "Nothing to run yet — upload or generate "
+                              "a pack first.",
+    "te_no_base_url_warning": "Run started without any URL — Live "
+                              "preview, video, and bug-report screenshots "
+                              "are disabled. Add a URL to the requirements "
+                              "(or set Base URL) to enable real Playwright "
+                              "execution.",
+    "te_auto_run_done": "Auto-run finished: %(passed)d passed, %(failed)d "
+                        "failed, %(blocked)d blocked.",
+    "te_auto_run_failed": "Auto-run failed: %(error)s",
+    "upload_no_file": "No file selected.",
+    "upload_bad_ext": "Unsupported file type ‘%(ext)s’. Use one "
+                      "of: xlsx, csv, md, json.",
+    "upload_tc_ok": "Imported %(n)d test case(s) from %(file)s.",
+    "upload_cl_ok": "Imported %(n)d checklist item(s) from %(file)s.",
+    # Appended to the two above. They were English f-strings outside the
+    # ``t.get``, so they stayed English whatever the dictionary held.
+    "upload_total_now": " Total now: %(n)d.",
+    "upload_skipped": " Skipped %(n)d already in this project (%(ids)s).",
+    "tc_restored_from_db": "Restored %(n)d test cases saved for this "
+                           "project. Traceability and user stories are "
+                           "rebuilt on the next generation.",
+    "cl_restored_from_db": "Restored %(n)d checklist items saved for this "
+                           "project.",
+    "tc_walkthrough_meta_saved": "Walkthrough binding for %(tc)s saved.",
+    "crawl_partial": "Some pages could not be crawled — generation "
+                     "continued on available data: %(errors)s",
+    "mvp_gen_failed": "Generation failed",
+    "review_session_pilot_off": "Recorder pilot is not enabled on this host "
+                                "(RECORDER_ENABLED=0).",
+    "review_session_not_found": "This review link is expired, already used, "
+                                "or never existed. Recordings stage for 24 "
+                                "hours; re-run the CLI to capture again.",
+    "review_session_wrong_project": "This review link belongs to a different "
+                                    "project. Switch projects in the picker "
+                                    "and reopen the link.",
 }

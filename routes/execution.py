@@ -1947,8 +1947,8 @@ def register(app: Flask) -> None:
         except Exception as exc:  # pragma: no cover — surfaces on UI
             log.exception("auto-run failed: %s", exc)
             flash(
-                g.t.get("te_auto_run_failed",
-                        "Auto-run failed: ") + f"{type(exc).__name__}",
+                g.t.get("te_auto_run_failed", "Auto-run failed: %(error)s")
+                % {"error": type(exc).__name__},
                 "error",
             )
             return redirect(url_for("test_execution_page"))
@@ -2005,10 +2005,15 @@ def register(app: Flask) -> None:
         passed = stats.get("passed", 0)
         failed = stats.get("failed", 0)
         blocked = stats.get("blocked", 0)
+        # Placeholders, not an f-string. An f-string fallback holds the
+        # numbers already, so the day the key reached a dictionary the
+        # message would have kept its words and lost its figures — which
+        # is the whole content of this one.
         flash(
             g.t.get("te_auto_run_done",
-                    f"Auto-run finished: {passed} passed, {failed} failed, "
-                    f"{blocked} blocked."),
+                    "Auto-run finished: %(passed)d passed, %(failed)d "
+                    "failed, %(blocked)d blocked.")
+            % {"passed": passed, "failed": failed, "blocked": blocked},
             "success",
         )
         return redirect(url_for("test_execution_page"))
