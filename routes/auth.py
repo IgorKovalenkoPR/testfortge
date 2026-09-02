@@ -32,8 +32,8 @@ from __future__ import annotations
 import secrets
 import threading
 
-from flask import (Flask, flash, jsonify, redirect, render_template, request,
-                   session, url_for)
+from flask import (Flask, flash, g, jsonify, redirect, render_template,
+                   request, session, url_for)
 
 from engine import auth as _auth
 from engine import db as _db
@@ -294,7 +294,8 @@ def register(app: Flask) -> None:
             if result.reason == "locked":
                 flash(_auth.lockout_message(result.locked_until), "error")
             else:
-                flash(_auth.GENERIC_LOGIN_FAILURE, "error")
+                flash(g.t.get("auth_login_failed",
+                              _auth.GENERIC_LOGIN_FAILURE), "error")
             log.info("login failed for %r: %s",
                      _db.normalize_email(email)[:40], result.reason)
             return render_template(
@@ -320,8 +321,9 @@ def register(app: Flask) -> None:
                              org_id=_perm.current_org_id(),
                              diff={"everywhere": everywhere})
         _perm.logout_user(everywhere=everywhere)
-        flash("Signed out." if not everywhere
-              else "Signed out on every device.", "success")
+        flash(g.t.get("auth_signed_out_everywhere",
+                      "Signed out on every device.") if everywhere
+              else g.t.get("auth_signed_out", "Signed out."), "success")
         return redirect(url_for("auth_login"))
 
     # ── Password reset (E1.3 / E1.7) ──────────────────────────────
@@ -373,7 +375,9 @@ def register(app: Flask) -> None:
             # One answer for expired, used, revoked and never existed. 410
             # rather than 404 because the URL shape was right; the same
             # choice the invite route makes.
-            flash("That reset link is no longer valid. Ask for a new one.",
+            flash(g.t.get("auth_reset_link_dead",
+                          "That reset link is no longer valid. Ask for a new "
+                          "one."),
                   "error")
             return render_template("auth_reset.html", invalid=True), 410
 
@@ -403,7 +407,9 @@ def register(app: Flask) -> None:
         # user to start over from their inbox.
         claimed = _db.consume_auth_token(token, "reset")
         if claimed is None:
-            flash("That reset link is no longer valid. Ask for a new one.",
+            flash(g.t.get("auth_reset_link_dead",
+                          "That reset link is no longer valid. Ask for a new "
+                          "one."),
                   "error")
             return render_template("auth_reset.html", invalid=True), 410
 
@@ -411,7 +417,9 @@ def register(app: Flask) -> None:
         if not _db.set_password_hash(user_id, pwd_hash):
             log.error("reset consumed for %s but the hash would not save",
                       user_id[:8])
-            flash("Your password could not be saved — see server logs.",
+            flash(g.t.get("auth_reset_save_failed",
+                          "Your password could not be saved — see server "
+                          "logs."),
                   "error")
             return render_template("auth_reset.html", invalid=True), 500
 
@@ -434,8 +442,10 @@ def register(app: Flask) -> None:
                          diff={"sessions_ended": dropped, "via": "email"})
         log.info("password reset for %s; %d session(s) ended",
                  user_id[:8], dropped)
-        flash("Your password has been changed and you have been signed out "
-              "everywhere else. Sign in with the new one.", "success")
+        flash(g.t.get("auth_password_changed",
+                      "Your password has been changed and you have been "
+                      "signed out "
+              "everywhere else. Sign in with the new one."), "success")
         return redirect(url_for("auth_login"))
 
     # ── Address confirmation (E1.3 / E1.7) ────────────────────────
@@ -481,21 +491,24 @@ def register(app: Flask) -> None:
         if user is None:                       # pragma: no cover — gated
             return redirect(url_for("auth_login"))
         if user.get("email_verified"):
-            flash("Your address is already confirmed.", "info")
+            flash(g.t.get("auth_already_confirmed",
+                          "Your address is already confirmed."), "info")
             return redirect(request.referrer or url_for("index"))
 
         if not _mailer.configured():
             # Honest rather than hopeful: with no provider there is no way
             # to prove an address, and pretending otherwise would leave
             # them clicking a button that does nothing.
-            flash("This instance cannot send email yet, so addresses "
-                  "cannot be confirmed. Ask whoever runs the server.",
+            flash(g.t.get("auth_no_email_transport",
+                          "This instance cannot send email yet, so addresses "
+                  "cannot be confirmed. Ask whoever runs the server."),
                   "error")
             return redirect(request.referrer or url_for("index"))
 
         _dispatch(_send_verify, request.url_root, dict(user))
-        flash(f"A confirmation link is on its way to {user.get('email')}.",
-              "success")
+        flash(g.t.get("auth_confirmation_sent",
+                      "A confirmation link is on its way to %(email)s.")
+              % {"email": user.get("email")}, "success")
         return redirect(request.referrer or url_for("index"))
 
     @app.route("/auth/accept/<token>", methods=["GET", "POST"])
@@ -507,8 +520,10 @@ def register(app: Flask) -> None:
             # One message for expired, revoked, already-used and never
             # existed. Distinguishing them would confirm which tokens
             # were real to anyone spraying guesses at the endpoint.
-            flash("That invitation link is no longer valid. Ask an admin "
-                  "to send a new one.", "error")
+            flash(g.t.get("auth_invite_link_dead",
+                          "That invitation link is no longer valid. Ask an "
+                          "admin "
+                  "to send a new one."), "error")
             return render_template("auth_invite.html", invalid=True,
                                    google_enabled=oauth is not None), 410
 
@@ -529,14 +544,17 @@ def register(app: Flask) -> None:
             # the link change the existing one.
             org_id = _db.consume_invite(token, existing["id"])
             if not org_id:
-                flash("That invitation could not be claimed. Ask an admin "
-                      "to send a new one.", "error")
+                flash(g.t.get("auth_invite_unclaimable",
+                              "That invitation could not be claimed. Ask an "
+                              "admin "
+                      "to send a new one."), "error")
                 return redirect(url_for("auth_login"))
             _db.append_audit(entity="org_member", action="join",
                              user_id=existing["id"], org_id=org_id,
                              diff={"role": invite["role"], "via": "invite"})
-            flash(f"You have joined {org.get('name', 'the team')}. "
-                  f"Sign in to continue.", "success")
+            flash(g.t.get("auth_joined_org",
+                          "You have joined %(org)s. Sign in to continue.")
+                  % {"org": org.get("name", "the team")}, "success")
             return redirect(url_for("auth_login"))
 
         password = request.form.get("password") or ""
@@ -544,7 +562,8 @@ def register(app: Flask) -> None:
         display_name = (request.form.get("display_name") or "").strip()
 
         if password != confirm:
-            flash("The two passwords do not match.", "error")
+            flash(g.t.get("auth_passwords_differ",
+                          "The two passwords do not match."), "error")
             return render_template(
                 "auth_invite.html", invite=invite,
                                    google_enabled=oauth is not None,
@@ -581,8 +600,10 @@ def register(app: Flask) -> None:
         )
         if not user_id:
             # Lost a race with a concurrent claim of the same invite.
-            flash("An account for that address already exists. Sign in "
-                  "instead.", "error")
+            flash(g.t.get("auth_account_exists",
+                          "An account for that address already exists. Sign "
+                          "in "
+                  "instead."), "error")
             return redirect(url_for("auth_login"))
 
         org_id = _db.consume_invite(token, user_id)
@@ -591,15 +612,17 @@ def register(app: Flask) -> None:
             # account exists and is usable; they just have no team yet.
             log.warning("invite %s… became unclaimable after account "
                         "creation for %s", token[:8], user_id[:8])
-            flash("Your account was created, but the invitation had "
-                  "expired. Ask an admin to invite you again.", "error")
+            flash(g.t.get("auth_invite_expired",
+                          "Your account was created, but the invitation had "
+                  "expired. Ask an admin to invite you again."), "error")
             return redirect(url_for("auth_login"))
 
         _db.append_audit(entity="user", action="create", user_id=user_id,
                          org_id=org_id,
                          diff={"role": invite["role"], "via": "invite"})
         _perm.login_user(user_id, org_id=org_id)
-        flash(f"Welcome to {org.get('name', 'the team')}.", "success")
+        flash(g.t.get("auth_welcome_org", "Welcome to %(org)s.")
+              % {"org": org.get("name", "the team")}, "success")
         return redirect(url_for("index"))
 
     # ── Google sign-in (E1.4) ─────────────────────────────────────
@@ -614,7 +637,9 @@ def register(app: Flask) -> None:
         from an invitation and chose Google instead of a password.
         """
         if oauth is None:
-            flash("Google sign-in is not configured on this instance.",
+            flash(g.t.get("auth_google_off",
+                          "Google sign-in is not configured on this "
+                          "instance."),
                   "error")
             return redirect(url_for("auth_login"))
 
@@ -651,7 +676,8 @@ def register(app: Flask) -> None:
             # replayed or expired code, and a user who clicked "cancel".
             log.warning("google callback rejected: %s: %s",
                         type(exc).__name__, exc)
-            flash(_oauth.GENERIC_REFUSAL, "error")
+            flash(g.t.get("auth_google_refused",
+                          _oauth.GENERIC_REFUSAL), "error")
             return redirect(url_for("auth_login"))
 
         claims = (token or {}).get("userinfo") or {}
@@ -662,7 +688,8 @@ def register(app: Flask) -> None:
                 log.warning("google id_token unreadable: %s", exc)
                 claims = {}
         if not claims:
-            flash(_oauth.GENERIC_REFUSAL, "error")
+            flash(g.t.get("auth_google_refused",
+                          _oauth.GENERIC_REFUSAL), "error")
             return redirect(url_for("auth_login"))
 
         decision = _oauth.decide(claims, invite_token)
@@ -674,7 +701,8 @@ def register(app: Flask) -> None:
             # account here" from "your address is unverified", and the
             # first is an account-enumeration oracle that needs no
             # password at all.
-            flash(_oauth.GENERIC_REFUSAL, "error")
+            flash(g.t.get("auth_google_refused",
+                          _oauth.GENERIC_REFUSAL), "error")
             return redirect(url_for("auth_login"))
 
         subject = str(claims.get("sub"))
@@ -692,14 +720,17 @@ def register(app: Flask) -> None:
             )
             if not user_id:
                 # Lost a race with another claim of the same invite.
-                flash(_oauth.GENERIC_REFUSAL, "error")
+                flash(g.t.get("auth_google_refused",
+                              _oauth.GENERIC_REFUSAL), "error")
                 return redirect(url_for("auth_login"))
             org_id = _db.consume_invite(decision.invite_token, user_id)
             if not org_id:
                 log.warning("invite went stale during google provisioning "
                             "for user %s", user_id[:8])
-                flash("Your account was created, but the invitation had "
-                      "expired. Ask an admin to invite you again.", "error")
+                flash(g.t.get("auth_invite_expired",
+                              "Your account was created, but the invitation "
+                              "had "
+                      "expired. Ask an admin to invite you again."), "error")
                 return redirect(url_for("auth_login"))
             _db.link_identity(user_id, _oauth.PROVIDER, subject,
                               email=decision.email)
@@ -707,7 +738,8 @@ def register(app: Flask) -> None:
                              org_id=org_id,
                              diff={"via": "google", "invite": True})
             _perm.login_user(user_id, org_id=org_id)
-            flash("Welcome to TestForTge.", "success")
+            flash(g.t.get("auth_welcome",
+                          "Welcome to TestForTge."), "success")
             return redirect(next_url)
 
         user_id = decision.user_id
@@ -719,7 +751,8 @@ def register(app: Flask) -> None:
                 # workspace to another.
                 log.warning("google identity for user %s could not be "
                             "linked", (user_id or "")[:8])
-                flash(_oauth.GENERIC_REFUSAL, "error")
+                flash(g.t.get("auth_google_refused",
+                              _oauth.GENERIC_REFUSAL), "error")
                 return redirect(url_for("auth_login"))
             _db.append_audit(entity="identity", action="link",
                              user_id=user_id, diff={"provider": "google"})

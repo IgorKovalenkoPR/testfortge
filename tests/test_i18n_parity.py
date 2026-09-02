@@ -44,10 +44,12 @@ somebody has to remember to extend:
    and ``DEV_ONLY_TEMPLATES`` for a page no user can reach.
 6. no route file *grows* a ``flash()`` with a bare English string. Rule 5
    for routes, and a ratchet for the same reason rule 5 was one first:
-   177 of the 220 ``flash()`` calls pass a literal, ``auth.py`` alone
-   holds 27 of them, and that is a piece of work with product copy in it
-   rather than a defect one commit closes. Per-file counts that may fall
-   and not rise, so the gap is named and cannot grow.
+   177 of the 220 ``flash()`` calls passed a literal when it was written,
+   which is a piece of work with product copy in it rather than a defect
+   one commit closes. Per-file counts that may fall and not rise, so the
+   gap is named and cannot grow. ``auth.py`` went first — the sign-in
+   flow is the one place a reader has no way to avoid — and is down from
+   27 to 3.
 """
 from __future__ import annotations
 
@@ -511,7 +513,14 @@ class TestNoRouteGrowsMoreEnglishFlashes:
     #: file → how many bare-literal ``flash()`` calls it had when this was
     #: written. Lower is fine. Higher is a new English message.
     BASELINE = {
-        "auth.py": 27,
+        # 27 → 3. The three that are left do not take a literal: the
+        # lockout sentence comes from ``_auth.lockout_message`` (and
+        # builds an English plural of "minute" on the way, so it needs
+        # the helper opened up rather than a key), ``_again(message)``
+        # is handed its text by callers that are keyed already, and
+        # ``str(exc)`` is a ``PasswordPolicyError`` whose four messages
+        # live in ``engine/auth.py`` and would have to carry a key.
+        "auth.py": 3,
         "automation.py": 5,
         "bugs.py": 3,
         "dashboard.py": 1,

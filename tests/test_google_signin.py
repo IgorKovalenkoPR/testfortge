@@ -277,6 +277,19 @@ class TestRoutes:
         def _index():
             return "home"
 
+        # ``routes/auth.py`` reads its flash text through ``g.t``, which
+        # the real app sets in a ``before_request`` registered ahead of
+        # every blueprint — so a view can always assume it. This app is
+        # bare on purpose (it exists to isolate one OAuth callback), and
+        # without the hook the callback raised ``AttributeError: t``
+        # instead of refusing the sign-in.
+        @app.before_request
+        def _language():
+            from flask import g
+            from engine.i18n import get_lang
+            g.lang = "en"
+            g.t = get_lang("en")
+
         _routes_auth.register(app)
         c = app.test_client()
         resp = c.get("/auth/google/callback")

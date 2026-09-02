@@ -2010,4 +2010,49 @@ TRANSLATIONS = {
     "review_session_wrong_project": "This review link belongs to a different "
                                     "project. Switch projects in the picker "
                                     "and reopen the link.",
+    # ── The authentication flow's flashes (rule 6, auth.py) ───────
+    # This file's own docstring called these the two moments there is no
+    # way around — "signing in, and being refused" — and M-2 localised
+    # their *templates* while every flash stayed English. Twenty-four of
+    # ``routes/auth.py``'s twenty-seven come through here now.
+    #
+    # Values are each call site's fallback verbatim, extracted from the
+    # source rather than retyped, so nothing changes for an English
+    # reader. Two of them are constants elsewhere and stay so — the
+    # English lives in ``engine/auth.py`` and ``engine/oauth.py``, one
+    # source each, and the key adds Ukrainian without moving it.
+    "auth_login_failed": "That email and password do not match an account.",
+    "auth_google_refused": "We could not sign you in with that Google "
+                           "account. TestForTge is invite-only — ask an "
+                           "admin on your team for an invitation, and make "
+                           "sure the address on your Google account is "
+                           "verified.",
+    "auth_google_off": "Google sign-in is not configured on this instance.",
+    "auth_signed_out": "Signed out.",
+    "auth_signed_out_everywhere": "Signed out on every device.",
+    "auth_welcome": "Welcome to TestForTge.",
+    "auth_welcome_org": "Welcome to %(org)s.",
+    "auth_joined_org": "You have joined %(org)s. Sign in to continue.",
+    "auth_passwords_differ": "The two passwords do not match.",
+    "auth_password_changed": "Your password has been changed and you have "
+                             "been signed out everywhere else. Sign in "
+                             "with the new one.",
+    "auth_reset_link_dead": "That reset link is no longer valid. Ask for a "
+                            "new one.",
+    "auth_reset_save_failed": "Your password could not be saved \u2014 see "
+                              "server logs.",
+    "auth_already_confirmed": "Your address is already confirmed.",
+    "auth_confirmation_sent": "A confirmation link is on its way to "
+                              "%(email)s.",
+    "auth_no_email_transport": "This instance cannot send email yet, so "
+                               "addresses cannot be confirmed. Ask whoever "
+                               "runs the server.",
+    "auth_invite_link_dead": "That invitation link is no longer valid. Ask "
+                             "an admin to send a new one.",
+    "auth_invite_unclaimable": "That invitation could not be claimed. Ask "
+                               "an admin to send a new one.",
+    "auth_invite_expired": "Your account was created, but the invitation "
+                           "had expired. Ask an admin to invite you again.",
+    "auth_account_exists": "An account for that address already exists. "
+                           "Sign in instead.",
 }
