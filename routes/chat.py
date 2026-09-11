@@ -96,6 +96,21 @@ def _sse(event_name: str, data: dict) -> str:
     )
 
 
+def _lang_strings(lang: str) -> dict:
+    """The dictionary for *lang*, empty on any failure.
+
+    ``g.t`` is not reachable here: the SSE generator runs after the request
+    context this route was called in, which is the whole point of
+    ``stream_with_context`` existing at all. So the language is resolved
+    from the ``lang`` the route already parsed.
+    """
+    try:
+        from engine import i18n
+        return i18n.get_lang(lang) or {}
+    except Exception:  # pragma: no cover — a missing dictionary
+        return {}
+
+
 def _reply_to_dict(reply) -> dict:
     """ChatReply dataclass → JSON-ready dict. Identical shape to /chat."""
     return {
@@ -275,6 +290,25 @@ def register(app: Flask) -> None:
             if not api_key or refused:
                 fallback = _chatbot_mod.rule_based_fallback(message, lang)
                 reply_dict = _reply_to_dict(fallback)
+                if refused == "budget":
+                    # Say which of the two fallbacks this is. Without it the
+                    # answer simply reads as a worse answer, and the reason
+                    # lives only in the log. Appended rather than replacing
+                    # the reply: the rule-based answer is still the answer,
+                    # this is a note about where it came from.
+                    #
+                    # Only here, not in the non-streaming path: there the
+                    # refusal happens inside ``engine.chatbot``, which
+                    # catches LLMBudgetExceeded as the LLMUnavailable it
+                    # subclasses and returns None — by the time the route
+                    # sees it, "no allowance" and "no key" are the same
+                    # value. The banner in the shell covers that case, and
+                    # inventing a reason here from a signal we do not have
+                    # would be worse than saying nothing.
+                    note = _lang_strings(lang).get("llm_budget_chat_note")
+                    if note:
+                        reply_dict["text"] = "\n\n".join(
+                            [reply_dict["text"].rstrip(), note])
                 yield _sse("full", reply_dict)
                 yield _sse("done", {"intent": reply_dict["intent"]})
                 _append_history(message, reply_dict)

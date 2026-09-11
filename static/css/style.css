@@ -2276,6 +2276,20 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .verify-banner form { margin: 0; }
 .verify-banner .text-muted { display: block; font-size: .85rem; }
 
+/* The over-allowance banner. Same shape as the one above — text on the
+   left, the one thing you can do about it on the right, wrapping under on
+   a narrow screen — so the two read as one kind of notice rather than two
+   designs. It shares the rules rather than restating them; only the right
+   half differs, because for a plain user it is a sentence, not a button. */
+.budget-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 1rem;
+    align-items: center;
+    justify-content: space-between;
+}
+.budget-banner .text-muted { display: block; font-size: .85rem; }
+
 /* Why the sign-in page is on screen — a timeout, or a session the server
    could not find (E1.5). Informational, not an error: nobody did anything
    wrong, and styling it red would say they had. */

@@ -334,20 +334,26 @@ class TestAPlainUserCannot:
     def test_they_are_not_shown_the_card_either(self, sole_team):
         _legacy_project("Invisible To A Member")
 
-        body = Person(sole_team["member"], sole_team["org"]).text(
+        response = Person(sole_team["member"], sole_team["org"]).client.get(
             "/org/settings")
 
+        # Since §5.1 #4 was reversed the whole page is admin-only, so this
+        # is now a 403 rather than a page with one card missing. Stated
+        # explicitly: the two "not in body" assertions below hold trivially
+        # for any refusal, and a test that cannot fail is not evidence.
+        assert response.status_code == 403
+        body = response.get_data(as_text=True)
         assert "/org/settings/adopt-projects" not in body
         assert "Invisible To A Member" not in body, (
             "a member was shown the name of a project they cannot see and "
             "cannot claim — a puzzle, not information")
 
-    def test_the_settings_page_still_renders_for_them(self, sole_team):
-        """The read-only half of the page is the owner's decision (§5.1
-        #4), so the new card must not be what takes it down."""
+    def test_the_settings_page_is_closed_to_them_entirely(self, sole_team):
+        """§5.1 #4 reversed: Settings is an administration module, and a
+        member neither sees the link nor reaches the URL."""
         response = Person(sole_team["member"], sole_team["org"]).client.get(
             "/org/settings")
-        assert response.status_code == 200
+        assert response.status_code == 403
 
 
 # ── Several teams: the refusal, in words ─────────────────────────────

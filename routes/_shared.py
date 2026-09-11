@@ -991,6 +991,69 @@ def get_picker_context(session_obj=None) -> dict:
     }
 
 
+#: Key under which :func:`get_budget_context` memoises its answer on ``g``.
+_BUDGET_CACHE_KEY = "_llm_budget_state"
+
+
+def get_budget_context() -> dict:
+    """``llm_budget`` for every template render — the over-allowance banner.
+
+    Why this exists at all. When a team runs past its monthly allowance,
+    ``engine.llm_client`` raises ``LLMBudgetExceeded``, every generator
+    catches it as the ``LLMUnavailable`` it subclasses, and each falls
+    through to its rule engine. That is the right behaviour — a working
+    product beats an error page — but it is silent: the log says why and
+    nothing on screen does. Until 2026-09-11 one page carried the
+    sentence, ``/org/settings``, and that page is now admins-only, so the
+    person most likely to notice the output getting thinner had nowhere to
+    read the reason.
+
+    A banner in the shell rather than a message at each fallback, for a
+    reason about the condition rather than about effort: being over the
+    allowance is a state of the *team* that lasts until the month turns or
+    an admin raises the cap — not an event belonging to one generation. A
+    notice threaded out of seven generators would appear once, on the page
+    that happened to trigger it, and be gone on reload; this is true
+    whenever it is shown and stops being shown the moment it stops being
+    true.
+
+    One DB round trip per *render*, not per access: memoised on ``g``,
+    which is also what keeps the banner and anything else on the page from
+    disagreeing within one response. Context processors do not run for the
+    JSON endpoints the front end polls, so the hot paths are untouched.
+
+    Best-effort, like the picker above: a context processor that raises
+    turns a working page into a 500, and a missing banner is a far smaller
+    failure than that.
+    """
+    from flask import g
+    cached = getattr(g, _BUDGET_CACHE_KEY, None)
+    if cached is not None:
+        return cached
+    out = {"llm_budget": None}
+    try:
+        from engine import llm_cost as _llm_cost
+        from engine import permissions as _perm
+        org_id = _perm.current_org_id()
+        # No organisation means no allowance to be over, and no signed-in
+        # user means nobody to tell. Both are the common case on the auth
+        # pages, and both skip the query entirely.
+        if org_id and _perm.current_user() is not None:
+            state = _llm_cost.org_budget_state(org_id)
+            if state.get("over"):
+                out = {"llm_budget": {
+                    "spent": _llm_cost.format_usd(state["spent_micros"]),
+                    "limit": _llm_cost.format_usd(state["limit_micros"]),
+                }}
+    except Exception as exc:
+        log.debug("budget banner skipped: %s", exc)
+    try:
+        setattr(g, _BUDGET_CACHE_KEY, out)
+    except Exception:  # pragma: no cover — no app context
+        pass
+    return out
+
+
 # ── Metric snapshot helpers (Sprint 3 task 3.3) ──────────────────
 
 

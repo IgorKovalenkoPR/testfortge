@@ -376,6 +376,20 @@ def _deny_forbidden(minimum: str):
         return (f"Forbidden — this action needs the {minimum} role.", 403)
 
 
+#: The same refusal :func:`require_role` produces, for a view that has to
+#: decide for itself.
+#:
+#: Two routes need this: ``org_members`` and ``org_settings`` are admin
+#: modules, but their "you are not on a team yet" card is the only page
+#: that explains that state, and it has to stay reachable by the person in
+#: it — who, having no organisation, has no role either. So the gate lives
+#: a few lines inside the view, after the empty state, and it must produce
+#: exactly what the decorator would: one refusal, worded one way, 403 or
+#: JSON depending on the caller. A hand-rolled ``abort(403)`` there would
+#: have been a second dialect of "no".
+deny_forbidden = _deny_forbidden
+
+
 def template_context() -> dict:
     """Injected into every template so the UI can match the server."""
     from engine import features
@@ -401,7 +415,7 @@ __all__ = [
     "SESSION_USER_KEY", "SESSION_ORG_KEY",
     "auth_active", "org_active",
     "current_user", "current_user_id", "current_org_id", "current_role",
-    "is_admin", "has_role",
+    "is_admin", "has_role", "deny_forbidden",
     "login_user", "logout_user", "set_active_org",
     "require_login", "require_role", "template_context",
 ]

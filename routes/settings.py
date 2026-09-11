@@ -1,6 +1,6 @@
 """TestFortge — organisation settings and configuration (E2.5).
 
-  * GET  /org/settings                  — the screen (everyone in the team)
+  * GET  /org/settings                  — admin: the screen
   * POST /org/settings/general          — admin: rename the organisation
   * POST /org/settings/llm-key          — admin: store the team's own API key
   * POST /org/settings/llm-key/clear    — admin: forget it
@@ -17,10 +17,29 @@ now the per-org Anthropic key, the monthly budget and the usage meter were
 reachable only from a Python shell, which is a strange thing to ask of a QA
 lead.
 
-Readable by every member, writable only by admins — the owner's decision
-(§5.1 #4). Read-only is not a courtesy here: a plain user whose generation
-quietly fell back to the deterministic engine needs somewhere that says
-"the team is over its monthly allowance", and a 403 does not say that.
+Admin only, the whole screen — reversing §5.1 #4, under which every member
+could read it. The owner's ruling is that Settings is an administration
+module and a plain user should not see it at all, so the sidebar link is
+hidden in ``templates/base.html`` and the view refuses a non-admin with
+the same 403 the decorator would. Hiding a link is UX; the refusal is the
+boundary. The "you are not on a team yet" card is the one exception, and
+is checked first — see the view.
+
+What that costs, stated rather than discovered later. This page was the
+only place in the product that says "the team is over its monthly
+allowance". Checked rather than assumed: ``engine.llm_client`` logs the
+exhaustion and falls through to the rule engines, ``routes/chat.py``
+catches ``LLMBudgetExceeded`` and answers from the deterministic
+chatbot without a word about why, and the generation routes never ask.
+So a plain user whose output quietly got thinner now has nowhere to read
+the reason and has to ask an admin. That is the owner's call to make, and
+the honest place to close it is a notice where the fallback happens — not
+a page reopened to a role that is not meant to have it.
+
+The ``is_admin`` flag the template still receives is therefore always
+true. It is kept because every write route below tests the role
+independently, and a page whose forms trust "the GET let me in" is one
+decorator away from being wrong.
 
 Claiming the projects that predate the flag
 -------------------------------------------
@@ -99,7 +118,13 @@ def register(app: Flask) -> None:
     def org_settings():
         org_id = _perm.current_org_id()
         if not org_id:
+            # Before the admin gate, for the reason given at the same
+            # point in ``routes/members.py``: a person with no
+            # organisation has no role, and this card is half of what the
+            # product has to say to them.
             return render_template("org_settings.html", org=None)
+        if not _perm.has_role("admin"):
+            return _perm.deny_forbidden("admin")
 
         org = _db.get_organization(org_id) or {}
         org_settings_blob = org.get("settings") or {}
@@ -114,9 +139,13 @@ def register(app: Flask) -> None:
         # page stops contradicting itself. Their historical platform-key
         # spend stays visible in the breakdown below, where it is history
         # rather than a limit.
-        budget = _llm_cost.budget_state(
-            org_id, org_settings_blob,
-            key_source="org" if byok_configured else "platform")
+        #
+        # Through ``org_budget_state`` rather than resolving the two inputs
+        # here, so this page and the over-allowance banner in the shell
+        # cannot answer the question differently — a page saying "allowance
+        # reached" under a banner saying nothing, or the reverse, is worse
+        # than either alone.
+        budget = _llm_cost.org_budget_state(org_id)
         usage = _db.llm_usage_summary(org_id)
 
         return render_template(

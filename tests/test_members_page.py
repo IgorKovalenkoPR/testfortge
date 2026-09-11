@@ -66,14 +66,25 @@ class TestPageAccess:
         assert resp.status_code == 302
         assert "/auth/login" in resp.headers["Location"]
 
-    def test_a_plain_user_sees_the_team_read_only(self, client):
-        # The owner's decision (§5.1 #4): read-only produces fewer "where
-        # do I look" messages than a 403 does.
+    def test_a_plain_user_is_refused(self, client):
+        # Reverses §5.1 #4. Team is an administration module: a plain user
+        # is not shown the link and cannot reach the page by typing it.
         org, (admin, user) = _team("admin", "user")
         _signed_in_as(client, org, user)
         resp = client.get("/org/members")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         assert b"Invite someone" not in resp.data
+
+    def test_a_plain_user_is_not_shown_the_names_of_their_colleagues(
+            self, client):
+        # The status code is the gate; this is the thing the gate is for.
+        # Written separately because "403" and "the roster did not leak"
+        # are different claims, and only one of them survives a refactor
+        # that starts rendering a friendlier page.
+        org, (admin, user) = _team("admin", "user")
+        admin_email = _db.get_user(admin)["email"]
+        _signed_in_as(client, org, user)
+        assert admin_email.encode() not in client.get("/org/members").data
 
     def test_an_admin_sees_the_invite_form(self, client):
         org, (admin,) = _team("admin")
@@ -100,7 +111,13 @@ class TestPageAccess:
         invited = _email()
         _db.create_invite(org, invited, "user", new_invite_token())
         _signed_in_as(client, org, user)
-        assert invited.encode() not in client.get("/org/members").data
+        resp = client.get("/org/members")
+        # The refusal is asserted, not assumed. Without this line the test
+        # passes on any response that happens not to contain the address —
+        # including the 403 the page now returns — and would keep passing
+        # if the admin-only filter below were deleted.
+        assert resp.status_code == 403
+        assert invited.encode() not in resp.data
         _signed_in_as(client, org, admin)
         assert invited.encode() in client.get("/org/members").data
 

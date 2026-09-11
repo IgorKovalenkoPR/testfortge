@@ -69,6 +69,19 @@ def register_all(app: Flask) -> None:
             # which is much worse than just hiding the picker.
             return {"projects": [], "active_project_id": ""}
 
+    # Whether this team is past its monthly AI allowance, for the banner
+    # in ``base.html``. Separate from the picker above because it answers a
+    # different question and skips its query entirely for a caller with no
+    # organisation — which is every request on the auth pages. Same
+    # defensive shape: a context processor that raises 500s the page.
+    @app.context_processor
+    def _inject_budget_context():
+        try:
+            from ._shared import get_budget_context
+            return get_budget_context()
+        except Exception:
+            return {"llm_budget": None}
+
     # Access policy for every route (E2.3). Installed last so its
     # before_request hook runs after the HTTP Basic gate — that gate is the
     # outer perimeter during the rollout and should reject first — and

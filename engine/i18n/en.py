@@ -572,6 +572,23 @@ TRANSLATIONS = {
     'verify_banner_why': "It was not us who delivered your invitation, so "
                          "nothing has proved this address belongs to you.",
     'verify_banner_send': 'Send me a confirmation link',
+    # ── Over the monthly AI allowance ─────────────────────────────
+    # Shown in the shell, to every member, because the fallback that
+    # follows is otherwise silent: generation keeps working and quietly
+    # stops being LLM-assisted. It used to be readable only on
+    # /org/settings, which is admin-only since 2026-09-11.
+    'llm_budget_banner': "Your team has used its monthly AI allowance.",
+    'llm_budget_banner_spent': '%(spent)s of %(limit)s.',
+    'llm_budget_banner_why': "Generation has not stopped — it is falling "
+                             "back to the built-in rule engines, which cost "
+                             "nothing and produce thinner output. The "
+                             "allowance resets when the month does.",
+    'llm_budget_banner_admin': 'Raise the allowance in Settings',
+    'llm_budget_banner_ask': 'An admin on your team can raise it.',
+    # Tedgie, when the same thing has just happened to a chat reply.
+    'llm_budget_chat_note': "(Your team is past its monthly AI allowance, so "
+                            "this answer comes from my built-in knowledge "
+                            "rather than the model.)",
     # ── Attaching evidence to a bug by hand (E4.5a) ────────────────
     'bug_attach_label': 'Attach evidence',
     'bug_attach_submit': 'Attach',

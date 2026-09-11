@@ -210,8 +210,44 @@ def budget_state(org_id: str | None, org_settings: dict | None = None,
     }
 
 
+def org_budget_state(org_id: str | None) -> dict:
+    """:func:`budget_state` for *org_id*, resolving its own inputs.
+
+    ``budget_state`` takes the organisation's settings and its key source
+    as arguments, which is right for the call path that already has both
+    in hand. Every *other* caller was resolving them by hand, and there
+    are now three: the Settings page, the over-allowance banner in the
+    shell, and the tests for each. Two hand-rolled copies of
+
+        key_source="org" if has_org_secret(...) else "platform"
+
+    is two chances to get it backwards and tell a team on its own key that
+    they have run out of an allowance that does not apply to them.
+
+    Fails **soft**, the same way the budget gate fails open: a metering
+    outage returns "not over" rather than raising. The caller is a page
+    render — usually of a page that has nothing to do with spend — and an
+    accounting error must not be what takes it down.
+    """
+    unlimited = {"limit_micros": 0, "spent_micros": 0,
+                 "over": False, "ratio": 0.0}
+    if not org_id:
+        return unlimited
+    try:
+        from engine import db as _db
+        org = _db.get_organization(org_id) or {}
+        byok = _db.has_org_secret(org_id, "anthropic_api_key")
+        return budget_state(org_id, org.get("settings") or {},
+                            key_source="org" if byok else "platform")
+    except Exception as exc:  # pragma: no cover — never fatal
+        log.warning("budget state unavailable for %s: %s",
+                    (org_id or "")[:8], exc)
+        return unlimited
+
+
 __all__ = [
     "MICROS_PER_USD", "PRICES", "Price", "Usage",
     "extract_usage", "price_for", "cost_micros", "format_usd",
     "default_budget_usd", "org_budget_micros", "budget_state",
+    "org_budget_state",
 ]

@@ -36,6 +36,18 @@ this is what was waiting behind it.
 A member still sees the Storage card and its capacity readouts. Only the
 configuration goes, which is what "members can read this page; only admins
 can change it" already promised in the Guide.
+
+Since then the owner reversed §5.1 #4: Settings is an administration
+module, and a plain user no longer reaches the page at all (see
+``tests/test_admin_only_modules.py``). That makes the page gate the outer
+boundary and this file's subject the inner one — and both are kept. The
+template's ``{% if is_admin %}`` is now unreachable from the web, which is
+exactly the condition under which a guard quietly rots: the day the page
+is opened up again, or a card from it is reused somewhere a member can
+see, the credential field comes back with it unless something is still
+asserting the guard. So the member-facing tests below assert the refusal
+rather than the rendering, and the template scan — the part that was never
+about one page — is unchanged.
 """
 from __future__ import annotations
 
@@ -85,25 +97,43 @@ def _page(app, role):
     return response.get_data(as_text=True)
 
 
+def _refused_page(app, role):
+    """What a member gets now: the 403, and its body to look through."""
+    response = _client(app, role).get("/org/settings")
+    assert response.status_code == 403, response.status_code
+    return response.get_data(as_text=True)
+
+
 class TestAMemberIsNotShownTheCredentials:
 
     def test_no_secret_key_field(self, app):
-        assert 'name="secret_key"' not in _page(app, "user")
+        assert 'name="secret_key"' not in _refused_page(app, "user")
 
     def test_no_access_key_field(self, app):
-        assert 'name="access_key"' not in _page(app, "user")
+        assert 'name="access_key"' not in _refused_page(app, "user")
 
     def test_no_form_posts_to_the_storage_endpoints(self, app):
-        body = _page(app, "user")
-        assert "/org/settings/storage" not in body
+        assert "/org/settings/storage" not in _refused_page(app, "user")
 
-    def test_the_rest_of_the_page_is_still_there(self, app):
-        """A member can still read this page — that is what the Guide
-        promises. A fix that hid the whole card, or the whole page, would
-        satisfy the three tests above."""
-        body = _page(app, "user")
-        assert "settings-meter" in body, "the capacity readouts went too"
-        assert len(body) > 8000, len(body)
+    def test_the_template_guard_is_still_there(self, app):
+        """The three tests above now hold for a reason that has nothing to
+        do with this file: the page refuses before it renders. That makes
+        them unable to see the guard they were written for, so the guard is
+        asserted directly — against the template, where it lives — rather
+        than left to a rendering nobody can reach.
+
+        Rendering it here would mean rendering the admin's page, which
+        proves the opposite thing.
+        """
+        import pathlib
+        body = pathlib.Path(TEMPLATE_DIR, "org_settings.html").read_text(
+            encoding="utf-8")
+        marker = body.index('name="secret_key"')
+        assert _guarded_before(re.sub(r"\{#.*?#\}", "", body[:marker],
+                                      flags=re.S)), (
+            "the storage credential form is no longer inside an "
+            "`{% if is_admin %}` — latent today because the page itself "
+            "refuses a member, and a defect again the moment it does not")
 
 
 class TestAnAdminStillConfiguresIt:

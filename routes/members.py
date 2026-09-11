@@ -1,6 +1,6 @@
 """TestFortge — organisation members and invitations (E2.4).
 
-  * GET  /org/members                       — the team (all members)
+  * GET  /org/members                       — admin: the team
   * POST /org/members/invite                — admin: invite an address
   * POST /org/members/<user_id>/role        — admin: change a role
   * POST /org/members/<user_id>/remove      — admin: remove a member
@@ -57,9 +57,23 @@ The password is never logged, never flashed back, and the same three
 cleanups the email reset performs run here too — see
 ``org_set_password``.
 
-The page is readable by every member and writable only by admins — the
-owner's decision (§5.1 #4): a plain user seeing the team read-only
-produces fewer "where do I look" messages than a 403 does.
+Admin only — the whole page, not just its forms.
+
+That reverses §5.1 #4, under which the page was readable by every member
+and writable only by admins. The owner's ruling now is that Team is an
+administration module and a plain user should not see it at all: the
+sidebar link is hidden in ``templates/base.html`` and the view refuses a
+non-admin with the same 403 the decorator would, so typing the URL gets
+nowhere either. Hiding a link is UX; the refusal is the boundary.
+
+The one thing still readable by anyone signed in is the "you are not on a
+team yet" card, which is checked first — see the view.
+
+The ``is_admin`` branches further down — the invite form in the template,
+the pending-invitation list below — are now unreachable by a non-admin
+and are kept deliberately: they are defence in depth, and the day this
+page is opened up again they are what keeps the phishable list of invited
+addresses from coming with it.
 """
 from __future__ import annotations
 
@@ -132,9 +146,21 @@ def register(app: Flask) -> None:
         org_id = _perm.current_org_id()
         if not org_id:
             # A real state, not an error: an admin who deleted their last
-            # organisation lands here.
+            # organisation lands here — and so does anyone signed in with
+            # no membership at all, for whom this card is the only page in
+            # the product that says why nothing else works. It is reached
+            # BEFORE the admin gate on purpose: somebody with no
+            # organisation has no role either, so gating it would answer
+            # "this needs the admin role" to a person whose actual problem
+            # is that nobody has invited them.
             return render_template("org_members.html", org=None,
                                    members=[], invites=[])
+        # Everything past here is the team itself, and that is admin-only
+        # (see the module docstring). ``require_role("admin")`` on the
+        # route would have been one line, and would have taken the empty
+        # state above with it.
+        if not _perm.has_role("admin"):
+            return _perm.deny_forbidden("admin")
         org = _db.get_organization(org_id) or {}
         members = _db.list_org_members(org_id)
         # Only an admin may see pending invitations. To everyone else the

@@ -81,14 +81,34 @@ class TestPageAccess:
         assert b"/org/settings/general" in body
         assert b"/org/settings/budget" in body
 
-    def test_a_plain_user_sees_the_page_but_no_forms(self, client, team):
-        # Read-only, not 403 — the owner's decision, and the page is where
-        # the answer to "why did generation get worse" lives.
+    def test_a_plain_user_is_refused(self, client, team):
+        # Reverses §5.1 #4. Settings is an administration module and a
+        # plain user is not shown it at all — the sidebar link is hidden
+        # and the URL refuses, because a hidden link that still serves the
+        # page to anyone who types it is not a removal.
         _as(client, team, "user")
         resp = client.get("/org/settings")
-        assert resp.status_code == 200
+        assert resp.status_code == 403
         assert b"/org/settings/general" not in resp.data
         assert b"/org/settings/budget" not in resp.data
+
+    def test_the_sidebar_does_not_offer_it_to_a_plain_user(self, client,
+                                                           team):
+        # The other half of the same requirement, and the half a status
+        # code cannot see: a 403 nobody was invited to walk into is a
+        # worse experience than a link that was never there.
+        _as(client, team, "user")
+        body = client.get("/guide").data
+        assert b'href="/org/settings"' not in body
+        assert b'href="/org/members"' not in body
+
+    def test_the_sidebar_still_offers_it_to_an_admin(self, client, team):
+        # A hiding rule that hides it from everybody would pass the test
+        # above and delete the module.
+        _as(client, team, "admin")
+        body = client.get("/guide").data
+        assert b'href="/org/settings"' in body
+        assert b'href="/org/members"' in body
 
     def test_the_key_section_is_hidden_from_a_plain_user(self, client, team,
                                                         monkeypatch):
@@ -96,8 +116,12 @@ class TestPageAccess:
         monkeypatch.setenv(_llm_keys.ENCRYPTION_KEY_ENV, _fernet_key())
         _llm_keys.set_org_key(team["org"], GOOD_KEY)
         _as(client, team, "user")
-        body = client.get("/org/settings").data
-        assert b"/org/settings/llm-key" not in body
+        resp = client.get("/org/settings")
+        # Asserted rather than implied: this used to be "the page renders
+        # without the key section", and it would now pass on a 403 without
+        # anyone noticing which property it was measuring.
+        assert resp.status_code == 403
+        assert b"/org/settings/llm-key" not in resp.data
 
     def test_a_user_with_no_team_gets_a_page_not_an_error(self, client):
         uid = _db.create_user(_email())
@@ -111,9 +135,9 @@ class TestPageAccess:
         assert b"No team selected" in resp.data
 
     def test_the_model_routing_is_shown(self, client, team):
-        # Knowing which model handles what explains cost differences
-        # between features, so it is not admin-only.
-        _as(client, team, "user")
+        # Which model handles what explains cost differences between
+        # features. It now reads as admin, with the rest of the page.
+        _as(client, team, "admin")
         body = client.get("/org/settings").data
         assert b"authoring" in body and b"claude-" in body
 
@@ -320,24 +344,25 @@ class TestUsageReport:
         _db.record_llm_usage(kind="consult", model="claude-sonnet-5",
                              org_id=team["org"], input_tokens=1500,
                              output_tokens=500, cost_micros=8_000)
-        _as(client, team, "user")
+        _as(client, team, "admin")
         body = client.get("/org/settings").data
         assert b"authoring" in body and b"consult" in body
         # $0.09 total — displayed, not rounded away to $0.00.
         assert b"$0.09" in body
 
     def test_an_empty_month_says_so(self, client, team):
-        _as(client, team, "user")
+        _as(client, team, "admin")
         assert b"No AI calls recorded" in client.get("/org/settings").data
 
     def test_being_over_the_allowance_is_stated_plainly(self, client, team):
-        # This is the answer to "why did generation get worse", and it must
-        # be visible to the plain user who noticed.
+        # The answer to "why did generation get worse". Since §5.1 #4 was
+        # reversed the plain user who noticed can no longer read it here —
+        # they ask an admin, and this is what the admin sees.
         _db.update_org_settings(team["org"], {"llm_budget_usd": 1})
         _db.record_llm_usage(kind="authoring", model="claude-sonnet-5",
                              org_id=team["org"],
                              cost_micros=2 * _llm_cost.MICROS_PER_USD)
-        _as(client, team, "user")
+        _as(client, team, "admin")
         body = client.get("/org/settings").data
         assert b"allowance reached" in body
         assert b"falling back" in body
@@ -391,7 +416,10 @@ class TestUsageReport:
         theirs = _db.create_organization("Theirs")
         _db.record_llm_usage(kind="authoring", model="claude-sonnet-5",
                              org_id=theirs, cost_micros=99_000_000)
-        _as(client, team, "user")
+        # Admin, not "user": as a plain user this request is a 403, and a
+        # 403 does not contain anybody's spend — the test would have gone
+        # on passing while measuring nothing.
+        _as(client, team, "admin")
         assert b"$99.00" not in client.get("/org/settings").data
 
 
