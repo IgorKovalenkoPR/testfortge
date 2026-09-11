@@ -644,7 +644,15 @@ class TestNoRouteGrowsMoreEnglishFlashes:
         "bugs.py": 3,
         "dashboard.py": 1,
         "estimation.py": 8,
-        "execution.py": 15,
+        # 15 → 7 + 8, and the total is unchanged: Stage 7 Phase B moved
+        # ``/test-execution/results`` into its own module and eight of
+        # this file's bare flashes went with the view. The ratchet is
+        # keyed on the file name, so a split reads as one file improving
+        # and another regressing — neither happened. Splitting the entry
+        # rather than merging it keeps the grip on both halves; the eight
+        # are still owed a key each.
+        "execution.py": 7,
+        "execution_results.py": 8,
         "execution_manual.py": 12,
         "generation.py": 13,
         # 24 → 2. The two left take no literal: the invitation flash is

@@ -12,7 +12,8 @@ from flask import Flask
 
 from . import (auth, members, settings, dashboard, projects, generation,
                edit, execution,
-               execution_live, execution_manual, bugs, automation,
+               execution_live, execution_results, execution_manual,
+               bugs, automation,
                estimation, chat, ops, guide, debug)
 
 
@@ -40,6 +41,11 @@ def register_all(app: Flask) -> None:
     # match the first-defined rule. ``bugs`` order is irrelevant
     # (distinct paths) but kept together with execution for cohesion.
     execution_live.register(app)
+    # The results page, Stage 7 Phase B. After ``execution`` for the same
+    # URL-rule-order reason, and it carries the endpoint name with it:
+    # ``test_execution_results`` is still what route_policy gates and what
+    # url_for resolves.
+    execution_results.register(app)
     # The step-by-step manual walk. Its own module for the same reason
     # execution_live is: routes/execution.py is 2,800 lines and a new
     # surface belongs beside it, not inside it.

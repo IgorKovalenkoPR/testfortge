@@ -13,7 +13,7 @@ This module pins the four PR-H behaviours that solve it:
   1. ``compute_dedup_signature`` is stable across runs, ignores
      query strings, treats list-and-string element formats the
      same, and disambiguates by page URL.
-  2. ``_aggregate_broken_image_findings`` collapses N broken images
+  2. ``aggregate_broken_image_findings`` collapses N broken images
      on the same page into 1 aggregate finding with a filename
      list — other defect classes pass through unchanged.
   3. The DB helpers (``find_bug_id_by_signature``,
@@ -123,7 +123,7 @@ class TestComputeDedupSignature:
 
 class TestAggregateBrokenImageFindings:
     def test_collapses_n_broken_images_on_one_page(self):
-        from routes.execution import _aggregate_broken_image_findings
+        from engine.run_results import aggregate_broken_image_findings
         findings = [
             {
                 "severity": "Major", "area": "Images",
@@ -137,7 +137,7 @@ class TestAggregateBrokenImageFindings:
             }
             for fn in ("a.svg", "b.svg", "c.svg")
         ]
-        result = _aggregate_broken_image_findings(findings)
+        result = aggregate_broken_image_findings(findings)
         assert len(result) == 1
         agg = result[0]
         assert agg["aggregated_count"] == 3
@@ -146,7 +146,7 @@ class TestAggregateBrokenImageFindings:
         assert "3 broken images" in agg["message"]
 
     def test_groups_split_by_url(self):
-        from routes.execution import _aggregate_broken_image_findings
+        from engine.run_results import aggregate_broken_image_findings
         findings = []
         for fn in ("c1.svg", "c2.svg", "c3.svg"):
             findings.append({
@@ -166,7 +166,7 @@ class TestAggregateBrokenImageFindings:
                 "url": "https://artest.com/jobs",
                 "element": f'img[src="{fn}"]',
             })
-        result = _aggregate_broken_image_findings(findings)
+        result = aggregate_broken_image_findings(findings)
         assert len(result) == 2
         counts = {r["url"]: r["aggregated_count"] for r in result}
         assert counts == {
@@ -177,7 +177,7 @@ class TestAggregateBrokenImageFindings:
     def test_single_finding_passes_through_without_aggregation(self):
         """A page with only 1 broken image isn't worth aggregating;
         the heuristic's per-image bug is still useful."""
-        from routes.execution import _aggregate_broken_image_findings
+        from engine.run_results import aggregate_broken_image_findings
         findings = [{
             "defect_class": "broken_image",
             "message": (
@@ -186,7 +186,7 @@ class TestAggregateBrokenImageFindings:
             "url": "https://artest.com/contact",
             "element": 'img[src="lonely.svg"]',
         }]
-        result = _aggregate_broken_image_findings(findings)
+        result = aggregate_broken_image_findings(findings)
         assert len(result) == 1
         # No aggregation markers added.
         assert "aggregated_count" not in result[0]
@@ -194,7 +194,7 @@ class TestAggregateBrokenImageFindings:
     def test_axe_findings_pass_through_unchanged(self):
         """Aggregation is broken-image-only — axe findings need
         per-element resolution for engineering triage."""
-        from routes.execution import _aggregate_broken_image_findings
+        from engine.run_results import aggregate_broken_image_findings
         axe1 = {
             "defect_class": "axe_critical",
             "message": "Select element must have an accessible name",
@@ -207,13 +207,13 @@ class TestAggregateBrokenImageFindings:
             "url": "https://artest.com/jobs",
             "element": ".cta-link",
         }
-        result = _aggregate_broken_image_findings([axe1, axe2])
+        result = aggregate_broken_image_findings([axe1, axe2])
         assert len(result) == 2, "axe findings must not be aggregated"
         assert all("aggregated_count" not in r for r in result)
 
     def test_empty_input_returns_empty_list(self):
-        from routes.execution import _aggregate_broken_image_findings
-        assert _aggregate_broken_image_findings([]) == []
+        from engine.run_results import aggregate_broken_image_findings
+        assert aggregate_broken_image_findings([]) == []
 
 
 # ── 3. DB helpers ─────────────────────────────────────────────────

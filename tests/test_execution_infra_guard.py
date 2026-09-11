@@ -1,11 +1,11 @@
 """All-failed / cannot-execute infrastructure guard in
-``routes.execution._reconcile_with_automation``.
+``engine.run_results.reconcile_with_automation``.
 
 Investigation 2026-07-15: a Test Execution run was scoring 0 pass /
 255 fail / 0 blocked and auto-filing one bug per test case. Root cause
 (reproduced): the deterministic simulator caps its fail rate at 45%
 and can NEVER produce an all-failed run — the all-failed verdict is
-imposed by ``_reconcile_with_automation`` copying the automation
+imposed by ``reconcile_with_automation`` copying the automation
 runner's per-item status 1:1 and synthesizing a bug for each, with no
 "cannot-execute" state, no evidence gate, and no all-failed guard.
 
@@ -27,9 +27,9 @@ QA-correct behaviour (pinned here):
 from __future__ import annotations
 
 from engine.qa_testers import execute_items
-from routes.execution import (
-    _reconcile_with_automation, _dedupe_bugs_by_root_cause,
-    _make_cannot_execute_summary_bug, _INFRA_GUARD_MIN_SUITE,
+from engine.run_results import (
+    reconcile_with_automation, dedupe_bugs_by_root_cause,
+    make_cannot_execute_summary_bug, INFRA_GUARD_MIN_SUITE,
 )
 
 
@@ -64,8 +64,8 @@ def _asset(status, *, evidence=False, url="https://site/"):
 
 
 def _reconcile(ex, assets):
-    _reconcile_with_automation(ex, assets, "mobile_web")
-    _dedupe_bugs_by_root_cause(ex, assets)
+    reconcile_with_automation(ex, assets, "mobile_web")
+    dedupe_bugs_by_root_cause(ex, assets)
     return ex
 
 
@@ -74,7 +74,7 @@ def _reconcile(ex, assets):
 
 class TestAllFailedGuard:
     def test_all_failed_no_evidence_becomes_blocked_plus_one_bug(self):
-        n = _INFRA_GUARD_MIN_SUITE + 2
+        n = INFRA_GUARD_MIN_SUITE + 2
         items = _items(n)
         ex = _exec(items)
         assets = {it["id"]: _asset("failed", evidence=False) for it in items}
@@ -92,7 +92,7 @@ class TestAllFailedGuard:
         """The prose-assertion failure path writes a failure screenshot,
         so a per-item evidence gate would NOT catch it. The aggregate
         guard (0 pass across the suite) must still fire."""
-        n = _INFRA_GUARD_MIN_SUITE + 5
+        n = INFRA_GUARD_MIN_SUITE + 5
         items = _items(n)
         ex = _exec(items)
         assets = {it["id"]: _asset("failed", evidence=True,
@@ -105,7 +105,7 @@ class TestAllFailedGuard:
         assert len(ex["bugs"]) == 1
 
     def test_summary_bug_is_runner_sourced_and_singular(self):
-        items = _items(_INFRA_GUARD_MIN_SUITE)
+        items = _items(INFRA_GUARD_MIN_SUITE)
         ex = _exec(items)
         assets = {it["id"]: _asset("failed", evidence=False) for it in items}
         _reconcile(ex, assets)
@@ -125,7 +125,7 @@ class TestAllFailedGuard:
 
 class TestCannotExecuteClassification:
     def test_runner_blocked_never_files_a_bug(self):
-        n = _INFRA_GUARD_MIN_SUITE + 1
+        n = INFRA_GUARD_MIN_SUITE + 1
         items = _items(n)
         ex = _exec(items)
         assets = {it["id"]: _asset("blocked") for it in items}
@@ -163,7 +163,7 @@ class TestCannotExecuteClassification:
     def test_small_all_failed_suite_is_left_alone(self):
         """A sub-threshold suite that legitimately fails all its items
         is a real signal, not infrastructure noise — no guard."""
-        n = _INFRA_GUARD_MIN_SUITE - 1
+        n = INFRA_GUARD_MIN_SUITE - 1
         items = _items(n)
         ex = _exec(items)
         assets = {it["id"]: _asset("failed", evidence=True,
@@ -184,7 +184,7 @@ class TestCannotExecuteClassification:
 
 class TestSummaryBugHelper:
     def test_helper_fills_mandatory_fields(self):
-        bug = _make_cannot_execute_summary_bug(
+        bug = make_cannot_execute_summary_bug(
             n_blocked=42, site_url="https://shop.example.com/",
             reporter="Olena Marchenko")
         for field in ("title", "severity", "priority", "status",
