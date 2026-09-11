@@ -795,6 +795,20 @@ def register(app: Flask) -> None:
                       # exactly what blew up — without forcing them to
                       # dig through Render logs.
                       try:
+                          # ``os`` is imported here, beside the others.
+                          # It was the one name this block never bound: the
+                          # module imports os locally as ``_os`` wherever it
+                          # needs it, and these two lines reached for a bare
+                          # ``os`` that does not exist at module scope. Every
+                          # call raised NameError, the bare ``except`` below
+                          # swallowed it, and the info.json this block exists
+                          # to write was never written once — so
+                          # /test-execution/diag had nothing to show an
+                          # operator about a dispatch that had just failed,
+                          # which is the situation it was built for. The
+                          # comment four lines above this one, in this same
+                          # file, warns about exactly this shape.
+                          import os
                           import json as _j
                           import time as _time
                           from routes.automation import STORAGE_ROOT as _SR

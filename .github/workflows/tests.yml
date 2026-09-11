@@ -116,6 +116,15 @@ jobs:
           # can collect tests/test_mcp_*.
           pip install -r mcp_server/requirements.txt
           pip install pytest
+          # tests/test_live_info_on_dispatch_failure.py runs pyflakes over
+          # routes/, engine/ and mcp_server/ and fails on an undefined
+          # name. That class of defect cannot be found by running the
+          # code: inside a broad `except Exception` a NameError is
+          # swallowed and the feature simply never happens — which is how
+          # the live-info write sat dead from the day it was written.
+          # Test-only, like the plugins above: a linter has no business in
+          # a production dyno's site-packages.
+          pip install pyflakes
 
       - name: Show environment
         run: |
