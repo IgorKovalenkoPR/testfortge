@@ -104,9 +104,21 @@ class TestThePremise:
         assert lines == []
         assert REASON in (err or ""), err
 
-    def test_the_only_template_that_rendered_errors_is_unreachable(self):
-        from tests.test_every_template_is_reachable import UNREACHABLE
-        assert "user_stories.html" in UNREACHABLE
+    def test_the_only_template_that_rendered_errors_is_gone(self):
+        """``user_stories.html`` was the one page that displayed a parse
+        error, and no route rendered it — which is why this file's subject,
+        the *async* path, had to carry the message instead.
+
+        It used to be asserted as "listed in UNREACHABLE". The E11 rebase
+        deleted the file along with six other pages no route reached, so
+        the premise is now stronger rather than gone: the template does not
+        exist at all. Asserting its absence keeps the premise checked — if
+        somebody revives that page, this says so, and the async message
+        stops being the only way a parse error reaches anyone.
+        """
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        assert not (root / "templates" / "user_stories.html").exists()
 
 
 class TestTheAsyncPathSaysWhy:
