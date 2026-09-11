@@ -4456,25 +4456,30 @@ def _insert_bug(project_id: str | None, bug: dict, source: str,
         )
         sess.add(row)
         sess.flush()
-        if project_id and not row.external_id:
-            # Give an id-less bug the id it is already being *displayed*
-            # under. ``workspace.bug_row_to_dict`` synthesises
-            # ``BUG-{row.id:03d}`` when ``external_id`` is NULL, but
-            # ``editable._next_public_id`` mints from stored ids only — so
-            # a project holding one NULL-id bug shown as BUG-001 handed
-            # BUG-001 out again to the next manual creation, and the
-            # unique index could not object because NULL is unconstrained.
-            # Storing the synthesised id makes displayed and stored the
-            # same value and brings the row under the index.
-            #
-            # Row id, not a count. The row id is globally unique, so it is
-            # unique within the project too; a count collides again the
-            # moment a bug is deleted. The trade-off is that per-project
-            # numbering is not dense — a project's first bug can be
-            # BUG-042 — which is exactly what the display already showed,
-            # so this changes no rendered value.
-            row.external_id = f"BUG-{int(row.id):03d}"
-            sess.flush()
+        # An id-less bug keeps ``external_id = NULL``, and that is the
+        # whole answer now.
+        #
+        # E11 (2026-08-22) closed this differently: it wrote the id the
+        # bug was already being *displayed* under — ``BUG-{row.id:03d}``
+        # — into the row, so that displayed and stored agreed and the
+        # unique index could see it. The defect was real. A project
+        # holding one NULL-id bug shown as BUG-001 handed BUG-001 out
+        # again to the next manual creation.
+        #
+        # ``ec18d9e`` (2026-08-30) then fixed the cause instead of the
+        # symptom: ``workspace.bug_row_to_dict`` no longer invents an id
+        # *in the namespace the minter draws from*. It renders
+        # ``BUG-#12`` — a prefix ``public_ids.split_id`` reads as
+        # ``BUG-#``, which renumbering never mints — so there is nothing
+        # left to collide with and nothing to legitimise.
+        #
+        # Both fixes landed in the same repository eight days apart and
+        # only one can be right. The later one is: a read path that
+        # writes is a worse thing to own than a display string that was
+        # honest all along, and ``tests/test_bug_display_id_collision``
+        # asserts exactly that — rendering a page must not assign a
+        # stored id. Re-applying the backfill during the E11 rebase made
+        # that test fail, which is how the conflict announced itself.
         return row.id
 
 

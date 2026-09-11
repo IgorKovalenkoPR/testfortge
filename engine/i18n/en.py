@@ -476,6 +476,13 @@ TRANSLATIONS = {
                             "this answer comes from my built-in knowledge "
                             "rather than the model.)",
     # ── Attaching evidence to a bug by hand (E4.5a) ────────────────
+    # Bulk triage refuses a value-taking action with no value. Added with
+    # the route in the E11 rebase: the commit shipped the call site and
+    # neither dictionary entry, so it rendered its English fallback in both
+    # languages — invisible to any comparison of en.py against ua.py, and
+    # exactly what rule 3 of the i18n gate exists to catch.
+    'bug_bulk_missing_value': 'Pick a value for that action — nothing was '
+                              'changed.',
     'bug_attach_label': 'Attach evidence',
     'bug_attach_submit': 'Attach',
     'bug_attach_hint': 'Screenshot, video, PDF or log.',

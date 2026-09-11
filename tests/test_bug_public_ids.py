@@ -148,42 +148,42 @@ class TestFilingTwiceUnderTheSameId:
 
 
 class TestIdsThatAreNotIds:
-    def test_an_id_less_bug_is_stored_under_the_id_it_is_shown_as(
-            self, project):
-        """Empty string is not an id — but neither is NULL, in practice.
+    def test_an_id_less_bug_keeps_its_null(self, project):
+        """An id-less bug is stored with ``external_id IS NULL``.
 
-        This used to assert that an id-less bug kept ``external_id IS
-        NULL``, on the grounds that inventing an id for a bug nobody gave
-        one is worse than leaving it blank. The reasoning missed that the
-        id was being invented anyway, one layer up:
-        ``workspace.bug_row_to_dict`` renders ``BUG-{row.id:03d}`` when the
-        column is NULL, so the operator has always seen ``BUG-001``.
+        This test asserted the opposite between 2026-08-22 and the E11
+        rebase: that the row was backfilled with the id it was being
+        *displayed* under, so that the mint and the display could not
+        disagree. The defect behind it was real — a NULL-id bug shown as
+        ``BUG-001`` handed ``BUG-001`` back out to the next manual
+        creation, and the unique index could not object because NULL is
+        unconstrained on both engines.
 
-        The two halves then disagreed. ``editable._next_public_id`` mints
-        from *stored* ids, so a project holding one NULL-id bug displayed as
-        ``BUG-001`` handed ``BUG-001`` straight back out to the next manual
-        creation — and the ``(project_id, external_id)`` index could not
-        object, because NULL is unconstrained on both engines. Two bugs, one
-        id, in the UI and in the Markdown export.
+        ``ec18d9e`` closed the same defect from the other end eight days
+        later, and better: ``workspace.bug_row_to_dict`` stopped inventing
+        an id in the namespace the mint draws from. It renders ``BUG-#12``,
+        a prefix renumbering never produces, so there is no collision left
+        to legitimise — and the read path does not write, which is the
+        property ``tests/test_bug_display_id_collision`` holds.
 
-        So the property is not "store nothing", it is **the id shown is the
-        id stored**. That is what makes the index able to do its job.
+        Two fixes for one defect, eight days apart, and only one can be
+        true at a time. This file now agrees with the later one.
         """
         _file(project, "", "No id at all")
         _file(project, "   ", "Also no id")
 
         stored = _ids(project)
-        assert len(stored) == 2
-        assert all(s and s.startswith("BUG-") for s in stored), stored
-        # The point of the fix: two id-less filings do not share an id.
-        assert len(set(stored)) == 2, stored
+        assert len(stored) == 2, stored
+        assert all(v is None for v in stored), (
+            "an id-less bug was given a stored id; the display is what "
+            "makes it readable, and it does so without writing")
 
-        # And the stored value is the one the UI renders, so the mint and
-        # the display can no longer disagree.
+        # …and the two are still distinguishable on screen, by row.
         from engine import workspace as _workspace
-        shown = {_workspace.bug_row_to_dict(row)["id"]
-                 for row in _db.list_bugs(project)}
-        assert shown == set(stored), (shown, stored)
+        shown = [_workspace.bug_row_to_dict(row)["id"]
+                 for row in _db.list_bugs(project)]
+        assert len(set(shown)) == 2, shown
+        assert all(s.startswith("BUG-#") for s in shown), shown
 
     def test_a_bug_with_no_project_is_not_constrained(self, fresh_db):
         """Tedgie files before a project is chosen, and that is allowed.
