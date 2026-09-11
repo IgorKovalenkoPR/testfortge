@@ -220,7 +220,7 @@ class TestThePipelineStillReadsIt:
         assert _has_form_submit([_marker_step()]) is True
 
     def test_it_does_not_read_as_a_click_in_the_editor_preview(self):
-        from routes.generation import _human_steps_preview
+        from routes.recorder import _human_steps_preview
         line = _human_steps_preview([MARKER])
         assert "Click" not in line, line
         assert "css=form" not in line, line

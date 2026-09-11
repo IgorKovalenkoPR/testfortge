@@ -654,7 +654,14 @@ class TestNoRouteGrowsMoreEnglishFlashes:
         "execution.py": 7,
         "execution_results.py": 8,
         "execution_manual.py": 12,
-        "generation.py": 13,
+        # 13 → 11 + 2, total unchanged: the Web Recorder moved to its own
+        # module and took two of this file's bare flashes with it. Same
+        # shape as the execution.py split above — the ratchet is keyed on
+        # file names, so a pure move reads as one file improving and
+        # another regressing. Split rather than merged, so the grip stays
+        # on both halves.
+        "generation.py": 11,
+        "recorder.py": 2,
         # 24 → 2. The two left take no literal: the invitation flash is
         # composed from the module-level ``_LEAD`` table and one of two
         # ``tail`` branches (with ``_undelivered`` inside them), which is

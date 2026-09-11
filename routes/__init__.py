@@ -13,7 +13,7 @@ from flask import Flask
 from . import (auth, members, settings, dashboard, projects, generation,
                edit, execution,
                execution_live, execution_results, execution_manual,
-               bugs, automation,
+               bugs, automation, recorder,
                estimation, chat, ops, guide, debug)
 
 
@@ -50,6 +50,11 @@ def register_all(app: Flask) -> None:
     # execution_live is: routes/execution.py is 2,800 lines and a new
     # surface belongs beside it, not inside it.
     execution_manual.register(app)
+    # The Web Recorder — the Chrome extension's endpoints and the
+    # capture-review pipeline. Its own module since generation.py was
+    # carrying two unrelated jobs; ``generation`` imports one flag back
+    # from it, so this import must not go the other way.
+    recorder.register(app)
     bugs.register(app)
     automation.register(app)
     estimation.register(app)
