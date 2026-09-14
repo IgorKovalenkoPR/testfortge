@@ -14,7 +14,7 @@ cases:
     preconditions: "{url} is open in the browser and the site holds content the query below will match."
     steps:
       - "Open {url} and go to the page carrying the search field"
-      - "Enter a valid search term that matches existing data"
+      - "Enter a valid search term that matches existing data, for example 'software testing'"
       - "Submit the search (press Enter or click Search button)"
       - "Review the results"
     test_data: "Search term matching existing data (e.g. 'software testing')"
@@ -25,7 +25,7 @@ cases:
   - summary: "Verify that 'No results' message is displayed for a non-matching query"
     preconditions: "A page of {host} exposing the search field is open in the browser."
     steps:
-      - "Enter a search term that does not match any existing data"
+      - "Enter the search term 'xyznonexistent123456', which matches no existing data"
       - "Submit the search"
     test_data: "Search term: 'xyznonexistent123456'"
     expected_result: "A 'No results found' message should be displayed. No error should appear and the search field should remain usable."
@@ -35,8 +35,8 @@ cases:
   - summary: "Verify that XSS and SQL injection are blocked in the search field"
     preconditions: "A page of {host} exposing the search field is open in the browser."
     steps:
-      - "Enter an XSS payload in the search field and submit"
-      - "Enter an SQL injection payload in the search field and submit"
+      - "Enter the XSS payload <script>alert('xss')</script> in the search field and submit"
+      - "Enter the SQL injection payload ' OR 1=1 -- in the search field and submit"
       - "Observe the page behavior after each submission"
     test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
     expected_result: "Both payloads should be sanitized. No script should execute and no database error should be displayed. The search should return an empty result set or an error message."

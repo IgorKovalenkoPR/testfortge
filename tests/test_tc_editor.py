@@ -484,6 +484,24 @@ class TestEndpoints:
         assert db.load_test_cases(project)[0]["expected_result"] == \
             "The result must be correct"
 
+    def test_a_hand_written_declarative_result_is_stored_verbatim(
+            self, client, project, editing_on):
+        """The 2026-09-14 house-style pass does not reach a human's text.
+
+        ``tc_house_style`` rewrites "is" / "are" onto "should" in the
+        expected result of a GENERATED case. The editors run a different
+        path — advice only — because a reviewer who signed a sentence off
+        outranks a convention, and a save that silently reworded what
+        somebody typed is the worst version of this feature.
+        """
+        headers = self._prepare(client, project)
+        typed = "The required fields are highlighted"
+        resp = client.patch(
+            "/api/edit/test_case/SC1_001",
+            json={"changes": {"expected_result": typed}}, headers=headers)
+        assert resp.status_code == 200
+        assert db.load_test_cases(project)[0]["expected_result"] == typed
+
     def test_creating_needs_a_csrf_token(self, client, project, editing_on):
         """Every non-form endpoint in this app has to be checked for this:
         without the token it passes the suite and 400s in production."""

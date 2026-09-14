@@ -2671,25 +2671,48 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 .tc-editor-status-info { color: #475569; }
 
 .tc-steps {
+    /* The ordinal is a counter, not the list marker, because the row below
+       is a flex container and `display: flex` on an <li> drops its
+       list-item box along with the marker. */
     margin: 0;
-    padding-left: 1.4em;
+    padding-left: 0;
+    list-style: none;
+    counter-reset: tc-step;
 }
 
 .tc-step {
-    /* The action buttons sit on the step's own line rather than in a
-       gutter: a gutter needs a fixed width, and a step is anything from
-       three words to three lines. */
+    /* One row: ordinal, text, actions. The actions used to sit inline at
+       the end of the text, which looked right until a step filled the
+       line — the button group is an atomic inline box, so it wrapped onto
+       a line of its own and, being invisible until hover, read as a 22px
+       blank gap between two steps. A flex column reserves the width
+       instead, so a long step wraps its own text and nothing else moves. */
     position: relative;
     padding: 2px 0;
+    display: flex;
+    align-items: flex-start;
+    gap: .45em;
+    counter-increment: tc-step;
+}
+
+.tc-step::before {
+    content: counter(tc-step) ".";
+    flex: 0 0 auto;
+    min-width: 1.2em;
 }
 
 .tc-step-text {
-    display: inline;
+    flex: 1 1 auto;
+    /* Without this a long unbreakable token (a field name such as
+       _wpcf7_ak_hp_textarea) refuses to shrink and pushes the actions
+       out of the cell. */
+    min-width: 0;
     white-space: pre-wrap;
 }
 
 .tc-step-actions {
     display: inline-flex;
+    flex: 0 0 auto;
     gap: 2px;
     margin-left: 8px;
     /* Shown on hover or when something inside has focus — so the list reads
@@ -2697,7 +2720,6 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
        display:none, which would take the buttons out of the tab order. */
     opacity: 0;
     transition: opacity 0.12s ease-in-out;
-    vertical-align: baseline;
 }
 
 .tc-step:hover .tc-step-actions,

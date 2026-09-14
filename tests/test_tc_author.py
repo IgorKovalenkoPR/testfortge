@@ -783,13 +783,22 @@ class TestTeamLeadHouseStyle:
         assert not [f for f in report.findings
                     if f.category == "Expected Result Voice"]
 
-    def test_declarative_expected_result_is_left_alone(self):
+    def test_declarative_expected_result_is_rewritten_to_should(self):
+        # Reversed by the operator ruling of 2026-09-14: "should" / "should
+        # be" replaces "is" / "are" in the expected result of a GENERATED
+        # case. The reviewer is a generation pass — a human's own text goes
+        # through tc_author.house_style_findings, which only advises.
         from engine.qa_team_lead import review_test_cases
         tc = _TC(expected_result="The required fields are highlighted")
         fixed, report = review_test_cases([tc])
-        assert fixed[0].expected_result == "The required fields are highlighted"
+        assert fixed[0].expected_result == \
+            "The required fields should be highlighted"
+        # Still not a "weak modal" finding: nothing here read as a
+        # requirement on the product, it was simply in the other voice.
         assert not [f for f in report.findings
                     if f.category == "Expected Result Voice"]
+        assert any(f.category == "Expected Result Shape"
+                   for f in report.findings)
 
     def test_negative_case_gains_the_feedback_assertion(self):
         from engine.qa_team_lead import review_test_cases

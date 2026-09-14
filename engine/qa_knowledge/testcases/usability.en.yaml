@@ -49,9 +49,9 @@ cases:
   - summary: "Verify that error and empty states are user-friendly, not raw stack traces"
     preconditions: "{url} is reachable in the browser."
     steps:
-      - "Open a known-bad path under {host} to trigger a 404"
+      - "Open the known-bad path /this-does-not-exist-123 under {host} to trigger a 404"
       - "Trigger a form submission with invalid input"
-      - "If the app exposes search, search for nonsense to hit an empty-state"
+      - "If the app exposes search, search for the nonsense query 'zzzqqqxxx' to hit an empty-state"
     test_data: "/this-does-not-exist-123, malformed form input, query: ‘zzzqqqxxx’"
     expected_result: "Each error and empty state should render a friendly message and a recovery CTA (link home, retry, contact). No raw 500 page or stack trace should be exposed."
     category: Negative

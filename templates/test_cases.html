@@ -488,7 +488,7 @@
     </h3>
     <p class="hint">
         {{ t.get('tc_upload_hint',
-            'Drop an existing pack (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the cases in the session for manual or automated execution. Supported headers include any case-insensitive variant of TC ID, Section, Summary, Preconditions, Test Steps, Test Data, Expected Result, Category, Priority, Status, Testing Type.') }}
+            'Drop an existing pack (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the cases in the session for manual or automated execution. Supported headers include any case-insensitive variant of TC ID, Section, Summary, Preconditions, Steps to Reproduce, Test Data, Expected Result, Category, Priority, Status, Testing Type.') }}
     </p>
     <div class="form-row" style="align-items:flex-end; gap:12px;">
         <div class="form-group" style="flex:1">
@@ -829,7 +829,11 @@
                         blob cannot express. Each control posts one operation
                         and the server applies it to the row as it is now,
                         under the same version check as any other edit. -#}
-                    <ol class="tc-steps" data-tc-steps="{{ tc.id }}"
+                    {#- role="list" because the CSS removes the list marker
+                        (the ordinal is a counter — see .tc-step in
+                        style.css), and Safari drops list semantics from a
+                        list styled that way. -#}
+                    <ol class="tc-steps" role="list" data-tc-steps="{{ tc.id }}"
                         data-tc-version="{{ tc_edit[tc.id].row_version }}">
                         {% for step in tc.test_steps | tc_step_list %}
                         <li class="tc-step" data-step-index="{{ loop.index0 }}">

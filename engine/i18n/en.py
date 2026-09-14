@@ -142,7 +142,7 @@ TRANSLATIONS = {
     "tc_subtitle": "TestFort-format test cases grouped by sections",
     "tc_summary": "Summary",
     "tc_preconditions": "Preconditions",
-    "tc_steps": "Test Steps",
+    "tc_steps": "Steps to Reproduce",
     "tc_test_data": "Test Data",
     "tc_expected": "Expected Result",
     "tc_issues": "Issues",
@@ -1326,7 +1326,8 @@ TRANSLATIONS = {
                       "the session for manual or automated execution. "
                       "Supported headers include any case-insensitive "
                       "variant of TC ID, Section, Summary, Preconditions, "
-                      "Test Steps, Test Data, Expected Result, Category, "
+                      "Steps to Reproduce, Test Data, Expected Result, "
+                      "Category, "
                       "Priority, Status, Testing Type.",
     "tc_upload_file": "File",
     "tc_upload_replace": "Replace current pack",

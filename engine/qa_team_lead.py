@@ -158,6 +158,65 @@ def _strip_page_numbers_from_text(text: str) -> str:
 # 2. Test Case Review Rules
 # ═══════════════════════════════════════════════════════════════════
 
+def _apply_column_house_style(tc, tc_id: str, report: ReviewReport) -> None:
+    """Rules 12-15 — how each column is written, not what it says.
+
+    Kept in one helper because all four come from the same review and read
+    the same module; a rule here changes the shape of a column for every
+    generator at once, which is the point of running it in the Team Lead
+    pass rather than in each of the four authors.
+    """
+    from . import tc_house_style as style
+
+    # Rule 12 + 13: preconditions state prior state, one fact per line,
+    # and never claim reachability that step 1 is about to prove.
+    preconditions = getattr(tc, "preconditions", "") or ""
+    if preconditions.strip():
+        fixed = style.format_preconditions(preconditions)
+        if fixed != preconditions:
+            report.findings.append(ReviewFinding(
+                severity="Minor", category="Precondition Shape",
+                message="Preconditions restated what step 1 does, or ran "
+                        "several facts into one line",
+                item_id=tc_id, auto_fixed=True,
+            ))
+            report.items_fixed += 1
+            if hasattr(tc, "preconditions"):
+                tc.preconditions = fixed
+
+    # Rule 14: Test Data is for credentials. A list of the field names the
+    # steps already name is a second copy of the same fact.
+    test_data = getattr(tc, "test_data", "") or ""
+    if test_data.strip():
+        kept = style.credentials_only(test_data)
+        if kept != test_data:
+            report.findings.append(ReviewFinding(
+                severity="Minor", category="Test Data Scope",
+                message="Test Data carried no credentials; the values "
+                        "belong in the title and the steps",
+                item_id=tc_id, auto_fixed=True,
+            ))
+            report.items_fixed += 1
+            if hasattr(tc, "test_data"):
+                tc.test_data = kept
+
+    # Rule 15: the expected result is written with "should", one fact per
+    # line. See engine/tc_house_style.py for why "should" and not "is".
+    expected = getattr(tc, "expected_result", "") or ""
+    if expected.strip():
+        fixed = style.format_expected_result(expected)
+        if fixed != expected:
+            report.findings.append(ReviewFinding(
+                severity="Minor", category="Expected Result Shape",
+                message="Expected result was written in declarative voice "
+                        "or ran several assertions into one line",
+                item_id=tc_id, auto_fixed=True,
+            ))
+            report.items_fixed += 1
+            if hasattr(tc, "expected_result"):
+                tc.expected_result = fixed
+
+
 def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> tuple[list, ReviewReport]:
     """Review and fix test cases. Returns (fixed_cases, report).
 
@@ -178,9 +237,15 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
       9. No generic placeholder steps ("Perform the action")
      10. At least two steps — navigation plus one action
      11. The summary asserts too; no hedging in the title
+     12. Preconditions do not claim reachability that step 1 proves
+     13. Preconditions carrying several facts are a numbered list
+     14. Test Data is filled only for credentials
+     15. The expected result is written with "should", one fact per line
 
     Rules 2 and 8-11 encode the house style measured from the reference
-    corpus; see ``engine/qa_knowledge/style/house_style.yaml``.
+    corpus; see ``engine/qa_knowledge/style/house_style.yaml``. Rules
+    12-15 come from the operator review of 2026-09-14 and live in
+    ``engine/tc_house_style.py``.
     """
     if report is None:
         report = ReviewReport()
@@ -365,6 +430,13 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
                 tc.summary = _fix_expected_result_voice(summary)
                 report.items_fixed += 1
                 report.findings[-1].auto_fixed = True
+
+        # Rules 12-15: the column conventions from the 2026-09-14 operator
+        # review. They run last because rule 8 may have just appended a
+        # sentence to the expected result, and that sentence is subject to
+        # the same voice and the same one-fact-per-line layout as the rest
+        # of the column.
+        _apply_column_house_style(tc, tc_id, report)
 
     # Calculate quality score
     if report.total_items_reviewed > 0:

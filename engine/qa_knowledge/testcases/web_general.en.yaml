@@ -74,7 +74,7 @@ cases:
     priority: High
     section: "Performance"
   - summary: "Verify that the page is served over HTTPS with valid certificate"
-    preconditions: "{url} is reachable over the public internet."
+    preconditions: "{url} is published on the public internet."
     steps:
       - "Open {url}"
       - "Pay attention to the padlock in the browser address bar"

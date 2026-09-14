@@ -397,11 +397,11 @@ _SCHEMA_HINT = """{
     {
       "section": "Job Positions grid",
       "summary": "Verify that User can filter Job Positions using the \\"Internal\\" filter",
-      "preconditions": "Job Positions are created",
+      "preconditions": "1. Job Positions are created\\n2. The HR module is open",
       "steps": ["Go to HR module -> Job Positions grid",
                 "Click on the \\"Internal\\" filter button"],
       "test_data": "",
-      "expected_result": "User can filter Job Positions using the \\"Internal\\" filter. Only internal positions remain in the grid.",
+      "expected_result": "1. User can filter Job Positions using the \\"Internal\\" filter\\n2. Only internal positions should remain in the grid",
       "category": "Positive",
       "priority": "Medium",
       "testing_type": "Functional",
@@ -1270,6 +1270,17 @@ def expand_check(check, *, profile=None, category: str = "",
     core = objective_core(objective)
     steps = [navigation_step(url_pattern, profile=profile)]
 
+    # The values go in a step of their own unless they are credentials,
+    # which keep the Test Data column. Operator ruling 2026-09-14 scoped
+    # that column to credentials (engine/tc_house_style.py), and a hint
+    # left only there would be dropped on the way out — taking the one
+    # concrete thing this deterministic case had with it.
+    data_hint = _test_data_hint(objective)
+    if data_hint:
+        from . import tc_house_style as _style
+        if not _style.credentials_only(data_hint):
+            steps.append(f"Use these values: {data_hint}")
+
     # The objective is phrased as an assertion, so the action step
     # introduces it rather than pretending it is already imperative —
     # "Attempt: login fails with an error" would not parse as an
@@ -1308,7 +1319,7 @@ def expand_check(check, *, profile=None, category: str = "",
         summary=_ensure_verify_that(objective),
         preconditions=preconditions,
         steps=steps,
-        test_data=_test_data_hint(objective),
+        test_data=data_hint,
         expected_result=expected,
         category=cat,
         priority=priority,

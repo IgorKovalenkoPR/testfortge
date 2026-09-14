@@ -476,7 +476,7 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
                    f"Perform the action: {short_action}",
                    "Observe the result"],
             test_data="Valid input data",
-            expected_result=f"The feature functions as specified, and the expected behaviour is observed.",
+            expected_result=f"The feature should function as specified, and the expected behaviour should be observed.",
             category="Positive", priority="High", section=section,
         ),
         TCTemplate(
@@ -487,7 +487,7 @@ def _generic_test_cases(action: str, original: str, section: str = "General") ->
                    "Attempt to perform the action",
                    "Observe the error handling"],
             test_data="Invalid/empty input data",
-            expected_result="Invalid input is rejected. A user-friendly error message is displayed. No data corruption occurs.",
+            expected_result="Invalid input should be rejected. A user-friendly error message should be displayed. No data corruption should occur.",
             category="Negative", priority="High", section=section,
         ),
         TCTemplate(
@@ -514,7 +514,7 @@ def _ac_to_test_case(criterion: str, action: str, section: str) -> TCTemplate:
                f"Perform the action: {short_action}",
                f"Validate criterion: {short_cr}"],
         test_data="Valid data matching the criterion",
-        expected_result=f"{short_cr}. The system behaves as specified.",
+        expected_result=f"{short_cr}. The system should behave as specified.",
         category="Positive", priority="High", section=section,
     )
 
@@ -541,17 +541,18 @@ def _ac_negative_test_case(criterion: str, action: str, section: str) -> TCTempl
         steps = ["Navigate to the feature under test",
                  f"Attempt the action that the spec forbids: {short_action}",
                  "Observe how the system responds"]
-        expected = (f"The system enforces the restriction. The action is "
-                    f"blocked, and a clear, user-facing error is displayed.")
+        expected = ("The system should enforce the restriction. The action "
+                    "should be blocked, and a clear, user-facing error "
+                    "should be displayed.")
     else:
         summary = (f"Verify that the system rejects input that violates "
                    f"'{short_cr[:70]}'")
         steps = ["Navigate to the feature under test",
                  f"Provide input/state that contradicts: {short_cr}",
                  "Observe error handling and system behavior"]
-        expected = ("The system rejects the invalid input gracefully. An "
-                    "appropriate, user-facing error message is displayed, "
-                    "and no data is persisted.")
+        expected = ("The system should reject the invalid input gracefully. "
+                    "An appropriate, user-facing error message should be "
+                    "displayed, and no data should be persisted.")
 
     return TCTemplate(
         summary=summary,
@@ -670,9 +671,10 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
             ],
             test_data=f"Navigation labels observed by crawler: {nav_str[:240]}",
             expected_result=(
-                "Every documented navigation item is rendered, clickable and "
-                "leads to a route whose page heading matches its label. No 404 "
-                "or empty-state pages on any of the items."
+                "Every documented navigation item should be rendered and "
+                "clickable, and should lead to a route whose page heading "
+                "matches its label. No 404 or empty-state page should appear "
+                "on any of the items."
             ),
             category="Positive", priority="High", section="Site Navigation",
         ))
@@ -704,9 +706,10 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
             steps=content_steps,
             test_data=f"URL: {url}",
             expected_result=(
-                f"The page loads with its declared title (\"{title[:80]}\") and "
-                f"H1 (\"{h1[:80] or '—'}\"). All observed sections are visible. "
-                f"No JavaScript errors are emitted on first paint."
+                f"The page should load with its declared title "
+                f"(\"{title[:80]}\") and H1 (\"{h1[:80] or '—'}\"). All observed "
+                f"sections should be visible. No JavaScript error should be "
+                f"emitted on first paint."
             ),
             category="Positive", priority="High", section=section,
         ))
@@ -727,9 +730,10 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                            "Confirm no JavaScript errors appear in DevTools Console"],
                     test_data=f"Button labels seen on the page: {btns_str}",
                     expected_result=(
-                        "Every listed control either navigates the user to "
-                        "the expected destination, opens its associated dialog "
-                        "or triggers its documented action without console errors."
+                        "Every listed control should either navigate the user "
+                        "to the expected destination, open its associated "
+                        "dialog or trigger its documented action without "
+                        "console errors."
                     ),
                     category="Positive", priority="Medium", section=section,
                 ))
@@ -744,7 +748,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                        "Verify the video starts playing within 3 seconds",
                        "Verify pause / mute / fullscreen controls respond"],
                 test_data=f"Page: {url}",
-                expected_result="Video starts playing within 3 s of clicking play; pause/mute/fullscreen behave as expected; no media errors in console.",
+                expected_result="The video should start playing within 3 s of clicking play; pause, mute and fullscreen should respond; no media error should appear in the console.",
                 category="Positive", priority="Medium", section=section,
             ))
 
@@ -765,7 +769,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                          f"Fill the form fields ({', '.join(named)}) with valid values",
                          "Click the submit / sign-in button",
                          "Observe the response — successful auth redirects or unlocks content"]
-                expected = "Form submits successfully, the server returns 2xx and the user is redirected to the post-auth page or sees a success state."
+                expected = "The form should submit successfully, the server should return 2xx, and the user should be redirected to the post-auth page or see a success state."
                 category = "Positive"
             else:
                 summary = f"Verify that the {label} on {path_lbl} accepts valid input and submits cleanly"
@@ -773,7 +777,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                          f"Fill the fields ({', '.join(named)}) with valid values",
                          "Submit the form",
                          "Observe network response and UI confirmation"]
-                expected = "Form submits successfully (HTTP 2xx). UI shows confirmation state. No console errors."
+                expected = "The form should submit successfully (HTTP 2xx). The UI should show a confirmation state. No console error should appear."
                 category = "Positive"
             cases.append(TCTemplate(
                 summary=summary[:120],
@@ -791,7 +795,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
                        f"Submit the form with malformed values (e.g. invalid email, mismatched password) for: {', '.join(named[:3])}",
                        "Inspect the rendered validation messages and HTTP responses"],
                 test_data=f"Empty values; malformed values for: {', '.join(named[:3])}",
-                expected_result="Each invalid attempt is blocked client- or server-side with a field-specific error message. No partial write reaches the backing store.",
+                expected_result="Each invalid attempt should be blocked client- or server-side with a field-specific error message. No partial write should reach the backing store.",
                 category="Negative", priority="High", section=section,
             ))
             break  # one form per page is enough
@@ -808,17 +812,17 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
         seed = topical or (pages[0].get("h1") or pages[0].get("title") or "news")
         cases.append(TCTemplate(
             summary=f"Verify that the on-site search returns results relevant to a topical query (\"{seed[:60]}\")",
-            preconditions=f"Site search is reachable from {analysis.url}.",
+            preconditions=f"The site search is available from {analysis.url}.",
             steps=["Open the homepage",
                    "Click the search input / icon",
                    f"Submit the query: \"{seed[:80]}\"",
                    "Inspect the result list and the first three items"],
             test_data=f"Query: {seed[:120]}",
             expected_result=(
-                "Search returns at least one result. The first three results "
-                "are topically relevant to the query and link to existing pages "
-                "(no 404). An empty-state message is rendered when the query "
-                "yields no matches."
+                "The search should return at least one result. The first "
+                "three results should be topically relevant to the query and "
+                "should link to existing pages (no 404). An empty-state "
+                "message should be rendered when the query yields no matches."
             ),
             category="Positive", priority="High", section="Site Search",
         ))
@@ -882,7 +886,7 @@ def _flow_test_cases(flow_key: str) -> list[TCTemplate]:
                     "Observe the system state, UI messaging and any emails/notifications",
                 ],
                 test_data=ref_text if category != "Security" else "",
-                expected_result=f"{raw}. The system behaves as stated, with no data loss and no double-charging.",
+                expected_result=f"{raw}. The system should behave as stated, with no data loss and no double-charging.",
                 category=category,
                 priority="High",
                 section=section,

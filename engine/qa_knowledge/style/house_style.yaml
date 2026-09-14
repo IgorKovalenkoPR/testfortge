@@ -81,6 +81,16 @@ preconditions:
       Never put navigation into preconditions. Navigation is step 1 of
       the steps column.
     - >-
+      Never write that a URL "is reachable". Step 1 opens it, so
+      reachability is not prior state — it is the first thing the tester
+      does. Where the page has to be open before the case begins, write
+      "<url> is open". Operator ruling 2026-09-14.
+    - >-
+      Two or more facts are a numbered list, one fact per line, exactly
+      as the steps column is: "1. https://example.com is open\n2. A test
+      account exists". One fact stays a plain sentence. Operator ruling
+      2026-09-14.
+    - >-
       Use the plural form when the case needs several records to be
       meaningful: grid filtering / grouping / pagination cases say
       "Job Positions are created", not "Job Position is created".
@@ -163,8 +173,10 @@ expected_result:
       Declarative present tense ("The entered data is accepted") stays
       valid and is NEVER rewritten when a human wrote it — a reviewer
       signed that text off, and editing it under them is not this tool's
-      job. The rule above governs what the generator writes, not what it
-      is allowed to keep.
+      job. In generated text it IS rewritten: operator ruling 2026-09-14
+      asked for "should" / "should be" in place of "is" / "are", and
+      ``engine/tc_house_style.py`` applies it to the first copula of each
+      fact on the way out of the generator.
     - >-
       Banned: "must", "shall", "is expected to", "ought to". These read as
       a requirement on the product rather than something the tester can
@@ -187,8 +199,10 @@ expected_result:
       Job and a Contact Name for this applicant." warning is displayed'.
     - >-
       When there are two or more independent post-conditions, number
-      them: "1. User cannot create New Group without the required fields
-      filling | 2. A warning is displayed".
+      them one per line, exactly as the steps column is: "1. User cannot
+      create New Group without the required fields filling\n2. A warning
+      should be displayed". A single post-condition stays a plain
+      sentence. Operator ruling 2026-09-14.
     - >-
       Add the persistence assertion when the case writes data: "Employee
       is not created", "Time is not added to Timesheet", "the record is
@@ -201,16 +215,33 @@ expected_result:
     - Never leave this column empty.
 
 test_data:
-  style: Concrete values, named per field, only when the case depends on them.
+  style: >-
+    Credentials, and nothing else. Operator ruling 2026-09-14: the column
+    is filled only where the case needs an account to sign in with — a
+    login and password, an API key or token, a card number, a one-time
+    code. Every other value belongs in the step that types it.
+  evidence: >-
+    The generated packs had filled this column with the field NAMES the
+    steps already carried ("Fields observed: business-email,
+    _wpcf7_ak_hp_textarea"), which is a second copy of the same fact and
+    a second thing to keep in sync. The operator's review of SC2_004 on
+    2026-09-14 named it and scoped the column to credentials.
   rules:
     - >-
-      The corpus most often encodes the interesting data in the TITLE
-      ("with cyrillic Name, Surname or Father's name", "with negative and
-      very big values of the Duration", "with Deadline in the past",
-      "with Date from Future"). Do that, and repeat the exact value in
-      test_data.
-    - Write "Field: value" pairs, comma-separated. Quote strings that contain spaces.
-    - Leave empty for pure navigation and display cases.
+      Fill it only for credentials. Write "Field: value" pairs,
+      comma-separated; quote strings that contain spaces.
+    - >-
+      Every other concrete value goes in the step that uses it — 'Enter
+      the XSS payload <script>alert(1)</script> in the "Comment" field',
+      'Enter one character over the maximum: 256 characters'. A step that
+      says "enter an invalid value" without naming it is unexecutable by
+      anyone but its author, and moving the value out of this column is
+      what makes that visible.
+    - >-
+      The corpus also encodes the interesting data in the TITLE ("with
+      cyrillic Name, Surname or Father's name", "with Deadline in the
+      past"). Keep doing that; it is where a reader looks first.
+    - Leave empty for everything else, including pure navigation and display cases.
 
 sections:
   style: >-

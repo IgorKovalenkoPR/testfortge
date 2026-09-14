@@ -38,7 +38,7 @@ cases:
   - summary: "Verify that checkout is rejected with invalid payment details"
     preconditions: "At least one item is in the cart on {host} and the checkout page is open."
     steps:
-      - "Enter invalid or expired payment details"
+      - "Enter the declined card 4000 0000 0000 0002 with the expired date 01/20"
       - "Attempt to complete the purchase"
       - "Observe the error handling"
     test_data: "Declined card: 4000 0000 0000 0002, Expired: 01/20"
