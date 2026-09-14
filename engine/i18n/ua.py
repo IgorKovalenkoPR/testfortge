@@ -188,7 +188,7 @@ TRANSLATIONS = {
     "tc_subtitle": "Тест-кейси у форматі TestFort згруповані по секціям",
     "tc_summary": "Опис",
     "tc_preconditions": "Передумови",
-    "tc_steps": "Кроки тестування",
+    "tc_steps": "Кроки відтворення",
     "tc_test_data": "Тестові дані",
     "tc_expected": "Очікуваний результат",
     "tc_issues": "Проблеми",
@@ -1393,7 +1393,8 @@ TRANSLATIONS = {
                       "для мануального чи автоматизованого виконання. "
                       "Розпізнаються будь-які варіанти заголовків (без "
                       "урахування регістру): TC ID, Section, Summary, "
-                      "Preconditions, Test Steps, Test Data, Expected "
+                      "Preconditions, Steps to Reproduce, Test Data, "
+                      "Expected "
                       "Result, Category, Priority, Status, Testing Type.",
     "tc_upload_file": "Файл",
     "tc_upload_replace": "Замінити поточний пак",

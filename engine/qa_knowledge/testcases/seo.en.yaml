@@ -35,7 +35,7 @@ cases:
     section: SEO
     testing_type: SEO
   - summary: "Verify that robots.txt and sitemap.xml are reachable and consistent"
-    preconditions: "{url} is reachable over the public internet."
+    preconditions: "{url} is published on the public internet."
     steps:
       - "Open {url}/robots.txt — verify HTTP 200 and that it references a Sitemap directive"
       - "Open the Sitemap URL — verify HTTP 200 and valid XML"

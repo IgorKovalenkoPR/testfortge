@@ -13,7 +13,7 @@ This module exposes two public functions:
 
 Each accepts XLSX, CSV, MD, JSON. Header / column names are matched
 case-insensitively against an alias dictionary so a column titled
-"Test Steps", "Steps", "Procedure" or "Шаги" all map to the same
+"Steps to Reproduce", "Test Steps", "Steps" or "Шаги" all map to the
 field. Missing optional columns get sensible defaults so a minimal
 "ID + Summary + Steps + Expected" pack still imports cleanly.
 """
@@ -311,7 +311,7 @@ def _read_json(file_path: str) -> list[dict]:
 #       ## TC-001 — Verify login with valid creds
 #       - **Section:** Authentication
 #       - **Preconditions:** ...
-#       - **Test Steps:** 1. Open login. 2. ...
+#       - **Steps to Reproduce:** 1. Open login. 2. ...
 #       - **Test Data:** ...
 #       - **Expected Result:** ...
 #       - **Category:** Positive
@@ -360,9 +360,17 @@ def _read_md_test_cases(file_path: str) -> list[TestCase]:
             next_idx += 1
         current.clear()
 
+    # The field this loop last wrote, so an indented continuation line can
+    # be appended to it. Preconditions, steps and expected results are
+    # numbered lists now, and export_markdown indents lines 2..n under the
+    # bullet — without this they match nothing and are dropped, so a
+    # round-trip through .md would keep only the first fact of each field.
+    last_field = ""
+
     for raw in lines:
         h = _MD_HEADING_RE.match(raw)
         if h:
+            last_field = ""
             level, title = len(h.group(1)), h.group(2).strip()
             if level <= 2:
                 _flush()
@@ -383,6 +391,7 @@ def _read_md_test_cases(file_path: str) -> list[TestCase]:
             label = m_field.group(1).strip().lower().replace(" ", "_").replace("/", "_")
             value = m_field.group(2).strip()
             field_aliases = {
+                "steps_to_reproduce": "test_steps",
                 "test_steps": "test_steps",
                 "steps": "test_steps",
                 "preconditions": "preconditions",
@@ -398,7 +407,14 @@ def _read_md_test_cases(file_path: str) -> list[TestCase]:
                 "testing_type": "testing_type",
                 "type": "testing_type",
             }
-            current[field_aliases.get(label, label)] = value
+            last_field = field_aliases.get(label, label)
+            current[last_field] = value
+            continue
+
+        if (last_field and current.get(last_field) and raw.strip()
+                and raw.startswith(("  ", "\t"))
+                and not _MD_BULLET_RE.match(raw)):
+            current[last_field] = f"{current[last_field]}\n{raw.strip()}"
             continue
 
         m_bul = _MD_BULLET_RE.match(raw)

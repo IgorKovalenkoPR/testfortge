@@ -25,7 +25,7 @@ cases:
   - summary: "Verify that 404 page is displayed for non-existent URLs"
     preconditions: "{url} is reachable in the browser."
     steps:
-      - "Enter a non-existent path under {host} in the browser address bar"
+      - "Enter the non-existent path /this-page-does-not-exist-12345 under {host} in the browser address bar"
       - "Observe the page that loads"
     test_data: "Non-existent path: /this-page-does-not-exist-12345"
     expected_result: "A 404 error page should be displayed. It should be styled and user-friendly rather than a raw server error."

@@ -159,10 +159,10 @@ Generated from User Stories with **scenario-based detection** (13 scenario types
 | ID | SC1_001 format |
 | Section | Grouped name (Authentication, Create / Add, Search / Filter, etc.) |
 | Summary | What the test case verifies |
-| Preconditions | Required state before testing |
-| Test Steps | Numbered steps (1. Open app, 2. Navigate to..., 3. Enter...) |
-| Test Data | Specific data values to use |
-| Expected Result | What should happen |
+| Preconditions | Required state before testing; a numbered list when it carries more than one fact |
+| Steps to Reproduce | Numbered steps (1. Open app, 2. Navigate to..., 3. Enter...) |
+| Test Data | Credentials the case needs; empty otherwise — every other value lives in the step that types it |
+| Expected Result | What should happen, written with "should" / "should be"; a numbered list when it carries more than one assertion |
 | Issues | Bug references (initially empty) |
 | Comment | Additional notes |
 | Status | Unchecked / Passed / Failed / Passed but / Blocked |

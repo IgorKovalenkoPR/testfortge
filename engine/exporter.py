@@ -38,6 +38,20 @@ def _sanitize_cell(val):
     return val
 
 
+def _md_field(label: str, value) -> str:
+    """One bullet for a field that may carry a numbered list.
+
+    Preconditions, steps and expected results are multi-line now
+    (engine/tc_house_style.py). A bare newline inside a bullet ends the
+    list item in every Markdown renderer, so line two onwards is indented
+    under it instead.
+    """
+    text = "" if value is None else str(value)
+    lines = text.split("\n")
+    head = f"- **{label}:** {lines[0]}"
+    return "\n".join([head] + [f"  {ln}" for ln in lines[1:]])
+
+
 def export_markdown(project_name: str, stories: list[UserStory],
                     test_cases: list[TestCase], checklist: list[ChecklistItem],
                     traceability: list[dict], recommendations: dict) -> str:
@@ -69,10 +83,10 @@ def export_markdown(project_name: str, stories: list[UserStory],
             a(f"\n### Section {tc.section_num}: {tc.section}\n")
         a(f"#### {tc.id}: {tc.summary}")
         a(f"- **User Story:** {tc.user_story_id} | **Category:** {tc.category} | **Priority:** {tc.priority}")
-        a(f"- **Preconditions:** {tc.preconditions}")
-        a(f"- **Test Steps:** {tc.test_steps}")
-        a(f"- **Test Data:** {tc.test_data}")
-        a(f"- **Expected Result:** {tc.expected_result}")
+        a(_md_field("Preconditions", tc.preconditions))
+        a(_md_field("Steps to Reproduce", tc.test_steps))
+        a(_md_field("Test Data", tc.test_data))
+        a(_md_field("Expected Result", tc.expected_result))
         if tc.issues:
             a(f"- **Issues:** {tc.issues}")
         if tc.comment:
@@ -158,6 +172,12 @@ def export_html(project_name: str, stories: list[UserStory],
                 test_cases: list[TestCase], checklist: list[ChecklistItem],
                 traceability: list[dict], recommendations: dict) -> str:
     h = _escape
+    # Preconditions, steps and expected results are numbered lists now
+    # (engine/tc_house_style.py), and HTML collapses the newlines that
+    # carry them — a three-fact expected result rendered as one run-on
+    # line here while the app showed it as three.
+    def br(value) -> str:
+        return _escape(value).replace("\n", "<br>")
     p: list[str] = []
     a = p.append
 
@@ -216,10 +236,10 @@ ul{margin:.5rem 0;padding-left:1.5rem}
           f"<span class='badge {pcls}'>{h(tc.priority)}</span></h3>")
         a(f"<p class='meta'>Story: {h(tc.user_story_id)}</p>")
         a("<table>")
-        a(f"<tr><th>Preconditions</th><td>{h(tc.preconditions)}</td></tr>")
-        a(f"<tr><th>Test Steps</th><td>{h(tc.test_steps)}</td></tr>")
+        a(f"<tr><th>Preconditions</th><td>{br(tc.preconditions)}</td></tr>")
+        a(f"<tr><th>Steps to Reproduce</th><td>{br(tc.test_steps)}</td></tr>")
         a(f"<tr><th>Test Data</th><td>{h(tc.test_data)}</td></tr>")
-        a(f"<tr><th>Expected Result</th><td>{h(tc.expected_result)}</td></tr>")
+        a(f"<tr><th>Expected Result</th><td>{br(tc.expected_result)}</td></tr>")
         a(f"<tr><th>Issues</th><td>{h(tc.issues or '—')}</td></tr>")
         a(f"<tr><th>Comment</th><td>{h(tc.comment or '—')}</td></tr>")
         a("</table></div>")
@@ -257,7 +277,8 @@ def export_csv_testcases(test_cases: list[TestCase]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["TC ID", "Section", "Summary", "User Story", "Category", "Priority",
-                "Preconditions", "Test Steps", "Test Data", "Expected Result", "Issues", "Comment", "Status"])
+                "Preconditions", "Steps to Reproduce", "Test Data", "Expected Result",
+                "Issues", "Comment", "Status"])
     for tc in test_cases:
         w.writerow([_sanitize_cell(v) for v in (
             tc.id, tc.section, tc.summary, tc.user_story_id, tc.category, tc.priority,
@@ -363,13 +384,14 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
 
     headers = [
         "TC ID", "Section", "Summary", "User Story", "Category", "Priority",
-        "Preconditions", "Test Steps", "Test Data", "Expected Result",
+        "Preconditions", "Steps to Reproduce", "Test Data", "Expected Result",
         "Issues", "Comment", "Status",
     ]
 
     # Column indices (1-based) for special formatting
     col_category = 5
     col_priority = 6
+    col_preconditions = 7
     col_steps = 8
     col_expected = 10
     col_status = 13
@@ -390,7 +412,7 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
             cell.border = _THIN_BORDER
 
             # Wrap text for long-form columns
-            if col_idx in (col_steps, col_expected):
+            if col_idx in (col_preconditions, col_steps, col_expected):
                 cell.alignment = _WRAP_ALIGNMENT
             else:
                 cell.alignment = _DEFAULT_ALIGNMENT

@@ -40,7 +40,7 @@ cases:
   - summary: "Verify that email field rejects invalid email format"
     preconditions: "A page of {host} carrying a form with an email field is open in the browser."
     steps:
-      - "Enter an invalid email address in the email field"
+      - "Enter an invalid email address in the email field: 'test@', then '@domain.com', then 'plaintext', then 'test @example'"
       - "Click the Submit/Save button"
       - "Observe the validation error"
     test_data: "Invalid emails: 'test@', '@domain.com', 'plaintext', 'test @example'"
@@ -51,8 +51,8 @@ cases:
   - summary: "Verify that XSS and SQL injection are blocked in form fields"
     preconditions: "A page of {host} carrying the form under test is open in the browser."
     steps:
-      - "Enter XSS payload in text fields and submit"
-      - "Enter SQL injection payload in text fields and submit"
+      - "Enter the XSS payload <script>alert('xss')</script> in each text field and submit"
+      - "Enter the SQL injection payload ' OR 1=1 -- in each text field and submit"
       - "Observe the behavior"
     test_data: "XSS: <script>alert('xss')</script>, SQL: ' OR 1=1 --"
     expected_result: "Both payloads should be sanitized. No script should execute and no database error should be displayed."
@@ -62,9 +62,9 @@ cases:
   - summary: "Verify that form accepts min and max boundary values and rejects min-1 / max+1"
     preconditions: "A page of {host} carrying the form under test is open in the browser."
     steps:
-      - "Enter minimum length values in text fields (1 character)"
-      - "Enter maximum length values in text fields"
-      - "Enter special characters and Unicode in all text fields"
+      - "Enter the minimum length value 'A' (1 character) in each text field"
+      - "Enter the maximum length value (255 characters) in each text field"
+      - "Enter the special characters @#$%^&*() and the non-Latin value 'Тестове значення' in each text field"
       - "Submit the form after each test"
     test_data: "Min: 'A', Max: 255 chars, Special: @#$%^&*(), Unicode: test"
     expected_result: "The min and max boundary values should be accepted; min-1 and max+1 should be rejected with a field-specific message. No error or data corruption should occur."

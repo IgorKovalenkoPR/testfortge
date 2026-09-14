@@ -48,7 +48,7 @@ cases:
   - summary: "Verify that validation is triggered for invalid email format"
     preconditions: "The login page of {host} is open in the browser."
     steps:
-      - "Enter an invalid email format in the email field"
+      - "Enter an invalid email format in the email field: 'test@', then '@domain.com', then 'plaintext', then 'test @example.com'"
       - "Enter a valid password"
       - "Click the 'Login' / 'Sign In' button"
     test_data: "Email: 'test@', '@domain.com', 'plaintext', 'test @example.com'"

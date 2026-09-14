@@ -2,7 +2,7 @@
 TestFortge — Test Case & Checklist Generator (TestFort Template)
 
 TestFort Test Case format:
-  №  | Summary | Preconditions | Test Steps | Test Data | Expected Result | Issues | Comment
+  №  | Summary | Preconditions | Steps to Reproduce | Test Data | Expected Result | Issues | Comment
   SC1_001, SC1_002... grouped by Sections
 
 TestFort Checklist format:

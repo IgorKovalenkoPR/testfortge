@@ -579,6 +579,14 @@ def _field_case(page: dict, form: dict, field: dict, kind: str,
     action = (step_tpl.format(**fmt) if step_tpl
               else f'{objective} in the "{label}" {noun}')
 
+    # The concrete value goes in the step that types it, not only in the
+    # Test Data column: that column is now filled for credentials alone
+    # (see engine/tc_house_style.py), and a step reading "Enter one
+    # character more than the maximum" is unexecutable without the number.
+    data = _test_data(kind, field, objective)
+    if data:
+        action = f"{action} — {data}"
+
     steps = [_nav(page, form)]
     if category == "Negative":
         # Isolate the control under test: everything else stays valid, or
@@ -603,7 +611,7 @@ def _field_case(page: dict, form: dict, field: dict, kind: str,
         summary=summary,
         preconditions=f"{section} is opened.",
         steps=steps,
-        test_data=_test_data(kind, field, objective),
+        test_data=data,
         expected_result=expected,
         category=category,
         priority="High" if field.get("required") else "Medium",
