@@ -187,8 +187,28 @@ services:
       # them up front means the epic that ships one only has to change a
       # value, and tests/test_render_blueprint.py fails the build if a new
       # flag reaches engine/features.py without landing here too.
+      # Turned on 2026-09-15 at the owner's request. Two preconditions,
+      # both checked in the Render dashboard before the Manual Sync that
+      # applies this, because getting either wrong locks the instance:
+      #
+      #   * BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (declared
+      #     below, sync:false) must hold real values. An account is created
+      #     only by consuming an invitation, an invitation is issued only by
+      #     an admin, and engine/bootstrap.py is the only thing that can
+      #     mint the first one. Unset, there is no origin and nobody can
+      #     sign in.
+      #   * the database must have no users at all — that is the condition
+      #     bootstrap acts on, deliberately, because this plan's Postgres is
+      #     recreated roughly monthly.
+      #
+      # The perimeter does not change: BASIC_GATE_ENABLED stays "1" below,
+      # so the HTTP Basic gate keeps guarding this instance either way.
       - key: AUTH_ENABLED
-        value: "0"
+        value: "1"
+      # Left off. Organisations are a further scoping layer on top of
+      # accounts and the owner asked only for accounts; engine/features.py
+      # reads ORG_MODE as off without AUTH_ENABLED anyway, so this is now a
+      # choice rather than a consequence.
       - key: ORG_MODE
         value: "0"
       # Makes Postgres the source of truth for a project's artefacts
