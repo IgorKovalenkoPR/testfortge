@@ -29,6 +29,21 @@ def _activate(client, pid: str) -> None:
         sess["project_id"] = pid
 
 
+def _seed_run(pid: str, identity: dict, **payload) -> int:
+    """A run seeded the way a real dispatch writes one.
+
+    ``started_by`` matters and is easy to leave out. With authentication on
+    the register scopes to the caller, so a row without it is correctly
+    hidden — and a test that omits it then asserts against a page that is
+    behaving. The dispatcher stamps it (``routes/execution.py``,
+    ``_perm_uid``); seeding has to as well, or these tests pass with the
+    flags off and fail in the mode the product ships in.
+    """
+    payload.setdefault("mode", "walkthrough")
+    payload["started_by"] = identity.get("user_id") or ""
+    return _db.start_execution_run(pid, payload)
+
+
 class TestAnOpenRunCanBeEnded:
     """The remedy the refusal message names has to exist."""
 
@@ -84,31 +99,34 @@ class TestAnOpenRunCanBeEnded:
 
 class TestTheRegisterIsNotADeadEnd:
 
-    def test_an_open_run_offers_a_cancel(self, client, make_project):
+    def test_an_open_run_offers_a_cancel(self, client, make_project,
+                                         suite_identity):
         pid = make_project("register-cancel-button")
         _activate(client, pid)
-        run_id = _db.start_execution_run(pid, {"mode": "walkthrough"})
+        run_id = _seed_run(pid, suite_identity)
 
         body = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"/test-execution/runs/{run_id}/cancel" in body, (
             "an open run with no control is a run the operator can only "
             "clear with SQL")
 
-    def test_a_closed_run_offers_none(self, client, make_project):
+    def test_a_closed_run_offers_none(self, client, make_project,
+                                      suite_identity):
         pid = make_project("register-no-cancel-when-closed")
         _activate(client, pid)
-        run_id = _db.start_execution_run(pid, {"mode": "walkthrough"})
+        run_id = _seed_run(pid, suite_identity)
         _db.finish_execution_run(run_id, status="completed")
 
         body = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"/test-execution/runs/{run_id}/cancel" not in body
 
     def test_an_automated_run_links_to_its_results(self, client,
-                                                   make_project):
+                                                   make_project,
+                                                   suite_identity):
         pid = make_project("register-results-link")
         _activate(client, pid)
-        _db.start_execution_run(pid, {"mode": "tc_driven",
-                                      "config_id": "20260915_090700_abc123"})
+        _seed_run(pid, suite_identity, mode="tc_driven",
+                  config_id="20260915_090700_abc123")
 
         body = client.get("/test-execution/runs").get_data(as_text=True)
         assert "/test-execution/results/20260915_090700_abc123" in body, (
@@ -116,22 +134,23 @@ class TestTheRegisterIsNotADeadEnd:
             "the dispatching tab's auto-redirect")
 
     def test_the_mode_column_uses_the_name_the_operator_chose(
-            self, client, make_project):
+            self, client, make_project, suite_identity):
         """``live`` is the executor's internal name and appears nowhere in
         the UI the operator used to start the run."""
         pid = make_project("register-mode-label")
         _activate(client, pid)
-        _db.start_execution_run(pid, {"mode": "live"})
+        _seed_run(pid, suite_identity, mode="live")
 
         body = client.get("/test-execution/runs").get_data(as_text=True)
         assert ">live<" not in body
         assert "Automated" in body
 
     def test_verdict_counts_are_shown_for_a_finished_run(self, client,
-                                                         make_project):
+                                                         make_project,
+                                                         suite_identity):
         pid = make_project("register-counts")
         _activate(client, pid)
-        run_id = _db.start_execution_run(pid, {"mode": "tc_driven"})
+        run_id = _seed_run(pid, suite_identity, mode="tc_driven")
         _db.finish_execution_run(run_id, status="completed",
                                  stats={"passed": 7, "failed": 2,
                                         "blocked": 1})
@@ -154,13 +173,13 @@ class TestTheCancelFormWorksWithCsrfOn:
     """
 
     def test_the_form_renders_a_token_and_the_post_is_accepted(
-            self, client, make_project, monkeypatch):
+            self, client, make_project, monkeypatch, suite_identity):
         import re
         monkeypatch.setitem(client.application.config,
                             "WTF_CSRF_ENABLED", True)
         pid = make_project("cancel-csrf-on")
         _activate(client, pid)
-        run_id = _db.start_execution_run(pid, {"mode": "walkthrough"})
+        run_id = _seed_run(pid, suite_identity)
 
         body = client.get("/test-execution/runs").get_data(as_text=True)
         assert f"/test-execution/runs/{run_id}/cancel" in body
@@ -173,14 +192,14 @@ class TestTheCancelFormWorksWithCsrfOn:
         assert _db.get_execution_run(run_id)["finished_at"]
 
     def test_a_post_without_a_token_is_refused(
-            self, client, make_project, monkeypatch):
+            self, client, make_project, monkeypatch, suite_identity):
         """The other half: the guard has to actually be on, or the test
         above proves only that a token was rendered."""
         monkeypatch.setitem(client.application.config,
                             "WTF_CSRF_ENABLED", True)
         pid = make_project("cancel-csrf-off-token")
         _activate(client, pid)
-        run_id = _db.start_execution_run(pid, {"mode": "walkthrough"})
+        run_id = _seed_run(pid, suite_identity)
 
         assert client.post(
             f"/test-execution/runs/{run_id}/cancel").status_code == 400
