@@ -94,11 +94,15 @@ DELIBERATELY_ENGLISH = {
     "domain_edtech": "EdTech / E-Learning",
     "brand_aria": "the brand's own tagline",
     "automation_base_url": "BASE_URL is the variable's name",
+    # The mode's name in this product. The Ukrainian Run Mode card keeps
+    # the name and translates only the gloss after it ("QA walkthrough —
+    # дослідити сайт"); the register column has room for the name alone,
+    # and it has to read the same as the radio the operator chose.
+    "runs_mode_walkthrough": "QA walkthrough",
     "te_base_url": "the field is called Base URL in both",
     "automation_broken": "Broken is an Allure result state, like Failed",
     "review_session_url": "URL",
     "te_status_auto": "Auto, the value of the status field",
-    "te_mode_walkthrough": "QA walkthrough — the mode's name in this product",
     "chat_aria": "the assistant's own name and tagline",
     "dm_unit_tc": "TC", "dm_unit_cl": "CL",
     "pp_counts": ("nothing translatable is left in it: TC and CL are "

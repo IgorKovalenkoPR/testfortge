@@ -220,7 +220,15 @@ class TestTheRouteRefusesPolitely:
         blocker = _db.start_execution_run(project, {"mode": "tc_driven"})
         resp = client.post("/test-execution",
                            data={"run_mode": "tc_driven",
-                                 "selected_items": ["TC_001"]},
+                                 "selected_items": ["TC_001"],
+                                 "source": "test_cases",
+                                 "env_type": "web",
+                                 # What makes this a *browser* run, and so
+                                 # the thing the cap is about. This case
+                                 # used to post without it and still expect
+                                 # a refusal — see the test below for why
+                                 # that was the defect, not the contract.
+                                 "base_url": "https://example.com/"},
                            follow_redirects=True)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
@@ -229,6 +237,51 @@ class TestTheRouteRefusesPolitely:
         # could pass without the message naming this run at all.
         assert f"#{blocker} (tc_driven)" in body
         assert "already in progress" in body
+
+    def test_a_run_that_launches_no_browser_is_not_refused(
+            self, client, project, monkeypatch):
+        """The refusal has to be about the resource it names.
+
+        The cap exists because two Chromiums do not fit in one machine's
+        worth of memory. A run with no Base URL never launches one — the
+        route falls through to the deterministic simulator — and neither
+        does a run on an iOS or Android environment. Both were refused
+        anyway, with a message about browser memory, because the gate was
+        evaluated three hundred lines before the handler knew which kind of
+        run this was.
+
+        Measured as "no test run starts at all, neither by test case nor by
+        checklist": the operator's runs were the URL-less kind, and the
+        thing holding the slot was a browser run that had already finished.
+        """
+        monkeypatch.setenv("TESTFORTGE_MAX_CONCURRENT_RUNS", "1")
+        blocker = _db.start_execution_run(project, {"mode": "walkthrough"})
+
+        for label, form in (
+            ("test cases, no URL",
+             {"run_mode": "tc_driven", "source": "test_cases",
+              "selected_items": ["TC_001"], "env_type": "web"}),
+            ("checklist, no URL",
+             {"run_mode": "tc_driven", "source": "checklist",
+              "selected_items": ["HDR_001"], "env_type": "web"}),
+            ("native app environment",
+             {"run_mode": "tc_driven", "source": "test_cases",
+              "selected_items": ["TC_001"], "env_type": "ios",
+              "base_url": "https://example.com/"}),
+        ):
+            resp = client.post("/test-execution", data=form,
+                               follow_redirects=True)
+            assert resp.status_code == 200, label
+            body = resp.get_data(as_text=True)
+            assert f"#{blocker} (walkthrough)" not in body, (
+                f"{label}: refused by the browser-run cap although this "
+                f"run never launches a browser")
+
+        # Close it. With no organisation the cap's scope is the whole
+        # instance — which is the point of it, and which means a test that
+        # leaves a run open refuses the *next* test's browser run. The
+        # fixture's own comment says the same thing about organisations.
+        _db.finish_execution_run(blocker, status="completed")
 
     def test_the_manual_walk_is_not_refused(self, client, project,
                                             monkeypatch):

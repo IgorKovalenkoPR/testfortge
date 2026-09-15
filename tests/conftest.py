@@ -416,6 +416,32 @@ def auth_on(monkeypatch):
     return identity
 
 
+@pytest.fixture(autouse=True)
+def _no_leftover_open_runs():
+    """Start every test with no unfinished run anywhere in the database.
+
+    The browser-run cap counts open ``execution_run`` rows, and with no
+    organisation its scope is the whole instance — it has to be, because
+    the memory it protects belongs to the machine and a per-project cap is
+    bypassable by switching project. The suite shares one database, so a
+    test that seeds a blocking run and does not close it refuses the *next*
+    test's dispatch, and that test fails for something another file did.
+
+    The same reasoning the ``fresh_org`` fixture already documents for
+    organisations, applied to the case where there are none. Done here once
+    rather than as a cleanup line in every test that opens a run, because a
+    cleanup repeated forty times is the shape where one copy is missing.
+    """
+    from engine import db as _db
+    try:
+        for run in _db.list_open_runs_anywhere(limit=200):
+            _db.close_execution_run_if_open(int(run["id"]),
+                                            status="completed")
+    except Exception:      # pragma: no cover — a DB not yet migrated
+        pass
+    yield
+
+
 @pytest.fixture
 def forget_workspace():
     """``forget_workspace(client)`` — drop the workspace, keep the identity.

@@ -201,6 +201,40 @@ def _build_automation_assets(report_dict: dict[str, Any],
                             }
                 except OSError:
                     pass
+            # A step that failed is the failure, whether or not a picture
+            # of it survived. The block above records ``failure_step`` only
+            # when ``screenshot_failure`` names a file that exists and is
+            # non-empty — and ``run_results.reconcile_with_automation``
+            # reads exactly that field to decide whether a runner failure
+            # is "a genuine, evidence-backed product failure" or a
+            # cannot-execute condition. So a Playwright step that failed
+            # without a usable screenshot — the capture itself failed (which
+            # ``live_executor`` logs at WARNING because it happens), the
+            # artefacts were swept by retention, or the ephemeral disk was
+            # recycled between the worker and the import — was reclassified
+            # as *"Automation could not execute this item — recorded as
+            # Blocked (not a product defect)"* and filed nothing.
+            #
+            # That is "it never even got as far as bug reports": the run
+            # completed, the verdict said Blocked, and the defect the
+            # browser had just watched happen was gone.
+            #
+            # The screenshot stays what it always was — corroboration,
+            # attached when there is one. It is not what makes a failure
+            # real. The cannot-execute guard the 2026-07-15 investigation
+            # added is untouched: a script that never ran a step, or whose
+            # runner reported "blocked", still has no failed step here and
+            # is still Blocked with no bug.
+            if failure_step is None and str(step.get("status") or "") == "failed":
+                failure_step = {
+                    "index": step.get("index", 0),
+                    "action": step.get("action", ""),
+                    "comment": step.get("comment", ""),
+                    "screenshot": "",
+                    "context_screenshot": prev_after,
+                    "console_errors": list(
+                        step.get("console_errors") or [])[:5],
+                }
             if after:
                 prev_after = after
         video = r.get("video_path") or ""
@@ -225,6 +259,51 @@ def _build_automation_assets(report_dict: dict[str, Any],
     return assets
 
 
+def close_db_runs(config: dict, status: str, stats: dict | None = None) -> int:
+    """Mark this run's ``ExecutionRun`` rows finished. Returns how many.
+
+    The worker is the only process that knows the run ended. Until this
+    existed nothing here wrote to ``execution_run`` at all: the rows the
+    dispatcher opened were closed by ``/test-execution/results/<id>``, i.e.
+    by a human with a browser tab still open on the page that dispatched
+    them. Close the tab — or simply let the auto-redirect miss, which it
+    does on every status the poller does not recognise — and the row stayed
+    ``running`` for ever. ``engine.run_limits`` counts exactly those rows
+    against a cap of one browser run per organisation, so each finished run
+    went on refusing the next one until the 30-minute staleness window
+    expired. That is the "A browser run is already in progress for this
+    team" the operator could not get past, and it was produced by runs that
+    had *succeeded*.
+
+    Best-effort by construction: a worker that cannot reach the database
+    has still done the work, and the artefacts on disk remain the record.
+    Failures are printed rather than raised so they land in the per-run
+    worker log.
+    """
+    run_ids = config.get("db_run_ids") or {}
+    if not isinstance(run_ids, dict) or not run_ids:
+        return 0
+    closed = 0
+    try:
+        from engine import db as _db
+    except Exception as exc:  # pragma: no cover — defensive
+        print(f"runner_worker: db import failed, runs left open: {exc}",
+              file=sys.stderr)
+        return 0
+    for _env, run_id in run_ids.items():
+        try:
+            if _db.close_execution_run_if_open(int(run_id), status=status,
+                                                stats=stats or {}):
+                closed += 1
+        except Exception as exc:  # pragma: no cover — best-effort
+            print(f"runner_worker: could not close run {run_id}: {exc}",
+                  file=sys.stderr)
+    if closed:
+        print(f"runner_worker: closed {closed} execution_run row(s) "
+              f"as {status!r}", file=sys.stderr)
+    return closed
+
+
 def _write_terminated_artifacts(
     *,
     signum: int,
@@ -232,6 +311,7 @@ def _write_terminated_artifacts(
     error_path: str,
     result_path: str,
     done_path: str,
+    config: dict | None = None,
 ) -> None:
     """Write error.flag → result.json → done.flag (in that order) when
     the worker is killed by SIGTERM/SIGINT. Pulled out of ``main()`` so
@@ -285,6 +365,15 @@ def _write_terminated_artifacts(
             f.write(datetime.now(timezone.utc).isoformat())
     except Exception:
         pass
+    # A killed run is still a finished run as far as the concurrency cap
+    # is concerned. Without this, SIGTERM during a deploy left the row
+    # open and the next operator was told a run was in progress by a
+    # process that no longer existed.
+    if config is not None:
+        try:
+            close_db_runs(config, "terminated")
+        except Exception:
+            pass
 
 
 def main() -> int:
@@ -344,6 +433,7 @@ def main() -> int:
             error_path=error_path,
             result_path=result_path,
             done_path=done_path,
+            config=config,
         )
         # 143 = 128 + SIGTERM(15); 130 = 128 + SIGINT(2).
         if hasattr(_signal, "SIGTERM") and signum == _signal.SIGTERM:
@@ -404,34 +494,42 @@ def main() -> int:
                 print(f"runner_worker: cred reconstruction failed: {exc}",
                       file=sys.stderr)
 
-        # Stage 3 dispatch.
+        # Dispatch — one mode per thing the UI actually offers.
         #
-        # Default (LEGACY_EXECUTOR unset): every mode resolves to
-        # ``"live"`` so a stray ``mode="walkthrough"`` in a saved
-        # config picks up the unified executor automatically. The
-        # legacy TC-driven and walkthrough paths are only reachable
-        # by setting ``LEGACY_EXECUTOR=1`` — kept for one release so
-        # operators can A/B compare before we delete the dead code.
+        # Stage 3 unified every mode onto ``LiveExecutor``, and until now
+        # ``tc_driven`` was redirected there too unless ``LEGACY_EXECUTOR=1``
+        # was set, which no deployment sets. That made the two automated
+        # radio buttons the same engine with two labels, and it silently
+        # broke the one the operator reaches first:
         #
-        # The Sprint-5 ``WALKTHROUGH_MODE_ENABLED`` feature flag still
-        # gates the legacy walkthrough path (kept byte-identical for
-        # the A/B). It has no effect on ``mode="live"``.
+        # ``LiveExecutor`` is a crawler. It walks pages and runs a test
+        # case only where ``walkthrough_tc_match.match_tcs_for_url`` binds
+        # one to the URL it landed on — and that function never selects a
+        # case whose ``trigger`` is ``"manual"``, which is the default for
+        # every case the generator and the editor create
+        # (``engine/editable.py`` create_defaults, ``engine/db.py``
+        # ``trigger=d.get("trigger", "manual")``). So "Automated — built-in
+        # engine: Playwright drives the items you select below" selected
+        # your items, handed them to a crawler, and executed none of them.
+        # With no walkthrough block to read, it also ran with
+        # ``max_pages=50`` and an eight-minute budget on a 512 MB box —
+        # fifty pages of Chromium to run zero test cases.
+        #
+        # So ``tc_driven`` now means what its label says: each selected
+        # item becomes a script and is executed, in order, with no crawl.
+        # ``walkthrough`` (and the internal alias ``live``) keeps the
+        # exploratory executor, which is the mode that wants a crawl.
         raw_mode = (config.get("mode") or "").strip().lower()
         legacy_executor = (os.environ.get("LEGACY_EXECUTOR") or "").strip() == "1"
-        if not raw_mode:
-            mode = "live"  # default → unified executor
-        elif raw_mode in ("live",):
-            mode = "live"
-        elif legacy_executor and raw_mode in ("walkthrough", "tc_driven"):
-            mode = raw_mode
+        if raw_mode == "tc_driven":
+            mode = "tc_driven"
+        elif legacy_executor and raw_mode == "walkthrough":
+            mode = "walkthrough"   # the pre-Stage-3 runner, opt-in only
         else:
-            if raw_mode != "live":
-                # Operator-friendly: don't surprise-fail on a saved
-                # legacy config; redirect with a log line so the
-                # behaviour change is auditable.
+            if raw_mode not in ("live", "walkthrough", ""):
                 print(
-                    f"runner_worker: mode={raw_mode!r} requested but "
-                    f"LEGACY_EXECUTOR is not set — redirecting to 'live'",
+                    f"runner_worker: unknown mode={raw_mode!r} — "
+                    f"running the exploratory executor",
                     file=sys.stderr,
                 )
             mode = "live"
@@ -562,7 +660,7 @@ def main() -> int:
                 getattr(runner, "tc_bindings", []) or []
             )
             early_exit_reason = ""
-        else:  # tc_driven (only reachable when LEGACY_EXECUTOR=1)
+        else:  # tc_driven — item-driven, one script per selected item
             # PR-A: thread project_id so the locator registry can learn
             # per-project across runs. Falls back to "" when the caller
             # didn't set one — runner treats that as "disable registry".
@@ -616,6 +714,15 @@ def main() -> int:
                 "source": config.get("source", "test_cases"),
                 "item_type": config.get("item_type", "test_case"),
                 "envs": config.get("envs", {}),
+                # The rows the dispatcher opened, one per env_type.
+                # ``/test-execution/results/<id>`` adopts these instead of
+                # opening a second set — every key it reads comes from
+                # ``config_echo``, and this one was the only one the echo
+                # was assembled without. The import therefore never found a
+                # row to adopt, opened its own, and left the dispatcher's
+                # row running for ever: two rows per run in the register,
+                # one of them permanently "in progress".
+                "db_run_ids": config.get("db_run_ids") or {},
             },
             "finished_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -624,6 +731,17 @@ def main() -> int:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f)
         os.replace(tmp, result_path)
+        close_db_runs(
+            config,
+            "early_exit" if early_exit_reason else "completed",
+            stats={
+                "total":    rep_dict.get("total", 0),
+                "passed":   rep_dict.get("passed", 0),
+                "failed":   rep_dict.get("failed", 0),
+                "blocked":  rep_dict.get("blocked", 0),
+                "early_exit_reason": early_exit_reason,
+            },
+        )
         return 0
     except SystemExit:
         # The SIGTERM/SIGINT handler above (``_on_terminate``) calls
@@ -658,6 +776,7 @@ def main() -> int:
         print(f"runner_worker: FAILED {type(exc).__name__}: {exc}",
               file=sys.stderr)
         print(tb, file=sys.stderr)
+        close_db_runs(config, "failed")
         return 1
     finally:
         # done.flag is written last and is what the polling route waits

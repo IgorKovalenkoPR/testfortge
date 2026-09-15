@@ -100,12 +100,17 @@ class Decision:
             started = str(run.get("started_at") or "")[:16].replace("T", " ")
             mode = str((run.get("env_payload") or {}).get("mode") or "run")
             label = f"#{run.get('id')} ({mode})"
-            parts.append(f"{label} started at {started}." if started
+            # " UTC", because the row is stored in UTC and the operator is
+            # not. Unlabelled, an operator three hours ahead reads a run
+            # that died at breakfast as one that started minutes ago — and
+            # concludes the limit is broken rather than that the run is.
+            parts.append(f"{label} started at {started} UTC." if started
                          else f"{label} is running.")
-        parts.append("Wait for it to finish, or open it from Runs to see "
-                     "where it is. Browser runs are limited because the "
-                     "service has one machine's worth of memory and two at "
-                     "once are killed rather than queued.")
+        parts.append("Open Runs and press Cancel on it to free the slot, "
+                     "or wait for it to finish. Browser runs are limited "
+                     "because the service has one machine's worth of "
+                     "memory and two at once are killed rather than "
+                     "queued.")
         if self.stale:
             # Say it, rather than letting somebody wonder why an old run is
             # not blocking: the alternative reading is that the limit is
@@ -149,26 +154,43 @@ def split_by_age(runs: list[dict], *, now: datetime | None = None,
     return counted, stale
 
 
-def check(project_ids: list[str], *, limit: int | None = None,
+def _counts_as_browser_run(run: dict) -> bool:
+    mode = str((run.get("env_payload") or {}).get("mode") or "")
+    # A run with no mode recorded predates the field. Counted as a browser
+    # run: under-counting risks the OOM this exists to prevent, and
+    # over-counting only costs a wait.
+    return mode in BROWSER_MODES or not mode
+
+
+def check(project_ids: list[str] | None, *, limit: int | None = None,
           now: datetime | None = None) -> Decision:
     """May another browser run start across *project_ids*?
 
     Takes project ids rather than an org id so the caller owns the mapping:
-    with organisations off there is no org, and the honest scope is then the
-    projects the caller can reach.
+    with organisations off there is no org, and the honest scope is then
+    the whole instance — which is what ``None`` means here. It has to be,
+    because the memory the cap protects belongs to the machine, not to a
+    project: the caller's previous fallback resolved to the single active
+    project, so switching project admitted a second Chromium. That is the
+    bypass this module's own docstring names, and it was live.
+
+    An empty list still means "nothing to count", which is what a caller
+    with no projects at all should get.
     """
     cap = max_concurrent() if limit is None else limit
     runs: list[dict] = []
-    if project_ids:
-        from engine import db as _db
+    from engine import db as _db
+    if project_ids is None:
+        try:
+            runs = [r for r in _db.list_open_runs_anywhere(limit=60)
+                    if _counts_as_browser_run(r)]
+        except Exception as exc:  # pragma: no cover — best-effort
+            log.warning("instance-wide run limit lookup failed: %s", exc)
+    elif project_ids:
         for pid in project_ids:
             try:
                 for run in _db.list_open_runs(pid, limit=20):
-                    mode = str((run.get("env_payload") or {}).get("mode") or "")
-                    # A run with no mode recorded predates the field. Counted
-                    # as a browser run: under-counting risks the OOM this
-                    # exists to prevent, and over-counting only costs a wait.
-                    if mode in BROWSER_MODES or not mode:
+                    if _counts_as_browser_run(run):
                         runs.append(run)
             except Exception as exc:  # pragma: no cover — best-effort
                 log.warning("run limit lookup failed for %s: %s", pid, exc)

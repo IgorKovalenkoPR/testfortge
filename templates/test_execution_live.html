@@ -283,13 +283,20 @@
                 if (s.status === 'done') {
                     redirected = true;
                     window.location.href = resultsUrl;
-                } else if (s.status === 'failed' || s.status === 'stalled') {
+                } else if (s.status === 'failed' || s.status === 'stalled'
+                           || s.status === 'terminated') {
+                    // 'terminated' means the worker took a signal - a
+                    // redeploy, a restart, an OOM kill. It was absent from
+                    // this list, so the most common free-tier ending left
+                    // the filmstrip polling a process that was gone.
                     redirected = true;
                     var p = document.getElementById('te-live-help');
                     if (p) {
                         p.hidden = false;
                         var heading = (s.status === 'stalled')
                             ? 'Run stalled — worker process appears dead.'
+                            : (s.status === 'terminated')
+                            ? 'Run stopped — the worker was killed (deploy, restart or out of memory).'
                             : 'Run failed.';
                         // Stalled runs may still have partial results
                         // worth importing — offer a button that hits

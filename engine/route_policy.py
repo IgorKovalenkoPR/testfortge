@@ -258,6 +258,12 @@ POLICY: dict[str, str] = {
     "manual_run_assign": "admin",
     "manual_run_verdict": "user",
     "manual_run_finish": "user",
+    # Ending any run by hand, not just a manual walk. "user" rather than
+    # "admin" because the concurrency slot it frees is what stops that
+    # user from working, and a tester who has to find an admin to unblock
+    # their own run is as stuck as one with no button at all. The route
+    # scopes through ``_authorise`` like every other run route.
+    "execution_run_cancel": "user",
 
     # ── Automation ────────────────────────────────────────────────
     "automation_page": "user",

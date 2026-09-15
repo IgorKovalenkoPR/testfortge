@@ -159,6 +159,25 @@ services:
       # it never fired and the kernel did the stopping.
       - key: MEMORY_BUDGET_MB
         value: "380"
+      # ── Browser-run fair use (engine/run_limits.py) ──────────────
+      #
+      # Both are read at call time precisely so an operator can change
+      # them from the dashboard without a redeploy — which only works if
+      # they exist here, because a Manual Sync deletes what the blueprint
+      # does not declare. They were the documented escape hatch from "a
+      # browser run is already in progress for this team", and the
+      # operator who needed it did not have it.
+      #
+      # One concurrent browser run: two Chromiums do not fit under the
+      # 512 MB ceiling and the second is killed rather than queued.
+      - key: TESTFORTGE_MAX_CONCURRENT_RUNS
+        value: "1"
+      # How long before an unfinished run is treated as dead and closed.
+      # Thirty minutes is generous against the eight-minute wall-clock
+      # budget a run is given, and it is now a repair rather than a read
+      # filter: the row is actually closed (engine/db.close_abandoned_runs).
+      - key: TESTFORTGE_RUN_STALE_MINUTES
+        value: "30"
       # ── Programme feature flags (docs/plans/team_platform_architecture.md)
       #
       # All five declared at "0" from the start rather than added one per
@@ -835,6 +854,25 @@ services:
       # number is load-bearing on this plan.
       - key: MEMORY_BUDGET_MB
         value: "380"
+      # ── Browser-run fair use (engine/run_limits.py) ──────────────
+      #
+      # Both are read at call time precisely so an operator can change
+      # them from the dashboard without a redeploy — which only works if
+      # they exist here, because a Manual Sync deletes what the blueprint
+      # does not declare. They were the documented escape hatch from "a
+      # browser run is already in progress for this team", and the
+      # operator who needed it did not have it.
+      #
+      # One concurrent browser run: two Chromiums do not fit under the
+      # 512 MB ceiling and the second is killed rather than queued.
+      - key: TESTFORTGE_MAX_CONCURRENT_RUNS
+        value: "1"
+      # How long before an unfinished run is treated as dead and closed.
+      # Thirty minutes is generous against the eight-minute wall-clock
+      # budget a run is given, and it is now a repair rather than a read
+      # filter: the row is actually closed (engine/db.close_abandoned_runs).
+      - key: TESTFORTGE_RUN_STALE_MINUTES
+        value: "30"
       # Postgres-backed sessions (engine/server_session.py). Staging
       # diverges from production here on purpose, and the divergence is
       # the point of staging: this is a free instance that sleeps after

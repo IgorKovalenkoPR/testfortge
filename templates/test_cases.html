@@ -340,11 +340,32 @@
                     // user to redo the work.
                     return handleJobLost();
                 }
+                // A poll that comes back 401 is not an unstable server —
+                // it is this browser's session having ended while the job
+                // ran, and the answer is to sign in again, not to retry.
+                // The submit path already knew that; the poll loop did
+                // not, so a mid-run expiry counted as ten consecutive
+                // errors and reported "Server returned errors", which
+                // sent the operator looking for a fault that was not
+                // there.
+                if (res.status === 401
+                    || (res.body && res.body.error === 'session_expired')
+                    || isCsrfFailure(res)) {
+                    return showReloadRequired();
+                }
                 if (!res.ok) {
                     consecErrors += 1;
                     if (consecErrors >= MAX_CONSEC_ERRORS) {
+                        // Say what the server actually said. The reason
+                        // was discarded here and replaced with a fixed
+                        // sentence, so every distinct server failure
+                        // reached the operator as the same nine words.
+                        var why = (res.body && (res.body.message
+                                                || res.body.error))
+                                  || ('HTTP ' + res.status);
                         return fallbackToSync(
-                            "{{ t.get('tc_gen_unstable', 'Server returned errors — retrying directly.') }}");
+                            "{{ t.get('tc_gen_unstable', 'Generation stopped — the server kept returning errors.') }}"
+                            + ' (' + why + ')');
                     }
                     return scheduleNextPoll(jobId);
                 }
@@ -371,8 +392,13 @@
                 if (stopped) return;
                 consecErrors += 1;
                 if (consecErrors >= MAX_CONSEC_ERRORS) {
+                    // Its own key. This used to reuse ``tc_gen_offline``
+                    // with a different English default from the one the
+                    // dictionary defines, so a genuine network failure
+                    // rendered the generic sentence and was
+                    // indistinguishable from a server-side one.
                     return fallbackToSync(
-                        "{{ t.get('tc_gen_offline', 'Network errors while polling — retrying directly.') }}");
+                        "{{ t.get('tc_gen_poll_network', 'Generation stopped — the browser could not reach the server while it was running. Check your connection and press Retry.') }}");
                 }
                 scheduleNextPoll(jobId);
             });
@@ -889,18 +915,46 @@
         </div>
         {%- endif %}
 
-        {# BDD view. Shown only for automation-targeted cases, and derived
-           from the columns above rather than stored beside them — so it
-           cannot drift from the case a client signed off. Read-only here:
-           editing belongs on the manual columns, which is where the
-           derivation reads from. #}
+        {# BDD view. Derived from the columns above unless an operator has
+           written their own, in which case theirs wins — ``ensure_gherkin``
+           has worked that way since it was written, and the ``gherkin``
+           column has been in the schema just as long. What was missing was
+           any way to put text in it: the block was a read-only ``<pre>``
+           and the hint told the operator to "edit the case, not this",
+           which described an impossibility rather than a policy. The
+           .feature export now reads the same function, so an edit made
+           here is the edit that downloads. #}
+        {# The pane stays scoped to automation-targeted cases — a pack of
+           two hundred manual cases does not want two hundred Gherkin
+           editors. The format switch below it is offered on every case,
+           because the .feature export's own error message tells the
+           operator to "switch individual cases to BDD in the editor" and
+           until now there was no such control anywhere. #}
         {% if tc.tc_format == 'gherkin' %}
-        <details class="tc-gherkin">
+        <details class="tc-gherkin" open>
             <summary>{{ t.get('tc_gherkin_summary', 'BDD view (Given / When / Then)') }}</summary>
-            <p class="hint">{{ t.get('tc_gherkin_hint', 'Derived from the columns above. Edit the case, not this — the .feature export re-derives on every download.') }}</p>
-            <pre class="gherkin-block">{{ tc | gherkin_view }}</pre>
+            <p class="hint">
+                {% if tc.gherkin %}
+                {{ t.get('tc_gherkin_hint_edited', 'Hand-written. This is what the .feature export downloads. Clear the box and save to go back to deriving it from the columns above.') }}
+                {% else %}
+                {{ t.get('tc_gherkin_hint_derived', 'Derived from the columns above, and re-derived whenever they change. Edit it here to pin your own wording — the .feature export will then download yours.') }}
+                {% endif %}
+            </p>
+            <div class="gherkin-block">
+                {{ tc_field(tc, "gherkin", tc | gherkin_view, kind="textarea") }}
+            </div>
         </details>
         {% endif %}
+        <p class="hint tc-format-row">
+            {{ t.get('tc_gherkin_format_label', 'Format') }}:
+            {{ editable("test_case", tc.id, "tc_format",
+                        tc.tc_format or 'manual',
+                        version=(tc_edit.get(tc.id).row_version
+                                 if tc_edit and tc_edit.get(tc.id) else None),
+                        kind="choice", choices=["manual", "gherkin"],
+                        readonly=(not (tc_edit and tc_edit.get(tc.id)))) }}
+            <small>{{ t.get('tc_gherkin_format_help', 'Set it to gherkin to give this case a Given / When / Then pane and include it in the .feature download.') }}</small>
+        </p>
 
         <div class="tc-status-row">
             <label>{{ t.status }}:</label>

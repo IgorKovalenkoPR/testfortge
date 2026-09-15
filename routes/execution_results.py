@@ -68,6 +68,30 @@ def register(app: Flask) -> None:
         pending_dir = os.path.join(STORAGE_ROOT, "automation_runs", "_pending")
         result_path = os.path.join(pending_dir, f"{run_id}.result.json")
         config_path = os.path.join(pending_dir, f"{run_id}.json")
+
+        def _close_dispatched_runs(status: str, note: str = "") -> None:
+            """Close the rows the dispatcher opened for this config.
+
+            Read from the config file rather than from ``config_echo``,
+            because every early return below happens before the echo has
+            been parsed — and two of them happen when there is no result
+            file to parse an echo out of at all. Those returns used to
+            abandon the row: a run the worker had explicitly reported as
+            failed went on counting against the one-browser-run cap until
+            the staleness window expired half an hour later.
+            """
+            try:
+                with open(config_path, "r", encoding="utf-8") as _cf:
+                    _cfg = json.load(_cf) or {}
+            except Exception:
+                return
+            for _rid in (_cfg.get("db_run_ids") or {}).values():
+                try:
+                    _db.close_execution_run_if_open(
+                        int(_rid), status=status,
+                        stats={"note": note} if note else None)
+                except Exception as _exc:  # pragma: no cover — best-effort
+                    log.warning("could not close run %s: %s", _rid, _exc)
         # ── Stalled-run handling ──────────────────────────────────
         # If result.json never landed but the worker DID write some
         # screenshots before being OOM-killed, salvage what we can. The
@@ -108,6 +132,7 @@ def register(app: Flask) -> None:
                     f"({run_id}.log) for the failure cause.",
                     "error",
                 )
+                _close_dispatched_runs("failed", "no salvageable artefacts")
                 return redirect(url_for("test_execution_page"))
             flash(
                 f"Run did not finish cleanly (worker likely OOM-killed). "
@@ -122,15 +147,18 @@ def register(app: Flask) -> None:
                     payload = json.load(f)
             except Exception as exc:
                 flash(f"Cannot read run results: {exc}", "error")
+                _close_dispatched_runs("failed", f"unreadable result: {exc}")
                 return redirect(url_for("test_execution_page"))
 
-        if payload.get("status") == "failed":
+        if payload.get("status") in ("failed", "terminated"):
             flash(
                 "Automation run failed: "
                 f"{payload.get('error', 'unknown error')}. "
                 "Open /test-execution/diag for details.",
                 "error",
             )
+            _close_dispatched_runs(str(payload.get("status")),
+                                   str(payload.get("error", ""))[:200])
             return redirect(url_for("test_execution_page"))
 
         report = payload.get("report") or {}

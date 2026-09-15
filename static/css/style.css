@@ -2130,6 +2130,25 @@ input[type="text"]:focus, textarea:focus, select:focus {
     font-size: .8rem;
     line-height: 1.5;
     white-space: pre;
+}
+
+/* The BDD body is an inline-edit host now rather than a <pre>, and a
+   <span> collapses newlines — a Scenario would have rendered as one long
+   line. Restore the pre semantics on the host and on the textarea the
+   editor swaps in. */
+.gherkin-block .ie,
+.gherkin-block textarea {
+    display: block;
+    white-space: pre-wrap;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    width: 100%;
+    min-height: 9rem;
+}
+
+.gherkin-block .ie {
+    min-height: 0;
     overflow-x: auto;
     margin: .4rem 0 0;
     padding: .6rem .7rem;

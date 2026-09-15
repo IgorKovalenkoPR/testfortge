@@ -4864,6 +4864,34 @@ def finish_execution_run(run_id: int, status: str = "completed",
         row.finished_at = _utcnow()
 
 
+def close_execution_run_if_open(run_id: int, status: str = "completed",
+                                stats: dict | None = None) -> bool:
+    """Close *run_id* only when nothing has closed it already.
+
+    ``finish_execution_run`` overwrites whatever it finds, which is right
+    for the import step — its reconciled stats are the better answer. It is
+    wrong for the two writers that arrive without knowing what happened
+    first: the detached worker, which closes its own row so an unimported
+    run stops holding the concurrency slot, and the operator's Cancel,
+    which is a verdict about the run rather than a report of it. Either one
+    overwriting the other would lose the more specific status — a cancelled
+    run re-labelled "completed" by a worker that finished after the click
+    reads as a run nobody cancelled.
+
+    Returns whether it wrote, so a caller can tell "I closed it" from
+    "somebody else already had".
+    """
+    with session_scope() as sess:
+        row = sess.get(ExecutionRun, run_id)
+        if row is None or row.finished_at is not None:
+            return False
+        row.status = status
+        if stats:
+            row.stats = stats
+        row.finished_at = _utcnow()
+        return True
+
+
 def save_case_result(run_id: int, *, case_external_id: str | None = None,
                      case_id: int | None = None, case_kind: str = "test_case",
                      status: str | None = None, evidence_path: str | None = None,
@@ -5119,6 +5147,70 @@ def list_open_runs(project_id: str, *, mode: str | None = None,
         out = [r for r in out
                if str((r.get("env_payload") or {}).get("mode") or "") == mode]
     return out[:limit]
+
+
+def list_open_runs_anywhere(limit: int = 50) -> list[dict]:
+    """Every unfinished run on this instance, newest first.
+
+    The browser-run cap is about the machine's memory, so with no
+    organisation to scope by the honest scope is the machine. The caller
+    used to fall back to ``list_projects(owner_sid=...)``, which returns
+    nothing for the rows a project created without a session owner — so
+    the scope collapsed to the one active project and the cap became
+    per-project. Switching project then admitted a second Chromium, which
+    is the bypass ``engine/run_limits`` names in its own docstring.
+    """
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(ExecutionRun)
+            .where(ExecutionRun.finished_at.is_(None))
+            .order_by(ExecutionRun.started_at.desc()).limit(limit * 3)
+        ).scalars().all()
+        return [_row_to_dict(r) for r in rows][:limit]
+
+
+def close_abandoned_runs(project_ids: list[str] | None,
+                         older_than_minutes: int,
+                         status: str = "abandoned") -> list[int]:
+    """Close runs in *project_ids* that were started and never finished.
+
+    ``engine.run_limits`` has always ignored runs past its staleness
+    window when it counts, which stops a dead run wedging the cap for
+    ever. What it never did was write anything: the row stayed
+    ``running``, so the Runs register went on showing a run in progress
+    for a process that had not existed for hours, and the same row was
+    re-examined and re-ignored on every request thereafter.
+
+    A read filter and a repair are different things, and only the second
+    one tells the truth. Returns the ids it closed so the caller can log
+    or report them.
+    """
+    if project_ids is not None and not project_ids:
+        return []
+    if older_than_minutes <= 0:
+        return []
+    cutoff = _utcnow() - timedelta(minutes=older_than_minutes)
+    closed: list[int] = []
+    conditions = [ExecutionRun.finished_at.is_(None),
+                  ExecutionRun.started_at < cutoff]
+    if project_ids is not None:
+        conditions.insert(0, ExecutionRun.project_id.in_(list(project_ids)))
+    with session_scope() as sess:
+        rows = sess.execute(
+            select(ExecutionRun).where(*conditions).limit(200)
+        ).scalars().all()
+        for row in rows:
+            # A manual walk is meant to outlive a working day — that is
+            # the whole point of it being resumable — so it is never
+            # abandoned by the clock.
+            if (row.env_payload or {}).get("manual_queue") is not None:
+                continue
+            if str((row.env_payload or {}).get("mode") or "") == "manual":
+                continue
+            row.status = status
+            row.finished_at = _utcnow()
+            closed.append(row.id)
+    return closed
 
 
 def list_execution_runs(project_id: str, limit: int = 50) -> list[dict]:
@@ -5745,7 +5837,10 @@ __all__ = [
     "save_estimation", "list_estimations", "list_estimations_by_owner",
     "latest_estimation",
     # execution
-    "start_execution_run", "finish_execution_run", "save_case_result",
+    "start_execution_run", "finish_execution_run",
+    "close_execution_run_if_open", "close_abandoned_runs",
+    "list_open_runs_anywhere",
+    "save_case_result",
     "merge_run_env", "list_case_results_for_runs",
     "list_execution_runs",
     # dashboard

@@ -212,6 +212,23 @@ def _registry() -> dict[str, Entity]:
                 "status": _text(20),
                 "testing_type": _text(40),
                 "suite": _text(20),
+                # The BDD body. ``TestCase.gherkin`` has been in the schema
+                # since the migration at engine/db.py, ``gherkin.ensure_gherkin``
+                # has always preferred it over the derived text, and its
+                # docstring says "the column holds only text an operator
+                # hand-edited… Hand-edited text always wins". Nothing ever
+                # wrote to it: the field was designed, migrated and read,
+                # and never given a writer, so the page told the operator
+                # to "edit the case, not this" because editing this was
+                # impossible rather than because it was wrong. Empty means
+                # "derive again", which is the revert.
+                "gherkin": _text(20000),
+                # So a case generated as a manual table can be switched to
+                # BDD without regenerating the pack. The .feature export
+                # refuses a pack with no BDD case and told the operator to
+                # "switch individual cases to BDD in the editor" — an
+                # instruction to use a control that did not exist.
+                "tc_format": _choice(("manual", "gherkin")),
             },
         ),
         # ── Requirement 6: edit generated checklist items ──

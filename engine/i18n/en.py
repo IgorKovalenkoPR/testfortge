@@ -940,6 +940,23 @@ TRANSLATIONS = {
     "automation_sub": "Generate a TypeScript + Playwright suite from the "
                       "BDD test cases, run it where the browsers live, and "
                       "send the Allure results back here.",
+    "automation_vs_execution_title": "This module does not run anything.",
+    "automation_vs_execution_body": "It writes a TypeScript + Playwright "
+                                    "suite you run on your own machine or "
+                                    "in CI, and it reads the Allure "
+                                    "results back. To run a browser from "
+                                    "inside TestForTge — against the test "
+                                    "cases you select, right now — use "
+                                    "Test Execution.",
+    "automation_browser_disabled": "In-process browser runs are off on "
+                                   "this instance "
+                                   "(TESTFORTGE_BROWSER_ENABLED=0) — "
+                                   "Chromium does not fit beside the web "
+                                   "worker here. Download the suite below "
+                                   "and run it where the browsers are, or "
+                                   "use Test Execution, which runs the "
+                                   "browser in a detached process that "
+                                   "survives a restart.",
     "automation_how_title": "How this works",
     "automation_step1": "Generate",
     "automation_step1_body": "download a self-contained Node project built "
@@ -1311,11 +1328,22 @@ TRANSLATIONS = {
                               "generate again.",
     "tc_gen_reload": "Reload page",
     "tc_gen_offline": "Generation could not finish — try again.",
-    "tc_gen_unstable": "Server returned errors — retrying directly.",
+    # "retrying directly" described a synchronous fallback that was
+    # deliberately removed (it tied up the single worker for the whole LLM
+    # run and reliably 502'd). The string stayed, so the operator was told
+    # a retry was under way, waited for it, and nothing was retrying.
+    "tc_gen_unstable": "Generation stopped — the server kept returning "
+                       "errors. Press Retry to start a new run.",
+    # Its own key: the poll loop used to reuse tc_gen_offline for this with
+    # a different English default, so a network failure and a server
+    # failure printed the same sentence.
+    "tc_gen_poll_network": "Generation stopped — the browser could not "
+                           "reach the server while it was running. Check "
+                           "your connection and press Retry.",
     "tc_gen_stage_done": "Done — loading test cases…",
     "tc_gen_failed": "Generation failed",
-    "tc_gen_watchdog": "Generation is taking longer than expected — "
-                       "finishing directly.",
+    "tc_gen_watchdog": "Generation is taking longer than expected. Press "
+                       "Retry to start a new run.",
     "tc_gen_bad_response": "The server returned an unexpected response — "
                            "try again.",
     "tc_gen_offline_submit": "Could not reach the server — check your "
@@ -1376,9 +1404,22 @@ TRANSLATIONS = {
     "tc_step_add": "Add step",
     "tc_delete": "Delete this test case",
     "tc_gherkin_summary": "BDD view (Given / When / Then)",
-    "tc_gherkin_hint": "Derived from the columns above. Edit the case, not "
-                       "this — the .feature export re-derives on every "
-                       "download.",
+    # The old "edit the case, not this" described an impossibility rather
+    # than a policy: the column existed, ensure_gherkin preferred it, and
+    # nothing could write to it. Two hints now, because the answer differs
+    # depending on whether this case has been hand-written.
+    "tc_gherkin_hint_derived": "Derived from the columns above, and "
+                               "re-derived whenever they change. Edit it "
+                               "here to pin your own wording — the "
+                               ".feature export will then download yours.",
+    "tc_gherkin_hint_edited": "Hand-written. This is what the .feature "
+                              "export downloads. Clear the box and save to "
+                              "go back to deriving it from the columns "
+                              "above.",
+    "tc_gherkin_format_label": "Format",
+    "tc_gherkin_format_help": "Set it to gherkin to give this case a "
+                              "Given / When / Then pane and include it in "
+                              "the .feature download.",
     "tc_walkthrough_meta_title": "Walkthrough binding",
     "tc_url_pattern_label": "URL pattern (fnmatch glob)",
     "tc_trigger_label": "Trigger",
@@ -1449,9 +1490,17 @@ TRANSLATIONS = {
                         "explores the URL autonomously, raising findings "
                         "for broken images, accessibility issues, dead "
                         "navigation, and more.",
-    "te_mode_tc": "Automated — built-in engine",
-    "te_mode_tc_help": "Playwright drives the items you select below. Watch "
-                       "it live or leave it in the background.",
+    # "built-in engine" said where the run happens and nothing about what
+    # it does, which is the half the operator was asking about — they read
+    # it next to a whole Automation QA module and could not tell the two
+    # apart. Both labels now say what runs, and the help text says what
+    # the other one is for.
+    "te_mode_tc": "Automated — run the items you selected",
+    "te_mode_tc_help": "Playwright opens each item you tick below, in "
+                       "order, on this service. Nothing is crawled and "
+                       "nothing is skipped. For the TypeScript suite you "
+                       "run in CI, see Automation QA — it is a different "
+                       "thing and it runs elsewhere.",
     "te_mode_manual": "Manual — walk it yourself",
     "te_mode_manual_help": "One item at a time with its steps and expected "
                            "result on screen, one click per verdict. "
@@ -1461,9 +1510,12 @@ TRANSLATIONS = {
     "te_assignee_hint": "The assignee is who can record verdicts in the "
                         "run. Admins can always open any run in the "
                         "project.",
-    "te_mode_walkthrough": "QA walkthrough",
-    "te_mode_walkthrough_help": "Autonomous exploration + opportunistic TC "
-                                "matching by URL.",
+    "te_mode_walkthrough": "QA walkthrough — explore the site",
+    "te_mode_walkthrough_help": "Crawls from the Base URL and raises "
+                                "findings of its own. It ignores the "
+                                "selection below: a test case runs only if "
+                                "its Walkthrough binding names a URL "
+                                "pattern the crawl reaches.",
     "te_site_sweep": "Also sweep the site for Performance, Security, "
                      "Accessibility and UI defects the pack does not cover",
     "te_site_sweep_hint": "Runs 53 checks against the live URL and files "
@@ -1661,6 +1713,30 @@ TRANSLATIONS = {
     "runs_empty_mine": "Nothing is assigned to you in this project yet.",
     "runs_empty": "This project has no runs yet.",
     "runs_start": "Start a run",
+    "runs_result": "Result",
+    "runs_mode_automated": "Automated",
+    "runs_mode_walkthrough": "QA walkthrough",
+    "runs_mode_manual": "Manual",
+    "runs_simulated": "simulated",
+    "runs_simulated_help": "This run had no Base URL, so no browser was "
+                           "opened. Every verdict came from the "
+                           "deterministic simulator.",
+    "runs_open_results": "Results",
+    # The way out of "a browser run is already in progress for this team".
+    # There was none: the only writer of finished_at for an automated run
+    # was a page the operator had to reach with the dispatching tab still
+    # open, so a lost tab meant waiting out the staleness window.
+    "runs_cancel": "Cancel",
+    "runs_cancel_confirm": "Mark this run cancelled? This frees the "
+                           "one-browser-run slot so you can start another. "
+                           "It does not kill a browser that is still "
+                           "running in the background.",
+    "runs_cancel_already": "Run #%(id)s is already closed.",
+    "runs_cancel_done": "Run #%(id)s marked cancelled. The slot is free — "
+                        "you can start another run. If a browser process "
+                        "is still finishing in the background its results "
+                        "will still be importable.",
+    "runs_cancel_failed": "Could not close the run: %(error)s",
     # Keys a template builds at render time (`'dash_period_' ~ period`), so
     # no scanner can see the whole name — they are listed here in full for
     # every value PERIODS can take, which is what makes them checkable.

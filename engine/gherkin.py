@@ -100,8 +100,21 @@ class Scenario:
     #: Lines the translation could not express as steps, kept as comments
     #: so nothing disappears silently.
     notes: list[str] = field(default_factory=list)
+    #: An operator's own Gherkin for this case, verbatim. When set it is
+    #: what renders — the structured fields above are not consulted at all.
+    #: Without this the page and the download disagreed: ``ensure_gherkin``
+    #: has always preferred the stored column, and the ``.feature`` export
+    #: never read it, so a hand-edited scenario was shown on screen and
+    #: silently replaced by the derived text on download.
+    raw: str = ""
 
     def render(self, indent: str = "  ") -> list[str]:
+        if self.raw.strip():
+            # Re-indent to the caller's level so a scenario written flush
+            # left still nests correctly inside a Feature, and so an
+            # operator's own leading whitespace is not doubled.
+            return [(indent + line) if line.strip() else ""
+                    for line in _dedent_lines(self.raw)]
         out: list[str] = []
         if self.tags:
             out.append(indent + " ".join(self.tags))
@@ -268,8 +281,36 @@ def _data_table(test_data: str) -> tuple[list[list[str]], str]:
     return [["field", "value"]] + rows, ""
 
 
+def _dedent_lines(text: str) -> list[str]:
+    """Split *text* into lines with the common leading indent removed."""
+    lines = str(text or "").replace("\r\n", "\n").split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    body = [ln for ln in lines if ln.strip()]
+    if not body:
+        return []
+    pad = min(len(ln) - len(ln.lstrip()) for ln in body)
+    return [ln[pad:] if ln.strip() else "" for ln in lines]
+
+
 def scenario_from_test_case(tc: Any) -> Scenario:
-    """Derive one :class:`Scenario` from a manual test case."""
+    """Derive one :class:`Scenario` from a manual test case.
+
+    An operator's stored Gherkin wins, on the same rule
+    :func:`ensure_gherkin` has always applied on the page. Putting it here
+    rather than at one call site means every route that renders a
+    ``.feature`` inherits the rule instead of having to remember it — the
+    ``.feature`` download did not, so an edit shown on the page was
+    silently replaced by derived text in the file.
+    """
+    stored = str(getattr(tc, "gherkin", "") or "")
+    if stored.strip():
+        return Scenario(
+            name=re.sub(r"\s+", " ",
+                        str(getattr(tc, "summary", "") or "").strip())
+                 or "Unnamed scenario",
+            raw=stored,
+        )
     name = re.sub(r"\s+", " ", str(getattr(tc, "summary", "") or "").strip())
     scenario = Scenario(name=name or "Unnamed scenario", tags=tags_for(tc))
 

@@ -557,11 +557,25 @@ def _drain_tc_job_into_session() -> None:
     if not job or job.kind != "tc_gen":
         return
     if job.status == DONE and job.result:
+        from flask import flash as _flash, g as _g
         r = job.result
         _store_test_cases(r.get("tc_dicts", []))
         session["user_stories"]      = r.get("stories", [])
         session["raw_requirements"]  = r.get("raw_requirements", [])
         session["traceability_data"] = r.get("trace", [])
+        # The same warning the synchronous path has always raised. Without
+        # it a partial crawl produced a thinner pack with nothing on screen
+        # to explain the difference.
+        errors = r.get("crawl_errors") or []
+        if errors:
+            _flash(
+                (_g.t.get("crawl_partial",
+                          "Some pages could not be crawled — generation "
+                          "continued on available data: %(errors)s")
+                 if hasattr(_g, "t") else
+                 "Some pages could not be crawled: %(errors)s")
+                % {"errors": "; ".join(errors[:3])},
+                "warning")
         session.pop("tc_gen_job_id", None)
     elif job.status == FAILED:
         # Surface the worker error once and stop polling for this id.
@@ -1449,8 +1463,17 @@ def register(app: Flask) -> None:
             )
             new_stories = (generate_user_stories(parsed_reqs, custom_prompt)
                            if parsed_reqs else [])
+            # The crawler's own account of what it could not reach. The
+            # synchronous POST has always collected and flashed these; this
+            # worker — the path the UI actually takes — asked for none of
+            # them and returned none, so a blocked or timed-out crawl was
+            # invisible to everyone using the product normally. "Generation
+            # could not finish" with no reason is the same screen whether
+            # the site refused the crawl or the LLM was unavailable.
+            crawl_errors: list[str] = []
             tc_list = generate_test_cases(new_stories, custom_prompt,
-                                          raw_requirements=raw_reqs_for_persona)
+                                          raw_requirements=raw_reqs_for_persona,
+                                          crawl_errors_out=crawl_errors)
             trace = generate_traceability(new_stories, tc_list) if tc_list else []
             tc_dicts = [tc_to_dict(tc) for tc in tc_list]
 
@@ -1465,6 +1488,14 @@ def register(app: Flask) -> None:
                                            tc_format=tc_format)
                 if site_out:
                     tc_dicts.extend(site_out.get("tc_dicts") or [])
+                    for err in site_out.get("crawl_errors") or []:
+                        if err and err not in crawl_errors:
+                            crawl_errors.append(err)
+                else:
+                    crawl_errors.append(
+                        f"The crawl of {url} returned nothing — the site "
+                        f"may have refused it, or it timed out. Test cases "
+                        f"were authored from the text alone.")
             else:
                 tc_dicts.extend(_run_authored_without_url(custom_prompt,
                                                           raw_lines))
@@ -1486,6 +1517,7 @@ def register(app: Flask) -> None:
                 "stories": [story_to_dict(s) for s in new_stories],
                 "raw_requirements": raw_reqs_for_persona,
                 "trace": trace,
+                "crawl_errors": crawl_errors,
             }
 
         job_id = get_queue().submit(
@@ -1790,10 +1822,11 @@ _EXTENSION_CACHE: dict[str, tuple[bytes, str]] = {}
 def _feature_archive(cases: list, project_name: str) -> bytes:
     """Zip of one ``.feature`` per section, plus a README naming the gaps.
 
-    The Gherkin is derived here rather than read from the column, so the
-    archive always matches the manual columns the client signed off — see
-    :func:`engine.gherkin.ensure_gherkin` for why the column holds only
-    hand-edited text.
+    The Gherkin is derived from the manual columns unless an operator has
+    written their own, in which case theirs is what ships — the same rule
+    :func:`engine.gherkin.ensure_gherkin` applies on the page. It used to
+    derive unconditionally, so the scenario on screen and the scenario in
+    the download could differ with nothing saying so.
     """
     import io as _io
     import zipfile
@@ -1815,9 +1848,10 @@ def _feature_archive(cases: list, project_name: str) -> bytes:
             f"grouped into one .feature per section.",
             "",
             "Generated from the manual test cases, which stay the source of "
-            "truth. Re-export after editing a case rather than editing a "
-            ".feature by hand — a .feature that drifts from the signed-off "
-            "case is worse than none.",
+            "truth unless a scenario was hand-written in the BDD view of a "
+            "case — those ship verbatim. Re-export after editing a case "
+            "rather than editing a .feature by hand: a .feature that drifts "
+            "from the signed-off case is worse than none.",
         ]
         if findings:
             readme += ["", "## Findings", ""]

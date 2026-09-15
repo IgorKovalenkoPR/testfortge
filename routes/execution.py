@@ -66,14 +66,22 @@ log = get_logger(__name__)
 
 
 
-def _run_limit_scope() -> list[str]:
-    """The projects a browser run competes with.
+def _run_limit_scope() -> list[str] | None:
+    """The projects a browser run competes with. ``None`` means all of them.
 
     The organisation when there is one, because the memory is shared by the
     whole service — two projects in one team starting a run each costs
     exactly as much as one project starting two, and scoping per project
-    would make the limit bypassable by switching project. With
-    organisations off, the honest scope is the caller's own projects.
+    would make the limit bypassable by switching project.
+
+    With organisations off there is no team, and the previous answer here
+    was "the caller's own projects" via ``list_projects(owner_sid=…)``.
+    That returns nothing for a project created without a session owner,
+    which is most of them, so the scope collapsed to ``ensure_active_project``
+    alone and the cap became per-project. Measured: two open browser runs on
+    one instance against a cap of one, by starting the second from a
+    different project. The honest scope with no team is the machine, which
+    is whose memory the cap is about.
     """
     from engine import permissions as _perm_mod
     org_id = None
@@ -81,12 +89,11 @@ def _run_limit_scope() -> list[str]:
         org_id = _perm_mod.current_org_id()
     except Exception:  # pragma: no cover — defensive
         org_id = None
+    if not org_id:
+        return None
     try:
-        if org_id:
-            return [p["id"] for p in _db.list_projects_for_org(org_id)
-                    if p.get("id")]
-        owned = _db.list_projects(owner_sid=get_session_id(session)) or []
-        ids = [p["id"] for p in owned if p.get("id")]
+        ids = [p["id"] for p in _db.list_projects_for_org(org_id)
+               if p.get("id")]
     except Exception as exc:  # pragma: no cover — best-effort
         log.warning("run limit scope lookup failed: %s", exc)
         ids = []
@@ -96,10 +103,42 @@ def _run_limit_scope() -> list[str]:
     return ids
 
 
+def _perm_uid() -> str:
+    """The signed-in user id, or "" with authentication off.
+
+    Stamped onto every run this module opens so the Runs register can show
+    a tester their own work. Never raises: a run must not fail to start
+    because identity could not be resolved.
+    """
+    try:
+        from engine import permissions as _perm_mod
+        return _perm_mod.current_user_id() or ""
+    except Exception:  # pragma: no cover — defensive
+        return ""
+
+
 def _run_limit_decision():
-    """Whether another browser run may start now."""
+    """Whether another browser run may start now.
+
+    Repairs before it counts. ``run_limits`` has always *ignored* runs past
+    its staleness window, which is what stops a dead run wedging the cap
+    for ever — but ignoring is not closing, so the row stayed ``running``
+    and the Runs register went on advertising a run in progress for a
+    worker that had been killed hours earlier. Closing them here means the
+    two surfaces agree, and it costs one indexed query on a path that is
+    already about to count the same rows.
+    """
     from engine import run_limits
-    return run_limits.check(_run_limit_scope())
+    scope = _run_limit_scope()
+    try:
+        closed = _db.close_abandoned_runs(
+            scope, int(run_limits.stale_after().total_seconds() // 60))
+        if closed:
+            log.info("closed %d abandoned run(s) before the limit check: %s",
+                     len(closed), closed)
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("abandoned-run sweep failed: %s", exc)
+    return run_limits.check(scope)
 
 
 def _maybe_restore_pack_from_db() -> None:
@@ -212,18 +251,19 @@ def register(app: Flask) -> None:
               if run_mode == "manual":
                   return redirect(url_for("manual_run_start"), code=307)
 
-              # Fair use, before anything expensive happens (E5.5). The
-              # manual walk is above this line on purpose: it is a person
-              # reading a page and costs nothing to have ten of. A browser
-              # run is a Chromium on a box with half a gigabyte, and two at
-              # once are OOM-killed rather than queued — which shows up as a
-              # run that stops with no verdict and no explanation. Refusing
-              # the second one with a message naming the first is the whole
-              # improvement.
-              gate = _run_limit_decision()
-              if not gate.allowed:
-                  flash(gate.message(), "warning")
-                  return redirect(url_for("test_execution_page"))
+              # The fair-use gate used to be evaluated here, which is
+              # before this handler knows whether the run will launch a
+              # browser at all. ``base_url`` is not read for another
+              # hundred lines and ``wants_automation`` — the flag that
+              # actually decides Chromium — not for three hundred, so a
+              # Test-Cases or Checklist run with no URL, or on an iOS /
+              # Android environment, was refused by a message about
+              # browser memory for a run that only ever reaches the
+              # deterministic simulator. That is the "no run starts at
+              # all, neither by test case nor by checklist" the operator
+              # reported: the refusal had nothing to do with the run being
+              # refused. The gate now sits beside ``wants_automation``, the
+              # one place that knows.
               # Walkthrough sub-config — only consulted when run_mode ==
               # "walkthrough". Numeric coercion is permissive so a
               # missing/empty field falls back to the conservative
@@ -494,6 +534,18 @@ def register(app: Flask) -> None:
               # live page will at least transition idle → starting →
               # idle (or done). Operator will see SOME activity and not
               # think the page is broken.
+              # Fair use (E5.5), now that ``wants_automation`` has told us
+              # whether this run puts a Chromium on the box. Two at once are
+              # OOM-killed rather than queued, which surfaces as a run that
+              # stops with no verdict and no explanation; refusing the
+              # second one with a message naming the first is the whole
+              # improvement. A simulator-only run costs nothing and is not
+              # gated — nor is the manual walk, which returned above.
+              if wants_automation:
+                  gate = _run_limit_decision()
+                  if not gate.allowed:
+                      flash(gate.message(), "warning")
+                      return redirect(url_for("test_execution_page"))
               if wants_automation:
                   try:
                       from routes.automation import STORAGE_ROOT as _SR
@@ -527,8 +579,12 @@ def register(app: Flask) -> None:
               # preview, no webm, no screenshots in bug reports). Flash
               # explains the trade-off so the next run can be configured
               # correctly without operator surprise.
+              # Both sources, not only test cases. The trade-off is
+              # identical — a checklist run with no URL is simulated in
+              # exactly the same way — and a warning that appears for one
+              # and not the other reads as "this one is fine".
               if (not base_url
-                  and source == "test_cases"
+                  and source in ("test_cases", "checklist")
                   and any(et in ("web", "mobile_web") for et in env_types)):
                   # Reaches here only when no resource_urls existed
                   # either — completely URL-less run, simulator only.
@@ -597,8 +653,16 @@ def register(app: Flask) -> None:
                   # picks up the merged automation_assets, runs the
                   # per-env loop + bug rewrite, and renders the same
                   # post-run page operators are used to.
+                  # Bound before the try so the failure handler can close
+                  # whatever this dispatch managed to open. Without it the
+                  # ``except`` below falls through into the per-environment
+                  # loop, which opens a *second* row per env — leaving the
+                  # first pair permanently "running" and counting against
+                  # the concurrency cap for every later run.
+                  db_run_ids: dict[str, int] = {}
                   try:
                       from routes.automation import STORAGE_ROOT
+                      from engine.automation_paths import APP_ROOT
                       import json as _json
                       import os as _os
                       import sys as _sys
@@ -764,7 +828,6 @@ def register(app: Flask) -> None:
                       # run_limits.split_by_age ignores anything past its
                       # staleness window, so a crashed run stops blocking
                       # the cap on its own rather than wedging it.
-                      db_run_ids: dict[str, int] = {}
                       try:
                           _pid = ensure_active_project()
                           if _pid:
@@ -786,6 +849,23 @@ def register(app: Flask) -> None:
                                           # browser run.
                                           "mode": run_mode,
                                           "site_url": site_url,
+                                          # The pending-config id, so the
+                                          # Runs register can link to the
+                                          # results page. Without it the
+                                          # only route to a finished
+                                          # automated run was the
+                                          # dispatching tab's own
+                                          # auto-redirect, and closing
+                                          # that tab lost the run.
+                                          "config_id": config_id,
+                                          # Who pressed Run. The register
+                                          # scopes a non-admin to
+                                          # ``assignee_id``, which only a
+                                          # manual walk ever sets — so a
+                                          # tester's own automated runs
+                                          # were filtered out of the page
+                                          # that exists to show them.
+                                          "started_by": _perm_uid(),
                                       },
                                       browser_visibility=(
                                           "headless" if headless
@@ -821,7 +901,9 @@ def register(app: Flask) -> None:
                           stderr=_subprocess.STDOUT,
                           start_new_session=True,
                           close_fds=True,
-                          cwd=_os.path.dirname(STORAGE_ROOT) or None,
+                          # The application root, not wherever artefacts
+                          # happen to live — see engine.automation_paths.
+                          cwd=APP_ROOT,
                       )
                       log.info(
                           "automation: dispatched worker pid=%s config=%s "
@@ -857,6 +939,21 @@ def register(app: Flask) -> None:
                       return redirect(url_for("test_execution_page"))
                   except Exception as exc:
                       log.exception("Automation dispatch failed: %s", exc)
+                      # Close the rows this dispatch opened before falling
+                      # through to the simulator, which opens its own. A
+                      # row nobody will ever run holds the concurrency slot
+                      # exactly as firmly as one that is genuinely busy.
+                      for _rid in (db_run_ids or {}).values():
+                          try:
+                              _db.close_execution_run_if_open(
+                                  int(_rid), status="failed",
+                                  stats={"dispatch_error":
+                                         f"{type(exc).__name__}: "
+                                         f"{str(exc)[:200]}"})
+                          except Exception as _close_exc:  # pragma: no cover
+                              log.warning("could not close run %s: %s",
+                                          _rid, _close_exc)
+                      db_run_ids = {}
                       # Stamp the phase + reason into info.json so the
                       # /test-execution/diag endpoint shows the operator
                       # exactly what blew up — without forcing them to
@@ -930,6 +1027,7 @@ def register(app: Flask) -> None:
                                   "source": source,
                                   "mode": run_mode,
                                   "site_url": site_url,
+                                  "started_by": _perm_uid(),
                               },
                               browser_visibility=("headless" if headless else "visible"),
                               record_video=bool(record_video),
@@ -1630,6 +1728,29 @@ def register(app: Flask) -> None:
 
         return jsonify(out)
 
+    def _close_runs_for_config(pending_dir: str, config_id: str,
+                               status: str, note: str) -> None:
+        """Close the ``ExecutionRun`` rows a dead dispatch left open.
+
+        The poller is the only thing that ever learns a worker failed
+        before it could write anything about itself, so it is the only
+        place that can say so.
+        """
+        import json as _json
+        import os as _os
+        try:
+            with open(_os.path.join(pending_dir, f"{config_id}.json"),
+                      "r", encoding="utf-8") as fh:
+                cfg = _json.load(fh) or {}
+        except Exception:
+            return
+        for rid in (cfg.get("db_run_ids") or {}).values():
+            try:
+                _db.close_execution_run_if_open(int(rid), status=status,
+                                                stats={"note": note})
+            except Exception as exc:  # pragma: no cover — best-effort
+                log.warning("run-status could not close run %s: %s", rid, exc)
+
     @app.route("/test-execution/run-status/<run_id>")
     def test_execution_run_status(run_id):
         """Polled by /test-execution/live to know when the detached
@@ -1716,6 +1837,36 @@ def register(app: Flask) -> None:
             except Exception as exc:
                 log.debug("run-status: stall check failed: %s", exc)
             return jsonify({"status": "running"})
+
+        # No started.flag. Either the subprocess has not reached its first
+        # write yet, or it never will — a bad interpreter, a cwd the
+        # ``engine`` package is not importable from, an OOM at spawn. The
+        # two were indistinguishable and "queued" had no upper bound, so a
+        # worker that died at exec left the widget painting "running" for
+        # ever with no Import button and no error, while the POST that
+        # dispatched it had already flashed a tick.
+        #
+        # The config file's own mtime is the clock: it is written
+        # immediately before Popen, so its age is the age of the dispatch.
+        start_grace_s = 90
+        try:
+            age = time.time() - os.path.getmtime(
+                os.path.join(pending_dir, f"{run_id}.json"))
+        except OSError:
+            age = 0
+        if age > start_grace_s:
+            _close_runs_for_config(pending_dir, run_id, "failed",
+                                   "worker never started")
+            return jsonify({
+                "status": "failed",
+                "error": (
+                    f"The worker was dispatched {int(age)} s ago and never "
+                    f"started. It usually means the subprocess could not be "
+                    f"launched at all — check the worker log "
+                    f"({run_id}.log) and /test-execution/diag. The run has "
+                    f"been closed so it stops holding the browser-run slot."
+                ),
+            })
         return jsonify({"status": "queued"})
 
 

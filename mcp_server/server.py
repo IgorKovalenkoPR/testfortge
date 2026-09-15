@@ -47,6 +47,7 @@ from engine import chatbot
 from engine import db
 from engine import walkthrough_stats
 from engine.automation_paths import STORAGE_ROOT
+from engine.automation_paths import APP_ROOT as _APP_ROOT
 from engine.job_queue import count_active_subprocess_runs
 
 # A stable session_id for the per-session concurrency cap that
@@ -565,7 +566,7 @@ def trigger_test_execution(
         stderr=subprocess.STDOUT,
         start_new_session=True,
         close_fds=True,
-        cwd=os.path.dirname(STORAGE_ROOT) or None,
+        cwd=_APP_ROOT,
     )
     return {
         "config_id": config_id,

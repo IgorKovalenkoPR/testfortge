@@ -48,8 +48,16 @@
                 window.location.href =
                     "/test-execution/results/" + encodeURIComponent(runId);
             }, 1500);
-        } else if (s === 'stalled' || s === 'failed') {
-            pill.textContent = (s === 'stalled') ? '⚠ stalled' : '✗ failed';
+        } else if (s === 'stalled' || s === 'failed' || s === 'terminated') {
+            // 'terminated' is what /run-status answers when the worker was
+            // killed by a signal — a deploy, a restart, an OOM. It was
+            // missing from this list, so the one outcome the free tier
+            // produces most often fell through to the else branch and the
+            // widget said '● running' for ever, on a process that no
+            // longer existed.
+            pill.textContent = (s === 'failed') ? '✗ failed'
+                             : (s === 'terminated') ? '✗ stopped'
+                             : '⚠ stalled';
             pill.style.background = '#fee2e2';
             pill.style.color = '#991b1b';
             hint.textContent = stat.error

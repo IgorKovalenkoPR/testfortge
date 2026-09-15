@@ -1148,6 +1148,12 @@ def _log_sweep_failure(exc: BaseException) -> None:
         pass
 
 
+#: Prefixed onto every verdict nothing actually observed. Read by the
+#: results page and the bug pipeline, so the word travels with the text
+#: rather than living in a counter the UI never rendered.
+_SIMULATED_PREFIX = "[simulated]"
+
+
 def execute_items(items: list, item_type: str, tester_id: str,
                   environment: str, testing_types: list[str],
                   selected_ids: list[str] | None = None,
@@ -1263,7 +1269,13 @@ def execute_items(items: list, item_type: str, tester_id: str,
             mstatus = manual_statuses[item_id].strip()
             if mstatus in ("Passed", "Failed", "Blocked"):
                 status = mstatus
-                comment = f"Status set manually by {tester_name}."
+                # "Status set manually by <name>" became the *actual
+                # result* on the bug this verdict files — a sentence
+                # describing the click rather than the defect, attributed
+                # to the simulated persona rather than to whoever clicked.
+                # The run form has no per-item note field, so the honest
+                # text is the one that claims nothing.
+                comment = "Status set manually in the run form."
                 source = "manual"
 
         if not status and runner and summary:
@@ -1280,6 +1292,14 @@ def execute_items(items: list, item_type: str, tester_id: str,
             status = _compute_status(summary, category, priority, tester_id, environment)
             comment = _generate_comment(status, summary, tester_name)
             source = "simulated"
+            # Say so in the comment itself, not only in a ``sources``
+            # counter nothing renders. A run with no URL produced a
+            # pass-rate, per-case verdicts and bug reports — "SQL
+            # metacharacters in search are not escaped", Major, High —
+            # against a site nothing had opened. The verdict is a
+            # placeholder for a demo pack; presented without the word
+            # simulated it is a finding about the product.
+            comment = f"{_SIMULATED_PREFIX} {comment}".strip()
 
         sources[source] = sources.get(source, 0) + 1
 
@@ -1323,6 +1343,19 @@ def execute_items(items: list, item_type: str, tester_id: str,
         if status in ("Failed", "Blocked"):
             bug_counter += 1
             bug_summary = _make_bug_summary(summary)
+            # Every Failed/Blocked item carries a bug id — that contract
+            # stands. What could not stand is a bug the board cannot tell
+            # from one somebody saw. A run with no URL executes nothing,
+            # and it was filing defects like "SQL metacharacters in search
+            # are not escaped" at Major/High against a site no browser had
+            # opened — with a reporter name, steps to reproduce, and no
+            # word anywhere saying it was invented. Re-running the pack
+            # filed them again, so they accumulated.
+            #
+            # The marker goes in the title because that is the one field
+            # every surface renders: the board, the CSV, the Jira export.
+            if source == "simulated":
+                bug_summary = f"{_SIMULATED_PREFIX} {bug_summary}"
             bug_expected = _make_bug_expected(summary, expected)
             # Use real actual_result when available
             bug_actual = comment if comment else _make_bug_actual(bug_summary)
@@ -1344,6 +1377,11 @@ def execute_items(items: list, item_type: str, tester_id: str,
             # downstream Jira-style export and the in-app cards have
             # every ISTQB-mandatory field filled.
             labels = [item_type]
+            if source:
+                # So /bug-reports can filter the invented ones out, the
+                # same way it already separates walkthrough findings from
+                # hand-filed cases.
+                labels.append(f"source:{source}")
             if category:
                 labels.append(f"category:{category.lower().replace(' ', '-')}")
             if testing_types:

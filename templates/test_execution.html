@@ -358,7 +358,12 @@
            to the existing results table directly (no subtab needed). #}
         {% set wt_findings = run.walkthrough_findings or [] %}
         {% set wt_bindings = run.walkthrough_tc_bindings or [] %}
-        {% set has_wt = (run.mode == 'walkthrough') and (wt_findings | length > 0) %}
+        {# ``live`` is the internal name the worker writes for the
+           exploratory executor; this test only ever accepted the form
+           value ``walkthrough``, so the Findings tab never appeared for a
+           normal run. The bugs were filed and the panel explaining them
+           was unreachable. #}
+        {% set has_wt = (run.mode in ('walkthrough', 'live')) and (wt_findings | length > 0) %}
         {% if has_wt %}
         <div class="te-subtabs" role="tablist" data-te-subtabs>
             <button type="button" class="te-subtab"

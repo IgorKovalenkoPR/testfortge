@@ -27,6 +27,7 @@ from datetime import datetime
 
 from flask import Flask, abort, current_app, jsonify, request
 
+from engine.automation_paths import APP_ROOT as _APP_ROOT
 from engine.log import get_logger
 from engine.walkthrough_runner import feature_enabled
 
@@ -170,7 +171,7 @@ def register(app: Flask) -> None:
             stderr=subprocess.STDOUT,
             start_new_session=True,
             close_fds=True,
-            cwd=os.path.dirname(storage_root) or None,
+            cwd=_APP_ROOT,
         )
         log.info("debug/walkthrough: dispatched worker pid=%s config=%s "
                  "urls=%d", proc.pid, config_id, len(start_urls))

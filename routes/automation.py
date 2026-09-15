@@ -20,7 +20,7 @@ from __future__ import annotations
 import hmac
 import os
 
-from flask import (Flask, Response, abort, flash, jsonify, redirect,
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect,
                    render_template, request, send_from_directory, session,
                    url_for)
 
@@ -81,6 +81,39 @@ def _project_base_url(project_id: str | None) -> str:
         log.debug("automation: base_url lookup failed: %s", exc)
         return ""
     return str(project.get("base_url") or "")
+
+
+_BROWSER_OFF_EN = (
+    "In-process browser runs are off on this instance "
+    "(TESTFORTGE_BROWSER_ENABLED=0) — Chromium does not fit beside the web "
+    "worker here. Download the suite below and run it where the browsers "
+    "are, or use Test Execution, which runs the browser in a detached "
+    "process that survives a restart."
+)
+
+
+def _in_process_browser_allowed() -> bool:
+    """Whether this instance may launch Chromium inside the web worker.
+
+    ``/automation/run`` and ``/automation/run-async`` do exactly that, and
+    they are the two routes in the Execute section with no UI: nothing in
+    ``templates/`` references either, and this module's own codegen
+    explains why — "the web service runs on a 512 MB instance with
+    Playwright deliberately kept out of the worker", which is why the
+    Automation module emits a suite you run where the browsers are.
+
+    So they stayed reachable by POST, ungated, uncounted by the
+    browser-run cap and invisible to the Runs register: a request that
+    blocks for minutes while Chromium eats the instance the operator is
+    reading the page on. ``TESTFORTGE_BROWSER_ENABLED`` is the switch that
+    already states this instance's answer — it is ``0`` on both
+    deployments — and it was simply never consulted here.
+
+    The refusal text lives at the call sites rather than here, so it goes
+    through ``g.t.get`` like every other message the operator reads.
+    """
+    from engine.qa_persona import browser_pass_enabled
+    return browser_pass_enabled()
 
 
 def register(app: Flask) -> None:
@@ -297,6 +330,10 @@ def register(app: Flask) -> None:
 
     @app.route("/automation/run", methods=["POST"])
     def automation_run():
+        if not _in_process_browser_allowed():
+            flash(g.t.get("automation_browser_disabled", _BROWSER_OFF_EN),
+                  "warning")
+            return redirect(url_for("automation_page"))
         tc_data = pack_test_cases()
         if not tc_data:
             flash("No test cases to automate. Generate Test Cases first.", "warning")
@@ -340,6 +377,11 @@ def register(app: Flask) -> None:
         and, once ``status == "done"``, reload ``/automation`` to display
         the report (stored in the session by the job on completion).
         """
+        if not _in_process_browser_allowed():
+            return jsonify({
+                "error": "browser_disabled",
+                "message": g.t.get("automation_browser_disabled",
+                                   _BROWSER_OFF_EN)}), 409
         tc_data = pack_test_cases()
         if not tc_data:
             return jsonify({"error": "no_test_cases",

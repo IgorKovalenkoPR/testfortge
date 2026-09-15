@@ -97,6 +97,32 @@ def _run_pack(run: dict) -> tuple[list, list]:
     return tcs, cls
 
 
+#: How a run's stored mode reads in the register. The column showed the
+#: raw value, so an operator who had chosen "Automated — built-in engine"
+#: saw "live" — the internal name of the executor, which appears nowhere
+#: in the UI they used.
+#:
+#: Keys rather than literals, because a label rendered from a Python dict
+#: is English in every language and no dictionary comparison can see it.
+_MODE_LABELS = {
+    "tc_driven":   ("runs_mode_automated",   "Automated"),
+    "live":        ("runs_mode_automated",   "Automated"),
+    "walkthrough": ("runs_mode_walkthrough", "QA walkthrough"),
+    "manual":      ("runs_mode_manual",      "Manual"),
+}
+
+
+def _mode_label(mode: str) -> str:
+    key, english = _MODE_LABELS.get((mode or "").strip().lower(),
+                                    ("", mode or "—"))
+    if not key:
+        return english
+    try:
+        return g.t.get(key, english)
+    except Exception:  # pragma: no cover — outside a request
+        return english
+
+
 def _authorise(run: dict, *, adopt: bool = False) -> None:
     """Abort unless this run is in scope for the caller.
 
@@ -320,22 +346,97 @@ def register(app: Flask) -> None:
             scope = "mine"
 
         if scope == "mine" and me:
+            # ``assignee_id`` is written only by the manual walk, so scoping
+            # on it alone hid every automated run from the tester who
+            # started it — on the page whose stated purpose is showing them
+            # their runs. ``started_by`` is stamped by the dispatcher for
+            # exactly this.
             runs = [r for r in runs
-                    if str((r.get("env_payload") or {}).get("assignee_id")
-                           or "") == me]
+                    if me in (
+                        str((r.get("env_payload") or {}).get("assignee_id")
+                            or ""),
+                        str((r.get("env_payload") or {}).get("started_by")
+                            or ""))]
 
         for run in runs:
             payload = run.get("env_payload") or {}
-            run["mode_label"] = str(payload.get("mode") or "—")
-            run["tester_label"] = str(payload.get("tester") or "")
+            run["mode_label"] = _mode_label(str(payload.get("mode") or ""))
+            run["tester_label"] = str(payload.get("tester")
+                                      or payload.get("tester_name") or "")
             run["is_open"] = not run.get("finished_at")
             run["is_manual"] = payload.get("manual_queue") is not None
+            # The pending-config id is what /test-execution/results/<id>
+            # is keyed on — a different identifier from the row's own id.
+            run["config_id"] = str(payload.get("config_id") or "")
+            stats = run.get("stats") or {}
+            if any(k in stats for k in ("passed", "failed", "blocked")):
+                run["verdict_counts"] = {
+                    "passed":  int(stats.get("passed") or 0),
+                    "failed":  int(stats.get("failed") or 0),
+                    "blocked": int(stats.get("blocked") or 0),
+                }
+            else:
+                run["verdict_counts"] = None
+            # A run with no Base URL opens no browser: every verdict comes
+            # from the deterministic simulator. The register reported
+            # "13P 7F · completed" for such a run with nothing saying so,
+            # which is the same number a real pass would have produced.
+            sources = (stats.get("sources") or {})
+            run["simulated_only"] = bool(sources) and set(sources) == {
+                "simulated"}
 
         return render_template(
             "test_execution_runs.html",
             runs=runs, scope=scope, auth_on=auth_on, is_admin=admin,
             can_switch_scope=bool(auth_on and admin),
         )
+
+    @app.route("/test-execution/runs/<int:run_id>/cancel", methods=["POST"])
+    def execution_run_cancel(run_id):
+        """Close an open run by hand, whatever mode it is in.
+
+        The product had no way to end a run. A browser run holds the
+        one-at-a-time slot for the whole organisation until something
+        writes ``finished_at``, and until this existed the only writer was
+        a GET the operator had to reach with the dispatching tab still
+        open. When that did not happen — a closed tab, a redeploy, a
+        worker the free tier killed — the operator's entire remedy was to
+        wait thirty minutes for the staleness window, or to run SQL.
+
+        This does not kill the subprocess: the dispatcher discards the
+        handle, so there is no pid to signal. It is honest about that in
+        the flash. What it does is release the slot and stop the register
+        claiming a run is in progress when nothing is running, which is
+        the part the operator was blocked on.
+
+        Scoped through ``_authorise`` like every other run route, with
+        ``adopt=False``: cancelling is a write, and a write must not be
+        the thing that decides which project you are in.
+        """
+        run = _db.get_execution_run(run_id)
+        if not run:
+            abort(404)
+        _authorise(run, adopt=False)
+        if run.get("finished_at"):
+            flash(g.t.get("runs_cancel_already",
+                          "Run #%(id)s is already closed.")
+                  % {"id": run_id}, "warning")
+            return redirect(url_for("manual_runs_page"))
+        try:
+            _db.close_execution_run_if_open(run_id, status="cancelled")
+        except Exception as exc:
+            log.exception("run cancel failed")
+            flash(g.t.get("runs_cancel_failed",
+                          "Could not close the run: %(error)s")
+                  % {"error": exc}, "danger")
+            return redirect(url_for("manual_runs_page"))
+        flash(g.t.get("runs_cancel_done",
+                      "Run #%(id)s marked cancelled. The slot is free — "
+                      "you can start another run. If a browser process is "
+                      "still finishing in the background its results will "
+                      "still be importable.")
+              % {"id": run_id}, "success")
+        return redirect(url_for("manual_runs_page"))
 
     @app.route("/test-execution/manual/<int:run_id>/assign", methods=["POST"])
     @_perm.require_role("admin")
@@ -516,7 +617,27 @@ def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
 
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(item.steps, 1)) \
         or "1. Perform the check described in the summary"
+    # A public id, like every other execution-sourced bug gets. Without it
+    # ``save_bug`` stores ``external_id=NULL`` — the card renders a blank
+    # ID cell and no export, filter or conversation can cite the bug. The
+    # TC-driven path mints one; the manual walk was the only filer that did
+    # not, so the bug a tester filed by hand was the one they could not
+    # refer to afterwards.
+    public_id = ""
+    try:
+        existing = _db.list_bugs(run.get("project_id")) or []
+        public_id = _bug_report.generate_bug_id(
+            [_bug_report.dict_to_bug(b) for b in existing])
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("manual run: could not mint a bug id: %s", exc)
     body = {
+        "id": public_id,
+        # The run this came out of, in the column ``save_bug`` recognises.
+        # ``manual_run_id`` below is kept for the rows already written with
+        # it, but it lands in ``extra`` — so /bug-reports' run filter, which
+        # groups on ``run_id``, listed this bug under "no run" and offered
+        # no way to reach it.
+        "run_id": run.get("id"),
         # NOT the test case's own title. Every objective opens "Verify
         # that …", and a defect store where each headline is an
         # instruction to check something tells the reader nothing about

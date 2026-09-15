@@ -8,6 +8,20 @@
     'Generate a TypeScript + Playwright suite from the BDD test cases, run it where the browsers live, and send the Allure results back here.') }}</p>
 </div>
 
+{# The operator's actual question, asked in those words: "why does Test
+   Execution have an Automated run mode when there is a whole Automation
+   module?" The page explained what it does and never what it is not, and
+   the two names are close enough that the difference has to be stated
+   rather than inferred. #}
+<div class="card" style="border-left:4px solid var(--brand,#f97316);">
+    <p style="margin:0;">
+        <strong>{{ t.get('automation_vs_execution_title', 'This module does not run anything.') }}</strong>
+        {{ t.get('automation_vs_execution_body',
+           'It writes a TypeScript + Playwright suite you run on your own machine or in CI, and it reads the Allure results back. To run a browser from inside TestForTge — against the test cases you select, right now — use Test Execution.') }}
+        <a href="{{ url_for('test_execution_page') }}">{{ t.get('nav_test_execution', 'Test Execution') }}</a>
+    </p>
+</div>
+
 {# Why the suite is generated rather than run here. Saying it up front
    answers the obvious "where is the Run button" before it is asked. #}
 <div class="card">
