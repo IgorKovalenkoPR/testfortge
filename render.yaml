@@ -195,10 +195,23 @@ services:
       # instead of the caller's session (ADR 0001). Must be "1" before
       # EDITORS_ENABLED or DASHBOARD_V2 do anything — engine/features.py
       # enforces that dependency and warns at boot if it is violated.
+      #
+      # Turned on 2026-09-15, with EDITORS_ENABLED, at the owner's request:
+      # E12 made the BDD view editable and the editors are what carry that,
+      # so on production the repair was invisible while these were "0".
+      # Staging has run both at "1" since E3, and 40 test files exercise
+      # the DB-first path in the flags-off CI leg — including the golden
+      # paths in a real browser — so this combination (DB-first with
+      # AUTH_ENABLED=0) is tested even though no *deployment* ran it before.
       - key: WORKSPACE_DB_FIRST
-        value: "0"
+        value: "1"
+      # The inline editors. With AUTH_ENABLED="0" above there is no identity
+      # to scope them by, so every visitor past the HTTP Basic gate can edit
+      # every project's artefacts — which is the same reach they already
+      # have over generation, upload and deletion here. Turning AUTH_ENABLED
+      # on is a separate decision with its own first-admin bootstrap.
       - key: EDITORS_ENABLED
-        value: "0"
+        value: "1"
       - key: DASHBOARD_V2
         value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
