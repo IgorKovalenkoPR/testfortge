@@ -748,7 +748,8 @@ def lint_steps(steps: Iterable[Any]) -> list[str]:
     return out
 
 
-def starts_from_entry_point(steps: Iterable[Any]) -> bool:
+def starts_from_entry_point(steps: Iterable[Any], *,
+                            entry_url: str = "") -> bool:
     """True unless step 1 jumps straight to an in-page state.
 
     Reviewer: "Let`s imagine if this URL will be changed - how other
@@ -774,11 +775,23 @@ def starts_from_entry_point(steps: Iterable[Any]) -> bool:
         first = str(step or "").strip()
         if first:
             break
-    if not first:
-        return True
-    m = re.search(r"https?://[^\s\"'<>)]+", first)
-    if not m:
-        return True
+    m = re.search(r"https?://[^\s\"'<>)]+", first) if first else None
+    if m is None:
+        # No URL in step 1. Since the 2026-09-14 ruling that is the NORMAL
+        # shape — the entry point moved to the preconditions and into
+        # ``TestCase.url_pattern`` — so judge that instead. Returning True
+        # here unconditionally, as this did, made the gate vacuously true
+        # on every case the moment the navigation step went away: the
+        # reviewer's rule would have stopped being checked at all, with no
+        # failing test to say so.
+        entry = str(entry_url or "").strip()
+        if not entry:
+            return True
+        # ``url_pattern`` is often relative — "/hr/job-positions*" — which
+        # is a perfectly good entry point; it is judged on its path the
+        # same way an absolute one is.
+        tail = re.sub(r"^https?://[^/]*", "", entry.rstrip(".,;"))
+        return "#" not in tail and "?" not in tail
     url = m.group(0).rstrip(".,;")
     tail = re.sub(r"^https?://[^/]*", "", url)
     return "#" not in tail and "?" not in tail

@@ -23,7 +23,7 @@ cases:
     priority: High
     section: Search
   - summary: "Verify that 'No results' message is displayed for a non-matching query"
-    preconditions: "A page of {host} exposing the search field is open in the browser."
+    preconditions: "{url} is open. The page exposes the search field."
     steps:
       - "Enter the search term 'xyznonexistent123456', which matches no existing data"
       - "Submit the search"
@@ -33,7 +33,7 @@ cases:
     priority: High
     section: Search
   - summary: "Verify that XSS and SQL injection are blocked in the search field"
-    preconditions: "A page of {host} exposing the search field is open in the browser."
+    preconditions: "{url} is open. The page exposes the search field."
     steps:
       - "Enter the XSS payload <script>alert('xss')</script> in the search field and submit"
       - "Enter the SQL injection payload ' OR 1=1 -- in the search field and submit"
