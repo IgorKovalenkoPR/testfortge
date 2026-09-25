@@ -11,7 +11,7 @@ default_section: Forms
 # "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the form is submitted successfully with all valid data"
-    preconditions: "The page carrying the form is open at {url}."
+    preconditions: "{url} is open. The page carries the form under test."
     steps:
       - "Scroll the page down to the Form section"
       - "Fill the 'name' field with 'Olena Marchenko'"
@@ -26,7 +26,7 @@ cases:
     priority: High
     section: Forms
   - summary: "Verify that validation errors are displayed when required fields are left empty"
-    preconditions: "The page carrying the form is open at {url}."
+    preconditions: "{url} is open. The page carries the form under test."
     steps:
       - "Scroll the page down to the Form"
       - "Fill the 'email' field with ''"
@@ -38,7 +38,7 @@ cases:
     priority: High
     section: Forms
   - summary: "Verify that email field rejects invalid email format"
-    preconditions: "A page of {host} carrying a form with an email field is open in the browser."
+    preconditions: "{url} is open. The page carries a form with an email field."
     steps:
       - "Enter an invalid email address in the email field: 'test@', then '@domain.com', then 'plaintext', then 'test @example'"
       - "Click the Submit/Save button"
@@ -49,7 +49,7 @@ cases:
     priority: High
     section: Forms
   - summary: "Verify that XSS and SQL injection are blocked in form fields"
-    preconditions: "A page of {host} carrying the form under test is open in the browser."
+    preconditions: "{url} is open. The page carries the form under test."
     steps:
       - "Enter the XSS payload <script>alert('xss')</script> in each text field and submit"
       - "Enter the SQL injection payload ' OR 1=1 -- in each text field and submit"
@@ -60,7 +60,7 @@ cases:
     priority: High
     section: Forms
   - summary: "Verify that form accepts min and max boundary values and rejects min-1 / max+1"
-    preconditions: "A page of {host} carrying the form under test is open in the browser."
+    preconditions: "{url} is open. The page carries the form under test."
     steps:
       - "Enter the minimum length value 'A' (1 character) in each text field"
       - "Enter the maximum length value (255 characters) in each text field"

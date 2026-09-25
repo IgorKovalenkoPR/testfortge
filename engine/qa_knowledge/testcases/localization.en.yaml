@@ -11,7 +11,7 @@ default_section: Localization
 # "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the language switcher changes UI strings without breaking the layout"
-    preconditions: "{url} is reachable and exposes a language switcher in the header or the footer."
+    preconditions: "{url} is open. The page exposes a language switcher in the header or the footer."
     steps:
       - "Open {url} in the default language"
       - "Use the language switcher in the Header or Footer to toggle to each available language"
@@ -24,7 +24,7 @@ cases:
     section: Localization
     testing_type: Localization
   - summary: "Verify that html[lang] reflects the active locale and matches the rendered text"
-    preconditions: "{host} serves more than one language and DevTools is available in the browser."
+    preconditions: "{url} is open. The site serves more than one language and DevTools is available in the browser."
     steps:
       - "Switch to each available language"
       - "Open DevTools and inspect the <html lang=\"…\"> attribute"

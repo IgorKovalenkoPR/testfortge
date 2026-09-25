@@ -69,6 +69,68 @@ class TestOpenNotReachable:
             "User is logged in."
 
 
+class TestOneCanonicalPhrasing:
+    """The three spellings the operator found in one pack.
+
+    A deliverable carries one; so does a linter, because a synonym
+    defeats every grep-based duplicate check across a 4,808-row plan.
+    """
+
+    @pytest.mark.parametrize("variant", [
+        "testfort.com is open.",
+        "https://testfort.com is open",
+        "https://testfort.com is loaded.",
+        "https://testfort.com is reachable in the browser.",
+        "User can reach https://testfort.com from a fresh browser session.",
+        "Site is reachable at https://testfort.com.",
+        "The application at https://testfort.com is open.",
+    ])
+    def test_every_spelling_lands_on_the_one_form(self, variant):
+        assert style.format_preconditions(variant) == \
+            "https://testfort.com is open"
+
+    def test_the_scheme_is_always_stated(self):
+        """A bare host assumes a scheme, and staging and prod differ."""
+        assert style.absolute_url("testfort.com") == "https://testfort.com"
+        assert style.absolute_url("http://x.com") == "http://x.com"
+
+    def test_a_second_fact_welded_on_with_and_becomes_its_own_line(self):
+        assert style.format_preconditions(
+            "https://x.com is open in the browser and the main navigation "
+            "is visible.") == ("1. https://x.com is open\n"
+                               "2. The main navigation is visible")
+
+    def test_a_shared_subject_is_not_cut_loose(self):
+        """"… is reachable and is not blocked" has one subject.
+
+        Splitting there strands a predicate with nothing to attach to.
+        """
+        out = style.format_preconditions(
+            "https://x.com is reachable and is not blocked from indexing.")
+        assert "\n" not in out
+        assert out.startswith("https://x.com is open and")
+
+    def test_a_precondition_naming_the_same_page_twice_says_it_once(self):
+        assert style.format_preconditions(
+            "https://x.com is open. https://x.com is loaded.") == \
+            "https://x.com is open"
+
+
+class TestDedupeLabels:
+
+    def test_a_label_the_page_carries_twice_is_listed_once(self):
+        """The header and the mobile drawer both hold "Menu"."""
+        assert style.dedupe_labels(
+            ["Menu", "Menu", "Send", "Get a quote", "Send"]) == \
+            ["Menu", "Send", "Get a quote"]
+
+    def test_order_is_the_order_the_crawler_saw_them(self):
+        assert style.dedupe_labels(["b", "a", "b"]) == ["b", "a"]
+
+    def test_case_and_padding_do_not_make_a_new_label(self):
+        assert style.dedupe_labels(["Send", " send ", "SEND"]) == ["Send"]
+
+
 # ── Rule 2: one fact per line ────────────────────────────────────────
 
 class TestSplitFacts:
@@ -98,11 +160,43 @@ class TestSplitFacts:
             "The page loads in under 2.5 seconds on a wired connection") == [
             "The page loads in under 2.5 seconds on a wired connection"]
 
-    def test_an_existing_list_is_re_read_not_re_split(self):
-        """A numbered fact that contains two sentences stays one fact."""
+    def test_an_existing_list_is_split_down_to_one_fact_a_line(self):
+        """Numbering is a marker, not a fence.
+
+        An earlier version returned an already-numbered field verbatim,
+        which is how three assertions shipped merged into one numbered
+        line after the pipe defect below had cut the first one in half.
+        """
         assert style.split_facts(
             "1. The record is saved. The grid refreshes\n2. A toast appears"
-        ) == ["The record is saved. The grid refreshes", "A toast appears"]
+        ) == ["The record is saved", "The grid refreshes", "A toast appears"]
+
+    def test_a_pipe_inside_a_quoted_title_is_not_a_separator(self):
+        """The defect the operator caught on SC7_001.
+
+        A page title carries a pipe — `Software Testing Solutions |
+        Manual, Auto, AI` — and the pipe-separator rule could not see that
+        it sat inside quotes, so the assertion was cut mid-quote and
+        shipped as `2. Manual, Auto, AI") and H1 (…`.
+        """
+        text = ('The page should load with its declared title ("Software '
+                'Testing Solutions | Manual, Auto, AI") and H1 ("End-to-End '
+                'Software Testing Solutions"). All observed sections should '
+                'be visible. No JavaScript error should be emitted on first '
+                'paint.')
+        facts = style.split_facts(text)
+        assert facts[0] == ('The page should load with its declared title '
+                            '("Software Testing Solutions | Manual, Auto, '
+                            'AI") and H1 ("End-to-End Software Testing '
+                            'Solutions")')
+        assert facts[1] == "All observed sections should be visible"
+        assert facts[2].startswith("No JavaScript error should be emitted")
+        assert len(facts) == 3
+
+    def test_a_period_inside_brackets_is_not_a_separator(self):
+        assert style.split_facts(
+            "The page loads (see the spec. section 4) and renders"
+        ) == ["The page loads (see the spec. section 4) and renders"]
 
 
 class TestAsNumberedList:
@@ -272,10 +366,140 @@ class TestTheReviewedCase:
             "1. Each invalid attempt should be blocked")
         assert "\n2. " in self._reviewed().expected_result
 
-    def test_the_steps_are_not_touched(self):
-        """This pass owns three columns; the steps belong to tc_steps."""
-        assert self._reviewed().test_steps.startswith(
-            "1. Open https://testfort.com")
+    def test_the_duplicate_entry_step_is_dropped(self):
+        """Operator ruling 2026-09-14, second round.
+
+        The preconditions say the page is open; step 1 said "Open
+        https://testfort.com". That is the same fact in two columns, so
+        the step goes and the steps begin at the first real action.
+        """
+        reviewed = self._reviewed()
+        assert reviewed.test_steps.startswith(
+            "1. Submit the form with all fields empty")
+        assert "Open https://testfort.com" not in reviewed.test_steps
+
+    def test_the_entry_point_survives_as_structured_data(self):
+        """Nothing is lost: the runner reads url_pattern, not the prose.
+
+        Without this the heuristic replay path would fall back to the
+        run-wide base_url and send every case in the run to the same page.
+        """
+        assert self._reviewed().url_pattern == "https://testfort.com"
+
+
+class TestTheEntryPointMovedButNothingBroke:
+    """The 2026-09-14 second-round ruling, and its blast radius.
+
+    Navigation left the steps, so every consumer that assumed "step 1 is
+    the navigation" had to be re-pointed at structured data. These are the
+    properties that say it actually was.
+    """
+
+    def _case(self):
+        tc = _case(
+            preconditions="https://testfort.com is loaded; the form "
+                          "'Contact' is rendered on the page.",
+            test_steps="1. Open https://testfort.com\n"
+                       "2. Fill the fields with valid values\n"
+                       "3. Submit the form\n"
+                       "4. Observe the confirmation",
+            expected_result="The form is submitted. A confirmation is "
+                            "displayed.",
+            category="Positive", tc_format="gherkin",
+        )
+        return review_test_cases([tc])[0][0]
+
+    def test_the_replay_path_prefers_the_case_url_over_the_run_base_url(self):
+        """base_url is one value for a whole run.
+
+        Falling back to it would send every case in the run to the same
+        page the moment step 1 stopped carrying a per-case URL.
+        """
+        from engine import automation_qa
+        tc = self._case()
+        script = automation_qa.tc_to_script(
+            {"id": tc.id, "test_steps": tc.test_steps,
+             "preconditions": tc.preconditions,
+             "expected_result": tc.expected_result,
+             "url_pattern": tc.url_pattern},
+            base_url="https://wrong-run-wide.example")
+        assert script.steps[0].action == "goto"
+        assert script.steps[0].target == "https://testfort.com"
+
+    def test_the_canonical_precondition_binds_instead_of_skipping(self):
+        """The quiet failure mode, measured rather than assumed.
+
+        An unbound Given makes the scenario skip, so coverage collapses
+        while CI stays green. The canonical sentence must bind to a goto.
+        """
+        from engine import automation_codegen as cg
+        cov = cg.coverage_report([self._case()]).to_dict()
+        texts = [m["text"] for m in cov["manual_preconditions"]]
+        assert not any("is open" in t for t in texts), texts
+
+    def test_the_gherkin_given_is_not_first_personed(self):
+        from engine import gherkin
+        feature = gherkin.gherkin_for_test_case(self._case())
+        assert "Given https://testfort.com is open" in feature
+        assert "I https://" not in feature
+
+    def test_the_entry_point_gate_still_judges_something(self):
+        """It used to pass any case whose step 1 had no URL.
+
+        Once no step ever carries a URL that is every case, so the gate
+        would have gone vacuously true with no failing test to say so.
+        """
+        from engine import glossary
+        steps = ["Fill the fields with valid values", "Submit the form"]
+        assert glossary.starts_from_entry_point(steps, entry_url="") is True
+        assert glossary.starts_from_entry_point(
+            steps, entry_url="https://x.com/careers") is True
+        assert glossary.starts_from_entry_point(
+            steps, entry_url="https://x.com/careers#apply") is False
+        assert glossary.starts_from_entry_point(
+            steps, entry_url="/hr/job-positions*") is True
+
+    def test_a_navigation_to_a_different_page_is_not_dropped(self):
+        """Only the FIRST step, and only the page already declared open."""
+        kept = style.drop_redundant_entry_step(
+            "1. Open https://x.com/other\n2. Do a thing\n3. Do another",
+            "https://x.com is open")
+        assert kept.startswith("1. Open https://x.com/other")
+
+    @pytest.mark.parametrize("step", [
+        # Pure navigation to the declared entry point, however it is
+        # dressed. Each qualifier is already a precondition of its own.
+        "Open testfort.com in the browser",
+        "Open https://testfort.com in a browser",
+        "Open testfort.com at 1280x800",
+        "Open testfort.com in browser DevTools responsive mode",
+        "Navigate to https://testfort.com",
+    ])
+    def test_pure_navigation_to_the_declared_page_is_dropped(self, step):
+        blob = f"1. {step}\n2. Do a thing\n3. Do another"
+        assert style.drop_redundant_entry_step(
+            blob, "https://testfort.com is open") == \
+            "1. Do a thing\n2. Do another"
+
+    @pytest.mark.parametrize("step", [
+        # Each of these does something BESIDES opening the entry point.
+        "Open testfort.com and one content/article page",
+        "Open testfort.com/robots.txt - verify HTTP 200",
+        "Open the known-bad path /this-does-not-exist-123 under testfort.com",
+        "Visit the Homepage and at least 3 representative inner pages",
+        "Open browser DevTools (Console and Network tabs)",
+    ])
+    def test_a_step_that_does_more_than_navigate_survives(self, step):
+        blob = f"1. {step}\n2. Do a thing\n3. Do another"
+        assert style.drop_redundant_entry_step(
+            blob, "https://testfort.com is open") == blob
+
+    def test_a_two_step_case_keeps_its_navigation(self):
+        """Dropping it would leave one step, which is a checklist item."""
+        kept = style.drop_redundant_entry_step(
+            "1. Open https://x.com\n2. Look at the banner",
+            "https://x.com is open")
+        assert kept.startswith("1. Open https://x.com")
 
 
 class TestTheExportsCarryTheLists:

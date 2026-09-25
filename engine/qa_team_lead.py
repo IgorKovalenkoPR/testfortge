@@ -184,6 +184,29 @@ def _apply_column_house_style(tc, tc_id: str, report: ReviewReport) -> None:
             if hasattr(tc, "preconditions"):
                 tc.preconditions = fixed
 
+    # Rule 16: the entry point is stated once. The preconditions keep it;
+    # a first step that only re-opens the same page goes, and the URL is
+    # written into url_pattern so the runner and the codegen still know
+    # where the case starts. Runs after rule 12/13, which is what makes
+    # the precondition canonical enough to read the URL off.
+    steps_blob = getattr(tc, "test_steps", "") or ""
+    entry = style.entry_point_url(getattr(tc, "preconditions", "") or "")
+    if entry:
+        if not (getattr(tc, "url_pattern", "") or "").strip() \
+                and hasattr(tc, "url_pattern"):
+            tc.url_pattern = entry
+        trimmed = style.drop_redundant_entry_step(
+            steps_blob, getattr(tc, "preconditions", "") or "")
+        if trimmed != steps_blob and hasattr(tc, "test_steps"):
+            report.findings.append(ReviewFinding(
+                severity="Minor", category="Duplicate Entry Point",
+                message="Step 1 only re-opened the page the preconditions "
+                        "already declare open",
+                item_id=tc_id, auto_fixed=True,
+            ))
+            report.items_fixed += 1
+            tc.test_steps = trimmed
+
     # Rule 14: Test Data is for credentials. A list of the field names the
     # steps already name is a second copy of the same fact.
     test_data = getattr(tc, "test_data", "") or ""

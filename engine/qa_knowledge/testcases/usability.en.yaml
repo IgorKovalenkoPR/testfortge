@@ -11,7 +11,7 @@ default_section: Usability
 # "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that the primary call-to-action on the Homepage is visible above the fold"
-    preconditions: "{url} is open in the browser at a 1280×800 viewport."
+    preconditions: "{url} is open. The viewport is 1280×800."
     steps:
       - "Open {url} at 1280×800"
       - "Pay attention to whether the primary CTA (e.g. Sign up / Buy / Start) is reachable without scrolling"
@@ -23,7 +23,7 @@ cases:
     section: Usability
     testing_type: Usability
   - summary: "Verify that body text uses a readable font size (>= 14 px) and adequate line-height"
-    preconditions: "A content-rich page of {host} is open at a 1280×800 viewport."
+    preconditions: "{url} is open. The page is content-rich and the viewport is 1280×800."
     steps:
       - "Open a content-rich page"
       - "Inspect computed font-size and line-height of the main body text"
@@ -35,7 +35,7 @@ cases:
     section: Usability
     testing_type: Usability
   - summary: "Verify that interactive controls have visible hover and focus states"
-    preconditions: "A page of {host} carrying several links and buttons is open in the browser."
+    preconditions: "{url} is open. The page carries several links and buttons."
     steps:
       - "Hover over each navigation link, button and interactive icon"
       - "Tab through the same controls using only the keyboard"

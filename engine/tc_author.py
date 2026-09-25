@@ -1075,7 +1075,14 @@ def _terminology_findings(case: AuthoredCase) -> list[str]:
     for issue in glossary.lint_text(case.expected_result or "",
                                     kind="expected"):
         out.append(f"expected result: {issue}")
-    if case.steps and not glossary.starts_from_entry_point(case.steps):
+    # The entry point may live in the steps (older cases) or in
+    # ``url_pattern`` (since the 2026-09-14 ruling moved navigation out of
+    # the steps). Hand over both so the gate keeps judging something.
+    from engine import tc_house_style as _style
+    _entry = (case.url_pattern or "").strip() \
+        or _style.entry_point_url(case.preconditions or "")
+    if case.steps and not glossary.starts_from_entry_point(
+            case.steps, entry_url=_entry):
         out.append(
             "step 1 deep-links instead of navigating from the entry URL — "
             "a tester cannot reach the surface when the route changes")

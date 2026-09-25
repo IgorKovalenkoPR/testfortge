@@ -37,7 +37,7 @@ cases:
     priority: High
     section: "General Web"
   - summary: "Verify that the page is responsive on mobile viewport (375px width)"
-    preconditions: "{url} is open in the browser with DevTools responsive mode available."
+    preconditions: "{url} is open. DevTools responsive mode is available."
     steps:
       - "Open {url} in browser DevTools responsive mode"
       - "Set viewport width to 375px (mobile)"
@@ -50,7 +50,7 @@ cases:
     priority: High
     section: "Responsive Design"
   - summary: "Verify that the page is responsive on tablet viewport (768px width)"
-    preconditions: "{url} is open in the browser with DevTools responsive mode available."
+    preconditions: "{url} is open. DevTools responsive mode is available."
     steps:
       - "Open {url} in browser DevTools responsive mode"
       - "Set viewport width to 768px (tablet)"
@@ -74,7 +74,7 @@ cases:
     priority: High
     section: "Performance"
   - summary: "Verify that the page is served over HTTPS with valid certificate"
-    preconditions: "{url} is published on the public internet."
+    preconditions: "{url} is open. The site is published on the public internet."
     steps:
       - "Open {url}"
       - "Pay attention to the padlock in the browser address bar"

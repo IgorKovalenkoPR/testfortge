@@ -241,6 +241,11 @@ def _first_person(text: str) -> str:
         return s
     if re.match(r"^(?:the|a|an|there|it|every|all|no)\b", s, re.IGNORECASE):
         return s[0].lower() + s[1:]
+    # The house's canonical entry-point precondition — "https://x.com is
+    # open" — is a state too. Without this it became "I https://x.com is
+    # open", which reads as nonsense and matches no step binding.
+    if re.match(r"^[a-z][a-z0-9+.-]*://", s, re.IGNORECASE):
+        return s
     return "I " + s[0].lower() + s[1:]
 
 
@@ -249,8 +254,12 @@ def _declarative(text: str) -> str:
     s = re.sub(r"\s+", " ", (text or "").strip()).rstrip(".")
     if not s:
         return ""
-    # Keep an acronym or a quoted label as written.
-    if s[:2].isupper() or s.startswith('"'):
+    # Keep an acronym or a quoted label as written. ``isalpha`` as well as
+    # ``isupper``: "A confirmation …" has ``s[:2] == "A "``, and a space
+    # does not make ``isupper`` false, so a plain sentence opening with
+    # the article "A" was being mistaken for an acronym and shipped as
+    # "And A confirmation should be displayed".
+    if (s[:2].isalpha() and s[:2].isupper()) or s.startswith('"'):
         return s
     return s[0].lower() + s[1:]
 

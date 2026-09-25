@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .tc_house_style import dedupe_labels
 from .qa_utils import (
     is_instruction,
     detect_flows,
@@ -376,7 +377,7 @@ def _browser_findings_to_test_cases(findings: list[dict]) -> list[TCTemplate]:
 
         cases.append(TCTemplate(
             summary=summary,
-            preconditions=f"Browser: Chromium (headless). Page: {page_url}",
+            preconditions=f"{page_url} is open. Browser: Chromium (headless).",
             steps=[f"Open {page_url} in a browser",
                    f"Perform automated check: {category_str}",
                    f"Observe: {desc}"],
@@ -718,7 +719,11 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
             real_btns = [b for b in buttons
                          if 2 <= len(b.strip()) <= 40
                          and b.strip().lower() not in {"×", "x", "ok", "?", "close"}]
-            real_btns = real_btns[:5]
+            # A page carries the same label more than once — a desktop
+            # header and a mobile drawer both holding "Menu" — and the
+            # label is the locator a manual tester works from, so the
+            # list has to be distinct before it is capped at five.
+            real_btns = dedupe_labels(real_btns)[:5]
             if real_btns:
                 btns_str = ", ".join(f'"{b}"' for b in real_btns)
                 cases.append(TCTemplate(
@@ -758,7 +763,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
             if not real_fields:
                 continue
             named = [(f.get("name") or f.get("placeholder") or f.get("type", "field")) for f in real_fields]
-            named = [str(n) for n in named if n][:6]
+            named = dedupe_labels(str(n) for n in named if n)[:6]
             if not named:
                 continue
             has_password = any(f.get("type") == "password" for f in real_fields)
@@ -812,7 +817,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
         seed = topical or (pages[0].get("h1") or pages[0].get("title") or "news")
         cases.append(TCTemplate(
             summary=f"Verify that the on-site search returns results relevant to a topical query (\"{seed[:60]}\")",
-            preconditions=f"The site search is available from {analysis.url}.",
+            preconditions=f"{analysis.url} is open. The page exposes the site search.",
             steps=["Open the homepage",
                    "Click the search input / icon",
                    f"Submit the query: \"{seed[:80]}\"",

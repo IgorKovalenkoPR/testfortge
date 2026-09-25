@@ -11,7 +11,7 @@ default_section: SEO
 # "shall" stay banned — see qa_knowledge/style/wording_rules.yaml.
 cases:
   - summary: "Verify that every public page has a unique, non-empty <title> under 60 characters"
-    preconditions: "{url} is reachable and is not blocked from indexing."
+    preconditions: "{url} is open. The page is not blocked from indexing."
     steps:
       - "Visit the Homepage and at least 3 representative inner pages"
       - "Inspect <head><title> via DevTools or `view-source:`"
@@ -23,7 +23,7 @@ cases:
     section: SEO
     testing_type: SEO
   - summary: "Verify that every page has a meta description (50-160 chars) and canonical URL"
-    preconditions: "{url} is reachable and its inner pages can be opened in the browser."
+    preconditions: "{url} is open. The inner pages can be opened in the browser."
     steps:
       - "View page source on {url} and on 3 representative inner pages"
       - "Pay attention to the <meta name=\"description\"> content and its length"
@@ -35,7 +35,7 @@ cases:
     section: SEO
     testing_type: SEO
   - summary: "Verify that robots.txt and sitemap.xml are reachable and consistent"
-    preconditions: "{url} is published on the public internet."
+    preconditions: "{url} is open. The site is published on the public internet."
     steps:
       - "Open {url}/robots.txt — verify HTTP 200 and that it references a Sitemap directive"
       - "Open the Sitemap URL — verify HTTP 200 and valid XML"
@@ -47,7 +47,7 @@ cases:
     section: SEO
     testing_type: SEO
   - summary: "Verify that Open Graph and Twitter Card meta tags are present on shareable pages"
-    preconditions: "{url} is reachable and serves at least one content or article page."
+    preconditions: "{url} is open. The site serves at least one content or article page."
     steps:
       - "Open {url} and one content/article page"
       - "Pay attention to the og:title, og:description, og:image and og:url tags"

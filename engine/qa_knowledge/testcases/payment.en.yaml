@@ -47,7 +47,7 @@ cases:
     priority: High
     section: "Payment & Checkout"
   - summary: "Verify that double-charge is prevented on multiple submit clicks"
-    preconditions: "The checkout page of {host} is open and the payment form is filled with valid details."
+    preconditions: "{url} is open. The checkout page is reached and the payment form is filled with valid details."
     steps:
       - "Click the 'Pay' / 'Place Order' button rapidly multiple times"
       - "Pay attention to the number of charges in the payment provider dashboard"

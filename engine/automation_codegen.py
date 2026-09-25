@@ -86,6 +86,15 @@ ACTION_BINDINGS: tuple[Binding, ...] = (
     # https://x/careers page'. It carries the URL, so it IS executable —
     # and it is the single most common Given in the corpus, so leaving it
     # unbound would strand most scenarios.
+    # The canonical entry-point precondition, written by
+    # engine.tc_house_style.CANONICAL_OPEN. A regex over prose is normally
+    # the wrong contract, but this string is machine-written from ONE
+    # template and linted against it, so there is exactly one shape to
+    # match. Without the binding, every case whose navigation moved out of
+    # the steps becomes an unbound Given: the scenario is marked
+    # partly-manual and SKIPS, so coverage collapses while CI stays green.
+    Binding(r"^(https?://\S+?)\.? is open\.?$",
+            "precondition", "precondition: canonical entry point"),
     Binding(r"^the .+ is opened on the (https?://\S+) page\.?$",
             "precondition", "precondition: surface opened at url"),
     Binding(r"^the user is (?:on|at) the (https?://\S+)(?: page)?\.?$",
@@ -571,6 +580,8 @@ When(/^I (?:go to|open|visit|navigate to)(?: the site:?)? (\\S+)$/, nav);
 // The house precondition idiom — 'The "Apply" form is opened on the
 // https://x/careers page'. It carries the URL, so it is executable, and it
 // is the most common Given in the reference corpus.
+// The canonical entry-point precondition (engine/tc_house_style.py).
+Given(/^(https?:\\/\\/\\S+?)\\.? is open\\.?$/, nav);
 Given(/^the .+ is opened on the (https?:\\/\\/\\S+) page\\.?$/, nav);
 Given(/^the user is (?:on|at) the (https?:\\/\\/\\S+)(?: page)?\\.?$/, nav);
 

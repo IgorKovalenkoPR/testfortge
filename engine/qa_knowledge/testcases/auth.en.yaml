@@ -35,7 +35,7 @@ cases:
     priority: High
     section: Authentication
   - summary: "Verify that login is rejected when email field is left empty"
-    preconditions: "The login page of {host} is open in the browser."
+    preconditions: "{url} is open. The login page is rendered."
     steps:
       - "Leave the email field empty"
       - "Enter a password"
@@ -46,7 +46,7 @@ cases:
     priority: High
     section: Authentication
   - summary: "Verify that validation is triggered for invalid email format"
-    preconditions: "The login page of {host} is open in the browser."
+    preconditions: "{url} is open. The login page is rendered."
     steps:
       - "Enter an invalid email format in the email field: 'test@', then '@domain.com', then 'plaintext', then 'test @example.com'"
       - "Enter a valid password"
@@ -70,7 +70,7 @@ cases:
     priority: High
     section: Authentication
   - summary: "Verify that SQL injection is blocked in the login form"
-    preconditions: "The login page of {host} is open in the browser."
+    preconditions: "{url} is open. The login page is rendered."
     steps:
       - "Enter an SQL injection payload in the email field"
       - "Enter any value in the password field"

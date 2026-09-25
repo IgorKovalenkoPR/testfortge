@@ -188,8 +188,13 @@ def tc_to_script(tc: dict, base_url: str = "") -> AutomationScript:
             lines = [ln for ln in steps_text.splitlines() if ln.strip()]
         else:
             lines = list(steps_text)
-        if base_url and not any(_URL_RE.search(ln) for ln in lines[:1]):
-            lines.insert(0, f"Navigate to {base_url}")
+        # Where to start, now that the steps no longer say. The case's own
+        # url_pattern comes first: base_url is one value for the WHOLE
+        # run, so falling back to it would send every case in a run to the
+        # same page the moment step 1 stopped carrying a per-case URL.
+        entry = str(tc.get("url_pattern") or "").strip() or base_url
+        if entry and not any(_URL_RE.search(ln) for ln in lines[:1]):
+            lines.insert(0, f"Navigate to {entry}")
         for line in lines:
             script.steps.append(parse_manual_step(line, base_url))
 

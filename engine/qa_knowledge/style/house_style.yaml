@@ -78,13 +78,23 @@ preconditions:
     recruitment", "Manager X User" (228 — the role-matrix marker).
   rules:
     - >-
-      Never put navigation into preconditions. Navigation is step 1 of
-      the steps column.
+      No navigation ACTIONS here — "click", "scroll", "go to" belong in
+      the steps. The entry point is the exception and is stated here, as
+      the state it is: "<url> is open". Superseded the older rule that
+      sent every navigation to step 1; see the two rulings below.
     - >-
-      Never write that a URL "is reachable". Step 1 opens it, so
-      reachability is not prior state — it is the first thing the tester
-      does. Where the page has to be open before the case begins, write
-      "<url> is open". Operator ruling 2026-09-14.
+      There is EXACTLY ONE way to say the page under test is available,
+      and it is "<absolute URL, with scheme> is open" — never "is
+      reachable", "is loaded", "is available", "User can reach <url>",
+      and never a bare host without the scheme. Three spellings of this
+      one fact shipped in a single pack; a deliverable carries one.
+      Operator ruling 2026-09-14.
+    - >-
+      The entry point is stated ONCE, here. Do NOT also write "Open
+      <url>" as step 1 — that is the same fact in two columns. The steps
+      begin at the first real action. Operator ruling 2026-09-14, second
+      round. (A navigation to a DIFFERENT page mid-case is a real action
+      and stays a step.)
     - >-
       Two or more facts are a numbered list, one fact per line, exactly
       as the steps column is: "1. https://example.com is open\n2. A test
@@ -116,9 +126,12 @@ steps:
   target_count: 2-5 steps; go to 6-8 only for genuine multi-screen flows.
   rules:
     - >-
-      Step 1 is always navigation, written as a breadcrumb with "->" or
-      ">" separators and the view in parentheses when it matters:
-      "1. Go to HR module -> Job Positions grid (kanban view)".
+      Step 1 is the first REAL action. Do not open the page the
+      preconditions already declare open — that entry point is stated
+      once, in the Preconditions (ruling 2026-09-14). Navigation to a
+      further surface mid-case IS a step, written as a breadcrumb with
+      "->" or ">" separators and the view in parentheses when it
+      matters: "Go to HR module -> Job Positions grid (kanban view)".
     - >-
       Every subsequent step names one real control with its exact quoted
       label and the verb that operates it: 'Click on the "Create"
@@ -144,6 +157,12 @@ steps:
       "Leave the required fields empty", "Enter an invalid email address
       into the 'Email' field", "Set Deadline in the past".
     - Do not number the steps in the payload text; numbering is applied by the exporter.
+    - >-
+      Never list the same control label twice in one step. A page carries
+      the same label in a desktop header and a mobile drawer, and the
+      label IS the locator a manual tester works from — repeated, it
+      names nothing and a failure against it cannot be triaged. Name each
+      distinct label once. Operator ruling 2026-09-14.
 
 expected_result:
   style: >-
