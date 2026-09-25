@@ -535,7 +535,8 @@ def main() -> int:
             mode = "live"
 
         if mode == "live":
-            from engine.live_executor import LiveExecutor
+            from engine.live_executor import (
+                LiveExecutor, DEFAULT_MEMORY_BUDGET_MB)
             # Stage 3 config block (``live``) mirrors the Sprint-5
             # ``walkthrough`` block so the route layer can swap a key
             # name without restructuring the dispatch JSON.
@@ -576,9 +577,15 @@ def main() -> int:
                     "navigation_timeout_ms", 45000)),
                 "max_form_fills": int(live_cfg.get("max_form_fills", 5)),
                 "axe_enabled": bool(live_cfg.get("axe_enabled", True)),
+                # Resolved by live_executor, not re-parsed here. Reading the
+                # env var directly meant two answers to one question: this
+                # copy took a bare int() — so a typo in MEMORY_BUDGET_MB
+                # killed the whole run with a ValueError instead of the
+                # warning-and-fall-back the other copy already implements —
+                # and it hardcoded 400, ignoring the limit the container
+                # actually reports.
                 "memory_budget_mb": int(live_cfg.get(
-                    "memory_budget_mb",
-                    int(os.environ.get("MEMORY_BUDGET_MB", "400")))),
+                    "memory_budget_mb", DEFAULT_MEMORY_BUDGET_MB)),
                 # TestCases: explicit ``live.test_cases`` > config-level
                 # ``items_data`` > DB load (per project_id).
                 "test_cases": list(
