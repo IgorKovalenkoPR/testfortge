@@ -274,7 +274,11 @@ jobs:
       # the build. Raise it when the number rises.
       - name: Coverage gate on the programme's modules
         if: matrix.python-version == '3.12'
+        # Same annotation shape as the suite step: without it a red gate
+        # says only "exit code 1" — a failing test and a coverage shortfall
+        # look identical, and the log needs a token to read.
         run: >-
+          set -o pipefail;
           python -m pytest tests/ -q --tb=short -p no:cacheprovider
           --cov=engine.permissions --cov=engine.auth --cov=engine.route_policy
           --cov=engine.session_timeout
@@ -296,6 +300,13 @@ jobs:
           --cov=engine.tc_steps --cov=engine.features --cov=engine.security
           --cov-branch --cov-report=term-missing:skip-covered
           --cov-fail-under=93
+          2>&1 | tee /tmp/coverage.txt || {
+          sed -n '/short test summary info/,$p' /tmp/coverage.txt
+          | grep -E "^(FAILED|ERROR)" | head -40
+          | while IFS= read -r line; do echo "::error::$line"; done || true;
+          grep -E "^(TOTAL|FAIL Required test coverage)" /tmp/coverage.txt
+          | while IFS= read -r line; do echo "::error::coverage $line"; done || true;
+          exit 1; }
 
       # The authenticated leg (E9.9). The product ships with AUTH_ENABLED
       # and ORG_MODE on, and until this existed the suite could only be run
