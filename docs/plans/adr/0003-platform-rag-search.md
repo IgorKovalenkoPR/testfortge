@@ -483,3 +483,105 @@ Following the repo's own pattern, with no Alembic:
 
 ---
 
+
+---
+
+## Work breakdown (ordered; each task can be merged on its own and is sized for one developer agent)
+
+**T1. Haiku by default, model switcher, LLM attribution.** Depends on nothing.
+- **Files:**
+  - `engine/llm_models.py`: TIER_DEFAULTS + opus, all KIND_TIER → haiku, new kinds, `SWITCHABLE_KINDS`, `model_for(kind, *, org_id, user_id)`.
+  - `engine/llm_prefs.py` (new): org policy/user pref resolver, 30 s cache, premium-on-platform rule.
+  - `engine/llm_context.py` (new): contextvar.
+  - `engine/llm_client.py`: fill org/project/user from context, pass them to `model_for`.
+  - `engine/llm_cost.py`: Haiku 5.5 price, verify.
+  - `engine/job_queue.py`: carry context into the worker thread.
+  - `app.py`: `before_request` sets the context.
+  - `routes/chat.py` (lines 68 and 338): `model_for` with org/user.
+  - `routes/settings.py`: `POST /org/settings/models`, `models` in context.
+  - New routes `GET/PUT /api/me/model-preference`.
+  - `templates/org_settings.html`.
+  - `engine/route_policy.py`.
+  - `engine/features.py`: `MODEL_SWITCHER` + `_REQUIRES`.
+  - `render.yaml`.
+  - `engine/i18n/*`.
+  - Tests: `tests/test_llm_routing_and_cost.py` (update), `tests/test_model_switcher.py`, `tests/test_llm_attribution_context.py`.
+- **Gate:** the `tedgie_eval` run is recorded in the PR.
+
+**T2. `llm_result_cache` and `AUTOMATION_AI_MODE`.** After T1 (shares `llm_client`).
+- **Files:**
+  - `engine/db.py` (`LlmResultCache` + purge helper).
+  - `engine/llm_cache.py` (new).
+  - `engine/ai_mode.py` (new).
+  - `engine/tc_author.py`, `engine/checklist_author.py`, `engine/test_strategy.py`, `engine/site_recon.py`, `engine/session_segmenter.py`, `engine/mockup_vision.py`: `_PROMPT_VERSION`, `cached_call`, mode gating with a rules-first fallback.
+  - `engine/glossary.py` / `engine/tc_house_style.py`: `house_style_hash()`.
+  - `engine/retention.py` (purge + delete on project removal).
+  - `routes/settings.py` + `templates/org_settings.html` (org lowering of the mode).
+  - `render.yaml`.
+  - Tests: `tests/test_llm_result_cache.py`, `tests/test_ai_mode.py`.
+
+**T3. Search foundation: schema, capabilities, text, hash embedder.** Independent of T1 and T2.
+- **Files:**
+  - `engine/search/__init__.py` (`caps`).
+  - `engine/search/text.py`: normalise, lang detect, tokeniser moved from `istqb_rag`, snowball + UA light stemmer, translation.
+  - `engine/search/lexicon/concepts.json`, `xlate_ua.json`, `xlate_ru.json`.
+  - `engine/search/embed.py`: `Embedder` protocol, `HashEmbedder`, `get_embedder()`.
+  - `engine/istqb_rag.py`: import the tokeniser from `text.py`, without changing behaviour.
+  - `engine/db.py`: `SearchDoc`, `SearchScopeState`, `_ensure_search_schema` in `init_db`.
+  - `requirements.txt`: `snowballstemmer`.
+  - `.github/workflows/tests.yml`: `pgvector/pgvector:pg16`, a second database without the extension.
+  - Tests: `tests/test_search_text.py`, `tests/test_search_embed.py`, `tests/test_schema_migration.py` (extended), `tests/test_search_memory.py`.
+
+**T4. Indexer, hooks, backfill.** After T3.
+- **Files:**
+  - `engine/search/indexer.py`: per-kind document builders, chunking, content hash, upsert/delete, `search_vector` mirror, global corpora.
+  - `engine/search/hooks.py`: `after_flush`/`after_commit`, debounce through `job_queue`.
+  - `app.py`: install hooks, background global indexing at boot.
+  - `tools/search_backfill.py` (new).
+  - `engine/retention.py`: scope state on project delete.
+  - `engine/features.py`: `PLATFORM_SEARCH` + `_REQUIRES` on `WORKSPACE_DB_FIRST`.
+  - `render.yaml`.
+  - Tests: `tests/test_search_indexer.py`, `tests/test_search_hooks.py`.
+
+**T5. Retrieval and `/api/search`, `/api/hints`, `/api/search/status`, `/api/search/reindex`.** After T4.
+- **Files:**
+  - `engine/search/retrieve.py`: `_scope_clause`, PG FTS / Python BM25, pgvector / Python cosine, RRF, ID fast path, did-you-mean, explanation, deterministic chips, istqb group.
+  - `engine/search/hints.py`.
+  - `routes/search.py` (new), `routes/__init__.py`.
+  - `engine/route_policy.py`.
+  - `routes/ops.py`: `search` block in `/readyz`.
+  - Tests: `tests/fixtures/search_golden.json`, `tests/test_search_api.py`, `tests/test_search_tenancy.py`, `tests/test_search_golden.py`.
+
+**T6. Ask: `/api/ask` NDJSON, grounding gate, cache, budgets.** After T5 and T1.
+- **Files:**
+  - `engine/search/answer.py`: prompt, `PROMPT_VERSION`, token packing, citation validation, `SUGGESTIONS:` parsing, caps, rate limiting.
+  - `engine/db.py`: `RagAnswerCache` + purge.
+  - `engine/retention.py`.
+  - `routes/search.py`: `/api/ask`, `/api/ask/feedback`.
+  - `engine/features.py`: `PLATFORM_SEARCH_AI`.
+  - `engine/route_policy.py`.
+  - `render.yaml`.
+  - Tests: `tests/test_search_ask.py`.
+
+**T7. UI: global search, AI block, Ask panel, explanation, contextual hints.** After T5. The AI parts are hidden behind `PLATFORM_SEARCH_AI` and can merge before T6.
+- **Files:**
+  - `templates/base.html` (field + panel mount).
+  - `templates/_search_panel.html` (new).
+  - `static/js/search.js` (new): typeahead with `quick=1`, 150 ms debounce, NDJSON reader, chips, explanation popover.
+  - `static/css/search.css` (or extend the existing css).
+  - Hint mounts in `templates/test_cases.html`, `templates/bug_reports.html`, `templates/checklist.html`.
+  - `engine/i18n/*` (en/ua; RU queries without an RU UI).
+  - Tests: `tests/test_search_ui.py`, a scenario in `tests/test_e2e_golden_paths.py`.
+
+**T8 (optional, last). Tedgie and MCP on the shared retrieval.**
+- **Files:**
+  - `engine/chatbot.py`: project-grounded answers through `retrieve` before the `istqb_rag` fallback, behind `PLATFORM_SEARCH`.
+  - `mcp_server/` (`search` tool).
+  - `engine/project_facts.py` (link to search cards).
+  - Tests: `tests/test_tedgie_eval.py` (golden set unchanged), `tests/test_mcp_server_tools.py`.
+
+### Critical files for implementation
+- F:\ClaudeProjects\TestForTge\.claude\worktrees\testfortge-rag-ai-platform-629f1b\engine\db.py (models, `init_db`, `_ensure_*` migration pattern)
+- F:\ClaudeProjects\TestForTge\.claude\worktrees\testfortge-rag-ai-platform-629f1b\engine\llm_client.py and engine\llm_models.py (routing, attribution, budget)
+- F:\ClaudeProjects\TestForTge\.claude\worktrees\testfortge-rag-ai-platform-629f1b\routes\_shared.py (`visible_projects`, `project_access_with_meta`, the tenancy source)
+- F:\ClaudeProjects\TestForTge\.claude\worktrees\testfortge-rag-ai-platform-629f1b\engine\features.py and engine\route_policy.py (flags, endpoint classification)
