@@ -376,3 +376,101 @@ class TestTedgieAsk:
         )
         assert out["text"] == "ok"
         assert captured["message"] == "how do I file a bug?"
+
+
+# ── search (ADR 0003 T8) ────────────────────────────────────────
+
+
+class TestSearchTool:
+    """The MCP ``search`` tool: the ``/api/search`` retrieval layer, with
+    the result shape the app returns and the scope the other tools use."""
+
+    MARK = "wombatberry"
+
+    @pytest.fixture
+    def indexed(self, monkeypatch):
+        import secrets as _secrets
+
+        from engine.search import hooks, indexer, retrieve
+        from tests._search_seed import seed_golden
+        monkeypatch.setenv("PLATFORM_SEARCH", "1")
+        monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
+        monkeypatch.setenv("SEARCH_INDEX_DEBOUNCE_S", "3600")
+        monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+        db.init_db()
+        hooks.install()
+        hooks.reset()
+        retrieve.clear_caches()
+        org_a = db.create_organization(f"mcp a {_secrets.token_hex(4)}")
+        org_b = db.create_organization(f"mcp b {_secrets.token_hex(4)}")
+        a = db.upsert_project(f"mcp-search-a {_secrets.token_hex(4)}",
+                              org_id=org_a)
+        b = db.upsert_project(f"mcp-search-b {_secrets.token_hex(4)}",
+                              org_id=org_b)
+        seed_golden(a)
+        db.save_bug(b, {"id": "BUG-901", "title": f"{self.MARK} export fails",
+                        "status": "Open"})
+        indexer.reindex_project(a)
+        indexer.reindex_project(b)
+        hooks.reset()
+        yield {"a": a, "b": b, "org_a": org_a, "org_b": org_b}
+        hooks.reset()
+
+    def test_result_shape_matches_api_search(self, indexed):
+        out = mcp_server.search(query="login password",
+                                project=indexed["a"])
+        assert out["scope"] == "project"
+        assert out["results"], out
+        first = out["results"][0]
+        assert set(first) == {"ref", "kind", "title", "url", "snippet",
+                              "score", "project", "facets"}
+        assert first["project"]["id"] == indexed["a"]
+        assert isinstance(first["score"], float)
+        assert first["url"].startswith("/")
+        json.dumps(out)   # plain JSON for the MCP layer
+
+    def test_kinds_filter(self, indexed):
+        out = mcp_server.search(query="login", kinds=["bug", "nonsense"],
+                                project=indexed["a"])
+        assert out["results"]
+        assert {r["kind"] for r in out["results"]} == {"bug"}
+
+    def test_project_narrows_never_widens(self, indexed):
+        mine = mcp_server.search(query=self.MARK, project=indexed["a"])
+        assert all(self.MARK not in json.dumps(r).lower()
+                   for r in mine["results"])
+        theirs = mcp_server.search(query=self.MARK, project=indexed["b"])
+        assert [r["ref"] for r in theirs["results"]] == ["BUG-901"]
+
+    def test_org_narrows(self, indexed):
+        out = mcp_server.search(query=self.MARK, org_id=indexed["org_a"])
+        assert out["scope"] == "org"
+        assert all((r["project"] or {}).get("id") != indexed["b"]
+                   for r in out["results"])
+        # A project outside the named org is refused, not searched.
+        with pytest.raises(ValueError):
+            mcp_server.search(query=self.MARK, project=indexed["b"],
+                              org_id=indexed["org_a"])
+
+    def test_unknown_project_is_an_error(self, indexed):
+        with pytest.raises(ValueError):
+            mcp_server.search(query="login", project="f" * 32)
+
+    def test_unscoped_searches_every_project(self, indexed):
+        out = mcp_server.search(query=self.MARK)
+        assert out["scope"] == "all"
+        assert "BUG-901" in [r["ref"] for r in out["results"]]
+
+    def test_empty_query_raises(self, indexed):
+        with pytest.raises(ValueError):
+            mcp_server.search(query="   ")
+
+    def test_flag_off(self, monkeypatch):
+        monkeypatch.setenv("PLATFORM_SEARCH", "0")
+        out = mcp_server.search(query="login")
+        assert out == {"error": "platform_search_disabled", "results": []}
+
+    def test_registered_as_an_mcp_tool(self):
+        import asyncio
+        tools = asyncio.run(mcp_server.mcp.list_tools())
+        assert "search" in {t.name for t in tools}
