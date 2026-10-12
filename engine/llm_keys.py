@@ -247,9 +247,23 @@ def decrypt_secret(token: str | None) -> str | None:
         return None
 
 
+#: Env vars the platform key is read from, in order. ``CLAUDE_KEY`` is what
+#: the QAREA launchpad delivers: its CI variable is ``APP_CLAUDE_KEY`` and the
+#: deploy job strips the ``APP_`` prefix.
+PLATFORM_KEY_ENVS = ("ANTHROPIC_API_KEY", "CLAUDE_KEY")
+
+
 def platform_key() -> str | None:
-    """The operator's own key, or ``None``."""
-    return (os.environ.get("ANTHROPIC_API_KEY") or "").strip() or None
+    """The operator's own key, or ``None``.
+
+    Every "is there a platform key?" check goes through here — a module
+    reading ``ANTHROPIC_API_KEY`` directly is blind to ``CLAUDE_KEY``.
+    """
+    for name in PLATFORM_KEY_ENVS:
+        val = (os.environ.get(name) or "").strip()
+        if val:
+            return val
+    return None
 
 
 def resolve_key(org_id: str | None = None) -> tuple[str | None, str]:

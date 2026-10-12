@@ -1371,7 +1371,8 @@ def author_test_cases(*, profile=None, strategy=None,
         _logger.info("tc_author: disabled via TC_AUTHOR_ENABLED")
         return _deterministic_result(profile, strategy, arts)
 
-    api_key_set = bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
+    from engine.llm_keys import platform_key
+    api_key_set = bool(platform_key())
     if not api_key_set and not force_llm:
         return _deterministic_result(profile, strategy, arts)
 

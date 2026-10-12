@@ -276,7 +276,8 @@ def register(app: Flask) -> None:
             except Exception as exc:  # pragma: no cover — never block chat
                 _logger.warning("chat stream: BYOK resolution failed: %s", exc)
                 api_key, key_source = (
-                    os.environ.get("ANTHROPIC_API_KEY", ""), "platform")
+                    os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_KEY") or "",
+                    "platform")
             api_key = (api_key or "").strip()
 
             refused = ""

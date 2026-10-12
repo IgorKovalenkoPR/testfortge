@@ -103,7 +103,8 @@ def _build_client(api_key: str | None = None) -> Any:
     after BYOK resolution; when omitted we fall back to the platform key
     so the older call shape keeps working.
     """
-    key = (api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    from engine.llm_keys import platform_key
+    key = (api_key or platform_key() or "").strip()
     if not key:
         raise LLMUnavailable("no Anthropic API key (neither org nor platform)")
     try:

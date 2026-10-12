@@ -185,8 +185,9 @@ def register(app: Flask) -> None:
         """
         try:
             import os
+            from engine import llm_keys
             state = {
-                "anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "anthropic_key": bool(llm_keys.platform_key()),
                 "figma_pat":     bool(os.environ.get("FIGMA_PAT")),
                 "pdf2image_ok":  False,
                 "poppler_ok":    False,

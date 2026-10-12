@@ -403,7 +403,8 @@ def _call_claude_vision(
     """
     if not images:
         return "", "", ""
-    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    from engine.llm_keys import platform_key
+    api_key = platform_key() or ""
     if not api_key:
         _logger.info("ANTHROPIC_API_KEY not set or empty; skipping vision "
                      "call. Set it in Render env vars to enable Mockups.")

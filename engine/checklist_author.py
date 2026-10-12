@@ -41,6 +41,7 @@ from typing import Any
 from engine import checklist_rules as _rules
 from engine import glossary
 from engine.llm_client import LLMUnavailable, call_messages
+from engine.llm_keys import platform_key as _platform_key
 from engine.log import get_logger
 
 _logger = get_logger(__name__)
@@ -595,7 +596,7 @@ def author_checklist(*, artifacts: Artifacts | None = None,
         return _fallback("no artefacts")
     if not _author_enabled():
         return _fallback("CL_AUTHOR_ENABLED=0")
-    if not force_llm and not (os.environ.get("ANTHROPIC_API_KEY") or "").strip():
+    if not force_llm and not _platform_key():
         return _fallback("no API key")
 
     try:

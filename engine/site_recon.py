@@ -112,7 +112,8 @@ def recon_site(site_analysis, *, force_llm: bool = False) -> SiteProfile:
     """
     evidence = _build_evidence(site_analysis)
 
-    api_key_set = bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
+    from engine.llm_keys import platform_key
+    api_key_set = bool(platform_key())
     if not api_key_set and not force_llm:
         return _rule_based_profile(site_analysis, evidence)
 
