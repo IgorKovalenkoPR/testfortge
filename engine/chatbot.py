@@ -47,10 +47,10 @@ except Exception as _exc:  # pragma: no cover — import-time defensive
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.llm_safety import wrap_user_input
 
-# Routed by work kind at call time — see engine/llm_models.py. Still
-# on Sonnet: moving Tedgie to Haiku would cut the bill sharply, but
-# nothing can yet measure whether the answers got worse. That is the
-# eval harness in E6.7, and the default moves when it exists.
+# Routed by work kind at call time — see engine/llm_models.py. On Haiku
+# since the owner's decision of 2026-10-12 (ADR 0003), with the E6.7 golden
+# set as the gate; an org can move it back through the model switcher and
+# the operator through LLM_CONSULT_TIER.
 _CHAT_KIND = "consult"
 _ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "600"))
 

@@ -22,8 +22,9 @@ def _db_ready():
 def _clean_env(monkeypatch):
     """Routing reads the environment at call time; start from a blank slate."""
     for var in ("ANTHROPIC_MODEL", "ANTHROPIC_MODEL_SONNET",
-                "ANTHROPIC_MODEL_HAIKU", "LLM_ORG_BUDGET_USD",
-                llm_keys.ENCRYPTION_KEY_ENV):
+                "ANTHROPIC_MODEL_HAIKU", "ANTHROPIC_MODEL_OPUS",
+                "LLM_ORG_BUDGET_USD", "LLM_ALLOW_PREMIUM_ON_PLATFORM_KEY",
+                "MODEL_SWITCHER", llm_keys.ENCRYPTION_KEY_ENV):
         monkeypatch.delenv(var, raising=False)
     for kind in llm_models.KINDS:
         monkeypatch.delenv(f"LLM_MODEL_FOR_{kind.upper()}", raising=False)
@@ -58,18 +59,39 @@ class TestModelRouting:
         for kind in llm_models.KINDS:
             assert llm_models.model_for(kind)
 
-    def test_authoring_is_sonnet_and_segmentation_is_haiku(self):
-        # The one downgrade taken without an eval harness, and the reason
-        # is that its output is schema-validated with a deterministic
-        # fallback — verifiably good enough, not hopefully.
-        assert "sonnet" in llm_models.model_for("authoring")
-        assert "haiku" in llm_models.model_for("segmentation")
+    def test_every_kind_defaults_to_haiku(self):
+        # The owner's decision (ADR 0003, 2026-10-12): Haiku for every kind
+        # of work, Sonnet and Opus only through the switcher or an operator
+        # override.
+        assert set(llm_models.KIND_TIER.values()) == {"haiku"}
+        for kind in llm_models.KINDS:
+            assert llm_models.model_for(kind) == "claude-haiku-5-5", kind
 
-    def test_consult_stays_on_sonnet_until_an_eval_exists(self):
-        # Deliberate. Moving Tedgie to Haiku is the biggest single saving
-        # available and it stays unclaimed until E6.7 can show the
-        # golden-set score holding.
-        assert "sonnet" in llm_models.model_for("consult")
+    def test_tier_defaults_are_the_current_family_ids(self):
+        # Checked against Anthropic's model list on 2026-10-12. Complete ids,
+        # no date suffix.
+        assert llm_models.TIER_DEFAULTS == {
+            "haiku": "claude-haiku-5-5",
+            "sonnet": "claude-sonnet-5-5",
+            "opus": "claude-opus-5-5",
+        }
+
+    def test_search_kinds_are_declared(self):
+        assert "search_answer" in llm_models.KINDS
+        assert "query_rewrite" in llm_models.KINDS
+
+    def test_schema_checked_kinds_are_not_switchable(self):
+        # A more expensive model costs more there with no visible benefit.
+        assert llm_models.SWITCHABLE_KINDS == {
+            "consult", "search_answer", "authoring", "analysis", "vision"}
+        assert "segmentation" not in llm_models.SWITCHABLE_KINDS
+        assert "query_rewrite" not in llm_models.SWITCHABLE_KINDS
+
+    def test_consult_can_be_moved_back_to_sonnet_by_the_operator(self, monkeypatch):
+        # Tedgie moved to Haiku with the golden set as its gate; the lever
+        # back is still one environment variable.
+        monkeypatch.setenv("LLM_CONSULT_TIER", "sonnet")
+        assert llm_models.model_for("consult") == "claude-sonnet-5-5"
 
     def test_unknown_kind_raises_rather_than_guessing(self):
         with pytest.raises(llm_models.UnknownKind):
@@ -81,19 +103,19 @@ class TestModelRouting:
         assert llm_models.model_for("authoring") != "claude-experimental-9"
 
     def test_a_kind_can_be_moved_to_another_tier(self, monkeypatch):
-        monkeypatch.setenv("LLM_CONSULT_TIER", "haiku")
-        assert "haiku" in llm_models.model_for("consult")
+        monkeypatch.setenv("LLM_AUTHORING_TIER", "opus")
+        assert llm_models.model_for("authoring") == "claude-opus-5-5"
 
     def test_an_unknown_tier_falls_back_and_warns(self, monkeypatch):
         monkeypatch.setenv("LLM_CONSULT_TIER", "platinum")
-        assert "sonnet" in llm_models.model_for("consult")
+        assert "haiku" in llm_models.model_for("consult")
         assert any("platinum" in w for w in llm_models.routing_warnings())
 
     def test_legacy_tier_var_still_repoints_a_tier(self, monkeypatch):
         # An existing deployment that set this for cost reasons must not
         # be silently overridden by the new defaults.
-        monkeypatch.setenv("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-6")
-        assert llm_models.model_for("authoring") == "claude-sonnet-4-6"
+        monkeypatch.setenv("ANTHROPIC_MODEL_HAIKU", "claude-haiku-4-5")
+        assert llm_models.model_for("authoring") == "claude-haiku-4-5"
 
     def test_legacy_global_pin_is_honoured_but_reported(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
@@ -108,6 +130,9 @@ class TestModelRouting:
         assert llm_models.routing_warnings() == []
 
     @pytest.mark.parametrize("model,tier", [
+        ("claude-haiku-5-5", "haiku"),
+        ("claude-sonnet-5-5", "sonnet"),
+        ("claude-opus-5-5", "opus"),
         ("claude-haiku-4-5-20251001", "haiku"),
         ("claude-sonnet-5", "sonnet"),
         ("claude-opus-5", "opus"),
@@ -143,6 +168,45 @@ class TestPricing:
         assert (llm_cost.cost_micros("claude-haiku-4-5-20251001", usage) * 2
                 == pytest.approx(
                     llm_cost.cost_micros("claude-sonnet-5", usage), rel=1e-6))
+
+    @pytest.mark.parametrize("model,inp,out", [
+        # Published 2026-10-06, the TIER_DEFAULTS models.
+        ("claude-haiku-5-5", 0.10, 0.50),
+        ("claude-sonnet-5-5", 2.0, 10.0),
+        ("claude-opus-5-5", 4.0, 20.0),
+        # Older ids still in usage history.
+        ("claude-haiku-4-5-20251001", 1.0, 5.0),
+        ("claude-opus-5", 5.0, 25.0),
+    ])
+    def test_each_model_is_priced_by_its_own_row(self, model, inp, out):
+        # A tier-only table would price Haiku 5.5 as Haiku 4.5 - ten times
+        # over. And claude-sonnet-5-5 must not match the claude-sonnet-5
+        # row by prefix: the longest prefix wins. 100K input tokens, so
+        # Haiku 5.5 stays inside its base-rate tier.
+        assert llm_cost.cost_micros(model, llm_cost.Usage(100_000, 0, 0, 0)) \
+            == pytest.approx(inp * llm_cost.MICROS_PER_USD / 10, rel=1e-6)
+        assert llm_cost.cost_micros(model, llm_cost.Usage(0, 1_000_000, 0, 0)) \
+            == pytest.approx(out * llm_cost.MICROS_PER_USD, rel=1e-6)
+
+    def test_haiku_5_5_long_prompts_use_the_long_rate(self):
+        # $0.50 / $2.50 per million once the prompt passes 100K tokens.
+        usage = llm_cost.Usage(200_000, 1_000, 0, 0)
+        expected = 200_000 * 0.50 + 1_000 * 2.50
+        assert llm_cost.cost_micros("claude-haiku-5-5", usage) == \
+            pytest.approx(expected, rel=1e-6)
+
+    def test_a_published_cache_read_rate_beats_the_default_multiplier(self):
+        # Opus 5.5 reads cache at $0.20, which is 5% of input, not 10%.
+        read = llm_cost.cost_micros("claude-opus-5-5",
+                                    llm_cost.Usage(0, 0, 1_000_000, 0))
+        assert read == pytest.approx(0.20 * llm_cost.MICROS_PER_USD, rel=1e-6)
+
+    def test_an_unknown_family_member_is_priced_at_its_tier_ceiling(self):
+        # A Haiku id with no row is priced as the dearest Haiku, not the
+        # cheapest: overstating is the safe direction.
+        usage = llm_cost.Usage(1_000_000, 0, 0, 0)
+        assert (llm_cost.cost_micros("claude-haiku-9", usage)
+                == pytest.approx(1.0 * llm_cost.MICROS_PER_USD, rel=1e-6))
 
     def test_cache_reads_are_a_tenth_and_writes_are_more_than_input(self):
         # Collapsing these into "input" gets the cost wrong in both
@@ -415,10 +479,13 @@ class TestCallMessagesIntegration:
                             lambda: ())
         return seen
 
-    def test_kind_selects_the_model(self, captured):
+    def test_kind_selects_the_model(self, captured, monkeypatch):
         llm_client.call_messages(kind="segmentation", max_tokens=10,
                                  messages=[])
-        assert "haiku" in captured["model"]
+        assert captured["model"] == "claude-haiku-5-5"
+        monkeypatch.setenv("LLM_ANALYSIS_TIER", "sonnet")
+        llm_client.call_messages(kind="analysis", max_tokens=10, messages=[])
+        assert captured["model"] == "claude-sonnet-5-5"
 
     def test_an_explicit_model_still_wins(self, captured):
         # Backwards compatibility: the older call shape must be untouched.

@@ -1,34 +1,54 @@
-"""TestFortge — which Claude model handles which kind of work (E0.8).
+"""TestFortge — which Claude model handles which kind of work (E0.8, ADR 0003 §4.7).
 
 Before this module every call site resolved its own model out of the
 environment, and seven of them had drifted onto three different pinned
-defaults (``claude-sonnet-4-5``, ``claude-sonnet-4-6``, and whatever
-``ANTHROPIC_MODEL`` happened to hold). Two consequences: nobody could
-answer "what model is production using" without grepping, and the cheap
-work paid the expensive model's price.
+defaults. Two consequences: nobody could answer "what model is production
+using" without grepping, and the cheap work paid the expensive model's
+price.
 
 The model is chosen from the *kind of work*, not from the call site.
 
-Cost, for the routing to be judged against — the platform runs on a zero
-budget (``docs/plans/cost_model.md``), so this is the lever that matters
-most after prompt caching:
+Defaults — the owner's decision (ADR 0003, 2026-10-12)
+------------------------------------------------------
+**Every kind runs on Haiku.** Sonnet and Opus are reachable only through
+the model switcher (``MODEL_SWITCHER``, :mod:`engine.llm_prefs`) or an
+operator override below. Prices, per million input / output tokens, as
+published on 2026-10-06 (see :mod:`engine.llm_cost` for the table the
+meter actually uses):
 
-* Sonnet 5   — $2 / $10 per million input / output tokens
-* Haiku 4.5  — $1 / $5
+* Haiku 5.5  (``claude-haiku-5-5``)  — $0.10 / $0.50 (prompts ≤100K tokens)
+* Sonnet 5.5 (``claude-sonnet-5-5``) — $2 / $10
+* Opus 5.5   (``claude-opus-5-5``)   — $4 / $20
 
-Prices as of 2026-08; verify at anthropic.com/pricing before quoting them
-to anyone.
+Precedence, most specific first
+-------------------------------
+1. ``LLM_MODEL_FOR_<KIND>`` — a **hard pin by the operator**. Beats
+   everything, including the legacy pin below and every switcher setting;
+   the switcher shows the kind as "pinned by operator".
+2. ``ANTHROPIC_MODEL`` (legacy global pin) — while it is set the switcher
+   is off entirely (no org or user setting applies), and the env layers
+   below resolve exactly as they did before ADR 0003. :func:`routing_warnings`
+   says so at boot.
+3. The user's preference, when ``MODEL_SWITCHER`` is on, the kind is in
+   :data:`SWITCHABLE_KINDS`, the org lets users choose and the tier is in
+   the org's ``allowed_tiers``.
+4. The org's ``per_kind`` tier, then its ``default_tier``.
+5. ``LLM_<KIND>_TIER``.
+6. :data:`KIND_TIER` (Haiku).
 
-Environment overrides, most specific first
-------------------------------------------
-1. ``LLM_MODEL_FOR_<KIND>``  — pin one kind, e.g. ``LLM_MODEL_FOR_CONSULT``
-2. ``LLM_<KIND>_TIER``       — move one kind to another tier, e.g.
-   ``LLM_CONSULT_TIER=haiku``
-3. ``ANTHROPIC_MODEL_SONNET`` / ``ANTHROPIC_MODEL_HAIKU`` — repoint a tier
-4. ``ANTHROPIC_MODEL``       — legacy global pin. Honoured, because
-   deployments already set it, but it **disables routing entirely**;
-   :func:`routing_warnings` says so at boot rather than leaving someone
-   wondering why ``LLM_CONSULT_TIER`` did nothing.
+Steps 3–4 also pass the money rule in :func:`engine.llm_prefs.effective_tier`:
+Sonnet and Opus on the *platform* key need
+``LLM_ALLOW_PREMIUM_ON_PLATFORM_KEY``; a BYOK org may use any tier its admin
+allows.
+
+The tier is then mapped to a model through ``ANTHROPIC_MODEL_<TIER>``,
+then the legacy ``ANTHROPIC_MODEL``, then :data:`TIER_DEFAULTS`.
+
+Why the legacy pin sits where it does. ADR 0003 §4.7 lists it as
+"overrides everything, as today", but today's code let
+``LLM_MODEL_FOR_<KIND>`` and ``ANTHROPIC_MODEL_<TIER>`` win over it. This
+module keeps today's env ordering exactly and adds the one thing the ADR
+cares about: an org or user choice never beats it.
 """
 from __future__ import annotations
 
@@ -38,48 +58,69 @@ from engine.log import get_logger
 
 log = get_logger(__name__)
 
-#: Tier → default model id.
+#: Tier → default model id. Current Claude 5.5 family ids, checked against
+#: Anthropic's model list on 2026-10-12. No date suffixes: these are the
+#: complete ids.
 TIER_DEFAULTS: dict[str, str] = {
-    "sonnet": "claude-sonnet-5",
-    "haiku": "claude-haiku-4-5-20251001",
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5",
 }
 
-#: Kind of work → tier.
+#: Tiers in ascending order of cost. Used by the UI to list them.
+TIERS: tuple[str, ...] = ("haiku", "sonnet", "opus")
+
+#: Tiers that cost the operator real money on the platform key. Gated by
+#: ``LLM_ALLOW_PREMIUM_ON_PLATFORM_KEY`` — see :mod:`engine.llm_prefs`.
+PREMIUM_TIERS: frozenset[str] = frozenset({"sonnet", "opus"})
+
+#: Kind of work → tier. **Every kind is Haiku** (owner's decision,
+#: 2026-10-12). The kinds stay separate because they are still the
+#: dimension the usage report groups by and the switcher switches on:
 #:
-#: The split is by *what the answer has to be*, not by how important the
-#: feature feels:
-#:
-#: * ``authoring`` writes prose a QA engineer signs their name to — test
-#:   cases and checklist items in a measured house style. Sonnet.
-#: * ``analysis`` reads a site or a spec and reasons about coverage.
-#:   Sonnet.
-#: * ``vision`` reads mockup images. Sonnet.
-#: * ``segmentation`` extracts a short, schema-validated JSON shape from a
-#:   recorded session. Haiku: the output is checked against a schema and
-#:   there is a deterministic fallback if it fails, so a cheaper model is
-#:   *verifiably* good enough rather than hopefully good enough.
-#: * ``consult`` is Tedgie answering QA questions. Deliberately still
-#:   Sonnet — see the note below.
+#: * ``authoring`` — test cases and checklist items in the house style;
+#: * ``analysis`` — reading a site or a spec and reasoning about coverage;
+#: * ``vision`` — reading mockup images;
+#: * ``segmentation`` — short, schema-validated JSON from a recorded
+#:   session, with a deterministic fallback;
+#: * ``consult`` — Tedgie answering QA questions;
+#: * ``search_answer`` — the short grounded answer above search results
+#:   (ADR 0003 §4.6);
+#: * ``query_rewrite`` — reserved, not called by anything yet.
 KIND_TIER: dict[str, str] = {
-    "authoring": "sonnet",
-    "analysis": "sonnet",
-    "vision": "sonnet",
+    "authoring": "haiku",
+    "analysis": "haiku",
+    "vision": "haiku",
     "segmentation": "haiku",
-    "consult": "sonnet",
+    "consult": "haiku",
+    "search_answer": "haiku",
+    "query_rewrite": "haiku",
 }
 
-# Why ``consult`` is not on Haiku yet, even though it is the highest-volume
-# kind and moving it would cut the LLM bill by roughly 45%:
+#: Kinds an org policy or a user preference may move off Haiku.
+#: ``segmentation`` and ``query_rewrite`` stay put: their output is checked
+#: against a schema, so a more expensive model costs more with no visible
+#: benefit.
+SWITCHABLE_KINDS: frozenset[str] = frozenset(
+    {"consult", "search_answer", "authoring", "analysis", "vision"})
+
+# Why ``consult`` is on Haiku now, when this comment used to explain why it
+# was not.
 #
-# There is no way to tell today whether the answers got worse. Tedgie's
-# mentoring answers are free prose, graded by whether a QA engineer trusts
-# them, and the eval harness that would measure that is E6.7. Flipping the
-# model first and building the measurement second is how a quality
-# regression ships unnoticed and gets attributed to a prompt change three
-# sprints later.
+# The old objection was that nothing could tell whether Tedgie's answers got
+# worse, so flipping the model first and measuring second was how a quality
+# regression would ship unnoticed. That measurement now exists: E6.7's golden
+# set (engine/tedgie_eval.py, 105 items) gates CI at 100%/100%. The owner
+# decided on 2026-10-12 (ADR 0003) that Haiku is the default for every kind,
+# with the merge gate being a tedgie_eval run on the golden set recorded in
+# the PR.
 #
-# So the routing is here, the lever is documented (LLM_CONSULT_TIER=haiku),
-# and the default moves once E6.7 can show the golden-set score holding.
+# Read that gate for what it is: run_rule_layer() scores the deterministic
+# chain (fast path → project facts → rule fallback), which no model change
+# can move. The LLM leg of Tedgie is only measured by a live run with a key.
+# Until that run is recorded, the per-org escape hatch is the switcher
+# (MODEL_SWITCHER: an admin can put ``consult`` back on Sonnet for their
+# team) and the operator's is LLM_CONSULT_TIER=sonnet.
 
 #: Kinds that must exist. A typo'd kind is a KeyError, for the same reason
 #: a typo'd feature flag is (see engine/features.py).
@@ -99,21 +140,23 @@ def legacy_global_pin() -> str:
     return _env("ANTHROPIC_MODEL")
 
 
-def model_for(kind: str) -> str:
-    """Return the model id that should handle *kind*.
+def operator_pin(kind: str) -> str:
+    """``LLM_MODEL_FOR_<KIND>``, or ``""``. The switcher's "pinned by
+    operator" state reads this."""
+    return _env(f"LLM_MODEL_FOR_{kind.upper()}")
 
-    Raises :class:`UnknownKind` for an undeclared kind.
-    """
+
+def _check_kind(kind: str) -> None:
     if kind not in KIND_TIER:
         raise UnknownKind(
             f"{kind!r} is not a declared work kind. Declared: "
             f"{', '.join(KINDS)}. Add it to engine/llm_models.py."
         )
 
-    per_kind = _env(f"LLM_MODEL_FOR_{kind.upper()}")
-    if per_kind:
-        return per_kind
 
+def env_tier(kind: str) -> str:
+    """The tier the environment gives *kind*: ``LLM_<KIND>_TIER`` if it
+    names a real tier, else :data:`KIND_TIER`."""
     tier = _env(f"LLM_{kind.upper()}_TIER") or KIND_TIER[kind]
     if tier not in TIER_DEFAULTS:
         log.warning(
@@ -121,23 +164,62 @@ def model_for(kind: str) -> str:
             kind.upper(), tier, ", ".join(sorted(TIER_DEFAULTS)),
             KIND_TIER[kind])
         tier = KIND_TIER[kind]
+    return tier
 
+
+def model_for_tier(tier: str) -> str:
+    """Tier → model id: ``ANTHROPIC_MODEL_<TIER>``, the legacy pin, then
+    :data:`TIER_DEFAULTS`."""
     per_tier = _env(f"ANTHROPIC_MODEL_{tier.upper()}")
     if per_tier:
         return per_tier
-
     legacy = legacy_global_pin()
     if legacy:
         return legacy
-
     return TIER_DEFAULTS[tier]
+
+
+def tier_for(kind: str, *, org_id: str | None = None,
+             user_id: str | None = None,
+             key_source: str | None = None) -> str:
+    """The tier *kind* resolves to for this org and user (steps 2–6 of the
+    module docstring). Ignores the operator pin, which names a model, not
+    a tier — :func:`model_for` handles it."""
+    _check_kind(kind)
+    if not legacy_global_pin() and kind in SWITCHABLE_KINDS:
+        from engine import llm_prefs
+        chosen = llm_prefs.effective_tier(
+            kind, org_id=org_id, user_id=user_id, key_source=key_source)
+        if chosen:
+            return chosen
+    return env_tier(kind)
+
+
+def model_for(kind: str, *, org_id: str | None = None,
+              user_id: str | None = None,
+              key_source: str | None = None) -> str:
+    """Return the model id that should handle *kind*.
+
+    ``org_id`` and ``user_id`` feed the model switcher; without them, or
+    with ``MODEL_SWITCHER`` off, routing is env + :data:`KIND_TIER` exactly
+    as before. ``key_source`` (``"org"``/``"platform"``/``"none"``) lets a
+    caller that already resolved the key spare the switcher a second
+    lookup.
+
+    Raises :class:`UnknownKind` for an undeclared kind.
+    """
+    _check_kind(kind)
+    pinned = operator_pin(kind)
+    if pinned:
+        return pinned
+    return model_for_tier(tier_for(kind, org_id=org_id, user_id=user_id,
+                                   key_source=key_source))
 
 
 def tier_of(model: str) -> str | None:
     """Reverse lookup: which tier a model id belongs to, if any.
 
-    Used by the usage meter to price a call. Matches on prefix so a
-    dated id (``claude-haiku-4-5-20251001``) resolves the same as its
+    Matches on the family name so a dated id resolves the same as its
     alias, and returns ``None`` for anything unrecognised rather than
     guessing — an unknown model priced as Haiku would understate the
     bill, which is the wrong direction to be wrong in.
@@ -161,9 +243,9 @@ def routing_warnings() -> list[str]:
     legacy = legacy_global_pin()
     if legacy:
         out.append(
-            f"ANTHROPIC_MODEL={legacy!r} pins every call to one model and "
-            f"disables per-kind routing. Unset it and use "
-            f"ANTHROPIC_MODEL_SONNET / ANTHROPIC_MODEL_HAIKU instead."
+            f"ANTHROPIC_MODEL={legacy!r} pins every call to one model, "
+            f"disables per-kind routing and the model switcher. Unset it "
+            f"and use ANTHROPIC_MODEL_HAIKU / _SONNET / _OPUS instead."
         )
     for kind in KINDS:
         tier = _env(f"LLM_{kind.upper()}_TIER")
@@ -176,12 +258,14 @@ def routing_warnings() -> list[str]:
 
 
 def snapshot() -> dict[str, str]:
-    """Kind → resolved model, for ops surfaces and the Guide."""
+    """Kind → resolved model with no org or user, for ops surfaces and the
+    Guide."""
     return {kind: model_for(kind) for kind in sorted(KINDS)}
 
 
 __all__ = [
-    "TIER_DEFAULTS", "KIND_TIER", "KINDS", "UnknownKind",
-    "model_for", "tier_of", "routing_warnings", "snapshot",
-    "legacy_global_pin",
+    "TIER_DEFAULTS", "TIERS", "PREMIUM_TIERS", "KIND_TIER", "KINDS",
+    "SWITCHABLE_KINDS", "UnknownKind",
+    "model_for", "model_for_tier", "tier_for", "env_tier", "operator_pin",
+    "tier_of", "routing_warnings", "snapshot", "legacy_global_pin",
 ]

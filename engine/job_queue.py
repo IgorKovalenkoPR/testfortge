@@ -68,6 +68,10 @@ class Job:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     meta: dict = field(default_factory=dict)  # free-form user-supplied context
+    #: Who the job's LLM calls are on behalf of (engine.llm_context),
+    #: captured at submit. Deliberately not in ``meta``: meta is handed to
+    #: the browser by ``to_public_dict`` and ids do not belong there.
+    llm_ctx: Any = field(default=None, repr=False)
 
     def to_public_dict(self) -> dict:
         """Dict safe to hand to the browser (omits ``result`` payload —
@@ -151,12 +155,22 @@ class JobQueue:
         """
         if self._shutting_down:
             raise RuntimeError("JobQueue is shutting down — refusing new work")
-        job = Job(id=uuid.uuid4().hex, kind=kind, meta=meta or {})
+        # The submitting request's LLM attribution (ADR 0003 §4.7). A
+        # ThreadPoolExecutor does not carry context variables into its
+        # threads, so without this every generation job would call the LLM
+        # as nobody — no budget gate, no BYOK, no usage row for the org.
+        # Only this one variable is carried, not the whole context: copying
+        # it would hand the worker Flask's request context after the
+        # request has ended.
+        from engine import llm_context
+        job = Job(id=uuid.uuid4().hex, kind=kind, meta=meta or {},
+                  llm_ctx=llm_context.current())
         with self._lock:
             self._prune_locked()
             self._jobs[job.id] = job
 
         def _runner():
+            token = llm_context.set_context(job.llm_ctx)
             self._mark_running(job.id)
             try:
                 result = func(*args, **kwargs)
@@ -164,6 +178,8 @@ class JobQueue:
             except BaseException as exc:  # noqa: BLE001 — preserve all failures
                 log.exception("job %s (%s) failed", job.id, kind)
                 self._mark_failed(job.id, f"{type(exc).__name__}: {exc}")
+            finally:
+                llm_context.reset(token)
 
         self._executor.submit(_runner)
         return job.id

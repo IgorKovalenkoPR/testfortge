@@ -15,7 +15,8 @@ import os
 import time
 from datetime import datetime
 
-from flask import Flask, Response, jsonify, request, session, stream_with_context
+from flask import (Flask, Response, g, jsonify, request, session,
+                   stream_with_context)
 from werkzeug.utils import secure_filename
 
 from engine import blobs as _blobs
@@ -65,7 +66,10 @@ def _meter_stream(final) -> None:
         usage = _llm_cost.extract_usage(final)
         if not any(usage):
             return
-        model = _llm_models.model_for("consult")
+        model = (getattr(g, "_chat_stream_model", None)
+                 or _llm_models.model_for(
+                     "consult", org_id=session.get("org_id"),
+                     user_id=session.get("_user_id")))
         _db.record_llm_usage(
             kind="consult", model=model,
             org_id=session.get("org_id"),
@@ -317,6 +321,13 @@ def register(app: Flask) -> None:
 
             yield _sse("meta", {"intent": "ai_generic", "lang": lang})
 
+            stream_model = _llm_models.model_for(
+                "consult", org_id=org_id, user_id=_perm.current_user_id(),
+                key_source=key_source)
+            # Kept on ``g`` so the meter prices the model that actually
+            # answered, not a fresh routing that may differ by now.
+            g._chat_stream_model = stream_model
+
             chunks: list[str] = []
             # Bound before the try so the GeneratorExit handler below
             # can reach the stream without introspecting locals().
@@ -335,7 +346,9 @@ def register(app: Flask) -> None:
                     # than going through engine.llm_client (streaming has
                     # no equivalent there), so the routing has to be
                     # repeated here — and so does the metering, below.
-                    model=_llm_models.model_for("consult"),
+                    # With org and user, so the model switcher (ADR 0003
+                    # §4.7) applies to the streamed Tedgie too.
+                    model=stream_model,
                     max_tokens=_chatbot_mod._ANTHROPIC_MAX_TOKENS,
                     # System-blocks list (not a string) so the cached
                     # persona block actually hits Anthropic's ephemeral

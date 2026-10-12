@@ -106,6 +106,15 @@ FLAGS: dict[str, Flag] = {
             "AUTH_ENABLED is off — see engine/basic_auth.py — because "
             "that combination has nothing behind it.",
         ),
+        Flag(
+            "MODEL_SWITCHER", False, "E13",
+            "Org policy and per-user choice of Claude model tier (Haiku / "
+            "Sonnet / Opus) for the switchable kinds of work — ADR 0003 "
+            "§4.7. Requires ORG_MODE: the policy belongs to an "
+            "organisation. While off, routing is the environment plus "
+            "engine/llm_models.KIND_TIER exactly as before, which is "
+            "Haiku for every kind.",
+        ),
     )
 }
 
@@ -175,6 +184,8 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
     # Same reason: per-project metrics computed from the caller's session
     # are per-browser metrics wearing a project's name.
     "DASHBOARD_V2": ("WORKSPACE_DB_FIRST",),
+    # An org policy with no organisations has nobody to belong to.
+    "MODEL_SWITCHER": ("ORG_MODE",),
 }
 
 
@@ -187,7 +198,10 @@ def effective(name: str) -> bool:
     """
     if not is_enabled(name):
         return False
-    return all(is_enabled(dep) for dep in _REQUIRES.get(name, ()))
+    # Recursive, so a chain holds: MODEL_SWITCHER needs ORG_MODE, which
+    # itself needs AUTH_ENABLED. Checking the prerequisite with
+    # ``is_enabled`` would read ORG_MODE=1 as on even with AUTH_ENABLED=0.
+    return all(effective(dep) for dep in _REQUIRES.get(name, ()))
 
 
 def misconfigurations() -> list[str]:

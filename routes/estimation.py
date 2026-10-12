@@ -185,14 +185,15 @@ def register(app: Flask) -> None:
         """
         try:
             import os
-            from engine import llm_keys
+            from engine import llm_keys, llm_models
             state = {
                 "anthropic_key": bool(llm_keys.platform_key()),
                 "figma_pat":     bool(os.environ.get("FIGMA_PAT")),
                 "pdf2image_ok":  False,
                 "poppler_ok":    False,
-                "vision_model":  os.environ.get("ANTHROPIC_MODEL",
-                                                 "claude-sonnet-4-5"),
+                # What mockup_vision actually routes to, not a hardcoded
+                # guess that went stale with every model change.
+                "vision_model":  llm_models.model_for("vision"),
             }
             try:
                 import pdf2image  # noqa: F401

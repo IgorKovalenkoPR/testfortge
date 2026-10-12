@@ -84,6 +84,10 @@ UA = TRANSLATIONS["ua"]
 DELIBERATELY_ENGLISH = {
     # Proper nouns, abbreviations, and words spelled the same way
     "chat_title": "Tedgie is a name",
+    # Claude model tiers, as Anthropic names them (ADR 0003 model switcher).
+    # Haiku's label carries a translated gloss; these two are the bare name.
+    "ms_tier_sonnet": "Sonnet is Anthropic's model name",
+    "ms_tier_opus": "Opus is Anthropic's model name",
     "est_min": "MIN", "est_max": "MAX",
     "login_email": "Email is used as-is in Ukrainian",
     "reset_email_label": "Email",

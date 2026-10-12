@@ -138,6 +138,39 @@
             </form>
         </div>
         {% endif %}
+        {#- ── Model switcher (ADR 0003 §4.7) ──────────────────────────
+            Only when MODEL_SWITCHER is on and the caller is in a team — see
+            routes/__init__._inject_model_switcher. Tiers the caller cannot
+            pick are listed disabled with the reason, rather than hidden:
+            "why can't I have Opus" is the question this answers. The empty
+            value means "no choice of my own", i.e. the team default.
+            Saved by static/js/app.js with a PUT; the server re-checks
+            every rule shown here. -#}
+        {% if model_switcher %}
+        {% set ms_tier_label = {'haiku': t.ms_tier_haiku, 'sonnet': t.ms_tier_sonnet, 'opus': t.ms_tier_opus} %}
+        {% set ms_reason_label = {'org': t.ms_reason_org, 'pinned': t.ms_reason_pinned, 'premium_key': t.ms_reason_premium_key} %}
+        <div class="sidebar-user sidebar-model"
+             data-model-switcher
+             data-url="{{ url_for('api_me_model_preference') }}"
+             data-msg-saved="{{ t.ms_saved }}"
+             data-msg-failed="{{ t.ms_save_failed }}">
+            <label for="model-switcher">{{ t.ms_label }}</label>
+            <select id="model-switcher" name="model_tier" class="form-select"
+                    {% if not model_switcher.enabled %}disabled{% endif %}>
+                <option value="">{{ t.ms_team_default }}</option>
+                {% for opt in model_switcher.options %}
+                <option value="{{ opt.tier }}"
+                        {% if opt.disabled %}disabled{% endif %}
+                        {% if model_switcher.selected == opt.tier %}selected{% endif %}>
+                    {{ ms_tier_label[opt.tier] }}{% if opt.disabled and ms_reason_label.get(opt.reason) %} — {{ ms_reason_label[opt.reason] }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <small class="text-muted" data-model-switcher-status aria-live="polite">
+                {% if model_switcher.pinned %}{{ t.ms_reason_pinned }}{% else %}{{ t.ms_now_using|format(model_switcher.effective_model) }}{% endif %}
+            </small>
+        </div>
+        {% endif %}
     </nav>
 
     <main class="main-content">

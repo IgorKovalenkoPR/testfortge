@@ -196,6 +196,13 @@ POLICY: dict[str, str] = {
     "org_settings_storage": "admin",
     "org_settings_storage_test": "admin",
     "org_settings_storage_clear": "admin",
+    # Which Claude tiers the team may use, and on whose money (ADR 0003
+    # §4.7). Self-enforcing via @require_role("admin"); listed so the table
+    # answers "who can move the team onto Opus".
+    "org_settings_models": "admin",
+    # A member's own model choice, within that policy. Member-level: it
+    # changes nothing but the caller's own calls.
+    "api_me_model_preference": "user",
     # …but picking which existing project you are working in is not.
     "db_select_project": "user",
     "load_project": "user",
