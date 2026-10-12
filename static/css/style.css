@@ -3,31 +3,111 @@
    ═══════════════════════════════════════════════════════════════ */
 
 /* ── Reset & Base ─────────────────────────────────────────────── */
+/* Poppins is loaded by a <link> in templates/base.html — an @import
+   after the first rule is invalid CSS and browsers drop it. */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-    --primary: #6366f1;
-    --primary-dark: #4338ca;
-    --primary-light: #e0e7ff;
-    --bg: #f5f6fa;
-    --surface: #ffffff;
-    --text: #1e293b;
-    --text-muted: #64748b;
-    --text-light: #94a3b8;
-    --border: #e2e8f0;
-    --border-light: #f1f5f9;
-    --success: #059669;
-    --success-light: #d1fae5;
-    --warning: #d97706;
-    --warning-light: #fef3c7;
-    --danger: #dc2626;
-    --danger-light: #fee2e2;
-    --info-bg: #eff6ff;
-    --info-border: #bfdbfe;
-    --sidebar-w: 240px;
-    --radius: 8px;
-    --shadow: 0 1px 3px rgba(0,0,0,.06);
-    --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+    /* Testfort palette */
+    --tf-coral:          #FF865C;
+    --tf-coral-hover:    #FF6A36;
+    --tf-coral-soft:     #FFE9DE;
+    --tf-coral-grad:     linear-gradient(135deg, #FF865C 0%, #FF8A59 100%);
+    --tf-blue:           #18AAFD;
+    --tf-blue-hover:     #0A92DF;
+    --tf-blue-soft:      #E0F4FE;
+    --tf-ink:            #111111;
+    --tf-ink-2:          #2A2A2A;
+    --tf-mute:           #5E6472;
+    --tf-mute-2:         #6B7280;   /* was #828282 — 3.84:1 on white */
+    --tf-line:           #E5E7EB;
+    --tf-line-2:         #F2F3F5;
+    --tf-bg:             #F7F8FA;
+    --tf-surface:        #FFFFFF;
+
+    /* Typographic scale */
+    --tf-font-heading:   'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --tf-font-body:      'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    /* Geometry */
+    --tf-radius:         8px;
+    --tf-radius-sm:      6px;
+    --tf-radius-lg:      14px;
+    --tf-radius-pill:    200px;
+    --tf-container:      1048px;
+    --tf-topbar-h:       96px;
+
+    /* Shadows */
+    --tf-shadow-sm:      0 1px 2px rgba(17,17,17,.05);
+    --tf-shadow:         0 2px 10px rgba(17,17,17,.06);
+    --tf-shadow-md:      0 8px 24px rgba(17,17,17,.08);
+    --tf-shadow-coral:   0 8px 22px rgba(255,134,92,.28);
+
+    /* ── Accessible design tokens ─────────────────────────────────
+       Every value here is pinned by tests/test_design_tokens.py:
+       text/fill pairs ≥ 4.5:1, control borders and focus ≥ 3:1.
+       Coral (#FF865C) fails 4.5:1 against white (2.38:1), so it is
+       decoration only — borders, illustrations, the dark sidebar.
+       Anything that carries text or marks a state uses --accent. */
+    --accent:            #B93C12;   /* 5.65:1 white-on-accent */
+    --accent-hover:      #A8360F;   /* 6.56:1 */
+    --accent-soft:       #FFE9DE;   /* accent text on it: 4.83:1 */
+    --success:           #0F7B5A;   /* 5.25:1 */
+    --success-hover:     #0B6449;
+    --danger:            #C62828;   /* 5.62:1 */
+    --danger-hover:      #A51F1F;
+    --warning:           #B45309;   /* text on white 5.02:1 */
+    --text-subtle:       #6B7280;   /* 4.83:1 — replaces #828282/#94a3b8/#999 */
+    --border-control:    #8A909C;   /* 3.21:1 — inputs, outline buttons */
+    --focus:             #1D4ED8;   /* 6.70:1 */
+    --focus-on-dark:     #FF865C;   /* sidebar: 7.08:1 on #1A1D24 */
+
+    /* Badge text on their existing tints (all ≥ 4.5:1). */
+    --badge-amber:       #B45309;
+    --badge-orange:      #C2410C;
+    --badge-red:         #B91C1C;
+    --badge-emerald:     #047857;
+    --badge-green:       #15803D;
+    --badge-grey:        #4B5563;
+
+    /* Spacing scale */
+    --space-1:           4px;
+    --space-2:           8px;
+    --space-3:           12px;
+    --space-4:           16px;
+    --space-5:           24px;
+    --space-6:           32px;
+
+    /* Control heights — one scale for every button-like control */
+    --control-xs:        24px;
+    --control-sm:        32px;
+    --control-md:        40px;
+    --control-lg:        48px;
+
+    /* Override legacy tokens so existing rules pick up the new palette.
+       --primary is the *interactive* colour (links, active states, text
+       on white), so it maps to the accessible accent, not to coral. */
+    --primary:           var(--accent);
+    --primary-dark:      var(--accent-hover);
+    --primary-light:     var(--accent-soft);
+    --bg:                var(--tf-bg);
+    --surface:           var(--tf-surface);
+    --text:              var(--tf-ink);
+    --text-muted:        var(--tf-mute);
+    --text-light:        var(--text-subtle);
+    --border:            var(--tf-line);
+    --border-light:      var(--tf-line-2);
+    --radius:            var(--tf-radius);
+    --shadow:            var(--tf-shadow-sm);
+    --shadow-md:         var(--tf-shadow);
+    --info-bg:           var(--tf-blue-soft);
+    --info-border:       #BCE4FC;
+
+    /* Legacy tokens with no brand equivalent */
+    --sidebar-w:         240px;
+    --success-light:     #d1fae5;
+    --warning-light:     #fef3c7;
+    --danger-light:      #fee2e2;
 }
 
 body {
@@ -142,18 +222,6 @@ a:hover { text-decoration: underline; }
     padding: .5rem 1.2rem;
     margin-bottom: .5rem;
 }
-.lang-btn {
-    padding: .2rem .6rem;
-    border-radius: 4px;
-    font-size: .78rem;
-    font-weight: 600;
-    color: #a5b4fc;
-    text-decoration: none;
-    transition: background .15s, color .15s;
-}
-.lang-btn:hover { background: rgba(255,255,255,.1); color: #fff; text-decoration: none; }
-.lang-btn.active { background: var(--primary); color: #fff; }
-
 /* Nav section labels */
 .nav-section-label {
     padding: .3rem 1.2rem;
@@ -330,39 +398,7 @@ select { cursor: pointer; }
 .file-list { margin-top: .5rem; }
 .file-item { padding: .3rem .6rem; background: var(--border-light); border-radius: 4px; margin: .3rem 0; font-size: .85rem; }
 
-/* ── Buttons ──────────────────────────────────────────────────── */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    padding: .5rem 1.2rem;
-    border: none;
-    border-radius: 6px;
-    font-size: .9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background .15s, transform .1s;
-    text-decoration: none;
-    white-space: nowrap;
-    line-height: 1.4;
-}
-.btn:hover { transform: translateY(-1px); text-decoration: none; }
-
-.btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover { background: var(--primary-dark); }
-.btn-secondary { background: var(--border); color: var(--text); }
-.btn-secondary:hover { background: #cbd5e1; }
-.btn-success { background: var(--success); color: #fff; }
-.btn-success:hover { background: #047857; }
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-danger:hover { background: #b91c1c; }
-.btn-export { background: #7c3aed; color: #fff; }
-.btn-export:hover { background: #6d28d9; }
-
-.btn-lg { padding: .7rem 1.6rem; font-size: 1rem; }
-.btn-sm { padding: .35rem .8rem; font-size: .82rem; }
-.btn-xs { padding: .2rem .5rem; font-size: .78rem; }
-.btn-icon { font-size: 1.1rem; }
+/* Buttons: see "Buttons — one definition" in the component layer. */
 
 /* ── Stats Grid ───────────────────────────────────────────────── */
 .stats-grid, .stats-grid-4 {
@@ -399,38 +435,12 @@ select { cursor: pointer; }
     border-bottom: 2px solid var(--border);
     margin: 1.25rem 0 0;
 }
-.tab {
-    padding: .55rem 1.2rem;
-    border: none;
-    background: transparent;
-    font-size: .9rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: color .15s, border-color .15s;
-}
-.tab:hover { color: var(--primary); }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-
 .tab-content { display: none; padding-top: 1rem; }
 .tab-content.active { display: block; }
 
 /* ── Filter Bar ───────────────────────────────────────────────── */
 .filter-bar { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .filter-bar label { font-weight: 600; font-size: .85rem; color: var(--text-muted); }
-.filter-btn, .filter-btn-suite {
-    padding: .3rem .7rem;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    background: var(--surface);
-    font-size: .8rem;
-    cursor: pointer;
-    transition: all .15s;
-}
-.filter-btn:hover { border-color: var(--primary); color: var(--primary); }
-.filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
 /* ── Tables ───────────────────────────────────────────────────── */
 .data-table, .steps-table { width: 100%; border-collapse: collapse; margin: .75rem 0; }
@@ -983,13 +993,18 @@ input[type="number"]:focus {
     border-bottom: 1px solid var(--border);
 }
 .metric-btn {
-    padding: .5rem 1rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-md);
+    padding: 0 var(--space-4);
+    border: 1px solid var(--border-control);
+    border-radius: var(--tf-radius-pill);
     background: var(--surface);
     color: var(--text);
-    font-size: .85rem;
+    font-size: 14px;
     font-weight: 500;
+    line-height: 1;
     cursor: pointer;
     transition: all .15s;
 }
@@ -1145,7 +1160,7 @@ input[type="number"]:focus {
     .bar-row { grid-template-columns: 80px 1fr 35px; }
     .donut-row { flex-direction: column; align-items: center; }
     .metrics-selector { gap: .35rem; }
-    .metric-btn { font-size: .75rem; padding: .4rem .7rem; }
+    .metric-btn { min-height: var(--control-sm); padding: 0 var(--space-3); font-size: 13px; }
 }
 
 /* ── Print ────────────────────────────────────────────────────── */
@@ -1272,8 +1287,10 @@ input[type="number"]:focus {
   display: flex; flex-wrap: wrap; gap: .3rem; margin: .15rem 0 .35rem 0;
 }
 .qa-chat-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--control-sm); padding: 0 var(--space-3);
   background: #eef0ff; color: #3a44b1; border: 1px solid #d8dbff;
-  border-radius: 16px; padding: .25rem .6rem; font-size: .78rem;
+  border-radius: 16px; font-size: 13px; line-height: 1;
   cursor: pointer; transition: background .15s ease;
 }
 .qa-chat-chip:hover { background: #dde0ff; }
@@ -1305,105 +1322,6 @@ input[type="number"]:focus {
    without rewriting existing component rules.
    ═══════════════════════════════════════════════════════════════ */
 
-/* Poppins is loaded by a <link> in templates/base.html — an @import here,
-   after the first rule, is invalid and browsers drop it. */
-
-:root {
-    /* Testfort palette */
-    --tf-coral:          #FF865C;
-    --tf-coral-hover:    #FF6A36;
-    --tf-coral-soft:     #FFE9DE;
-    --tf-coral-grad:     linear-gradient(135deg, #FF865C 0%, #FF8A59 100%);
-    --tf-blue:           #18AAFD;
-    --tf-blue-hover:     #0A92DF;
-    --tf-blue-soft:      #E0F4FE;
-    --tf-ink:            #111111;
-    --tf-ink-2:          #2A2A2A;
-    --tf-mute:           #5E6472;
-    --tf-mute-2:         #6B7280;   /* was #828282 — 3.84:1 on white */
-    --tf-line:           #E5E7EB;
-    --tf-line-2:         #F2F3F5;
-    --tf-bg:             #F7F8FA;
-    --tf-surface:        #FFFFFF;
-
-    /* Typographic scale */
-    --tf-font-heading:   'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --tf-font-body:      'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
-
-    /* Geometry */
-    --tf-radius:         8px;
-    --tf-radius-sm:      6px;
-    --tf-radius-lg:      14px;
-    --tf-radius-pill:    200px;
-    --tf-container:      1048px;
-    --tf-topbar-h:       96px;
-
-    /* Shadows */
-    --tf-shadow-sm:      0 1px 2px rgba(17,17,17,.05);
-    --tf-shadow:         0 2px 10px rgba(17,17,17,.06);
-    --tf-shadow-md:      0 8px 24px rgba(17,17,17,.08);
-    --tf-shadow-coral:   0 8px 22px rgba(255,134,92,.28);
-
-    /* ── Accessible design tokens ─────────────────────────────────
-       Every value here is pinned by tests/test_design_tokens.py:
-       text/fill pairs ≥ 4.5:1, control borders and focus ≥ 3:1.
-       Coral (#FF865C) fails 4.5:1 against white (2.38:1), so it is
-       decoration only — borders, illustrations, the dark sidebar.
-       Anything that carries text or marks a state uses --accent. */
-    --accent:            #B93C12;   /* 5.65:1 white-on-accent */
-    --accent-hover:      #A8360F;   /* 6.56:1 */
-    --accent-soft:       #FFE9DE;   /* accent text on it: 4.83:1 */
-    --success:           #0F7B5A;   /* 5.25:1 */
-    --success-hover:     #0B6449;
-    --danger:            #C62828;   /* 5.62:1 */
-    --danger-hover:      #A51F1F;
-    --warning:           #B45309;   /* text on white 5.02:1 */
-    --text-subtle:       #6B7280;   /* 4.83:1 — replaces #828282/#94a3b8/#999 */
-    --border-control:    #8A909C;   /* 3.21:1 — inputs, outline buttons */
-    --focus:             #1D4ED8;   /* 6.70:1 */
-    --focus-on-dark:     #FF865C;   /* sidebar: 7.08:1 on #1A1D24 */
-
-    /* Badge text on their existing tints (all ≥ 4.5:1). */
-    --badge-amber:       #B45309;
-    --badge-orange:      #C2410C;
-    --badge-red:         #B91C1C;
-    --badge-emerald:     #047857;
-    --badge-green:       #15803D;
-    --badge-grey:        #4B5563;
-
-    /* Spacing scale */
-    --space-1:           4px;
-    --space-2:           8px;
-    --space-3:           12px;
-    --space-4:           16px;
-    --space-5:           24px;
-    --space-6:           32px;
-
-    /* Control heights — one scale for every button-like control */
-    --control-xs:        24px;
-    --control-sm:        32px;
-    --control-md:        40px;
-    --control-lg:        48px;
-
-    /* Override legacy tokens so existing rules pick up the new palette.
-       --primary is the *interactive* colour (links, active states, text
-       on white), so it maps to the accessible accent, not to coral. */
-    --primary:           var(--accent);
-    --primary-dark:      var(--accent-hover);
-    --primary-light:     var(--accent-soft);
-    --bg:                var(--tf-bg);
-    --surface:           var(--tf-surface);
-    --text:              var(--tf-ink);
-    --text-muted:        var(--tf-mute);
-    --text-light:        var(--text-subtle);
-    --border:            var(--tf-line);
-    --border-light:      var(--tf-line-2);
-    --radius:            var(--tf-radius);
-    --shadow:            var(--tf-shadow-sm);
-    --shadow-md:         var(--tf-shadow);
-    --info-bg:           var(--tf-blue-soft);
-    --info-border:       #BCE4FC;
-}
 
 /* ── Base ─────────────────────────────────────────────────────── */
 body {
@@ -1479,8 +1397,21 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
     box-shadow: 0 0 0 2px rgba(255,134,92,.25);
 }
 .nav-section-label     { color: #8A8F9C; font-weight: 700; }
-.lang-btn              { color: #B9BCC5; border-radius: var(--tf-radius-pill); }
-.lang-btn:hover        { background: rgba(255,255,255,.06); color: #FFFFFF; }
+.lang-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-sm);
+    padding: 0 var(--space-3);
+    border-radius: var(--tf-radius-pill);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    color: #B9BCC5;
+    text-decoration: none;
+    transition: background .15s, color .15s;
+}
+.lang-btn:hover        { background: rgba(255,255,255,.06); color: #FFFFFF; text-decoration: none; }
 .lang-btn.active       { background: var(--accent); color: #FFFFFF; }
 .sidebar-project       { border-top-color: rgba(255,255,255,.06); }
 .sidebar-project small { color: #9CA0AB; }
@@ -1568,19 +1499,49 @@ input[type="search"]:focus, textarea:focus, select:focus {
     background: var(--tf-coral-soft);
 }
 
-/* ── Buttons (pill style, Testfort cadence) ───────────────────── */
+/* ── Buttons — one definition ─────────────────────────────────────
+   One radius (pill), one line-height, three heights on the
+   --control-* scale. Size via .btn-sm / .btn-lg / .btn-xs — never with
+   inline padding or font-size (tests/test_design_tokens.py). */
 .btn {
-    font-family: var(--tf-font-heading);
-    font-weight: 600;
-    letter-spacing: .005em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--control-md);
+    padding: 0 var(--space-4);
+    border: 1px solid transparent;
     border-radius: var(--tf-radius-pill);
-    padding: .65rem 1.6rem;
-    min-height: 44px;
-    transition: background .18s ease, box-shadow .18s ease, transform .12s ease;
+    font-family: var(--tf-font-heading);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: .005em;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
     box-shadow: var(--tf-shadow-sm);
+    transition: background .18s ease, box-shadow .18s ease, transform .12s ease;
 }
-.btn:hover         { transform: translateY(-1px); box-shadow: var(--tf-shadow); }
+.btn:hover         { transform: translateY(-1px); box-shadow: var(--tf-shadow); text-decoration: none; }
 .btn:active        { transform: translateY(0); }
+.btn:disabled,
+.btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; transform: none; }
+
+.btn-sm { min-height: var(--control-sm); padding: 0 var(--space-3); font-size: 13px; }
+.btn-lg { min-height: var(--control-lg); padding: 0 var(--space-5); font-size: 16px; }
+.btn-xs { min-height: var(--control-xs); padding: 0 var(--space-2); font-size: 12px; gap: var(--space-1); }
+
+/* Icon-only: square at every size. */
+.btn-icon-only        { width: var(--control-md); padding: 0; }
+.btn-sm.btn-icon-only { width: var(--control-sm); }
+.btn-lg.btn-icon-only { width: var(--control-lg); }
+.btn-xs.btn-icon-only { width: var(--control-xs); }
+.btn-icon { display: inline-flex; font-size: 1.1rem; }
+
+/* Adjacent buttons: 8px inside a group, 16px between groups. */
+.btn-group  { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.btn-groups { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 
 .btn-primary       { background: var(--accent); color: #FFFFFF; box-shadow: var(--tf-shadow-sm); }
 .btn-primary:hover { background: var(--accent-hover); color: #FFFFFF; }
@@ -1613,9 +1574,6 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .btn-export        { background: #111111; color: #FFFFFF; }
 .btn-export:hover  { background: #2A2A2A; }
 
-.btn-lg { padding: .85rem 2.1rem; min-height: 52px; font-size: 1rem; }
-.btn-sm { padding: .42rem 1.05rem; min-height: 36px; font-size: .82rem; }
-.btn-xs { padding: .28rem .75rem; min-height: 28px; font-size: .75rem; }
 
 /* ── Stats ────────────────────────────────────────────────────── */
 .stat-card {
@@ -1632,17 +1590,43 @@ input[type="search"]:focus, textarea:focus, select:focus {
 
 /* ── Tabs ─────────────────────────────────────────────────────── */
 .tabs { border-bottom-color: var(--tf-line); }
-.tab  { font-family: var(--tf-font-heading); color: var(--tf-mute); }
+.tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-md);
+    padding: 0 var(--space-4);
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    background: transparent;
+    font-family: var(--tf-font-heading);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--tf-mute);
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+}
 .tab:hover        { color: var(--accent); }
 .tab.active       { color: var(--tf-ink); border-bottom-color: var(--accent); }
 
 /* ── Filter chips ─────────────────────────────────────────────── */
 .filter-btn, .filter-btn-suite {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-sm);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border-control);
     border-radius: var(--tf-radius-pill);
-    border-color: var(--border-control);
-    color: var(--tf-mute);
-    padding: .35rem .95rem;
+    background: var(--surface);
+    font-size: 13px;
     font-weight: 500;
+    line-height: 1;
+    color: var(--tf-mute);
+    cursor: pointer;
+    transition: all .15s;
 }
 .filter-btn:hover, .filter-btn-suite:hover {
     border-color: var(--accent); color: var(--accent); background: var(--accent-soft);
@@ -2262,7 +2246,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .verdict-btn {
     flex: 1 1 8rem;
-    min-height: 2.75rem;
+    min-height: var(--control-lg);
     font-weight: 600;
     border: 1px solid transparent;
 }
@@ -2498,6 +2482,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
     padding: 0; margin: -1px;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
 }
@@ -2838,14 +2823,19 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 .tc-step:focus-within .tc-step-actions { opacity: 1; }
 
 .tc-step-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-xs);
+    min-width: var(--control-xs);
     background: #f1f5f9;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--border-control);
     border-radius: 4px;
     color: #475569;
     cursor: pointer;
-    font-size: 0.78em;
+    font-size: 12px;
     line-height: 1;
-    padding: 3px 6px;
+    padding: 0 6px;
 }
 
 .tc-step-btn:hover:not(:disabled) {
@@ -2937,15 +2927,20 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 
 .cl-section-btn,
 .cl-row-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-xs);
+    min-width: var(--control-xs);
     background: #f1f5f9;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--border-control);
     border-radius: 4px;
     color: #475569;
     cursor: pointer;
-    font-size: 0.78em;
+    font-size: 12px;
     line-height: 1;
     margin-left: 3px;
-    padding: 3px 6px;
+    padding: 0 6px;
 }
 
 .cl-section-btn:hover,
@@ -3163,7 +3158,6 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
     padding: 4px 7px;
 }
 
-.bulk-bar .btn-sm { font-size: 0.82em; padding: 5px 12px; }
 
 .bulk-bar-status { font-size: 0.82em; font-weight: 600; }
 .bulk-bar-status-ok { color: #6ee7b7; }
@@ -3174,14 +3168,6 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 
 .bulk-select-all { font-size: 0.85em; color: #475569; cursor: pointer; }
 
-.sr-only {
-    clip: rect(0 0 0 0);
-    clip-path: inset(50%);
-    height: 1px; width: 1px;
-    overflow: hidden;
-    position: absolute;
-    white-space: nowrap;
-}
 
 /* ── Dashboard: filters, KPI tiles, customise (E7) ─────────────────── */
 .dash-filters { padding: 12px 16px; }
