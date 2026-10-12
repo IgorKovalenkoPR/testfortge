@@ -33,6 +33,7 @@
     <h1>{{ t.tc_title }}</h1>
     <p class="subtitle">{{ t.tc_subtitle }}</p>
 </div>
+{% with hints_page='test_cases' %}{% include '_search_hints.html' %}{% endwith %}
 
 {# The parser's own account of a file it could not use. Both this page and
    /checklist are handed ``errors`` by ``parse_page_input`` and neither

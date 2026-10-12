@@ -113,6 +113,18 @@ def register_all(app: Flask) -> None:
         except Exception:
             return {"model_switcher": None}
 
+    # Platform search UI (ADR 0003 §1.3, task T7): the header field, the
+    # results view, the hints and — behind PLATFORM_SEARCH_AI — the AI
+    # answer block and the Ask panel. ``None`` while PLATFORM_SEARCH is
+    # effectively off, so base.html renders exactly what it did before.
+    @app.context_processor
+    def _inject_search_ui():
+        try:
+            from engine.search.ui import search_ui_context
+            return {"search_ui": search_ui_context()}
+        except Exception:
+            return {"search_ui": None}
+
     # Access policy for every route (E2.3). Installed last so its
     # before_request hook runs after the HTTP Basic gate — that gate is the
     # outer perimeter during the rollout and should reject first — and

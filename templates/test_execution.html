@@ -10,6 +10,7 @@
 <meta name="te-i18n-overlay-slow" content="{{ t.get('te_overlay_slow', 'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | e }}">
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
 <p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
+{% with hints_page='executions' %}{% include '_search_hints.html' %}{% endwith %}
 
 {% include '_project_picker.html' %}
 

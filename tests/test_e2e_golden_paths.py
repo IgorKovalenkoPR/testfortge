@@ -33,6 +33,7 @@ sibling browser file is.
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import socket
@@ -672,6 +673,139 @@ class TestTwoPeopleInOneTeam:
             f"another team's project answered "
             f"{response.status if response else 'nothing'} to a non-member")
         outsider.does_not_see(name)
+
+
+# ── Platform search (ADR 0003 §1.3, task T7) ─────────────────────────
+
+@pytest.fixture
+def search_on():
+    """PLATFORM_SEARCH (+ its prerequisite) and PLATFORM_SEARCH_AI, for one
+    test. ``os.environ`` for the reason ``editors_on`` gives. The AI flag
+    is declared here when T6 has not declared it yet — the UI reads an
+    undeclared flag as off — and removed again afterwards. Indexing hooks
+    are debounced out of the way; the test indexes explicitly."""
+    from engine import features
+    keys = ("PLATFORM_SEARCH", "WORKSPACE_DB_FIRST", "PLATFORM_SEARCH_AI",
+            "SEARCH_INDEX_DEBOUNCE_S")
+    previous = {k: os.environ.get(k) for k in keys}
+    declared = "PLATFORM_SEARCH_AI" in features.FLAGS
+    if not declared:
+        features.FLAGS["PLATFORM_SEARCH_AI"] = features.Flag(
+            "PLATFORM_SEARCH_AI", False, "E13", "declared by the T7 e2e test")
+    os.environ.update({"PLATFORM_SEARCH": "1", "WORKSPACE_DB_FIRST": "1",
+                       "PLATFORM_SEARCH_AI": "1",
+                       "SEARCH_INDEX_DEBOUNCE_S": "3600"})
+    try:
+        yield True
+    finally:
+        if not declared:
+            features.FLAGS.pop("PLATFORM_SEARCH_AI", None)
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+#: What a T6 /api/ask stream looks like (the contract the UI codes to).
+ASK_STREAM = "\n".join(json.dumps(line) for line in (
+    {"type": "meta", "mode": "hybrid", "cached": False, "model_tier": "haiku",
+     "items": [{"n": 1, "ref": "TC-006", "kind": "test_case",
+                "title": "Password reset link is emailed",
+                "url": "/test-cases?focus=TC-006"}]},
+    {"type": "text", "text": "The reset email is covered by "},
+    {"type": "text", "text": "[[TC-006]] and nothing else."},
+    {"type": "chips", "chips": ["Which bugs mention the reset email?"]},
+    {"type": "done", "usage": {"in": 1, "out": 1}, "cached": False,
+     "citations": ["TC-006"]},
+)) + "\n"
+
+
+class TestPlatformSearch:
+    def test_typeahead_results_explanation_and_a_streamed_answer(
+            self, actors, team, search_on):
+        from engine.search import indexer
+        from tests._search_seed import seed_golden
+
+        admin = actors(team["admin"]["email"]).sign_in()
+        name = f"Search {team['tag']}"
+        _create_project(admin, name)
+        project_id = _project_id(team["org"], name)
+        seed_golden(project_id)
+        indexer.reindex_project(project_id)
+
+        page = admin.page
+        admin.go("/test-cases?lang=en")
+        # The "/" shortcut, pressed as a key — not a focus() call.
+        page.locator("body").press("/")
+        field = page.locator("#tf-search-input")
+        assert field.evaluate("el => el === document.activeElement")
+        field.type("password", delay=20)
+
+        # Grouped dropdown: a labelled group of options, each a link to
+        # the item, with a reason chip.
+        page.wait_for_selector("#tf-search-listbox [role=option]",
+                               timeout=WAIT)
+        assert field.get_attribute("aria-expanded") == "true"
+        listbox = page.locator("#tf-search-listbox")
+        assert listbox.locator("[role=group] >> text=Test cases").count()
+        assert listbox.locator(".tf-chip-reason").count()
+        page.keyboard.press("ArrowDown")
+        assert field.get_attribute("aria-activedescendant")
+        page.keyboard.press("Escape")
+        assert field.get_attribute("aria-expanded") == "false"
+
+        # Enter opens the results view, which replaces the page body.
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#tf-results .tf-hit", timeout=WAIT)
+        meta = page.locator("#tf-results-meta").inner_text()
+        assert " items · " in meta and " ms" in meta, meta
+        assert not page.locator(".page-header").is_visible()
+
+        # "How this was found": terms, engines and the per-hit scores.
+        page.click("#tf-results-meta .tf-how-toggle")
+        page.wait_for_selector("#tf-results-how .tf-how-table", timeout=WAIT)
+        how = page.locator("#tf-results-how").inner_text()
+        assert "Terms" in how and "password" in how
+        assert page.locator("#tf-results-how tbody tr").count() >= 1
+
+        # The AI answer, streamed from a stubbed /api/ask.
+        asked = []
+
+        def _ask(route):
+            asked.append(route.request.post_data_json)
+            route.fulfill(status=200, body=ASK_STREAM,
+                          headers={"Content-Type": "application/x-ndjson"})
+
+        page.route("**/api/ask", _ask)
+        page.click("#tf-ai [data-ai-get]")
+        page.wait_for_selector("#tf-ai-text a.tf-cite", timeout=WAIT)
+        answer = page.locator("#tf-ai-text").inner_text()
+        assert "The reset email is covered by" in answer
+        assert "[[" not in answer
+        cite = page.locator("#tf-ai-text a.tf-cite")
+        assert cite.inner_text() == "TC-006"
+        assert cite.get_attribute("href") == "/test-cases?focus=TC-006"
+        assert asked and asked[0]["q"] == "password"
+        assert page.locator("#tf-ai-text").get_attribute("aria-busy") == \
+            "false"
+
+        # The Ask panel: question, streamed answer, cited card, chips.
+        page.click("[data-ask-open]")
+        page.wait_for_selector("#tf-ask:not([hidden])", timeout=WAIT)
+        page.fill("#tf-ask-input", "What covers the reset email?")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#tf-ask .tf-ask-card", timeout=WAIT)
+        panel = page.locator("#tf-ask")
+        assert "nothing else." in panel.locator(".tf-ask-a").last.inner_text()
+        assert panel.locator(".tf-ask-card a").first.get_attribute("href") \
+            == "/test-cases?focus=TC-006"
+        assert panel.locator(
+            "button.tf-chip >> text=Which bugs mention the reset email?"
+        ).count() == 1
+        assert "1 sources" in panel.locator(".tf-ask-meta").last.inner_text()
+        page.keyboard.press("Escape")
+        assert panel.get_attribute("hidden") is not None
 
 
 # ── The harness ──────────────────────────────────────────────────────

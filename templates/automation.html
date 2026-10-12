@@ -7,6 +7,7 @@
   <p class="subtitle">{{ t.get('automation_sub',
     'Generate a TypeScript + Playwright suite from the BDD test cases, run it where the browsers live, and send the Allure results back here.') }}</p>
 </div>
+{% with hints_page='automation' %}{% include '_search_hints.html' %}{% endwith %}
 
 {# The operator's actual question, asked in those words: "why does Test
    Execution have an Automated run mode when there is a whole Automation

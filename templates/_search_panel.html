@@ -1,0 +1,174 @@
+{#- ── Platform search (ADR 0003 §1.3, task T7) ─────────────────────
+    Included by base.html only while PLATFORM_SEARCH is on (search_ui is
+    None otherwise, so a page with the flag off carries none of this).
+
+    Three parts, all driven by static/js/search.js:
+      1. the header field — an ARIA 1.2 combobox over a grouped listbox
+         fed by GET /api/search?quick=1 (typeahead, titles and ids only);
+      2. the results view — GET /api/search with the explanation, shown in
+         place of the page content until closed (Esc or the × button);
+      3. behind PLATFORM_SEARCH_AI (search_ui.ai): the AI answer block in
+         the results view and the Ask side panel, both reading the
+         NDJSON stream of POST /api/ask.
+
+    Every visible string comes from the dictionary; the ones JavaScript
+    composes travel in the JSON block below rather than in the script. -#}
+<div class="tf-search" id="tf-search"
+     data-search-url="{{ url_for('api_search') }}"
+     data-ask-url="/api/ask"
+     data-ai="{{ '1' if search_ui.ai else '0' }}"
+     data-lang="{{ lang }}"
+     data-project-id="{{ active_project_id or '' }}">
+
+  <div class="tf-search-bar" role="search">
+    <label class="sr-only" for="tf-search-input">{{ t.search_label }}</label>
+    <div class="tf-search-field">
+      <i data-lucide="search" class="icon-sm tf-search-icon" aria-hidden="true"></i>
+      <input type="search" id="tf-search-input" class="tf-search-input"
+             role="combobox"
+             aria-expanded="false"
+             aria-controls="tf-search-listbox"
+             aria-autocomplete="list"
+             aria-haspopup="listbox"
+             aria-describedby="tf-search-shortcut"
+             autocomplete="off" spellcheck="false" maxlength="300"
+             placeholder="{{ t.search_placeholder }}">
+      <kbd class="tf-search-kbd" id="tf-search-shortcut"
+           title="{{ t.search_shortcut_hint }}"><span class="sr-only">{{ t.search_shortcut_hint }}</span><span aria-hidden="true">/</span></kbd>
+      <div class="tf-search-dropdown" id="tf-search-dropdown" hidden>
+        <div id="tf-search-listbox" role="listbox"
+             aria-label="{{ t.search_listbox_label }}"></div>
+        <p class="tf-search-dropdown-status" id="tf-search-dropdown-status"
+           role="status" aria-live="polite"></p>
+      </div>
+    </div>
+    {% if search_ui.ai %}
+    <button type="button" class="btn btn-secondary btn-sm tf-ask-open"
+            data-ask-open aria-controls="tf-ask" aria-expanded="false">
+      <i data-lucide="sparkles" class="icon-sm" aria-hidden="true"></i>
+      <span>{{ t.ask_title }}</span>
+    </button>
+    {% endif %}
+  </div>
+
+  <section class="tf-results" id="tf-results" aria-labelledby="tf-results-title" hidden>
+    <div class="tf-results-head">
+      <h2 class="tf-results-title" id="tf-results-title" tabindex="-1">{{ t.search_results_title }}</h2>
+      <button type="button" class="btn btn-ghost btn-sm btn-icon-only"
+              data-results-close aria-label="{{ t.search_close }}" title="{{ t.search_close }}">
+        <i data-lucide="x" class="icon-sm" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="tf-results-meta" id="tf-results-meta" role="status" aria-live="polite"></div>
+    <div class="tf-results-notes" id="tf-results-notes"></div>
+    <div class="tf-results-how" id="tf-results-how" hidden></div>
+
+    {% if search_ui.ai %}
+    <section class="tf-ai" id="tf-ai" aria-labelledby="tf-ai-title" hidden>
+      <div class="tf-ai-head">
+        <h3 class="tf-ai-title" id="tf-ai-title">
+          <i data-lucide="sparkles" class="icon-sm" aria-hidden="true"></i>
+          {{ t.search_ai_title }}
+        </h3>
+        <button type="button" class="btn btn-ghost btn-xs" data-ai-continue>{{ t.search_ai_open_panel }}</button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-ai-get hidden>{{ t.search_ai_get }}</button>
+      <div class="tf-ai-text" id="tf-ai-text" aria-live="polite" aria-busy="false"></div>
+      <p class="tf-ai-note">{{ t.search_ai_disclaimer }}</p>
+    </section>
+    {% endif %}
+
+    <ol class="tf-results-list" id="tf-results-list"></ol>
+    <div class="tf-results-book" id="tf-results-book"></div>
+  </section>
+
+  {% if search_ui.ai %}
+  <aside class="tf-ask" id="tf-ask" role="dialog" aria-modal="false"
+         aria-labelledby="tf-ask-title" hidden>
+    <div class="tf-ask-head">
+      <div>
+        <h2 class="tf-ask-title" id="tf-ask-title">{{ t.ask_title }}</h2>
+        <p class="tf-ask-sub">{{ t.ask_subtitle }}</p>
+      </div>
+      <div class="tf-ask-actions">
+        <button type="button" class="btn btn-ghost btn-sm btn-icon-only" data-ask-reset
+                aria-label="{{ t.ask_reset }}" title="{{ t.ask_reset }}">
+          <i data-lucide="rotate-ccw" class="icon-sm" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm btn-icon-only" data-ask-close
+                aria-label="{{ t.ask_close }}" title="{{ t.ask_close }}">
+          <i data-lucide="x" class="icon-sm" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+    <div class="tf-ask-log" id="tf-ask-log" role="log" aria-live="polite" aria-relevant="additions">
+      <p class="tf-ask-empty" data-ask-empty>{{ t.ask_empty }}</p>
+    </div>
+    <form class="tf-ask-form" id="tf-ask-form" autocomplete="off">
+      <label class="sr-only" for="tf-ask-input">{{ t.ask_input_label }}</label>
+      <textarea id="tf-ask-input" class="tf-ask-input" rows="2" maxlength="300"
+                placeholder="{{ t.ask_placeholder }}"></textarea>
+      <button type="submit" class="btn btn-primary btn-sm" data-ask-send>{{ t.ask_send }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-ask-stop hidden>{{ t.ask_stop }}</button>
+    </form>
+  </aside>
+  {% endif %}
+
+  <script type="application/json" id="tf-search-i18n">{{ {
+    'group_test_case': t.search_group_test_case,
+    'group_checklist_item': t.search_group_checklist_item,
+    'group_bug': t.search_group_bug,
+    'group_run': t.search_group_run,
+    'group_case_result': t.search_group_case_result,
+    'group_estimation': t.search_group_estimation,
+    'group_guide': t.search_group_guide,
+    'group_knowledge': t.search_group_knowledge,
+    'group_istqb': t.search_group_istqb,
+    'group_istqb_book': t.search_group_istqb_book,
+    'reason_id': t.search_reason_id,
+    'reason_title': t.search_reason_title,
+    'reason_keyword': t.search_reason_keyword,
+    'reason_meaning': t.search_reason_meaning,
+    'reason_typo': t.search_reason_typo,
+    'reason_translated': t.search_reason_translated,
+    'see_all': t.search_see_all,
+    'ask_about': t.search_ask_about,
+    'only_in': t.search_only_in,
+    'no_matches': t.search_no_matches,
+    'loading': t.search_loading,
+    'count': t.search_count,
+    'corrected': t.search_corrected,
+    'translated': t.search_translated,
+    'conditions': t.search_conditions,
+    'remove_condition': t.search_remove_condition,
+    'relaxed': t.search_relaxed,
+    'stale': t.search_stale,
+    'empty': t.search_empty,
+    'error': t.search_error,
+    'refine': t.search_refine,
+    'how_found': t.search_how_found,
+    'how_terms': t.search_how_terms,
+    'how_engine': t.search_how_engine,
+    'how_scores': t.search_how_scores,
+    'how_col_item': t.search_how_col_item,
+    'how_col_lex': t.search_how_col_lex,
+    'how_col_vec': t.search_how_col_vec,
+    'how_col_fused': t.search_how_col_fused,
+    'how_filters': t.search_how_filters,
+    'how_before_after': t.search_how_before_after,
+    'how_timings': t.search_how_timings,
+    'istqb_page': t.search_istqb_page,
+    'ask_you': t.ask_you,
+    'ask_sources': t.ask_sources,
+    'ask_cached': t.ask_cached,
+    'ask_cited': t.ask_cited,
+    'ask_followups': t.ask_followups,
+    'ask_stopped': t.ask_stopped,
+    'err_rate_limited': t.ask_err_rate_limited,
+    'err_budget': t.ask_err_budget,
+    'err_no_key': t.ask_err_no_key,
+    'err_not_grounded': t.ask_err_not_grounded,
+    'err_upstream': t.ask_err_upstream,
+    'err_generic': t.ask_err_generic
+  }|tojson }}</script>
+</div>

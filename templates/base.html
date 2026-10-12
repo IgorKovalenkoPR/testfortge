@@ -182,6 +182,8 @@
 
     {#- page_class scopes a page's own rules in style.css (e.g. page-bug-reports) -#}
     <main class="main-content{% block page_class %}{% endblock %}" id="main-content" tabindex="-1">
+        {#- Platform search (ADR 0003 §1.3) — only while PLATFORM_SEARCH is on. -#}
+        {% if search_ui %}{% include '_search_panel.html' %}{% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, message in messages %}
@@ -312,6 +314,7 @@
     </script>
 
     <script src="{{ url_for('static', filename='js/app.js') }}" nonce="{{ csp_nonce }}"></script>
+    {% if search_ui %}<script src="{{ url_for('static', filename='js/search.js') }}" nonce="{{ csp_nonce }}" defer></script>{% endif %}
     {% block scripts %}{% endblock %}
 </body>
 </html>
