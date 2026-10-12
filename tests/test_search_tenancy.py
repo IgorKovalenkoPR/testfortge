@@ -10,6 +10,7 @@ chip or a "did you mean" would not carry a project id at all.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 
 import pytest
@@ -96,7 +97,22 @@ def _as(client, side: dict) -> None:
         _timeout.stamp(sess)
 
 
-def _assert_clean(body: dict, *, mine: set, foreign: str) -> None:
+def _echo_scrubbed(value, query: str):
+    """*value* as lowercase JSON with the caller's own query words removed.
+
+    ``did_you_mean`` and chip labels rebuild the query: "quokkafruit leak"
+    can come back as "quokkafruit lead" when some *other* document holds
+    "lead". The marker there is what the user typed, not what the index
+    gave away. Only exact typed words are scrubbed — a correction *to* the
+    marker ("quokkafrut" → "quokkafruit") still counts as a leak."""
+    text = json.dumps(value, ensure_ascii=False).lower()
+    for word in (query or "").lower().split():
+        text = re.sub(rf"(?<![\w]){re.escape(word)}(?![\w])", "", text)
+    return text
+
+
+def _assert_clean(body: dict, *, mine: set, foreign: str,
+                  query: str = "") -> None:
     """No foreign project id anywhere in *body*, and no foreign content in
     anything the index produced. (The caller's own query is echoed back in
     ``query``, ``explain`` and each chip's ``q`` — when the query *is* the
@@ -105,12 +121,14 @@ def _assert_clean(body: dict, *, mine: set, foreign: str) -> None:
     produced = {
         "results": body.get("results"), "groups": body.get("groups"),
         "facets": body.get("facets"), "total": body.get("total"),
-        "did_you_mean": (body.get("query") or {}).get("did_you_mean"),
         "corrections": (body.get("query") or {}).get("corrections"),
-        "chips": [{k: v for k, v in c.items() if k != "q"}
-                  for c in body.get("chips") or []],
     }
     text = json.dumps(produced, ensure_ascii=False).lower()
+    text += _echo_scrubbed({
+        "did_you_mean": (body.get("query") or {}).get("did_you_mean"),
+        "chips": [{k: v for k, v in c.items() if k != "q"}
+                  for c in body.get("chips") or []],
+    }, query)
     assert MARK_B not in text, "foreign content leaked"
     for r in body.get("results", []):
         pid = (r.get("project") or {}).get("id")
@@ -140,7 +158,7 @@ class TestOrgEra:
                                   query_string={"q": q, **combo})
                 assert resp.status_code == 200, (q, combo, resp.data)
                 _assert_clean(resp.get_json(), mine={a["pid"]},
-                              foreign=b["pid"])
+                              foreign=b["pid"], query=q)
 
     def test_b_still_finds_its_own(self, client, orgs):
         """The negative above is only meaningful if B can find it."""
@@ -260,7 +278,7 @@ class TestLegacyEra:
                                   query_string={"q": q, **combo})
                 assert resp.status_code == 200, (q, combo)
                 _assert_clean(resp.get_json(), mine={sids["a"]},
-                              foreign=sids["b"])
+                              foreign=sids["b"], query=q)
 
     def test_own_project_is_found_without_naming_it(self, client, sids):
         body = client.get("/api/search",
