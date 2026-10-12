@@ -6,6 +6,12 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}TestForTge{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    {# Poppins is loaded here, not by an @import in style.css: an @import
+       after the first rule is invalid CSS and was silently dropped, so the
+       brand font never loaded. The CSP allows both Google Fonts hosts. #}
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
