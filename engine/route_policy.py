@@ -322,6 +322,11 @@ POLICY: dict[str, str] = {
     "api_hints": "user",
     "api_search_status": "admin",
     "api_search_reindex": "admin",
+    # The AI answer (ADR 0003 §4.6, T6): member work, scoped like search;
+    # its own caps (daily per org, per-user bucket, monthly budget) are in
+    # engine/search/answer.py. Feedback votes on the caller's own answer.
+    "api_ask": "user",
+    "api_ask_feedback": "user",
 }
 
 

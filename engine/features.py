@@ -126,6 +126,15 @@ FLAGS: dict[str, Flag] = {
             "source of truth it would index a copy nobody is looking at. "
             "While off the hooks stay registered and write nothing.",
         ),
+        Flag(
+            "PLATFORM_SEARCH_AI", False, "E13",
+            "The one LLM use in search (ADR 0003 §4.6): POST /api/ask — a "
+            "short grounded answer over the retrieved items, streamed as "
+            "NDJSON — and /api/ask/feedback. Requires PLATFORM_SEARCH: "
+            "there is nothing to ground an answer in without the index. "
+            "While off both routes answer 404 and search works exactly as "
+            "without it.",
+        ),
     )
 }
 
@@ -200,6 +209,8 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
     # ADR 0003 §4.10: the index is built from the database, so it describes
     # what a page shows only once the database is the source of truth.
     "PLATFORM_SEARCH": ("WORKSPACE_DB_FIRST",),
+    # §4.10: an answer is grounded in search results, so no search, no AI.
+    "PLATFORM_SEARCH_AI": ("PLATFORM_SEARCH",),
 }
 
 

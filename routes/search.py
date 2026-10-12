@@ -9,6 +9,35 @@
 All four answer **404** while ``PLATFORM_SEARCH`` is effectively off (a
 hidden feature, not a 403 — ADR §4.10).
 
+And, behind ``PLATFORM_SEARCH_AI`` (which requires ``PLATFORM_SEARCH``;
+404 while effectively off) — task T6, ADR §4.6:
+
+  * POST /api/ask             — user:  the AI answer, ``application/x-ndjson``
+  * POST /api/ask/feedback    — user:  thumbs up/down on an answer
+
+``POST /api/ask`` body: ``{"q", "project_id"?, "scope"?: "project"|"org",
+"lang"?: "en"|"ua"|"ru", "history"?: [{"q", "a"}]}`` (``project`` is an
+alias of ``project_id``; tenancy exactly as ``/api/search``). One JSON object
+per line, in this order::
+
+  {"type":"meta","mode":"hybrid-py","cached":false,"grounded":true,
+   "lang":"en","items":["TC-001","BUG-15"],
+   "cards":[{"n":1,"ref","kind","title","url","snippet","project","score"}],
+   "model":"claude-haiku-...","model_tier":"haiku",
+   "answer_key":"<sha256>|null","prompt_version":"ask-v1"}
+  {"type":"text","text":"Login fails with a 500 [[BUG-15]] ..."}   (0..n)
+  {"type":"error","code":"not_grounded|budget|rate_limited|no_key|upstream",
+   "message":"...","reason":"org_day|user_minute|user_day"}  (0..1; reason
+                                                     only with rate_limited)
+  {"type":"chips","chips":[{"id","label","q",...,"source":"ai"?}]} (always)
+  {"type":"done","cached":false,"usage":{"input_tokens":N,"output_tokens":N},
+   "citations":["BUG-15"],"answer_key":"<sha256>|null"}       (always last)
+
+``text`` deltas are already cleaned: a ``[[ref]]`` that was not retrieved is
+removed, and the model's ``SUGGESTIONS:`` line never appears — it arrives as
+``source: "ai"`` chips. A cache hit replays the same events with
+``cached: true`` and zero usage.
+
 Tenancy (ADR §4.2) is decided here and enforced in
 :mod:`engine.search.retrieve`: the project ids a caller may search are
 ``visible_projects()`` (org membership with ``ORG_MODE`` on, the browser's
@@ -94,8 +123,8 @@ def _int(raw: str | None, default: int, lo: int, hi: int) -> int:
         return default
 
 
-def _scope_for_request() -> tuple[Any, list[str], dict[str, str], str,
-                                  str | None]:
+def _scope_for_request(args=None) -> tuple[Any, list[str], dict[str, str],
+                                           str, str | None]:
     """Resolve ``(error_response, allowed, names, scope, project_filter)``.
 
     * ``project_id`` (alias ``project``) → that project only, after the
@@ -105,10 +134,12 @@ def _scope_for_request() -> tuple[Any, list[str], dict[str, str], str,
     * ``scope=project`` without an id → the caller's active project;
     * otherwise every visible project.
     """
+    args = request.args if args is None else args
     ids, names = _visible()
-    pid = (request.args.get("project_id") or request.args.get("project")
-           or "").strip()
-    scope = (request.args.get("scope") or "").strip().lower()
+    pid = args.get("project_id") or args.get("project") or ""
+    pid = pid.strip() if isinstance(pid, str) else ""
+    scope = args.get("scope") or ""
+    scope = scope.strip().lower() if isinstance(scope, str) else ""
     if not pid and scope == "project":
         from routes._shared import resolve_active_project
         try:
@@ -125,6 +156,24 @@ def _scope_for_request() -> tuple[Any, list[str], dict[str, str], str,
             return None, allowed, names, "org", pid
         return None, [pid], names, "project", None
     return None, ids, names, "org", None
+
+
+def _ai_flag_on() -> bool:
+    from engine import features
+    return features.effective("PLATFORM_SEARCH_AI")
+
+
+def _ai_available() -> bool:
+    """``PLATFORM_SEARCH_AI`` effectively on and a key (the org's own, else
+    the platform's) to answer with."""
+    if not _ai_flag_on():
+        return False
+    try:
+        from engine import llm_keys
+        key, _source = llm_keys.resolve_key(_perm.current_org_id())
+    except Exception:   # noqa: BLE001
+        return False
+    return bool((key or "").strip())
 
 
 def _stale(allowed: list[str]) -> list[str]:
@@ -260,6 +309,7 @@ def register(app: Flask) -> None:
             "projects": len(ids), "pending_projects": len(pending),
             "last_indexed_at": last.isoformat() if last else None,
             "stale_projects": stale, "errors": errors,
+            "ai_available": _ai_available(),
         })
 
     @app.route("/api/search/reindex", methods=["POST"])
@@ -306,6 +356,109 @@ def register(app: Flask) -> None:
             return jsonify({"error": "unavailable", "message": str(exc)}), 503
         return jsonify({"job_id": job_id, "projects": len(targets),
                         "global": with_global}), 202
+
+
+    @app.route("/api/ask", methods=["POST"])
+    @_perm.require_role("user")
+    def api_ask():
+        """The AI answer over the search results, streamed as NDJSON (see
+        the module docstring for the contract)."""
+        if not _ai_flag_on():
+            abort(404)
+        import json
+
+        from flask import Response, stream_with_context
+
+        from engine.search import answer
+        from routes._shared import get_session_id
+
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "bad_request"}), 400
+        q = body.get("q")
+        q = q.strip()[:MAX_QUERY_CHARS] if isinstance(q, str) else ""
+        if not q:
+            return jsonify({"error": "empty_query"}), 400
+        err, allowed, names, scope, project_filter = _scope_for_request(body)
+        if err is not None:
+            return err
+        lang = body.get("lang") if body.get("lang") in answer.LANG_NAMES \
+            else None
+        req = answer.AskRequest(
+            q=q, allowed=allowed, names=names, scope=scope,
+            project_filter=project_filter,
+            project_id=(allowed[0] if scope == "project" and allowed
+                        else project_filter),
+            lang=lang, history=body.get("history") or [],
+            org_id=_perm.current_org_id(), user_id=_perm.current_user_id(),
+            sid=get_session_id())
+
+        def generate():
+            started = False
+            try:
+                for event in answer.ask_events(req):
+                    started = True
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+            except GeneratorExit:
+                raise
+            except Exception as exc:   # noqa: BLE001 — never a broken stream
+                log.warning("ask failed: %s: %s", type(exc).__name__, exc)
+                tail = [] if started else [
+                    {"type": "meta", "mode": None, "cached": False,
+                     "grounded": False, "items": [], "cards": [],
+                     "answer_key": None}]
+                tail += [{"type": "error", "code": "upstream",
+                          "message": answer.MESSAGES["upstream"]},
+                         {"type": "chips", "chips": []},
+                         {"type": "done", "cached": False,
+                          "usage": {"input_tokens": 0, "output_tokens": 0},
+                          "citations": [], "answer_key": None}]
+                for event in tail:
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+
+        return Response(stream_with_context(generate()),
+                        mimetype="application/x-ndjson",
+                        headers={"Cache-Control": "no-cache",
+                                 "X-Accel-Buffering": "no"})
+
+    @app.route("/api/ask/feedback", methods=["POST"])
+    @_perm.require_role("user")
+    def api_ask_feedback():
+        """``{"answer_key", "helpful": bool, "comment"?}`` → counts the vote
+        on the caller's own cached answer and records it (with the comment,
+        cut to 500 characters) in the audit log. A key that belongs to
+        another tenant is a 404, like one that does not exist."""
+        if not _ai_flag_on():
+            abort(404)
+        import re as _re
+
+        from engine import db as _db
+        from engine.search import answer
+        from routes._shared import get_session_id
+
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "bad_request"}), 400
+        key = body.get("answer_key")
+        helpful = body.get("helpful")
+        if not (isinstance(key, str) and _re.fullmatch(r"[0-9a-f]{64}", key)) \
+                or not isinstance(helpful, bool):
+            return jsonify({"error": "bad_request"}), 400
+        comment = body.get("comment")
+        comment = " ".join(comment.split())[:500] \
+            if isinstance(comment, str) else ""
+        org_id = _perm.current_org_id()
+        user_id = _perm.current_user_id()
+        scope = answer.tenant_scope(org_id, user_id, get_session_id())
+        owner = _db.rag_answer_owner(key)
+        if owner is not None and owner != scope:
+            return jsonify({"error": "not_found"}), 404
+        counted = _db.rate_rag_answer(key, scope=scope, helpful=helpful)
+        _db.append_audit(entity="search_answer", action="feedback",
+                         user_id=user_id, org_id=org_id, entity_id=key,
+                         diff={"helpful": helpful,
+                               **({"comment": comment} if comment else {})})
+        return jsonify({"ok": True, "counted": counted})
 
 
 __all__ = ["register", "KNOWN_KINDS"]
