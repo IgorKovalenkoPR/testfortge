@@ -89,7 +89,13 @@ jobs:
       # tests/test_suite_isolation.py::TestTheParallelCIStaysSafe holds the
       # pairing, and fails if a fourth file starts using that database
       # without the mark.
-      PYTEST_ADDOPTS: "-n auto --dist loadgroup"
+      #
+      # ``-m "not network"``: the three tests marked ``network`` fetch
+      # https://testfort.com live, so their result is the third-party
+      # site's (a redirect turns 200 into 302) and not this code's. They
+      # run in the non-blocking ``network`` job below instead; see
+      # docs/testing/quarantine.md for the owner and the review date.
+      PYTEST_ADDOPTS: "-n auto --dist loadgroup -m 'not network'"
 
     steps:
       - name: Checkout
@@ -320,6 +326,52 @@ jobs:
             exit 1
           }
 
+  # ── Quarantine: tests that reach a live third-party site ──────────
+  #
+  # Non-blocking by design (continue-on-error): these assert on what
+  # https://testfort.com serves today, so a red here is information about
+  # the site or the runner's network, not a gate on the change. Listed,
+  # owned and dated in docs/testing/quarantine.md — a test stays here only
+  # until its review date, then it is fixed offline or deleted.
+  network:
+    name: network-dependent tests (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      FLASK_DEBUG: "1"
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      # Same annotation shape as the other steps, as warnings: a failure
+      # names the test without pretending to be a gate.
+      - name: Run the network-marked tests
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -m network -q --no-header \
+            -p no:cacheprovider 2>&1 | tee /tmp/network.txt || {
+            sed -n '/short test summary info/,$p' /tmp/network.txt \
+              | grep -E "^(FAILED|ERROR)" | head -40 \
+              | while IFS= read -r line; do echo "::warning::network $line"; done || true
+            exit 1
+          }
+
   # ── E9.5 — the golden paths, in a real browser, ten times ─────────
   #
   # A separate job because it needs a Chromium build (~400 MB) that the
@@ -334,9 +386,11 @@ jobs:
   # quiet machine". The loop stops at the first failure so the log ends at
   # the interesting run rather than nine runs later.
   e2e:
-    name: e2e golden paths (×10)
+    name: e2e golden paths + search + a11y (×10)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 25 → 45 when the search and accessibility files joined the ten-run
+    # gate (locally: golden paths ~40 s, search ~45 s, a11y ~35 s a run).
+    timeout-minutes: 45
 
     # Deliberately no PYTEST_ADDOPTS here: the ten-run gate is about
     # determinism, and a browser suite sharing workers measures contention
@@ -374,7 +428,8 @@ jobs:
         run: |
           set -o pipefail
           rc=0
-          python -m pytest tests/test_e2e_golden_paths.py -q --no-header \
+          python -m pytest tests/test_e2e_golden_paths.py \
+            tests/test_e2e_search.py tests/test_e2e_a11y.py -q --no-header \
             -p no:cacheprovider 2>&1 | tee /tmp/e2e.txt || rc=$?
           if [ "$rc" -eq 0 ]; then
             grep -qE "[1-9][0-9]* passed" /tmp/e2e.txt || {
@@ -405,7 +460,8 @@ jobs:
           set -o pipefail
           for i in $(seq 1 10); do
             echo "── run $i of 10 ─────────────────────────────"
-            python -m pytest tests/test_e2e_golden_paths.py -q --no-header \
+            python -m pytest tests/test_e2e_golden_paths.py \
+              tests/test_e2e_search.py tests/test_e2e_a11y.py -q --no-header \
               -p no:cacheprovider 2>&1 | tee /tmp/run-$i.txt || {
                 sed -n '/short test summary info/,$p' /tmp/run-$i.txt \
                   | grep -E "^(FAILED|ERROR)" | head -40 \
