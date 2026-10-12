@@ -61,7 +61,32 @@ def axe_source() -> str:
     return raw.decode("utf-8")
 
 
+def _settle(page) -> None:
+    """Audit the page people look at, not a frame mid-transition.
+
+    The dashboard test waited for ``#main-content`` only, so axe could run
+    while the hints card was still arriving or a fade was half-way —
+    colour contrast measured on a partly transparent element. Green 30/30
+    on CI and 10/10 locally, then red on run 1 of 10 (CI, 2026-10-12) with
+    no code change. A real violation survives this wait; a transient one
+    does not. Infinite animations (spinners) are left out — they never
+    finish — and the whole wait is capped.
+    """
+    page.wait_for_load_state("networkidle")
+    page.evaluate(
+        """() => Promise.race([
+            Promise.all(document.getAnimations()
+                .filter(a => {
+                    const t = a.effect && a.effect.getComputedTiming();
+                    return t && t.endTime !== Infinity;
+                })
+                .map(a => a.finished.catch(() => null))),
+            new Promise(r => setTimeout(r, 3000)),
+        ])""")
+
+
 def _audit(page, axe_source: str) -> list[dict]:
+    _settle(page)
     if not page.evaluate("() => typeof window.axe === 'object'"):
         page.evaluate(axe_source)
     return page.evaluate(

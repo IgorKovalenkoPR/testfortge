@@ -486,6 +486,11 @@ jobs:
                   | while IFS= read -r line; do
                       echo "::error::run $i of 10: $line"
                     done || true
+                # The axe details live in the assertion's JSON body, which
+                # the FAILED line truncates: rule id, element, why.
+                axe=$(grep -E '^E? *"(id|impact|target|summary)":' /tmp/run-$i.txt \
+                  | head -20 | sed 's/^E *//' | tr '\n' ' ') || true
+                [ -n "$axe" ] && echo "::error::run $i of 10 axe: $axe"
                 echo "::error::golden paths failed on run $i of 10"
                 exit 1
               }
