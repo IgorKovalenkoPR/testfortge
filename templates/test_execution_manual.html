@@ -172,7 +172,7 @@
 
 {# ── Walk navigation ──────────────────────────────────────────────── #}
 <div class="card">
-    <div class="export-row">
+    <div class="export-row btn-group">
         {% if index > 0 %}
         <a href="{{ url_for('manual_run_page', run_id=run_id, i=index-1) }}"
            class="btn btn-sm">← {{ t.get('manual_run_prev', 'Previous') }}</a>

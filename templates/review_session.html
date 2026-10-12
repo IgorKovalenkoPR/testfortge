@@ -72,9 +72,9 @@
 
             {# Network requests — failures highlighted. #}
             {% if tele.network %}
-            <h4 style="margin:0 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4" style="margin:0 0 6px 0;font-size:0.95em;color:#334155;">
                 {{ t.get('review_session_network', 'Network requests') }}
-            </h4>
+            </h2>
             <div style="max-height:280px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;">
                 <table style="width:100%;border-collapse:collapse;font-size:0.82em;font-family:monospace;">
                     <thead>
@@ -89,7 +89,7 @@
                     {% for r in tele.network %}
                         {% set is_fail = (r.ok == false) or (r.status and r.status >= 400) %}
                         <tr style="border-top:1px solid #f1f5f9;{% if is_fail %}background:#fef2f2;{% endif %}">
-                            <td style="padding:4px 8px;font-weight:600;{% if is_fail %}color:#dc2626;{% elif r.status %}color:#16a34a;{% else %}color:#94a3b8;{% endif %}">
+                            <td style="padding:4px 8px;font-weight:600;{% if is_fail %}color:#dc2626;{% elif r.status %}color:var(--badge-green);{% else %}color:var(--text-subtle);{% endif %}">
                                 {% if r.error %}✕{% else %}{{ r.status or '—' }}{% endif %}
                             </td>
                             <td style="padding:4px 8px;color:#475569;">{{ r.method }}</td>
@@ -97,7 +97,7 @@
                                 {{ r.url|truncate(90) }}
                                 {% if r.error %}<em style="color:#dc2626;"> ({{ r.error }})</em>{% endif %}
                             </td>
-                            <td style="padding:4px 8px;color:#94a3b8;">{{ r.type }}</td>
+                            <td style="padding:4px 8px;color:var(--text-subtle);">{{ r.type }}</td>
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -107,9 +107,9 @@
 
             {# Console — errors + warnings colour-coded. #}
             {% if tele.console %}
-            <h4 style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4" style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
                 {{ t.get('review_session_console', 'Console output') }}
-            </h4>
+            </h2>
             <div style="max-height:240px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;background:#0f172a;padding:8px 10px;">
                 {% for c in tele.console %}
                 {% set col = '#f87171' if c.level in ('error', 'assert') else ('#fbbf24' if c.level in ('warning', 'warn') else '#94a3b8') %}
@@ -123,15 +123,15 @@
 
             {# DOM snapshots — one line per captured page. #}
             {% if tele.dom_snapshots %}
-            <h4 style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4" style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
                 {{ t.get('review_session_dom', 'DOM snapshots') }}
-            </h4>
+            </h2>
             <ul style="margin:0;padding-left:18px;color:#475569;font-size:0.85em;">
                 {% for s in tele.dom_snapshots %}
                 <li style="margin:3px 0;">
                     <strong>{{ s.title or s.url|truncate(60) }}</strong>
                     — {{ s.element_count }} {{ t.get('review_session_controls', 'interactive controls') }}
-                    <br><small style="color:#94a3b8;word-break:break-all;">{{ s.url|truncate(90) }}</small>
+                    <br><small style="color:var(--text-subtle);word-break:break-all;">{{ s.url|truncate(90) }}</small>
                 </li>
                 {% endfor %}
             </ul>
@@ -176,21 +176,21 @@
                 <label style="font-size:0.9em;color:#475569;">
                     {{ t.get('review_session_summary_label', 'Summary (editable)') }}
                 </label>
-                <input type="text" name="summary_{{ loop.index0 }}" value="{{ pc.summary }}"
+                <input aria-label="{{ t.get('review_session_summary_label', 'Summary (editable)') }}" type="text" name="summary_{{ loop.index0 }}" value="{{ pc.summary }}"
                        style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;">
 
                 <label style="font-size:0.9em;color:#475569;">
                     {{ t.get('review_session_suite_label', 'Suite tag') }}
                 </label>
                 <div>
-                    <select name="suite_{{ loop.index0 }}"
+                    <select aria-label="{{ t.get('review_session_suite_label', 'Suite tag') }}" name="suite_{{ loop.index0 }}"
                             style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;min-width:180px;">
                         <option value="Smoke"      {% if pc.suggested_suite == 'Smoke' %}selected{% endif %}>Smoke</option>
                         <option value="Regression" {% if pc.suggested_suite == 'Regression' %}selected{% endif %}>Regression</option>
                         <option value="E2E"        {% if pc.suggested_suite == 'E2E' %}selected{% endif %}>E2E</option>
                     </select>
                     {% if pc.rationale %}
-                    <small style="display:block;color:#94a3b8;margin-top:4px;font-size:0.82em;">
+                    <small style="display:block;color:var(--text-subtle);margin-top:4px;font-size:0.82em;">
                         {{ t.get('review_session_classifier_hint', 'Classifier suggests') }}
                         <strong>{{ pc.suggested_suite }}</strong>: {{ pc.rationale }}
                     </small>
@@ -207,7 +207,7 @@
                     <li style="margin:2px 0;">
                         {% if step.kind == 'assertion' %}◇{% else %}▸{% endif %}
                         <strong>{{ step.action }}</strong>
-                        {% if step.target %}<span style="color:#94a3b8;">{{ step.target|truncate(60) }}</span>{% endif %}
+                        {% if step.target %}<span style="color:var(--text-subtle);">{{ step.target|truncate(60) }}</span>{% endif %}
                         {% if step.value %}<em style="color:#0369a1;">= "{{ step.value|truncate(40) }}"</em>{% endif %}
                         {# The recorder stamps a comment on steps that
                            describe something rather than instruct it —
@@ -224,8 +224,7 @@
         {% endfor %}
 
         <div style="margin-top:18px;display:flex;gap:10px;align-items:center;">
-            <button type="submit" class="btn btn-primary" id="review-save-btn"
-                    style="font-size:1em;padding:10px 22px;">
+            <button type="submit" class="btn btn-primary" id="review-save-btn">
                 💾 {{ t.get('review_session_save_all', 'Save selected') }}
             </button>
             {# A POST, not a link. This used to be an <a href="/test-cases">:
@@ -239,7 +238,7 @@
                     {{ t.get('review_session_cancel', 'Cancel — discard recording') }}
                   </button>
                 </form>
-            <span id="review-status" style="color:#94a3b8;font-size:0.88em;"></span>
+            <span id="review-status" style="color:var(--text-subtle);font-size:0.88em;"></span>
         </div>
     </form>
 {% endif %}
@@ -257,7 +256,7 @@
     function setStatus(text, color) {
         if (status) {
             status.textContent = text || '';
-            status.style.color = color || '#94a3b8';
+            status.style.color = color || '#6B7280';
         }
     }
 

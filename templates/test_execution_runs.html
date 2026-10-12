@@ -33,7 +33,7 @@
 {% include '_project_picker.html' %}
 
 {% if can_switch_scope %}
-<div class="filter-row">
+<div class="filter-row btn-group">
     <a class="btn btn-sm {% if scope == 'mine' %}btn-primary{% endif %}"
        href="{{ url_for('manual_runs_page', scope='mine') }}">
         {{ t.get('runs_scope_mine', 'Assigned to me') }}

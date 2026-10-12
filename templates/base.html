@@ -6,10 +6,17 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}TestForTge{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    {# Poppins is loaded here, not by an @import in style.css: an @import
+       after the first rule is invalid CSS and was silently dropped, so the
+       brand font never loaded. The CSP allows both Google Fonts hosts. #}
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <nav class="sidebar">
+    <a class="skip-link" href="#main-content">{{ t.get('skip_to_content', 'Skip to main content') }}</a>
+    <nav class="sidebar" aria-label="{{ t.get('nav_aria', 'Main navigation') }}">
         <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — {{ t.brand_aria }}">
             <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
                  alt="" class="brand-icon" width="44" height="44">
@@ -140,7 +147,8 @@
         {% endif %}
     </nav>
 
-    <main class="main-content">
+    {#- page_class scopes a page's own rules in style.css (e.g. page-bug-reports) -#}
+    <main class="main-content{% block page_class %}{% endblock %}" id="main-content" tabindex="-1">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, message in messages %}

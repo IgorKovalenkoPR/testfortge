@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('te_title', 'Test Execution') }}{% endblock %}
+{% block page_class %}{{ ' page-test-execution' }}{% endblock %}
 
 {% block content %}
 {# Jinja → JS shuttle. Values that used to be interpolated inside inline
@@ -38,19 +39,19 @@
                     'The active project has no test cases or checklist items in your session. Generate a pack first — or switch to a project that already has one via the picker above.') }}
             </p>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="btn-group">
             <a href="{{ url_for('test_cases_page') }}"
-               class="btn btn-primary" style="font-size:0.9em;">
+               class="btn btn-sm btn-primary">
                 ✅ {{ t.get('te_empty_to_tc',
                    'Generate test cases →') }}
             </a>
             <a href="{{ url_for('checklist_page') }}"
-               class="btn btn-secondary" style="font-size:0.9em;">
+               class="btn btn-sm btn-secondary">
                 📋 {{ t.get('te_empty_to_cl',
                    'Generate checklist') }}
             </a>
             <a href="{{ url_for('estimation_page') }}"
-               class="btn btn-secondary" style="font-size:0.9em;">
+               class="btn btn-sm btn-secondary">
                 📈 {{ t.get('te_empty_to_est',
                    'Scope at /estimation') }}
             </a>
@@ -64,7 +65,7 @@
      style="display:flex;align-items:center;gap:14px;padding:10px 16px;
             background:linear-gradient(90deg,#ecfdf5 0%,#f0f9ff 100%);
             border:1px solid #bbf7d0;margin-bottom:14px;">
-    <i data-lucide="package-check" class="icon-md" style="color:#16a34a;"></i>
+    <i data-lucide="package-check" class="icon-md" style="color:var(--badge-green);"></i>
     <div style="flex:1;">
         <div style="font-weight:700;color:#0f172a;font-size:0.95em;">
             {{ t.get('te_pack_loaded', 'Pack loaded') }}
@@ -84,8 +85,7 @@
           style="display:inline;margin:0;"
           onsubmit='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-secondary"
-                style="font-size:0.8em;padding:6px 12px;">
+        <button type="submit" class="btn btn-sm btn-secondary">
             <i data-lucide="trash-2" class="icon-sm"></i>
             {{ t.get('te_pack_clear', 'Clear pack') }}
         </button>
@@ -109,10 +109,10 @@
    was added to end, reached by a button. #}
 {% if open_manual_runs %}
 <div class="card te-open-runs">
-    <h3 class="card-title">
+    <h2 class="heading-3 card-title">
         <i data-lucide="play-circle" class="icon-sm"></i>
         {{ t.get('te_open_runs_title', 'Unfinished manual runs') }}
-    </h3>
+    </h2>
     <p class="hint">{{ t.get('te_open_runs_hint',
         'Started and not closed. Resuming lands on the first item without a verdict.') }}</p>
     <table class="data-table">
@@ -161,7 +161,7 @@
         {{ t.get('te_empty_hint',
                  'Generate a test pack from requirements, or upload one you already have. The uploaded pack lands in the same session so you can run it on this page right away.') }}
     </p>
-    <div class="empty-state-actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+    <div class="empty-state-actions btn-group" style="margin-top:14px;">
         <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary">
             <i data-lucide="sparkles" class="icon-sm"></i>
             {{ t.get('te_empty_generate_tc', 'Generate test cases') }}
@@ -198,6 +198,7 @@
         <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
         <p class="meta-text">{{ t.te_formats }}</p>
         <input type="file" name="upload_file" required
+               aria-label="{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}"
                id="te-tc-file"
                class="file-input-hidden"
                accept=".xlsx,.csv,.md,.markdown,.json">
@@ -246,6 +247,7 @@
         <p>{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}</p>
         <p class="meta-text">{{ t.te_formats }}</p>
         <input type="file" name="upload_file" required
+               aria-label="{{ t.get('te_upload_drop', 'Drop file here, or click to browse') }}"
                id="te-cl-file"
                class="file-input-hidden"
                accept=".xlsx,.csv,.md,.markdown,.json">
@@ -281,8 +283,8 @@
         <form method="POST" action="{{ url_for('test_cases_upload') }}"
               enctype="multipart/form-data" style="flex:1;min-width:280px;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <strong>{{ t.get('te_upload_tc_title', 'Test cases') }}</strong>
-            <input type="file" name="upload_file" required style="margin-top:6px;width:100%;"
+            <strong id="te-up-tc-title">{{ t.get('te_upload_tc_title', 'Test cases') }}</strong>
+            <input type="file" name="upload_file" required aria-labelledby="te-up-tc-title" style="margin-top:6px;width:100%;"
                    accept=".xlsx,.csv,.md,.markdown,.json">
             <label style="display:block;margin-top:6px;font-size:0.85em;">
                 <input type="radio" name="upload_mode" value="replace" checked>
@@ -297,8 +299,8 @@
         <form method="POST" action="{{ url_for('checklist_upload') }}"
               enctype="multipart/form-data" style="flex:1;min-width:280px;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <strong>{{ t.get('te_upload_cl_title', 'Checklist') }}</strong>
-            <input type="file" name="upload_file" required style="margin-top:6px;width:100%;"
+            <strong id="te-up-cl-title">{{ t.get('te_upload_cl_title', 'Checklist') }}</strong>
+            <input type="file" name="upload_file" required aria-labelledby="te-up-cl-title" style="margin-top:6px;width:100%;"
                    accept=".xlsx,.csv,.md,.markdown,.json">
             <label style="display:block;margin-top:6px;font-size:0.85em;">
                 <input type="radio" name="upload_mode" value="replace" checked>
@@ -343,9 +345,9 @@
             </span>
         </div>
         <div class="run-stats-inline">
-            <span class="run-stat stat-passed">{{ run.stats.passed }} P</span>
-            <span class="run-stat stat-failed">{{ run.stats.failed }} F</span>
-            <span class="run-stat stat-blocked">{{ run.stats.blocked }} B</span>
+            <span class="run-stat stat-passed">{{ run.stats.passed }} <abbr title="{{ t.get('passed', 'Passed') }}">P</abbr></span>
+            <span class="run-stat stat-failed">{{ run.stats.failed }} <abbr title="{{ t.get('failed', 'Failed') }}">F</abbr></span>
+            <span class="run-stat stat-blocked">{{ run.stats.blocked }} <abbr title="{{ t.get('blocked', 'Blocked') }}">B</abbr></span>
             <span class="run-stat run-rate">{{ run.stats.pass_rate }}%</span>
             {% if run.bug_count %}<span class="run-stat run-bugs"><i data-lucide="bug" class="icon-sm"></i> {{ run.bug_count }}</span>{% endif %}
             <span class="run-toggle" id="toggle-run-{{ run.run_id }}"><i data-lucide="chevron-down" class="icon-sm"></i></span>
@@ -398,11 +400,11 @@
                 <tr class="result-row result-{{ r.status | lower | replace(' ', '-') }}">
                     <td>
                         {% if r.status == 'Passed' %}
-                        <span class="status-badge status-passed">P</span>
+                        <span class="status-badge status-passed"><abbr title="{{ t.get('passed', 'Passed') }}">P</abbr></span>
                         {% elif r.status == 'Failed' %}
-                        <span class="status-badge status-failed">F</span>
+                        <span class="status-badge status-failed"><abbr title="{{ t.get('failed', 'Failed') }}">F</abbr></span>
                         {% elif r.status == 'Blocked' %}
-                        <span class="status-badge status-blocked">B</span>
+                        <span class="status-badge status-blocked"><abbr title="{{ t.get('blocked', 'Blocked') }}">B</abbr></span>
                         {% endif %}
                     </td>
                     <td><strong>{{ r.item_id }}</strong></td>
@@ -807,7 +809,7 @@
                 </label>
             {% endif %}
             <div class="item-select-row">
-                <input type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc sec-tc-{{ current_section.idx }}" data-section="tc-sec-{{ current_section.idx }}" data-suite="{{ tc.suite or '' }}">
+                <input aria-label="{{ tc.id }} — {{ tc.summary }}" type="checkbox" name="selected_items" value="{{ tc.id }}" checked class="item-cb item-cb-tc sec-tc-{{ current_section.idx }}" data-section="tc-sec-{{ current_section.idx }}" data-suite="{{ tc.suite or '' }}">
                 <span class="item-id">{{ tc.id }}</span>
                 <span class="item-summary">{{ tc.summary }}</span>
                 <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
@@ -842,7 +844,7 @@
                 </label>
             {% endif %}
             <div class="item-select-row">
-                <input type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl sec-cl-{{ current_section.idx }}" data-section="cl-sec-{{ current_section.idx }}">
+                <input aria-label="{{ cl.id }} — {{ cl.objective }}" type="checkbox" name="selected_items" value="{{ cl.id }}" checked class="item-cb item-cb-cl sec-cl-{{ current_section.idx }}" data-section="cl-sec-{{ current_section.idx }}">
                 <span class="item-id">{{ cl.id }}</span>
                 <span class="item-summary">{{ cl.objective }}</span>
                 <span class="item-badge badge-{{ cl.category | lower | replace(' ', '-') }}">{{ cl.category }}</span>
@@ -878,7 +880,7 @@
                'On cloud servers you cannot see the browser window directly, but you can stream a frame-by-frame view of every screenshot Playwright takes. Open the live view in a new tab BEFORE clicking Run below.') }}
         </p>
         <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener"
-           class="btn btn-secondary" style="font-size:0.88em;">
+           class="btn btn-sm btn-secondary">
             {{ t.get('te_live_open', 'Open live view in new tab ↗') }}
         </a>
     </div>
@@ -911,15 +913,15 @@
         <p id="te-active-hint" style="margin:8px 0 0 0;font-size:0.85em;color:#0c4a6e;">
             {{ t.te_worker_hint }}
         </p>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="btn-group" style="margin-top:8px;">
             <a href="{{ url_for('test_execution_live') }}?run_id={{ active_automation_run.run_id }}"
                target="_blank" rel="noopener"
-               class="btn btn-secondary" style="font-size:0.85em;">
+               class="btn btn-sm btn-secondary">
                 {{ t.te_open_filmstrip }}
             </a>
             <a href="{{ url_for('test_execution_results', run_id=active_automation_run.run_id) }}"
                id="te-active-results-btn"
-               class="btn btn-primary" style="font-size:0.85em;display:none;">
+               class="btn btn-sm btn-primary" style="display:none;">
                 {{ t.te_import }}
             </a>
         </div>
@@ -927,13 +929,13 @@
     {% endif %}
     <div class="form-grid">
         <div class="form-group">
-            <label style="display:flex;align-items:center;gap:8px;">
+            <label for="f-base-url" style="display:flex;align-items:center;gap:8px;">
                 {{ t.get('te_base_url', 'Base URL') }}
                 <span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:0.72em;font-weight:700;">
                     {{ t.get('te_base_url_badge', 'required for live + screenshots + video') }}
                 </span>
             </label>
-            <input type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
+            <input id="f-base-url" type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
                    placeholder="https://example.com"
                    style="border:2px solid #fbbf24;">
             <p class="hint" style="margin-top:4px;font-size:0.78rem;color:#92400e;">
@@ -942,8 +944,8 @@
             </p>
         </div>
         <div class="form-group">
-            <label>{{ t.get('te_record_video', 'Record video') }}</label>
-            <select name="record_video">
+            <label for="f-record-video">{{ t.get('te_record_video', 'Record video') }}</label>
+            <select id="f-record-video" name="record_video">
                 <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
                 <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm with visible click / scroll / redirect') }}</option>
             </select>
@@ -984,7 +986,7 @@
     <div class="te-env-panel" data-env="web">
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_os_version_label', 'OS / Version') }}</label>
+                <label for="web_os_version">{{ t.get('te_os_version_label', 'OS / Version') }}</label>
                 {# Versioned selector — Feature #5. Each <optgroup> is an
                    OS family; selecting "Windows 11" / "macOS Sonoma (14)"
                    drives the engine matrix on the backend so the run uses
@@ -1001,14 +1003,14 @@
                 <input type="hidden" name="web_platform" id="web_platform_hidden" value="Windows">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_browser', 'Browser') }}</label>
-                <select name="web_browser">
+                <label for="f-web-browser">{{ t.get('te_browser', 'Browser') }}</label>
+                <select id="f-web-browser" name="web_browser">
                     {% for b in web_browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_version', 'Version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="web_version" placeholder="{{ t.get('te_web_version_ph', 'e.g. Chrome 138 on Win 11') }}">
+                <label for="f-web-version">{{ t.get('te_version', 'Version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-web-version" type="text" name="web_version" placeholder="{{ t.get('te_web_version_ph', 'e.g. Chrome 138 on Win 11') }}">
             </div>
         </div>
     </div>
@@ -1017,7 +1019,7 @@
     <div class="te-env-panel" data-env="mobile_web" hidden>
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_mw_os_version', 'OS / Version') }}</label>
+                <label for="mw_os_version">{{ t.get('te_mw_os_version', 'OS / Version') }}</label>
                 <select name="mw_os_version" id="mw_os_version">
                     {% for family, versions in mobile_os_versions.items() %}
                     <optgroup label="{{ family }}">
@@ -1028,24 +1030,24 @@
                 <input type="hidden" name="mw_os" id="mw_os_hidden" value="iOS">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_browser', 'Browser') }}</label>
-                <select name="mw_browser">
+                <label for="f-mw-browser">{{ t.get('te_browser', 'Browser') }}</label>
+                <select id="f-mw-browser" name="mw_browser">
                     {% for b in mobile_web_browsers %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_resolution', 'Device resolution') }}</label>
-                <select name="mw_resolution">
+                <label for="f-mw-resolution">{{ t.get('te_resolution', 'Device resolution') }}</label>
+                <select id="f-mw-resolution" name="mw_resolution">
                     {% for label, size in mobile_resolutions.items() %}
                         <option value="{{ size }}">{{ label }} ({{ size }})</option>
                     {% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="mw_resolution_custom" placeholder="e.g. 414x896" style="display:none; margin-top:6px">
+                <input type="text" name="mw_resolution_custom" aria-label="{{ t.get('te_custom_resolution', 'Custom resolution') }}" placeholder="e.g. 414x896" style="display:none; margin-top:6px">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="mw_version" placeholder="{{ t.get('te_mw_version_ph', 'e.g. iOS 17.4 / Android 14') }}">
+                <label for="f-mw-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-mw-version" type="text" name="mw_version" placeholder="{{ t.get('te_mw_version_ph', 'e.g. iOS 17.4 / Android 14') }}">
             </div>
         </div>
     </div>
@@ -1054,20 +1056,20 @@
     <div class="te-env-panel" data-env="ios" hidden>
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_device_model', 'Device model') }}</label>
-                <select name="ios_device">
+                <label for="f-ios-device">{{ t.get('te_device_model', 'Device model') }}</label>
+                <select id="f-ios-device" name="ios_device">
                     {% for d in ios_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="ios_device_custom" placeholder="{{ t.te_ph_iphone }}" style="display:none; margin-top:6px">
+                <input type="text" name="ios_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_iphone }}" style="display:none; margin-top:6px">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="ios_version" placeholder="{{ t.get('te_ios_version_ph', 'e.g. iOS 17.4.1') }}">
+                <label for="f-ios-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-ios-version" type="text" name="ios_version" placeholder="{{ t.get('te_ios_version_ph', 'e.g. iOS 17.4.1') }}">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="ios_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
+                <label for="f-ios-build">{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-ios-build" type="text" name="ios_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
             </div>
         </div>
     </div>
@@ -1076,20 +1078,20 @@
     <div class="te-env-panel" data-env="android" hidden>
         <div class="form-grid">
             <div class="form-group">
-                <label>{{ t.get('te_device_model', 'Device model') }}</label>
-                <select name="android_device">
+                <label for="f-android-device">{{ t.get('te_device_model', 'Device model') }}</label>
+                <select id="f-android-device" name="android_device">
                     {% for d in android_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="android_device_custom" placeholder="{{ t.te_ph_android }}" style="display:none; margin-top:6px">
+                <input type="text" name="android_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_android }}" style="display:none; margin-top:6px">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="android_version" placeholder="{{ t.get('te_android_version_ph', 'e.g. Android 14') }}">
+                <label for="f-android-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-android-version" type="text" name="android_version" placeholder="{{ t.get('te_android_version_ph', 'e.g. Android 14') }}">
             </div>
             <div class="form-group">
-                <label>{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
-                <input type="text" name="android_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
+                <label for="f-android-build">{{ t.get('te_app_build', 'App build') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
+                <input id="f-android-build" type="text" name="android_build" placeholder="{{ t.get('te_app_build_ph', 'e.g. 1.42.0 (build 5310)') }}">
             </div>
         </div>
     </div>
@@ -1131,20 +1133,20 @@
 
     <div class="form-row">
       <div class="form-group">
-        <label>{{ t.get('creds_login_url', 'Login page URL') }}</label>
-        <input type="url" name="cred_login_url"
+        <label for="f-cred-login-url">{{ t.get('creds_login_url', 'Login page URL') }}</label>
+        <input id="f-cred-login-url" type="url" name="cred_login_url"
                value="{{ cred.login_url or '' }}"
                placeholder="https://example.com/login">
       </div>
       <div class="form-group">
-        <label>{{ t.get('creds_username', 'Username / email') }}</label>
-        <input type="text" name="cred_username" autocomplete="off"
+        <label for="f-cred-username">{{ t.get('creds_username', 'Username / email') }}</label>
+        <input id="f-cred-username" type="text" name="cred_username" autocomplete="off"
                value="{{ cred.username or '' }}"
                placeholder="qa.tester@example.com">
       </div>
       <div class="form-group">
-        <label>{{ t.get('creds_password', 'Password') }}</label>
-        <input type="password" name="cred_password" autocomplete="new-password"
+        <label for="f-cred-password">{{ t.get('creds_password', 'Password') }}</label>
+        <input id="f-cred-password" type="password" name="cred_password" autocomplete="new-password"
                placeholder="{% if cred.password %}{{ t.get('creds_kept', '(kept from previous run)') }}{% endif %}">
       </div>
     </div>
@@ -1153,14 +1155,14 @@
       <summary>{{ t.get('creds_advanced', 'Advanced: registration URL / display name') }}</summary>
       <div class="form-row" style="margin-top:.5rem">
         <div class="form-group">
-          <label>{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
-          <input type="url" name="cred_register_url"
+          <label for="f-cred-register-url">{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
+          <input id="f-cred-register-url" type="url" name="cred_register_url"
                  value="{{ cred.register_url or '' }}"
                  placeholder="https://example.com/signup">
         </div>
         <div class="form-group">
-          <label>{{ t.get('creds_display_name', 'Display name') }}</label>
-          <input type="text" name="cred_display_name"
+          <label for="f-cred-display-name">{{ t.get('creds_display_name', 'Display name') }}</label>
+          <input id="f-cred-display-name" type="text" name="cred_display_name"
                  value="{{ cred.display_name or '' }}">
         </div>
       </div>
@@ -1198,7 +1200,7 @@
         <option value="E2E">E2E</option>
         <option value="">{{ t.get('te_suite_filter_untagged', 'Untagged only') }}</option>
     </select>
-    <small style="color:#94a3b8;">
+    <small style="color:var(--text-subtle);">
         {{ t.get('te_suite_filter_hint', '— ticks / unticks the TC checkboxes by suite tag.') }}
     </small>
 </div>
@@ -1269,88 +1271,6 @@
    static/js/test-execution.js. Original inline block kept commented
    for diff bisecting; removed in commit 2. #}
 
-<style>
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.form-row .form-group { flex: 1; }
-.form-group { margin-bottom: 12px; }
-.form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9em; }
-.form-group select, .form-group input[type="text"], .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; }
-.tester-select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95em; }
-.checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-.checkbox-card { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 0.9em; }
-.checkbox-card:hover { border-color: var(--primary); }
-.checkbox-card input:checked + span { font-weight: 600; color: var(--primary); }
-.radio-card { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; font-size: 1em; margin-right: 12px; }
-.radio-card:hover { border-color: var(--primary); }
-.radio-card input:checked + span { font-weight: 600; }
-.radio-card input { display: none; }
-.radio-card:has(input:checked) { border-color: var(--primary); background: var(--primary-light, #f0f0ff); }
-
-/* Resource URLs */
-.resource-urls-card { background: #f8fafe; }
-.url-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.url-chip { display: inline-block; padding: 6px 14px; background: white; border: 1px solid var(--primary); border-radius: 20px; color: var(--primary); font-size: 0.85em; text-decoration: none; word-break: break-all; }
-.url-chip:hover { background: var(--primary); color: white; }
-
-/* Item selection */
-.item-select-list { max-height: 460px; overflow-y: auto; border: 1px solid #e8eaf0; border-radius: 8px; padding: 8px; }
-.item-section-label { font-weight: 700; color: var(--primary); padding: 8px 6px 4px; font-size: 0.85em; border-bottom: 1px solid #e8eaf0; margin-bottom: 4px; }
-.item-select-row { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 4px; font-size: 0.88em; flex-wrap: wrap; }
-.item-select-row:hover { background: #f4f5f7; }
-.item-id { font-weight: 700; color: var(--primary); min-width: 78px; font-size: 0.85em; }
-.item-summary { flex: 1; min-width: 220px; }
-.item-badge { font-size: 0.75em; padding: 2px 8px; border-radius: 10px; }
-.item-status-select { width: 110px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.82em; background: #fff; }
-.item-status-select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
-.item-bug-input { width: 110px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.82em; }
-.item-bug-input:focus { outline: 2px solid var(--primary); outline-offset: -1px; border-color: var(--primary); }
-.select-actions { display: flex; gap: 8px; margin-bottom: 8px; }
-.btn-sm { padding: 4px 12px; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #555; }
-.btn-sm:hover { background: #eee; }
-
-/* Test Run cards */
-.run-card { margin-bottom: 16px; padding: 0; overflow: hidden; }
-.run-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #f8f9fb; cursor: pointer; flex-wrap: wrap; gap: 8px; }
-.run-header:hover { background: #eef0f5; }
-.run-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.run-meta { font-size: 0.82em; color: #666; }
-.run-stats-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.run-stat { font-size: 0.85em; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
-.run-stat.stat-passed { color: #16a34a; background: #f0fdf4; }
-.run-stat.stat-failed { color: #dc2626; background: #fef2f2; }
-.run-stat.stat-blocked { color: #d97706; background: #fffbeb; }
-.run-rate { color: var(--primary); background: #eff6ff; }
-.run-bugs { color: #dc2626; }
-.run-toggle { font-size: 0.8em; color: #999; margin-left: 4px; }
-.run-details { padding: 0 18px 14px; }
-
-/* Results table */
-.results-table { width: 100%; border-collapse: collapse; font-size: 0.85em; margin-top: 8px; }
-.results-table th { background: #f0f1f5; padding: 7px 10px; text-align: left; font-size: 0.85em; font-weight: 700; color: #555; }
-.results-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
-.result-row.result-failed { background: #fef8f8; }
-.result-row.result-blocked { background: #fffcf0; }
-.item-summary-cell { font-size: 0.88em; }
-.comment-cell { font-size: 0.82em; color: #666; max-width: 250px; }
-
-/* Status badges */
-.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.82em; font-weight: 700; }
-.status-passed { color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; }
-.status-failed { color: #dc2626; background: #fef2f2; border: 1px solid #fca5a5; }
-.status-blocked { color: #d97706; background: #fffbeb; border: 1px solid #fcd34d; }
-
-/* Bug link */
-.bug-link { color: #dc2626; font-weight: 700; font-size: 0.85em; text-decoration: none; }
-.bug-link:hover { text-decoration: underline; }
-
-.stat-passed { color: #16a34a; font-weight: 600; }
-.stat-failed { color: #dc2626; font-weight: 600; }
-.stat-blocked { color: #d97706; font-weight: 600; }
-
-.hint { color: #666; font-size: 0.85em; margin-bottom: 8px; }
-@media (max-width: 768px) { .form-grid { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
-</style>
 
 {% endblock %}
 

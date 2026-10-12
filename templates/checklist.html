@@ -59,7 +59,7 @@
 {# ── Generation progress modal ── #}
 <div id="cl-gen-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
     <div class="te-run-card">
-        <h3>{{ t.get('cl_gen_title', 'Generating checklist…') }}</h3>
+        <h2 class="heading-3">{{ t.get('cl_gen_title', 'Generating checklist…') }}</h2>
         <p id="cl-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
             {{ t.get('cl_gen_stage_init', 'Analyzing input…') }}
         </p>
@@ -377,8 +377,8 @@
     </p>
     <div class="form-row" style="align-items:flex-end; gap:12px;">
         <div class="form-group" style="flex:1">
-            <label>{{ t.get('cl_upload_file', 'File') }}</label>
-            <input type="file" name="upload_file" required
+            <label for="f-upload-file">{{ t.get('cl_upload_file', 'File') }}</label>
+            <input id="f-upload-file" type="file" name="upload_file" required
                    accept=".xlsx,.csv,.md,.markdown,.json">
         </div>
     {{ import_mapping("checklist", import_targets("checklist"), ('objective',)) }}
@@ -505,7 +505,8 @@
                 data-ie-row
                 {% if cl_edit.get(cl.id) and not cl_edit[cl.id].ai_generated %}data-ie-edited{% endif %}>
                 <td>
-                    <select class="status-select-sm">
+                    <select class="status-select-sm"
+                            aria-label="{{ t.get('status', 'Status') }}: {{ cl.id }}">
                         <option value="Unchecked">—</option>
                         <option value="Passed">P</option>
                         <option value="Failed">F</option>
@@ -545,7 +546,8 @@
                                 aria-label="{{ t.get('cl_delete', 'Delete this item') }}: {{ cl.id }}">✕</button>
                     </span>
                     {%- else %}
-                    <input type="text" class="inline-input" placeholder="—">
+                    <input type="text" class="inline-input" placeholder="—"
+                           aria-label="{{ t.get('cl_comment_label', 'Comment') }}: {{ cl.id }}">
                     {%- endif %}
                 </td>
             </tr>
