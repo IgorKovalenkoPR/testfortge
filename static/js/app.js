@@ -3,6 +3,54 @@
  * Handles: tooltips, tabs, filters, collapsibles, drag-drop
  */
 
+/* ── Phone-width navigation drawer ─────────────────────────────────
+   At ≤768px (style.css) the sidebar is off-canvas and the .mobile-bar
+   hamburger ([data-nav-toggle], aria-controls="sidebar-nav") opens it.
+   aria-expanded carries the state; Esc, a click outside the drawer (the
+   scrim) or following a link closes it, and closing by Esc or the scrim
+   returns focus to the toggle. Above 768px the toggle is not displayed
+   and an open drawer is closed, so a rotated tablet never keeps the
+   scrim. */
+(function () {
+    const toggle = document.querySelector('[data-nav-toggle]');
+    const nav = toggle && document.getElementById(toggle.getAttribute('aria-controls'));
+    if (!toggle || !nav) return;
+    const mq = window.matchMedia('(max-width: 768px)');
+
+    function isOpen() { return toggle.getAttribute('aria-expanded') === 'true'; }
+    function open() {
+        toggle.setAttribute('aria-expanded', 'true');
+        nav.classList.add('is-open');
+        document.body.classList.add('nav-open');
+        const first = nav.querySelector('a[href], button:not([disabled]), select, input');
+        if (first) first.focus();
+    }
+    function close(returnFocus) {
+        if (!isOpen()) return;
+        toggle.setAttribute('aria-expanded', 'false');
+        nav.classList.remove('is-open');
+        document.body.classList.remove('nav-open');
+        if (returnFocus) toggle.focus();
+    }
+
+    toggle.addEventListener('click', () => { if (isOpen()) close(true); else open(); });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(true); }
+    });
+    document.addEventListener('click', (e) => {
+        if (!isOpen()) return;
+        if (nav.contains(e.target) || toggle.contains(e.target)) return;
+        e.preventDefault();
+        close(true);
+    }, true);
+    nav.addEventListener('click', (e) => {
+        if (e.target.closest && e.target.closest('a[href]')) close(false);
+    });
+    const onChange = () => { if (!mq.matches) close(false); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     // Auto-hide alerts after 5 seconds
     document.querySelectorAll('.alert').forEach(alert => {
@@ -203,7 +251,25 @@ function applyStatusColor(select) {
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
         }[c]));
     }
-    function mdToHtml(s) {
+    /* [[REF]] citations (ADR 0003 T8): a ref the server retrieved —
+       present in `refs` ({ref: url}) with a same-origin path — becomes a
+       link; anything else is shown as its plain text. Runs on the
+       already-escaped HTML, so the ref text and the URL are escaped. */
+    function linkRefs(html, refs) {
+        return html.replace(/\[\[([^\[\]\n]{1,80})\]\]/g, (m, ref) => {
+            const key = ref.trim();
+            const url = refs && Object.prototype.hasOwnProperty.call(refs, key)
+                ? String(refs[key] || '') : '';
+            if (url && url.charAt(0) === '/' && url.charAt(1) !== '/') {
+                return '<a class="qa-chat-ref" href="' + escapeHtml(url) + '">' + ref + '</a>';
+            }
+            return ref;
+        });
+    }
+    function mdToHtml(s, refs) {
+        return linkRefs(mdToHtmlBase(s), refs);
+    }
+    function mdToHtmlBase(s) {
         // Italics were never handled, so every single-asterisk and
         // underscore emphasis reached the user as literal punctuation —
         // "— *EP (verbatim):*" from the guide replies, and the
@@ -227,10 +293,10 @@ function applyStatusColor(select) {
     }
     function scrollBottom() { body.scrollTop = body.scrollHeight; }
 
-    function renderMessage(role, text, chips) {
+    function renderMessage(role, text, chips, refs) {
         const msg = document.createElement('div');
         msg.className = 'qa-chat-msg ' + role;
-        msg.innerHTML = mdToHtml(text);
+        msg.innerHTML = mdToHtml(text, refs);
         body.appendChild(msg);
 
         if (Array.isArray(chips) && chips.length) {
@@ -340,8 +406,8 @@ function applyStatusColor(select) {
             </label>
             <div class="qa-bug-error" hidden></div>
             <div class="qa-bug-actions">
-                <button type="button" data-bug-cancel>${escapeHtml(L.cancel)}</button>
-                <button type="submit">${escapeHtml(L.submit)}</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bug-cancel>${escapeHtml(L.cancel)}</button>
+                <button type="submit" class="btn btn-primary btn-sm">${escapeHtml(L.submit)}</button>
             </div>
         `;
         body.appendChild(wrap);
@@ -402,7 +468,7 @@ function applyStatusColor(select) {
             const chips = (data.follow_up && data.follow_up.length)
                 ? data.follow_up
                 : (data.suggestions || []);
-            renderMessage('bot', data.text || '...', chips);
+            renderMessage('bot', data.text || '...', chips, data.refs);
             if (data.intent === 'bug_form') {
                 renderBugForm();
             }
@@ -413,7 +479,8 @@ function applyStatusColor(select) {
 
     /* SSE streaming path — same contract as /chat but tokens arrive
        progressively. Frame protocol:
-         event: meta   {intent, lang}             — before first delta
+         event: meta   {intent, lang, refs?}      — before first delta
+                       (refs = {ref: url}: [[REF]] citations to link, T8)
          event: delta  {text}                     — per token chunk
          event: full   {text, intent, ...}        — fast-path single shot
          event: done   {intent, suggestions, ...} — terminal frame
@@ -434,6 +501,7 @@ function applyStatusColor(select) {
             let receivedAny = false;
             let finalIntent = '';
             let finalChips = [];
+            let refs = null;    // {ref: url} — T8 citations, from meta/full/done
 
             function ensureBotEl() {
                 if (botEl) return botEl;
@@ -443,12 +511,16 @@ function applyStatusColor(select) {
                 return botEl;
             }
             function applyText(text) {
-                ensureBotEl().innerHTML = mdToHtml(text);
+                ensureBotEl().innerHTML = mdToHtml(text, refs);
                 scrollBottom();
             }
 
-            es.addEventListener('meta', () => {
+            es.addEventListener('meta', (ev) => {
                 receivedAny = true;
+                try {
+                    const d = JSON.parse(ev.data);
+                    if (d && d.refs) refs = d.refs;
+                } catch (e) { /* tolerate an empty meta frame */ }
                 // Show a placeholder bot bubble so the user gets immediate feedback.
                 ensureBotEl();
             });
@@ -468,6 +540,7 @@ function applyStatusColor(select) {
                 receivedAny = true;
                 try {
                     const d = JSON.parse(ev.data);
+                    if (d.refs) refs = d.refs;
                     plainBuf = d.text || '';
                     applyText(plainBuf);
                     if (d.intent) finalIntent = d.intent;
@@ -485,6 +558,10 @@ function applyStatusColor(select) {
                         ? d.follow_up
                         : (d && d.suggestions) || [];
                     if (chips && chips.length) finalChips = chips;
+                    if (d && d.refs) {
+                        refs = d.refs;
+                        if (plainBuf) applyText(plainBuf);
+                    }
                 } catch (e) { /* tolerate empty done frame */ }
                 es.close();
                 // Render chip row (if any) attached after the streamed bubble.

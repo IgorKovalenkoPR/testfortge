@@ -8,6 +8,8 @@ Read tools (v1):
 * :func:`list_execution_runs` — recent runs for a project
 * :func:`get_execution_run` — one run plus its per-case results
 * :func:`walkthrough_findings_stats` — summary of one or more result.json files
+* :func:`search` — platform search (ADR 0003 T8), ``/api/search`` result
+  shape, behind ``PLATFORM_SEARCH``
 
 Write tools (v1.5):
 
@@ -614,6 +616,89 @@ def tedgie_ask(
         raise ValueError("tedgie_ask: 'question' is required")
     _ = project_id  # reserved (see docstring)
     return chatbot.respond_dict(str(question).strip(), lang or "en")
+
+
+# ── Platform search tool (ADR 0003 T8) ─────────────────────────────
+
+#: ``kinds`` the search tool accepts — the ``/api/search`` list.
+SEARCH_KINDS = ("test_case", "checklist_item", "bug", "run", "case_result",
+                "estimation", "guide", "knowledge", "istqb")
+SEARCH_MAX_LIMIT = 50
+
+
+@mcp.tool()
+def search(
+    query: str,
+    kinds: list[str] | None = None,
+    project: str | None = None,
+    org_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Hybrid search over TestFortge's own data — the ``/api/search``
+    retrieval layer (ADR 0003), no LLM.
+
+    Scope follows the other tools on this server: the bearer token is an
+    operator credential, so with no arguments every project is searched
+    (as ``list_projects`` lists every project). ``project`` narrows to one
+    project (an unknown id is an error, never a widening); ``org_id``
+    narrows to one organisation's projects. Global documents (the Guide)
+    are always included, as in the app.
+
+    Args:
+        query: Free text, an id (``TC-012``, ``BUG-7``) or a phrase in
+            English, Ukrainian or Russian. Required.
+        kinds: Optional subset of ``test_case``, ``checklist_item``,
+            ``bug``, ``run``, ``case_result``, ``estimation``, ``guide``,
+            ``knowledge``, ``istqb``. Unknown kinds are ignored.
+        project: Optional project id (from ``list_projects``).
+        org_id: Optional organisation id.
+        limit: 1-50 results (default 20).
+
+    Returns ``{query, mode, total, scope, results}`` where each result has
+    the ``/api/search`` shape: ``ref``, ``kind``, ``title``, ``url``,
+    ``snippet``, ``score``, ``project`` (``{id, name}`` or null) and
+    ``facets``. ``{"error": "platform_search_disabled"}`` while
+    ``PLATFORM_SEARCH`` is off — the app answers 404 then.
+    """
+    from engine import features
+    from engine.search import retrieve
+
+    q = str(query or "").strip()[:300]
+    if not q:
+        raise ValueError("search: 'query' is required")
+    if not features.effective("PLATFORM_SEARCH"):
+        return {"error": "platform_search_disabled", "results": []}
+    wanted = sorted({k for k in (kinds or []) if k in SEARCH_KINDS}) or None
+    if project:
+        meta = db.get_project(str(project))
+        if not meta or (org_id and meta.get("org_id") != org_id):
+            raise ValueError(f"search: unknown project {project!r}")
+        rows = [meta]
+        scope = "project"
+    else:
+        rows = db.list_projects(org_id=org_id) if org_id \
+            else db.list_projects()
+        scope = "org" if org_id else "all"
+    allowed = [str(p["id"]) for p in rows if p.get("id")]
+    names = {str(p["id"]): str(p.get("name") or "") for p in rows
+             if p.get("id")}
+    try:
+        n = max(1, min(int(limit or 20), SEARCH_MAX_LIMIT))
+    except (TypeError, ValueError):
+        n = 20
+    body = retrieve.search(retrieve.SearchParams(
+        q=q, allowed=allowed, kinds=wanted, limit=n, explain=False,
+        istqb=False, scope=scope, project_names=names))
+    keep = ("ref", "kind", "title", "url", "snippet", "score", "project",
+            "facets")
+    return {
+        "query": (body.get("query") or {}).get("raw", q),
+        "mode": body.get("mode"),
+        "total": body.get("total", 0),
+        "scope": scope,
+        "results": [{k: r.get(k) for k in keep}
+                    for r in body.get("results") or []],
+    }
 
 
 # ── Recorder write tool (PR-B) ─────────────────────────────────────

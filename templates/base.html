@@ -16,7 +16,18 @@
 </head>
 <body>
     <a class="skip-link" href="#main-content">{{ t.get('skip_to_content', 'Skip to main content') }}</a>
-    <nav class="sidebar" aria-label="{{ t.get('nav_aria', 'Main navigation') }}">
+    {#- Phone-width top bar (≤768px; hidden above that by style.css). The
+        sidebar becomes a drawer this button opens: aria-expanded carries
+        the state, Esc closes it and focus returns here (static/js/app.js). -#}
+    <div class="mobile-bar">
+        <button type="button" class="btn btn-sm btn-icon-only nav-toggle"
+                data-nav-toggle aria-controls="sidebar-nav" aria-expanded="false"
+                aria-label="{{ t.nav_menu }}">
+            <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
+        <a href="{{ url_for('index') }}" class="mobile-bar-brand">TestForTge</a>
+    </div>
+    <nav class="sidebar" id="sidebar-nav" aria-label="{{ t.get('nav_aria', 'Main navigation') }}">
         <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — {{ t.brand_aria }}">
             <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
                  alt="" class="brand-icon" width="44" height="44">

@@ -59,6 +59,7 @@ Tedgie-style bug that hasn't been bound to a project yet (the
 | Tool | Arguments | Returns |
 |---|---|---|
 | `tedgie_ask` | `question` (required), optional `lang` (`en` / `ua`), optional `project_id` (reserved) | `{text, intent, suggestions, follow_up}` — same envelope the Flask `/chat` endpoint returns |
+| `search` | `query` (required), optional `kinds`, `project`, `org_id`, `limit` (1-50) | `{query, mode, total, scope, results}`; each result `{ref, kind, title, url, snippet, score, project, facets}` as in `/api/search`. Every project unless `project` / `org_id` narrows it; `{"error": "platform_search_disabled"}` while `PLATFORM_SEARCH` is off |
 
 Stateless — every call is a fresh request, no conversation history.
 The MCP client owns the multi-turn loop. If the host has

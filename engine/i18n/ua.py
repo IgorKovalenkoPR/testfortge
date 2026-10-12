@@ -2097,6 +2097,9 @@ TRANSLATIONS = {
     # visible <label> to associate with.
     "skip_to_content": "Перейти до основного вмісту",
     "nav_aria": "Головна навігація",
+    # The hamburger that opens the sidebar at phone width; its state is
+    # aria-expanded, so the name stays the same open or closed.
+    "nav_menu": "Меню",
     "bug_bulk_action_label": "Масова дія",
     "cl_comment_label": "Коментар",
     "tc_step_kind_label": "Тип кроку",
