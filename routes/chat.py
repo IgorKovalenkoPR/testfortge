@@ -33,7 +33,6 @@ from engine.bug_report import (
     BugReport, bug_to_dict, dict_to_bug, generate_bug_id,
 )
 from engine import llm_models as _llm_models
-from engine.llm_safety import wrap_user_input
 from engine.log import get_logger
 
 _logger = get_logger(__name__)
@@ -117,12 +116,39 @@ def _lang_strings(lang: str) -> dict:
 
 def _reply_to_dict(reply) -> dict:
     """ChatReply dataclass → JSON-ready dict. Identical shape to /chat."""
-    return {
+    out = {
         "text": reply.text,
         "intent": reply.intent,
         "suggestions": list(reply.suggestions or []),
         "follow_up": list(reply.follow_up or []),
     }
+    refs = getattr(reply, "refs", None)
+    if refs:
+        out["refs"] = dict(refs)
+    return out
+
+
+def _search_scope(active_project: str | None = None):
+    """What Tedgie may retrieve over (ADR 0003 T8), or ``None``.
+
+    ``None`` while ``PLATFORM_SEARCH`` is effectively off — the chat then
+    behaves exactly as before T8. Otherwise the project ids are
+    ``visible_projects()``, read through the same helper ``/api/search``
+    uses, so the chat can never see more than the search box; the active
+    project is a preference (a relaxed filter), never a widening.
+    """
+    try:
+        from engine.search import chat_grounding
+        if not chat_grounding.enabled():
+            return None
+        from routes.search import _visible
+        ids, names = _visible()
+        active = active_project if active_project in ids else None
+        return chat_grounding.ChatScope(allowed=ids, names=names,
+                                        project_id=active)
+    except Exception as exc:  # pragma: no cover — never block the chat
+        _logger.warning("chat: search scope unavailable: %s", exc)
+        return None
 
 
 def register(app: Flask) -> None:
@@ -176,16 +202,21 @@ def register(app: Flask) -> None:
         # usage panel, and ``llm_client``'s budget gate is conditioned on
         # ``org_id``, so it was skipped outright. ``_meter_stream`` below
         # attributed all three all along, which is what pointed here.
+        active = resolve_active_project()
         reply = _chatbot_respond(message, lang,
-                                 project_id=resolve_active_project(),
+                                 project_id=active,
                                  org_id=_perm.current_org_id(),
-                                 user_id=_perm.current_user_id())
+                                 user_id=_perm.current_user_id(),
+                                 search_scope=_search_scope(active))
 
         history = session.get("chat_history", [])
         history.append({"role": "user", "text": message})
-        history.append({"role": "bot", "text": reply["text"],
-                        "suggestions": reply["suggestions"],
-                        "follow_up": reply["follow_up"]})
+        bot_entry = {"role": "bot", "text": reply["text"],
+                     "suggestions": reply["suggestions"],
+                     "follow_up": reply["follow_up"]}
+        if reply.get("refs"):
+            bot_entry["refs"] = reply["refs"]
+        history.append(bot_entry)
         keep = app.config.get("CHAT_HISTORY_MAX_ENTRIES", 40)
         session["chat_history"] = history[-keep:]
 
@@ -218,16 +249,22 @@ def register(app: Flask) -> None:
         # append the final transcript entry without hitting the
         # ``RuntimeError: Working outside of request context`` trap.
         history_keep = app.config.get("CHAT_HISTORY_MAX_ENTRIES", 40)
+        # ADR 0003 T8: what the caller may retrieve over (None with
+        # PLATFORM_SEARCH off — the stream is then exactly as before).
+        scope = _search_scope(resolve_active_project())
 
         def _append_history(user_msg: str, reply_dict: dict) -> None:
             history = session.get("chat_history", [])
             history.append({"role": "user", "text": user_msg})
-            history.append({
+            entry = {
                 "role": "bot",
                 "text": reply_dict.get("text", ""),
                 "suggestions": reply_dict.get("suggestions", []),
                 "follow_up": reply_dict.get("follow_up", []),
-            })
+            }
+            if reply_dict.get("refs"):
+                entry["refs"] = reply_dict["refs"]
+            history.append(entry)
             session["chat_history"] = history[-history_keep:]
 
         def generate():
@@ -250,6 +287,13 @@ def register(app: Flask) -> None:
             except Exception as exc:  # pragma: no cover — defensive
                 _logger.warning("fast-path failed, falling back: %s", exc)
                 fast = None
+
+            # 1b. A lookup over the caller's own items (T8): a cited list
+            # from the index, no model call. May replace a keyword-matched
+            # ISTQB topic reply, nothing else (see chatbot.search_lookup).
+            lookup = _chatbot_mod.search_lookup(message, lang, scope, fast)
+            if lookup is not None:
+                fast = lookup
 
             if fast is not None:
                 reply_dict = _reply_to_dict(fast)
@@ -319,7 +363,15 @@ def register(app: Flask) -> None:
                 _append_history(message, reply_dict)
                 return
 
-            yield _sse("meta", {"intent": "ai_generic", "lang": lang})
+            # T8: a question about the caller's own items is grounded in
+            # the top retrieved ones; ``refs`` lets the widget link the
+            # ``[[REF]]`` citations as they stream in.
+            grounded = _chatbot_mod.search_grounding(message, scope)
+            refs = dict(grounded.refs) if grounded is not None else {}
+            meta = {"intent": "ai_generic", "lang": lang}
+            if refs:
+                meta["refs"] = refs
+            yield _sse("meta", meta)
 
             stream_model = _llm_models.model_for(
                 "consult", org_id=org_id, user_id=_perm.current_user_id(),
@@ -357,7 +409,13 @@ def register(app: Flask) -> None:
                     # Sprint 4 task 4.4: wrap the user-controlled
                     # message in <user_input> so the persona's
                     # untrusted-input clause can disarm directives.
-                    messages=[{"role": "user", "content": wrap_user_input(message)}],
+                    # T8: plus the retrieved project items when grounded
+                    # (identical to the <user_input>-wrapped message
+                    # otherwise — see chatbot.grounded_user_content).
+                    messages=[{"role": "user",
+                               "content": _chatbot_mod.grounded_user_content(
+                                   message,
+                                   grounded.block if grounded else None)}],
                 ) as stream:
                     for text in stream.text_stream:
                         # Heartbeat if the upstream went quiet — Render's
@@ -410,12 +468,18 @@ def register(app: Flask) -> None:
                     "suggestions": [],
                     "follow_up": [],
                 }
-                _append_history(message, reply_dict)
-                yield _sse("done", {
+                done = {
                     "intent": intent,
                     "suggestions": [],
                     "follow_up": [],
-                })
+                }
+                if refs:
+                    from engine.search.chat_grounding import clean_citations
+                    reply_dict["text"] = clean_citations(full_text, refs)
+                    reply_dict["refs"] = refs
+                    done["refs"] = refs
+                _append_history(message, reply_dict)
+                yield _sse("done", done)
             except GeneratorExit:
                 _logger.info("SSE client disconnected mid-stream")
                 # Meter what was spent before the hang-up. Everything

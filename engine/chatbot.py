@@ -68,6 +68,10 @@ class ChatReply:
     # When the bot is asking clarification questions it sets
     # ``follow_up`` so the UI can show them as quick-reply chips.
     follow_up: list[str] = field(default_factory=list)
+    # ``{ref: url}`` for every ``[[REF]]`` citation in ``text`` (T8): the
+    # widget renders those as links. Empty unless platform search grounded
+    # the reply.
+    refs: dict[str, str] = field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1553,7 +1557,8 @@ def _istqb_reply(topic: str, lang: str) -> ChatReply | None:
 def _ai_respond(message: str, lang: str, *,
                 org_id: str | None = None,
                 project_id: str | None = None,
-                user_id: str | None = None) -> ChatReply | None:
+                user_id: str | None = None,
+                grounding: str | None = None) -> ChatReply | None:
     """Try an Anthropic-backed reply. Returns None on any failure so the
     rule-based dispatcher can take over without the user noticing.
 
@@ -1593,7 +1598,8 @@ def _ai_respond(message: str, lang: str, *,
             # Sprint 4 task 4.4: wrap the user-controlled message in
             # ``<user_input>`` so the persona's untrusted-input clause
             # can disarm any embedded directives.
-            messages=[{"role": "user", "content": wrap_user_input(message)}],
+            messages=[{"role": "user",
+                       "content": grounded_user_content(message, grounding)}],
         )
     except LLMUnavailable as exc:
         _logger.warning("AI chatbot call unavailable, falling back to rules: %s", exc)
@@ -2018,10 +2024,69 @@ def _project_facts_reply(message: str, lang: str,
     return ChatReply(text=text, intent="project_facts")
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Platform search (ADR 0003 T8) — lookups and grounding
+# ═══════════════════════════════════════════════════════════════════
+
+#: Fast-path replies a project lookup may replace. The ISTQB topic and
+#: glossary detectors match a bare keyword ("which tests cover login?" is
+#: ``istqb:types_for_login``); when the caller's own projects hold matching
+#: items, the list is the answer that was asked for. Greetings, the bug
+#: form, mentoring and the guide handlers are never replaced.
+_LOOKUP_MAY_REPLACE = ("istqb",)
+
+
+def grounded_user_content(message: str, grounding: str | None) -> str:
+    """The model's user message: the wrapped question, then (T8) the
+    retrieved project items. Identical to the pre-T8 content when there is
+    no grounding — every call with ``PLATFORM_SEARCH`` off."""
+    content = wrap_user_input(message)
+    if grounding:
+        content = f"{content}\n\n{grounding}"
+    return content
+
+
+def search_lookup(message: str, lang: str, search_scope,
+                  fast: "ChatReply | None" = None) -> ChatReply | None:
+    """A deterministic, cited list of the caller's items for a lookup
+    ("which tests cover login?", "покажи відкриті баги по оплаті") — no
+    LLM call — or ``None``. Declines with no scope, with the flag off, when
+    nothing matched, and when *fast* already holds a reply a lookup must
+    not replace."""
+    if search_scope is None:
+        return None
+    if fast is not None and not str(fast.intent or "").startswith(
+            _LOOKUP_MAY_REPLACE):
+        return None
+    try:
+        from engine.search import chat_grounding
+        hit = chat_grounding.lookup(message, lang, search_scope)
+    except Exception as exc:   # pragma: no cover — never fail a reply
+        _logger.warning("search lookup failed: %s", exc)
+        return None
+    if hit is None:
+        return None
+    return ChatReply(text=hit.text, intent="search_lookup", refs=hit.refs)
+
+
+def search_grounding(message: str, search_scope):
+    """The retrieved-items block for an open project question, or ``None``
+    (see :func:`engine.search.chat_grounding.grounding`)."""
+    if search_scope is None:
+        return None
+    try:
+        from engine.search import chat_grounding
+        return chat_grounding.grounding(message, search_scope)
+    except Exception as exc:   # pragma: no cover — never fail a reply
+        _logger.warning("search grounding failed: %s", exc)
+        return None
+
+
 def respond(message: str, lang: str = "en", *,
             project_id: str | None = None,
             org_id: str | None = None,
-            user_id: str | None = None) -> ChatReply:
+            user_id: str | None = None,
+            search_scope=None) -> ChatReply:
     """Produce a :class:`ChatReply` for ``message``.
 
     Dispatch order:
@@ -2038,10 +2103,20 @@ def respond(message: str, lang: str = "en", *,
     ``org_id`` and ``user_id`` are along for step 4, and for the same
     reason: they are what let the reply be *billed* to somebody. See
     :func:`_ai_respond` for what their absence cost.
+
+    ``search_scope`` (a :class:`engine.search.chat_grounding.ChatScope`,
+    ADR 0003 T8) is what the caller may see. With it and ``PLATFORM_SEARCH``
+    on, a lookup is answered from the index — ahead of step 1's keyword
+    topic detectors, with no model call — and step 4 is grounded in the
+    retrieved items. ``None`` (every caller but the chat routes) is the
+    pre-T8 behaviour exactly.
     """
     raw = (message or "").strip()
 
     fast = try_fast_path(raw, lang)
+    lookup = search_lookup(raw, lang, search_scope, fast)
+    if lookup is not None:
+        return lookup
     if fast is not None:
         return fast
 
@@ -2050,10 +2125,17 @@ def respond(message: str, lang: str = "en", *,
         return facts
 
     # AI-backed reply (Anthropic Claude). Falls through to rule-based on
-    # any failure.
+    # any failure. With platform search on (T8), a question about the
+    # caller's own items carries the top retrieved items as grounding.
+    grounded = search_grounding(raw, search_scope)
     ai = _ai_respond(raw, lang, org_id=org_id, project_id=project_id,
-                     user_id=user_id)
+                     user_id=user_id,
+                     grounding=grounded.block if grounded else None)
     if ai is not None:
+        if grounded is not None:
+            from engine.search.chat_grounding import clean_citations
+            ai.text = clean_citations(ai.text, grounded.refs)
+            ai.refs = dict(grounded.refs)
         return ai
 
     return rule_based_fallback(raw, lang)
@@ -2062,13 +2144,19 @@ def respond(message: str, lang: str = "en", *,
 def respond_dict(message: str, lang: str = "en", *,
                  project_id: str | None = None,
                  org_id: str | None = None,
-                 user_id: str | None = None) -> dict:
-    """JSON-ready wrapper used by the Flask route."""
+                 user_id: str | None = None,
+                 search_scope=None) -> dict:
+    """JSON-ready wrapper used by the Flask route. ``refs`` (T8) is present
+    only when the reply cites retrieved items, so the pre-T8 shape is
+    unchanged everywhere else."""
     r = respond(message, lang, project_id=project_id, org_id=org_id,
-                user_id=user_id)
-    return {
+                user_id=user_id, search_scope=search_scope)
+    out = {
         "text": r.text,
         "intent": r.intent,
         "suggestions": r.suggestions,
         "follow_up": r.follow_up,
     }
+    if r.refs:
+        out["refs"] = dict(r.refs)
+    return out

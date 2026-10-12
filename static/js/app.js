@@ -203,7 +203,25 @@ function applyStatusColor(select) {
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
         }[c]));
     }
-    function mdToHtml(s) {
+    /* [[REF]] citations (ADR 0003 T8): a ref the server retrieved —
+       present in `refs` ({ref: url}) with a same-origin path — becomes a
+       link; anything else is shown as its plain text. Runs on the
+       already-escaped HTML, so the ref text and the URL are escaped. */
+    function linkRefs(html, refs) {
+        return html.replace(/\[\[([^\[\]\n]{1,80})\]\]/g, (m, ref) => {
+            const key = ref.trim();
+            const url = refs && Object.prototype.hasOwnProperty.call(refs, key)
+                ? String(refs[key] || '') : '';
+            if (url && url.charAt(0) === '/' && url.charAt(1) !== '/') {
+                return '<a class="qa-chat-ref" href="' + escapeHtml(url) + '">' + ref + '</a>';
+            }
+            return ref;
+        });
+    }
+    function mdToHtml(s, refs) {
+        return linkRefs(mdToHtmlBase(s), refs);
+    }
+    function mdToHtmlBase(s) {
         // Italics were never handled, so every single-asterisk and
         // underscore emphasis reached the user as literal punctuation —
         // "— *EP (verbatim):*" from the guide replies, and the
@@ -227,10 +245,10 @@ function applyStatusColor(select) {
     }
     function scrollBottom() { body.scrollTop = body.scrollHeight; }
 
-    function renderMessage(role, text, chips) {
+    function renderMessage(role, text, chips, refs) {
         const msg = document.createElement('div');
         msg.className = 'qa-chat-msg ' + role;
-        msg.innerHTML = mdToHtml(text);
+        msg.innerHTML = mdToHtml(text, refs);
         body.appendChild(msg);
 
         if (Array.isArray(chips) && chips.length) {
@@ -402,7 +420,7 @@ function applyStatusColor(select) {
             const chips = (data.follow_up && data.follow_up.length)
                 ? data.follow_up
                 : (data.suggestions || []);
-            renderMessage('bot', data.text || '...', chips);
+            renderMessage('bot', data.text || '...', chips, data.refs);
             if (data.intent === 'bug_form') {
                 renderBugForm();
             }
@@ -413,7 +431,8 @@ function applyStatusColor(select) {
 
     /* SSE streaming path — same contract as /chat but tokens arrive
        progressively. Frame protocol:
-         event: meta   {intent, lang}             — before first delta
+         event: meta   {intent, lang, refs?}      — before first delta
+                       (refs = {ref: url}: [[REF]] citations to link, T8)
          event: delta  {text}                     — per token chunk
          event: full   {text, intent, ...}        — fast-path single shot
          event: done   {intent, suggestions, ...} — terminal frame
@@ -434,6 +453,7 @@ function applyStatusColor(select) {
             let receivedAny = false;
             let finalIntent = '';
             let finalChips = [];
+            let refs = null;    // {ref: url} — T8 citations, from meta/full/done
 
             function ensureBotEl() {
                 if (botEl) return botEl;
@@ -443,12 +463,16 @@ function applyStatusColor(select) {
                 return botEl;
             }
             function applyText(text) {
-                ensureBotEl().innerHTML = mdToHtml(text);
+                ensureBotEl().innerHTML = mdToHtml(text, refs);
                 scrollBottom();
             }
 
-            es.addEventListener('meta', () => {
+            es.addEventListener('meta', (ev) => {
                 receivedAny = true;
+                try {
+                    const d = JSON.parse(ev.data);
+                    if (d && d.refs) refs = d.refs;
+                } catch (e) { /* tolerate an empty meta frame */ }
                 // Show a placeholder bot bubble so the user gets immediate feedback.
                 ensureBotEl();
             });
@@ -468,6 +492,7 @@ function applyStatusColor(select) {
                 receivedAny = true;
                 try {
                     const d = JSON.parse(ev.data);
+                    if (d.refs) refs = d.refs;
                     plainBuf = d.text || '';
                     applyText(plainBuf);
                     if (d.intent) finalIntent = d.intent;
@@ -485,6 +510,10 @@ function applyStatusColor(select) {
                         ? d.follow_up
                         : (d && d.suggestions) || [];
                     if (chips && chips.length) finalChips = chips;
+                    if (d && d.refs) {
+                        refs = d.refs;
+                        if (plainBuf) applyText(plainBuf);
+                    }
                 } catch (e) { /* tolerate empty done frame */ }
                 es.close();
                 // Render chip row (if any) attached after the streamed bubble.
