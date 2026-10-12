@@ -357,6 +357,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # `-m network` still collects every file under tests/, and the
+          # tests/test_mcp_* modules import the `mcp` package at collection
+          # time — without it they ERROR before any network test runs.
+          pip install -r mcp_server/requirements.txt
           pip install pytest
 
       # Same annotation shape as the other steps, as warnings: a failure
