@@ -177,7 +177,10 @@ class Actor:
         self.page.fill('input[name="email"]', self.email)
         self.page.fill('input[name="password"]', PASSWORD)
         self.page.click('button[type="submit"]')
-        self.page.wait_for_selector("text=Sign out", timeout=WAIT)
+        # "attached", not visible: at phone width Sign out lives in the
+        # closed sidebar drawer, and its presence is what proves the login.
+        self.page.wait_for_selector("text=Sign out", state="attached",
+                                    timeout=WAIT)
         return self
 
     # — reading —

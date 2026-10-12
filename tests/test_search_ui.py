@@ -216,6 +216,9 @@ class TestFlagRead:
         monkeypatch.setenv("PLATFORM_SEARCH", "1")
         monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
         monkeypatch.setenv("PLATFORM_SEARCH_AI", "1")
+        # Called outside a request: with auth on, nobody is signed in and
+        # the context is None by design — this test is about the flag only.
+        monkeypatch.setenv("AUTH_ENABLED", "0")
         assert _ui.ai_enabled() is True
         assert _ui.search_ui_context() == {"ai": True}
         monkeypatch.setenv("PLATFORM_SEARCH_AI", "0")
