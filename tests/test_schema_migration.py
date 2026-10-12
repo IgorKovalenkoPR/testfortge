@@ -371,3 +371,251 @@ class TestDdlPortability:
             base = re.sub(r"\(\d+\)$", "", declared)
             assert base in ("TEXT", "VARCHAR", "INTEGER", "BOOLEAN",
                             "FLOAT", "REAL"), declared
+
+
+# ── Platform search schema (ADR 0003 §4.1, §4.12, §7.2) ───────────────
+
+def _is_pg(engine) -> bool:
+    return engine.dialect.name == "postgresql"
+
+
+def _pg_scalar(engine, sql: str):
+    with engine.connect() as conn:
+        return conn.execute(text(sql)).scalar()
+
+
+def _vector_column_type(engine):
+    return _pg_scalar(
+        engine,
+        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+        "WHERE attrelid = to_regclass('search_vector') "
+        "AND attname = 'embedding' AND NOT attisdropped")
+
+
+class TestSearchSchema:
+    """``search_doc`` / ``search_scope_state`` on both engines, plus the
+    Postgres-only FTS column and the pgvector table, with and without the
+    extension.
+
+    CI's service image is ``pgvector/pgvector:pg16``, so the extension is
+    *available* there; the no-extension path is produced by dropping it and
+    pointing the CREATE EXTENSION statement at one that does not exist —
+    the same "statement fails inside the migration" a managed database
+    without the privilege gives, on the real engine.
+    """
+
+    def test_tables_exist_with_the_adr_columns(self, fresh_engine):
+        cols = _columns("search_doc")
+        for column in ("id", "doc_key", "scope", "org_id", "project_id",
+                       "kind", "ref", "chunk_no", "title", "body", "lang",
+                       "lex_title", "lex_body", "url", "facets",
+                       "content_hash", "vec_version", "vec_blob",
+                       "source_updated_at", "indexed_at"):
+            assert column in cols, column
+        for column in ("scope_key", "version", "indexed_at", "doc_count",
+                       "provider", "vec_version", "last_error", "vocab_json"):
+            assert column in _columns("search_scope_state"), column
+
+    def test_caps_are_published_at_boot(self, fresh_engine):
+        from engine import search
+        assert search.caps["checked"] is True
+        assert search.caps["backend"] == fresh_engine.dialect.name
+        assert search.caps["provider"] == "hash"
+        if _is_pg(fresh_engine):
+            assert search.caps["fts"] is True
+            assert "tsv" in _columns("search_doc")
+        else:
+            assert search.caps["fts"] is False
+            assert search.caps["pgvector"] is False
+            assert "tsv" not in _columns("search_doc")
+
+    def test_running_it_twice_is_a_no_op(self, fresh_engine):
+        from engine import search
+        before = (_columns("search_doc"), dict(search.caps))
+        _db._ensure_search_schema(fresh_engine)
+        _db._ensure_search_schema(fresh_engine)
+        assert (_columns("search_doc"), dict(search.caps)) == before
+
+    def test_detect_caps_agrees_with_what_the_migration_published(
+            self, fresh_engine):
+        from engine import search
+        published = dict(search.caps)
+        detected = search.detect_caps(fresh_engine, publish=False)
+        for key in ("fts", "pgvector", "pgvector_version", "backend"):
+            assert detected[key] == published[key], key
+
+    def test_a_doc_round_trips_and_cascades_with_its_project(self,
+                                                             fresh_engine):
+        from engine.search.embed import from_blob, get_embedder, to_blob
+        vec = get_embedder("hash").embed("не можу увійти")
+        pid = _db.upsert_project("search-cascade")
+        with _db.session_scope() as sess:
+            sess.add(_db.SearchDoc(
+                doc_key=f"project:{pid}:bug:BUG-1:0", scope="project",
+                project_id=pid, kind="bug", ref="BUG-1", title="Login fails",
+                lang="mixed", lex_title="login fail", lex_body="вхід login",
+                facets={"status": "open"}, vec_version="hash-v1.1-288",
+                vec_blob=to_blob(vec)))
+        with _db.session_scope() as sess:
+            row = sess.query(_db.SearchDoc).one()
+            assert from_blob(row.vec_blob) == vec
+            assert row.facets == {"status": "open"}
+        if _is_pg(fresh_engine):
+            # The generated tsvector is filled from the lexical columns.
+            assert _pg_scalar(
+                fresh_engine,
+                "SELECT count(*) FROM search_doc "
+                "WHERE tsv @@ to_tsquery('simple', 'login')") == 1
+        _db.delete_project(pid)
+        with _db.session_scope() as sess:
+            assert sess.query(_db.SearchDoc).count() == 0
+
+    def test_doc_key_is_unique(self, fresh_engine):
+        from sqlalchemy.exc import IntegrityError
+        with _db.session_scope() as sess:
+            sess.add(_db.SearchDoc(doc_key="global:-:guide:x:0",
+                                   scope="global", kind="guide", ref="x"))
+        with pytest.raises(IntegrityError):
+            with _db.session_scope() as sess:
+                sess.add(_db.SearchDoc(doc_key="global:-:guide:x:0",
+                                       scope="global", kind="guide", ref="x"))
+
+    # -- Postgres with the extension -----------------------------------
+
+    def test_with_the_extension_search_vector_and_hnsw_exist(
+            self, fresh_engine):
+        if not _is_pg(fresh_engine):
+            pytest.skip("pgvector is Postgres-only")
+        from engine import search
+        if not _pg_scalar(fresh_engine, "SELECT count(*) FROM "
+                          "pg_available_extensions WHERE name = 'vector'"):
+            pytest.skip("this Postgres has no pgvector build available "
+                        "(CI uses pgvector/pgvector:pg16)")
+        assert search.caps["pgvector"] is True
+        assert search.caps["pgvector_version"]
+        assert _vector_column_type(fresh_engine) == "vector(288)"
+        assert _pg_scalar(fresh_engine,
+                          "SELECT count(*) FROM pg_indexes WHERE "
+                          "indexname = 'ix_search_vector_hnsw'") == 1
+
+    def test_a_wrong_dimension_vector_table_is_rebuilt(self, fresh_engine):
+        from engine import search
+        if not _is_pg(fresh_engine) or not search.caps["pgvector"]:
+            pytest.skip("needs Postgres with pgvector")
+        with fresh_engine.begin() as conn:
+            conn.execute(text("DROP TABLE search_vector"))
+            conn.execute(text(
+                "CREATE TABLE search_vector (doc_id INTEGER PRIMARY KEY, "
+                "project_id VARCHAR(32), embedding vector(3))"))
+        _db._ensure_search_schema(fresh_engine)
+        assert _vector_column_type(fresh_engine) == "vector(288)"
+        assert search.caps["pgvector"] is True
+
+    def test_drop_all_is_not_blocked_by_search_vector(self, fresh_engine):
+        """search_vector is raw DDL with a FK into search_doc; without the
+        before_drop hook Postgres refuses ``drop_all`` with
+        DependentObjectsStillExist — and every destructive test file's
+        teardown would fail with it."""
+        _db.Base.metadata.drop_all(fresh_engine)
+        assert not _columns("search_doc")
+        if _is_pg(fresh_engine):
+            assert not _pg_scalar(
+                fresh_engine, "SELECT to_regclass('search_vector') IS NOT NULL")
+        _db.Base.metadata.create_all(fresh_engine)
+
+    # -- Postgres without the extension --------------------------------
+
+    def test_without_the_extension_boot_survives_and_reports_lexical(
+            self, fresh_engine, monkeypatch):
+        if not _is_pg(fresh_engine):
+            pytest.skip("the extension path is Postgres-only")
+        from engine import search
+        with fresh_engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS search_vector"))
+            conn.execute(text("DROP EXTENSION IF EXISTS vector CASCADE"))
+        monkeypatch.setattr(_db, "_PGVECTOR_CREATE_SQL",
+                            "CREATE EXTENSION IF NOT EXISTS "
+                            "tfg_no_such_extension")
+
+        _db._ensure_search_schema(fresh_engine)          # must not raise
+
+        assert search.caps["pgvector"] is False
+        assert search.caps["pgvector_version"] is None
+        assert search.caps["fts"] is True               # FTS needs no extension
+        assert not _pg_scalar(
+            fresh_engine, "SELECT to_regclass('search_vector') IS NOT NULL")
+        # The failed CREATE EXTENSION ran in a savepoint: the schema is still
+        # usable for ordinary writes.
+        pid = _db.upsert_project("search-no-extension")
+        with _db.session_scope() as sess:
+            sess.add(_db.SearchDoc(doc_key=f"project:{pid}:bug:BUG-2:0",
+                                   scope="project", project_id=pid,
+                                   kind="bug", ref="BUG-2",
+                                   lex_title="payment"))
+        assert search.detect_caps(fresh_engine, publish=False)[
+            "pgvector"] is False
+
+
+def _sqlalchemy_error():
+    from sqlalchemy.exc import OperationalError
+    return OperationalError("SELECT 1", {}, Exception("permission denied"))
+
+
+class _BrokenConn:
+    def __enter__(self):
+        raise _sqlalchemy_error()
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _BrokenPostgres:
+    """An engine that claims to be Postgres and fails every statement."""
+
+    class dialect:  # noqa: N801 — mimics Engine.dialect
+        name = "postgresql"
+
+    def begin(self):
+        return _BrokenConn()
+
+    def connect(self):
+        return _BrokenConn()
+
+
+class TestSearchSchemaNeverFailsTheBoot:
+    """Engine-free, so it runs on every machine, including one with no
+    Postgres server: a Postgres whose every statement fails (no privileges,
+    a connection dropped mid-boot) must leave init_db standing and report
+    the lexical-only capability record."""
+
+    def test_a_failing_postgres_is_survived(self, monkeypatch):
+        import sqlalchemy
+        from engine import search
+
+        def _refuse(_engine):
+            raise _sqlalchemy_error()
+
+        monkeypatch.setattr(sqlalchemy, "inspect", _refuse)
+        try:
+            _db._ensure_search_schema(_BrokenPostgres())  # must not raise
+            assert search.caps["backend"] == "postgresql"
+            assert search.caps["fts"] is False
+            assert search.caps["pgvector"] is False
+            assert search.detect_caps(_BrokenPostgres())["pgvector"] is False
+        finally:
+            search.reset_caps()
+
+    def test_sqlite_reports_no_fts_and_no_pgvector(self, tmp_path):
+        from sqlalchemy import create_engine
+        from engine import search
+        engine = create_engine(f"sqlite:///{tmp_path / 'caps.db'}")
+        try:
+            _db.Base.metadata.create_all(engine)
+            _db._ensure_search_schema(engine)
+            assert (search.caps["fts"], search.caps["pgvector"],
+                    search.caps["backend"]) == (False, False, "sqlite")
+            assert search.detect_caps(engine, publish=False)[
+                "pgvector"] is False
+        finally:
+            engine.dispose()
+            search.reset_caps()

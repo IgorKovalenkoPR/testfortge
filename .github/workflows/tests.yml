@@ -21,9 +21,18 @@ jobs:
     # Postgres and the ALTERs are hand-written SQL, so verifying them only
     # on SQLite verifies them on the wrong engine. Free in Actions, and it
     # means every push checks the upgrade path a deploy will actually take.
+    #
+    # pgvector/pgvector:pg16 rather than postgres:16-alpine (ADR 0003 §7.2):
+    # the same Postgres 16 with the `vector` extension *available*, so the
+    # search migration's "extension present" path — search_vector + HNSW —
+    # runs on every push. The "extension missing" path is not lost by this:
+    # tests/test_schema_migration.py::TestSearchSchema drops the extension
+    # and points the CREATE EXTENSION statement at one that does not exist,
+    # which is the real failure a managed database without the privilege
+    # produces, on the real engine.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: tfg
           POSTGRES_PASSWORD: tfg

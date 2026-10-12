@@ -33,8 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, String,
-                        Text, UniqueConstraint,
+from sqlalchemy import (DDL, Boolean, DateTime, Float, ForeignKey, Index,
+                        Integer, LargeBinary, String, Text, UniqueConstraint,
                         create_engine, delete, event, func, select, text,
                         update)
 from sqlalchemy.engine import Engine
@@ -284,6 +284,7 @@ def init_db() -> None:
     # already collide (E4.4a).
     _renumber_duplicate_public_ids(engine)
     _ensure_public_id_unique_indexes(engine)
+    _ensure_search_schema(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -779,6 +780,149 @@ def _ensure_public_id_unique_indexes(engine: Engine) -> None:
                                 table, project_id, external_id, count)
             except SQLAlchemyError:      # pragma: no cover — diagnostics only
                 pass
+
+
+#: The statement that enables pgvector. A module constant, not inline, so
+#: the no-extension test can point it at an extension that does not exist
+#: and exercise the real failure path on a real Postgres — the CI image
+#: ships pgvector, and the account there is a superuser, so the genuine
+#: "no privilege" failure cannot be produced any other way.
+_PGVECTOR_CREATE_SQL = "CREATE EXTENSION IF NOT EXISTS vector"
+
+#: Logged once per process: every gunicorn boot would otherwise repeat it.
+_PGVECTOR_UNAVAILABLE_LOGGED = False
+
+_SEARCH_TSV_DDL = (
+    "ALTER TABLE search_doc ADD COLUMN tsv tsvector GENERATED ALWAYS AS ("
+    "setweight(to_tsvector('simple', coalesce(lex_title, '')), 'A') || "
+    "setweight(to_tsvector('simple', coalesce(lex_body, '')), 'B')) STORED")
+
+
+def _ensure_search_schema(engine: Engine) -> None:
+    """The Postgres-only parts of the search schema — ADR 0003 §4.1, §4.12.
+
+    ``create_all`` has already made ``search_doc`` and ``search_scope_state``
+    on both engines. This adds what SQLAlchemy cannot express portably, and
+    publishes :data:`engine.search.caps`:
+
+    * **FTS (any Postgres):** a generated ``tsv`` column over the stored
+      lexical forms, plus its GIN index. No extension needed.
+    * **pgvector (when available):** ``CREATE EXTENSION IF NOT EXISTS
+      vector`` inside a SAVEPOINT — on a managed database the role usually
+      lacks the privilege, and a failed statement must not poison the
+      transaction or the boot. If ``pg_extension`` then lists ``vector``,
+      ``search_vector`` and its HNSW index are created. A ``search_vector``
+      whose dimension no longer matches the active embedder is dropped and
+      recreated empty (it is a derived copy of ``search_doc.vec_blob``; the
+      backfill refills it, and search runs lexical in between).
+    * **SQLite:** nothing beyond ``create_all``; the vectors live in
+      ``vec_blob`` and are compared in Python.
+
+    Never raises — a missing extension is the expected state on many hosts
+    and is logged once at info level; anything else is a warning. The
+    other ``_ensure_*`` helpers make the same promise, and for the same
+    reason: search is an optional feature and must not stop the app booting.
+    """
+    global _PGVECTOR_UNAVAILABLE_LOGGED
+    from engine import search as _search
+
+    try:
+        backend = engine.dialect.name
+    except Exception:   # noqa: BLE001 — a mock engine in a test
+        backend = None
+    if backend != "postgresql":
+        _search.publish_caps(fts=False, pgvector=False,
+                             pgvector_version=None, backend=backend)
+        return
+
+    fts = False
+    pgvector = False
+    version: str | None = None
+
+    # 1. Full-text search: generated tsvector + GIN.
+    try:
+        from sqlalchemy import inspect as _inspect
+        existing = {c["name"] for c in
+                    _inspect(engine).get_columns("search_doc")}
+        if "tsv" not in existing:
+            with engine.begin() as conn:
+                log.info("search migration: adding search_doc.tsv")
+                conn.execute(text(_SEARCH_TSV_DDL))
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_search_doc_tsv "
+                "ON search_doc USING GIN (tsv)"))
+        fts = True
+    except SQLAlchemyError as exc:
+        log.warning("search migration: full-text column/index failed: %s",
+                    exc)
+
+    # 2. pgvector: the extension, then the derived vector table.
+    try:
+        from engine.search.embed import active_dims
+        dims = active_dims()
+        with engine.begin() as conn:
+            try:
+                with conn.begin_nested():
+                    conn.execute(text(_PGVECTOR_CREATE_SQL))
+            except SQLAlchemyError as exc:
+                if not _PGVECTOR_UNAVAILABLE_LOGGED:
+                    _PGVECTOR_UNAVAILABLE_LOGGED = True
+                    log.info(
+                        "search: the pgvector extension could not be enabled "
+                        "(%s). Search will use Python vector scoring or "
+                        "lexical mode; an admin can run CREATE EXTENSION "
+                        "vector at any time.",
+                        str(exc).splitlines()[0] if str(exc) else exc)
+            version = conn.execute(text(
+                "SELECT extversion FROM pg_extension "
+                "WHERE extname = 'vector'")).scalar()
+            if version:
+                current = conn.execute(text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) "
+                    "FROM pg_attribute a "
+                    "WHERE a.attrelid = to_regclass('search_vector') "
+                    "AND a.attname = 'embedding' AND NOT a.attisdropped"
+                )).scalar()
+                wanted = f"vector({dims})"
+                if current and current != wanted:
+                    log.warning(
+                        "search: search_vector is %s, the active embedder "
+                        "needs %s — dropping it; run the search backfill "
+                        "(--to-pgvector) to refill it", current, wanted)
+                    conn.execute(text("DROP TABLE search_vector"))
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS search_vector ("
+                    "doc_id INTEGER PRIMARY KEY "
+                    "REFERENCES search_doc(id) ON DELETE CASCADE, "
+                    "project_id VARCHAR(32), "
+                    f"embedding vector({int(dims)}) NOT NULL)"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_search_vector_project "
+                    "ON search_vector (project_id)"))
+                # HNSW arrived in pgvector 0.5.0. On an older extension the
+                # table still works with an exact scan, so this one index
+                # failing is not a reason to report pgvector unavailable.
+                try:
+                    with conn.begin_nested():
+                        conn.execute(text(
+                            "CREATE INDEX IF NOT EXISTS ix_search_vector_hnsw "
+                            "ON search_vector USING hnsw "
+                            "(embedding vector_cosine_ops) "
+                            "WITH (m = 16, ef_construction = 64)"))
+                except SQLAlchemyError as exc:
+                    log.warning("search: HNSW index not created (pgvector "
+                                "%s): %s — exact scans only", version, exc)
+                pgvector = True
+    except SQLAlchemyError as exc:
+        log.warning("search migration: pgvector setup failed: %s", exc)
+        pgvector = False
+    except Exception as exc:   # noqa: BLE001 — boot must not fail on search
+        log.warning("search migration: unexpected error: %s", exc)
+        pgvector = False
+
+    _search.publish_caps(fts=fts, pgvector=pgvector,
+                         pgvector_version=version, backend=backend)
 
 
 def _ensure_case_result_source_column(engine: Engine) -> None:
@@ -1946,6 +2090,100 @@ class AuditLog(Base):
     diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                           default=_utcnow, index=True)
+
+
+# ── Platform search (ADR 0003 §4.1) ────────────────────────────────
+
+class SearchDoc(Base):
+    """One indexed chunk of a platform entity — the source of truth for
+    search (ADR 0003 §4.1).
+
+    Portable on purpose: everything here works on SQLite. Postgres gets two
+    derived extras from :func:`_ensure_search_schema` that the ORM never
+    reads — a generated ``tsv`` tsvector column (+ GIN) and, when the
+    ``vector`` extension exists, the ``search_vector`` table. Both are
+    rebuilt from this row, so either can be dropped at any time.
+
+    ``vec_blob`` is the embedding as float32 bytes (``embed.to_blob``) and
+    is what the SQLite / no-extension fallback reads; ``vec_version`` says
+    which embedder produced it, and a vector whose version differs from the
+    active one is never compared.
+
+    ``doc_key`` (``"{scope}:{project_id|-}:{kind}:{ref}:{chunk_no}"``) is the
+    upsert key, unique on both engines — SQLite treats NULLs in a unique
+    index as distinct, which is why the project id is spelled into the key
+    rather than relied on in a composite constraint.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True,
+                                     autoincrement=True)
+    doc_key: Mapped[str] = mapped_column(String(200), nullable=False,
+                                          unique=True)
+    scope: Mapped[str] = mapped_column(String(10), nullable=False)
+    # Denormalised from project.org_id; no FK, like Project.org_id itself.
+    org_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    ref: Mapped[str] = mapped_column(String(60), nullable=False)
+    chunk_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                           server_default="0")
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lang: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    lex_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lex_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    facets: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(40),
+                                                      nullable=True)
+    vec_version: Mapped[str | None] = mapped_column(String(24),
+                                                     nullable=True)
+    vec_blob: Mapped[bytes | None] = mapped_column(LargeBinary,
+                                                    nullable=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_search_doc_project_kind", "project_id", "kind"),
+    )
+
+
+class SearchScopeState(Base):
+    """Index bookkeeping per scope — a project id, or ``"global"``.
+
+    ``version`` is bumped on every index change (the answer cache and the
+    "stale" check compare it); ``vocab_json`` holds the top terms the
+    "did you mean" corrector works from (≤20k).
+    """
+    scope_key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                          server_default="0")
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    doc_count: Mapped[int] = mapped_column(Integer, nullable=False,
+                                            default=0, server_default="0")
+    provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vec_version: Mapped[str | None] = mapped_column(String(24),
+                                                     nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vocab_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+# ``search_vector`` is raw DDL (the ``vector`` type has no SQLAlchemy type
+# here) holding a foreign key into ``search_doc``. ``metadata.drop_all``
+# does not know it exists, so on Postgres it would refuse to drop
+# ``search_doc`` with DependentObjectsStillExist — the failure that turned
+# the CI matrix red for four days when ``auth_token`` was added (see
+# tests/test_migration_populated_copy.py). Dropping the derived table first
+# keeps every drop_all in the suite, and any operator's, working.
+event.listen(
+    SearchDoc.__table__, "before_drop",
+    DDL("DROP TABLE IF EXISTS search_vector").execute_if(
+        dialect="postgresql"))
 
 
 # ── Identity / tenancy helpers ─────────────────────────────────────

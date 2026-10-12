@@ -38,7 +38,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import threading
 from collections import Counter
 from dataclasses import dataclass
@@ -84,25 +83,13 @@ MAX_EXCERPT_WORDS = 60
 
 
 # ── Tokeniser (UA + EN) ────────────────────────────────────────────
-
-# Allow word characters from both Latin and Cyrillic alphabets.
-_TOKEN = re.compile(r"[A-Za-zЀ-ӿ][A-Za-z0-9Ѐ-ӿ\-]{1,}",
-                     re.UNICODE)
-
-# Stop-words that drown out signal in BM25. Kept short — broad
-# stop-word lists actually hurt recall on terminology-heavy queries.
-_STOPWORDS: frozenset[str] = frozenset({
-    "the", "a", "an", "is", "are", "of", "to", "and", "or", "in",
-    "for", "on", "at", "with", "by", "as", "be", "it", "from", "this",
-    "that", "these", "those", "what", "which", "how",
-    "є", "та", "і", "у", "в", "що", "як", "це", "до", "на", "по",
-    "the", "of",
-})
-
-
-def _tokenize(text: str) -> list[str]:
-    return [t.lower() for t in _TOKEN.findall(text or "")
-            if t.lower() not in _STOPWORDS]
+#
+# Moved to engine/search/text.py so platform search and this retriever
+# share one definition (ADR 0003 §4.5). Re-bound under the old private
+# names: behaviour is identical, and so is every caller's import.
+from engine.search.text import ISTQB_STOPWORDS as _STOPWORDS  # noqa: E402
+from engine.search.text import TOKEN_RE as _TOKEN  # noqa: E402,F401
+from engine.search.text import tokenize as _tokenize  # noqa: E402
 
 
 # ── Index ──────────────────────────────────────────────────────────
