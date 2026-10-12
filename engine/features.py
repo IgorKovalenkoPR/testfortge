@@ -118,8 +118,9 @@ FLAGS: dict[str, Flag] = {
         Flag(
             "PLATFORM_SEARCH", False, "E13",
             "Platform-wide search (ADR 0003): the indexing hooks, the "
-            "background index of the Guide and the ISTQB syllabus, and — "
-            "once they land — /api/search, /api/hints and the search "
+            "background index of the Guide and the ISTQB syllabus, "
+            "/api/search, /api/hints, /api/search/status and "
+            "/api/search/reindex, and — once T7 lands — the search "
             "field. Requires WORKSPACE_DB_FIRST: the index reads the "
             "project's rows in Postgres, and with the session as the "
             "source of truth it would index a copy nobody is looking at. "

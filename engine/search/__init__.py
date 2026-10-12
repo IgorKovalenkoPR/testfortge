@@ -5,7 +5,9 @@ the foundation only: text processing (:mod:`engine.search.text`), the
 deterministic embedder (:mod:`engine.search.embed`), the lexicons, and the
 capability record below. T4 adds the indexer
 (:mod:`engine.search.indexer`) and the ORM hooks that keep it current
-(:mod:`engine.search.hooks`); retrieval and endpoints come later.
+(:mod:`engine.search.hooks`); T5 the query pipeline
+(:mod:`engine.search.retrieve`) and contextual hints (:mod:`engine.search.hints`)
+behind `routes/search.py`.
 
 Kept import-light on purpose. ``import engine.search`` must not pull in
 NumPy, onnxruntime or any database driver (ADR 0003 §4.11, guarded by

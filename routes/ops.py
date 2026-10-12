@@ -142,7 +142,20 @@ def register(app: Flask) -> None:
             "status": "ok" if ok else "degraded",
             "checks": checks,
             "uptime_seconds": round(time.time() - _boot_ts, 1),
+            "search": _search_caps(),
         }), status_code
+
+    def _search_caps() -> dict:
+        """Search capabilities (ADR 0003 §4.10) — informational only: a
+        missing extension is a supported state and never fails readiness.
+        Infrastructure facts, no user data, like the rest of this probe."""
+        try:
+            from engine.search import caps, provider_name
+            return {"fts": bool(caps.get("fts")),
+                    "pgvector": bool(caps.get("pgvector")),
+                    "provider": provider_name()}
+        except Exception:   # noqa: BLE001 — a probe must not 500
+            return {"fts": False, "pgvector": False, "provider": None}
 
     @app.route("/metrics", methods=["GET"])
     def metrics():

@@ -590,3 +590,55 @@ class TestPgvectorMirror:
         sql, params = sent[0]
         assert "INSERT INTO search_vector" in sql and "ON CONFLICT" in sql
         assert params == {"id": 7, "pid": "pid", "emb": "[1.0,0.0]"}
+
+
+# ── "Did you mean" vocabulary (T5) ───────────────────────────────────
+
+class TestVocabulary:
+    def test_reindex_stores_words_with_document_frequency(self, search_on):
+        pid = _project()
+        _db.save_test_cases(pid, [TC, dict(TC, id="TC-002",
+                                           summary="Login works on mobile")])
+        indexer.reindex_project(pid)
+        vocab = _state(pid)["vocab"]
+        assert vocab["v"] == indexer.VOCAB_VERSION
+        terms = vocab["terms"]
+        assert terms["login"] == 2            # words, counted per document
+        assert terms["mobile"] == 1
+        assert "the" not in terms and "001" not in terms
+
+    def test_an_unchanged_pass_does_not_rebuild_it(self, search_on,
+                                                   monkeypatch):
+        pid = _project()
+        _db.save_test_cases(pid, [TC])
+        indexer.reindex_project(pid)
+
+        def boom(_f):
+            raise AssertionError("vocabulary rebuilt on an unchanged pass")
+        monkeypatch.setattr(indexer, "build_vocab", boom)
+        indexer.reindex_project(pid)
+
+    def test_a_change_rebuilds_it(self, search_on):
+        pid = _project()
+        _db.save_test_cases(pid, [TC])
+        indexer.reindex_project(pid)
+        _db.save_test_cases(pid, [dict(TC, summary="Checkout with coupon")])
+        indexer.reindex_project(pid)
+        terms = _state(pid)["vocab"]["terms"]
+        assert "coupon" in terms and "fails" not in terms
+
+    def test_a_scope_indexed_before_vocabularies_gets_one(self, search_on):
+        pid = _project()
+        _db.save_test_cases(pid, [TC])
+        indexer.reindex_project(pid)
+        with _db.session_scope() as sess:
+            sess.get(SearchScopeState, pid).vocab_json = None
+        indexer.reindex_project(pid)           # nothing changed …
+        assert "login" in _state(pid)["vocab"]["terms"]   # … but rebuilt
+
+    def test_capped(self, search_on, monkeypatch):
+        monkeypatch.setattr(indexer, "VOCAB_MAX", 3)
+        pid = _project()
+        _db.save_test_cases(pid, [TC])
+        indexer.reindex_project(pid)
+        assert len(_state(pid)["vocab"]["terms"]) == 3

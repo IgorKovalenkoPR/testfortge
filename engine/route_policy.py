@@ -312,6 +312,16 @@ POLICY: dict[str, str] = {
 
     # ── Metrics ───────────────────────────────────────────────────
     "metrics_history_route": "user",
+
+    # ── Platform search (ADR 0003 §4.8) ───────────────────────────
+    # Searching and hints are ordinary member work; the routes scope every
+    # query to the caller's visible projects (engine/search/retrieve.py).
+    # Index state and reindexing are operator/admin work: the status
+    # exposes counts and errors, and a reindex spends the worker's CPU.
+    "api_search": "user",
+    "api_hints": "user",
+    "api_search_status": "admin",
+    "api_search_reindex": "admin",
 }
 
 
