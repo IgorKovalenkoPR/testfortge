@@ -171,6 +171,47 @@ class TestTwoRunsDoNotShareAnything:
 
     @pytest.mark.skipif(os.environ.get(CHILD_MARKER) == "1",
                         reason="this IS the second process")
+    def test_a_pytest_started_from_a_worker_leaves_its_files_alone(self):
+        """A test that runs ``pytest`` in a subprocess hands it this
+        process's environment — ``PYTEST_XDIST_WORKER`` included.
+
+        The run root used to be named after the worker alone, and conftest
+        wipes its run root at import. So the child of ``gw1`` computed
+        ``gw1``'s root and deleted it under the running worker: on Linux the
+        open connections kept the unlinked database while new ones opened
+        the child's empty one. Measured on CI, 2026-10-12, after
+        tests/test_level_markers_unit.py ran: sign-ins answering 401 and
+        500 in test_load_smoke and rows vanishing in the files after it, on
+        whichever worker it landed. Windows refuses to delete an open file,
+        so it never showed locally.
+
+        The child gets the worker id that would have named *our* root; a
+        file left in the root is the witness, because ``rmtree`` removes a
+        closed file on every platform.
+        """
+        if not os.environ.get("TESTFORTGE_DB"):
+            pytest.skip("this run is on a server database")
+        # conftest puts the scratch database at <run root>/scratch.db and
+        # names the root testfortge-pytest-<token>.
+        root = pathlib.Path(os.environ["TESTFORTGE_DB"]).parent
+        token = root.name[len("testfortge-pytest-"):]
+        witness = root / "isolation-witness.txt"
+        witness.write_text("still here", encoding="utf-8")
+        try:
+            theirs = _second_run(
+                PYTEST_XDIST_WORKER=(os.environ.get("PYTEST_XDIST_WORKER")
+                                     or token))
+            assert witness.exists(), (
+                f"a pytest started from this process deleted its run root "
+                f"{root} -- every worker file after it would run on a "
+                f"database that is not the one its connections hold")
+            shared = _shared_with(theirs)
+            assert not shared, f"the child shares {shared} with its parent"
+        finally:
+            witness.unlink(missing_ok=True)
+
+    @pytest.mark.skipif(os.environ.get(CHILD_MARKER) == "1",
+                        reason="this IS the second process")
     def test_the_database_is_not_the_developers_own(self):
         """The older half of the same rule, kept explicit.
 

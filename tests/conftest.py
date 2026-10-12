@@ -61,9 +61,18 @@ os.environ.setdefault("FLASK_DEBUG", "1")
 # find regressions, and it rules out ``pytest-xdist`` and any background
 # run while you work.
 #
-# ``PYTEST_XDIST_WORKER`` first so an xdist worker is isolated from its
-# siblings rather than from the controller only; the pid otherwise.
-_RUN_TOKEN = os.environ.get("PYTEST_XDIST_WORKER") or f"pid-{os.getpid()}"
+# ``PYTEST_XDIST_WORKER`` so an xdist worker is isolated from its siblings
+# rather than from the controller only — and **always the pid as well**. A
+# test that runs ``pytest`` in a subprocess hands it this environment,
+# worker id included; named after the worker alone, the child computed the
+# worker's own root and the ``rmtree`` below deleted it under the running
+# worker (CI, 2026-10-12: tests/test_level_markers_unit.py, then 401/500
+# sign-ins and vanished rows on that worker; Windows refuses to delete an
+# open file, so it never showed locally). See
+# test_suite_isolation::test_a_pytest_started_from_a_worker_leaves_its_files_alone.
+_WORKER = os.environ.get("PYTEST_XDIST_WORKER")
+_RUN_TOKEN = (f"{_WORKER}-pid-{os.getpid()}" if _WORKER
+              else f"pid-{os.getpid()}")
 _RUN_ROOT = os.path.join(tempfile.gettempdir(),
                          f"testfortge-pytest-{_RUN_TOKEN}")
 
