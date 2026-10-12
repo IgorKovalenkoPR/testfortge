@@ -8,6 +8,7 @@ Covers:
   * get() returns None for unknown ids
 """
 
+import threading
 import time
 
 import pytest
@@ -149,7 +150,17 @@ class TestShutdown:
 
     def test_shutdown_waits_when_requested(self):
         q = JobQueue(max_workers=1)
-        jid = q.submit("unit", lambda: "finished")
+        started = threading.Event()
+
+        def _job():
+            started.set()
+            time.sleep(0.05)
+            return "finished"
+
+        jid = q.submit("unit", _job)
+        # In flight first: shutdown cancels jobs that have not started, so
+        # without this the test would race the worker and not test waiting.
+        assert started.wait(5)
         q.shutdown(wait=True)
         # With wait=True, the in-flight job must complete before shutdown
         # returns, so the result is observable immediately without polling.

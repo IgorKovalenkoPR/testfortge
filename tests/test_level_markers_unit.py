@@ -9,6 +9,7 @@ select nothing and pass.
 from __future__ import annotations
 
 import configparser
+import os
 import pathlib
 import subprocess
 import sys
@@ -76,11 +77,15 @@ def test_every_level_and_network_is_registered():
 
 
 def _collect(*args: str) -> list[str]:
+    # CI sets PYTEST_ADDOPTS="-n auto ... -m 'not network'": inherited, its
+    # ``-n`` is unrecognised under ``-p no:xdist`` and its ``-m`` would
+    # override the selection under test. The child gets only *args*.
+    env = {k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"}
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q",
          "-p", "no:cacheprovider", "-p", "no:xdist", *args],
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
-        timeout=300)
+        timeout=300, env=env)
     assert out.returncode in (0, 5), out.stdout[-2000:] + out.stderr[-2000:]
     return [line for line in out.stdout.splitlines() if "::" in line]
 
