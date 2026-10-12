@@ -255,6 +255,9 @@ jobs:
             sed -n '/short test summary info/,$p' /tmp/suite.txt \
               | grep -E "^(FAILED|ERROR)" | head -40 \
               | while IFS= read -r line; do echo "::error::$line"; done || true
+            # A test green alone and red here was broken by what ran
+            # before it on its worker; name those files.
+            python .github/scripts/xdist_neighbours.py /tmp/suite.txt || true
             exit 1
           }
 
