@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -52,6 +53,11 @@ log = get_logger(__name__)
 
 _engine: Engine | None = None
 _Session: sessionmaker | None = None
+# init_db is lazy (get_engine / session_scope call it while _engine is
+# None), so two threads can arrive together; without this both ran
+# create_all on one new database and the loser raised "table … already
+# exists". Re-entrant because the _ensure_* helpers may call back in.
+_INIT_LOCK = threading.RLock()
 
 
 #: ``scheme://`` at the front of a URL.
@@ -265,6 +271,14 @@ def init_db() -> None:
     global _engine, _Session
     if _engine is not None:
         return
+    with _INIT_LOCK:
+        if _engine is not None:       # built while we waited
+            return
+        _init_db_locked()
+
+
+def _init_db_locked() -> None:
+    global _engine, _Session
     url = database_url()
     _assert_prod_safety(url)
     log.info("Initialising DB engine: %s",

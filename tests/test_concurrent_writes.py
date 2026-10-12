@@ -77,3 +77,68 @@ def test_concurrent_writes_no_database_locked(fresh_db):
     # Sanity: rows actually landed.
     counts = db.count_records()
     assert counts["projects"] >= expected_total
+
+
+def test_two_threads_initialising_at_once_build_one_schema(tmp_path,
+                                                           monkeypatch):
+    """``init_db`` is lazy — ``get_engine`` / ``session_scope`` call it when
+    ``_engine`` is None — so two threads arriving together both ran
+    ``create_all`` against the same new file, and the loser raised
+    ``table test_case already exists``. Seen on CI, 2026-10-12, as an ERROR
+    in the fixture above: a background thread left by an earlier test
+    reached the database while the fixture was building its own.
+
+    The interleaving is forced, not hoped for: the first ``create_all``
+    waits until the second thread has had every chance to start its own.
+    """
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'race.db'}")
+    monkeypatch.delenv("TESTFORTGE_DB", raising=False)
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_Session", None)
+
+    real_create_all = db.Base.metadata.create_all
+    calls: list[int] = []
+    second_started = threading.Event()
+
+    def slow_create_all(*args, **kwargs):
+        calls.append(threading.get_ident())
+        if len(calls) == 1:
+            second_started.wait(timeout=5)
+            # Give the second thread time to reach create_all if nothing
+            # stops it; with the lock it is parked on init_db instead.
+            threading.Event().wait(0.3)
+        return real_create_all(*args, **kwargs)
+
+    monkeypatch.setattr(db.Base.metadata, "create_all", slow_create_all)
+
+    errors: list[BaseException] = []
+
+    def first():
+        try:
+            db.init_db()
+        except BaseException as exc:   # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    def second():
+        second_started.set()
+        try:
+            db.init_db()
+        except BaseException as exc:   # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    t1 = threading.Thread(target=first)
+    t1.start()
+    while not calls:                  # first is inside create_all
+        threading.Event().wait(0.01)
+    t2 = threading.Thread(target=second)
+    t2.start()
+    t1.join(10)
+    t2.join(10)
+    try:
+        assert not errors, f"concurrent init raised: {errors!r}"
+        assert len(calls) == 1, f"create_all ran {len(calls)} times"
+        assert db._engine is not None and db._Session is not None
+    finally:
+        if db._engine is not None:
+            db._engine.dispose()
