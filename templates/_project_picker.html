@@ -80,8 +80,7 @@
         </select>
         <button type="submit" id="pp-switch-btn"
                 {% if not projects %}disabled{% endif %}
-                class="btn btn-secondary"
-                style="padding:6px 14px;font-size:0.9em;">
+                class="btn btn-sm btn-secondary">
           {{ t.get('pp_switch', 'Switch') }}
         </button>
       </form>
@@ -100,11 +99,12 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ picker_next|default(request.path, true) }}">
         <input type="text" name="project_name" required
+               aria-label="{{ t.get('pp_new_placeholder', 'New project name…') }}"
                placeholder="{{ t.get('pp_new_placeholder', 'New project name…') }}"
                style="flex:1;min-width:160px;padding:6px 10px;
                       border:1px solid #cbd5e1;border-radius:4px;">
-        <button type="submit" class="btn btn-primary"
-                style="padding:6px 14px;font-size:0.9em;white-space:nowrap;">
+        <button type="submit" class="btn btn-sm btn-primary"
+                style="white-space:nowrap;">
           + {{ t.get('pp_create', 'Create') }}
         </button>
       </form>

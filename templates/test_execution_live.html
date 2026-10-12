@@ -70,7 +70,7 @@
                       word-break:break-word;"></p>
         </div>
         <a id="te-live-early-exit-import" href="#"
-           class="btn btn-secondary" style="font-size:0.85em;">
+           class="btn btn-sm btn-secondary">
             {{ t.tl_import_partial_btn }}
         </a>
     </div>
@@ -83,13 +83,13 @@
     <div id="live-toolbar"
          style="position:absolute;top:10px;right:10px;display:flex;gap:8px;z-index:5;">
         <button type="button" id="live-pause"
-                class="btn btn-secondary" style="padding:6px 14px;font-size:0.8em;">
+                class="btn btn-sm btn-secondary">
             <i data-lucide="pause" class="icon-sm"></i>
             <span id="live-pause-label">{{ t.get('te_live_pause', 'Pause') }}</span>
         </button>
         <a href="{{ url_for('test_execution_live_frame') }}"
            target="_blank" rel="noopener"
-           class="btn btn-secondary" style="padding:6px 14px;font-size:0.8em;">
+           class="btn btn-sm btn-secondary">
             <i data-lucide="external-link" class="icon-sm"></i>
             {{ t.get('te_live_open_tab', 'Open frame in new tab') }}
         </a>
@@ -118,8 +118,8 @@
         {{ t.get('te_live_help_body',
            'Live view only updates while a Playwright run is in progress. Make sure you set a Base URL on the Test Execution page before clicking Run — without it the simulator runs and no frames are captured.') }}
     </p>
-    <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary"
-       style="margin-top:8px;font-size:0.85em;">
+    <a href="{{ url_for('test_execution_page') }}" class="btn btn-sm btn-secondary"
+       style="margin-top:8px;">
         {{ t.get('te_live_help_back', 'Back to Test Execution') }}
     </a>
 </div>
@@ -148,7 +148,7 @@
             </p>
         </div>
         <a href="{{ url_for('test_execution_page') }}"
-           class="btn btn-primary" style="font-size:0.9em;">
+           class="btn btn-sm btn-primary">
             ▶️ {{ t.get('te_live_idle_cta',
                 'Go to Test Execution →') }}
         </a>
@@ -177,31 +177,31 @@
                 <td style="padding:6px 8px;font-family:monospace;">{{ run.run_id }}</td>
                 <td style="padding:6px 8px;">
                     {% if run.status == 'done' %}
-                    <span style="color:#16a34a;font-weight:600;">✓ {{ t.tl_done }}</span>
+                    <span style="color:var(--badge-green);font-weight:600;">✓ {{ t.tl_done }}</span>
                     {% elif run.status == 'running' %}
                     <span style="color:#0369a1;">● {{ t.te_running }}</span>
                     {% elif run.status == 'stalled' %}
                     <span style="color:#b91c1c;font-weight:600;">⚠ {{ t.tl_stalled }}</span>
                     {% else %}
-                    <span style="color:#94a3b8;">{{ t.tl_queued }}</span>
+                    <span style="color:var(--text-subtle);">{{ t.tl_queued }}</span>
                     {% endif %}
                 </td>
                 <td style="padding:6px 8px;">{{ run.age_s }}{{ t.tl_ago }}</td>
                 <td style="padding:6px 8px;">
                     {% if run.status == 'done' %}
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
-                       class="btn btn-primary" style="padding:4px 10px;font-size:0.8em;">
+                       class="btn btn-sm btn-primary">
                        {{ t.te_import }}
                     </a>
                     {% elif run.status == 'stalled' %}
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
-                       class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;"
+                       class="btn btn-sm btn-secondary"
                        title="{{ t.tl_died }}">
                        {{ t.tl_import_partial }}
                     </a>
                     {% else %}
                     <a href="{{ url_for('test_execution_live') }}?run_id={{ run.run_id }}"
-                       class="btn btn-secondary" style="padding:4px 10px;font-size:0.8em;">
+                       class="btn btn-sm btn-secondary">
                        {{ t.tl_watch }}
                     </a>
                     {% endif %}
@@ -304,8 +304,8 @@
                         // gracefully handles missing/incomplete
                         // result.json by flashing a warning.
                         var btn = '<a href="' + resultsUrl
-                            + '" class="btn btn-secondary" '
-                            + 'style="margin-top:8px;font-size:0.85em;">'
+                            + '" class="btn btn-sm btn-secondary" '
+                            + 'style="margin-top:8px;">'
                             + 'Try to import partial results</a>';
                         p.innerHTML = '<strong>' + heading + '</strong>'
                             + '<p style="margin:6px 0 0 0;font-size:0.88em;">'

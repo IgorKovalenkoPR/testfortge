@@ -23,7 +23,7 @@
 <div id="est-gen-overlay" class="te-run-overlay" hidden role="alertdialog"
      aria-busy="true" aria-live="polite">
     <div class="te-run-card">
-        <h3>{{ t.get('est_gen_title', 'Computing estimation…') }}</h3>
+        <h2 class="heading-3">{{ t.get('est_gen_title', 'Computing estimation…') }}</h2>
         <p id="est-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
             {{ t.get('est_gen_stage_init', 'Analyzing input…') }}
         </p>
@@ -43,29 +43,29 @@
     {# Project name on its own block — block-level form-group spans the
        full card width, so the placeholder is never clipped. #}
     <div class="form-group">
-      <label>{{ t.est_project_name }}</label>
-      <input type="text" name="project_name" value="{{ last.project_name or '' }}"
+      <label for="f-project-name">{{ t.est_project_name }}</label>
+      <input id="f-project-name" type="text" name="project_name" value="{{ last.project_name or '' }}"
              placeholder="{{ t.est_project_name_ph }}" style="width:100%">
     </div>
     <div class="form-row form-row-4">
       <div class="form-group">
-        <label>{{ t.est_additional_platforms }}</label>
-        <input type="number" name="additional_platforms" min="0" max="{{ limits.additional_platforms }}" step="1"
+        <label for="f-additional-platforms">{{ t.est_additional_platforms }}</label>
+        <input id="f-additional-platforms" type="number" name="additional_platforms" min="0" max="{{ limits.additional_platforms }}" step="1"
                value="{{ last.additional_platforms or 9 }}">
       </div>
       <div class="form-group">
-        <label>{{ t.est_minutes_per_tc }}</label>
-        <input type="number" name="minutes_per_tc" min="1" max="{{ limits.minutes_per_tc }}" step="1"
+        <label for="f-minutes-per-tc">{{ t.est_minutes_per_tc }}</label>
+        <input id="f-minutes-per-tc" type="number" name="minutes_per_tc" min="1" max="{{ limits.minutes_per_tc }}" step="1"
                value="{{ last.minutes_per_tc or 5 }}">
       </div>
       <div class="form-group">
-        <label>{{ t.est_buffer }}</label>
-        <input type="number" name="buffer_percent" min="0" max="{{ limits.buffer_percent }}" step="1"
+        <label for="f-buffer-percent">{{ t.est_buffer }}</label>
+        <input id="f-buffer-percent" type="number" name="buffer_percent" min="0" max="{{ limits.buffer_percent }}" step="1"
                value="{{ last.buffer_percent or 12 }}">
       </div>
       <div class="form-group">
-        <label>{{ t.est_primary_platform }}</label>
-        <input type="text" name="primary_platform" value="{{ last.primary_platform or 'Windows 10' }}">
+        <label for="f-primary-platform">{{ t.est_primary_platform }}</label>
+        <input id="f-primary-platform" type="text" name="primary_platform" value="{{ last.primary_platform or 'Windows 10' }}">
       </div>
     </div>
 
@@ -76,26 +76,26 @@
     </p>
     <div class="form-row">
       <div class="form-group">
-        <label>{{ t.get('est_compat_rate', 'Compatibility rate, %') }}</label>
-        <input type="number" name="compatibility_rate" min="0" max="10" step="0.05"
+        <label for="f-compatibility-rate">{{ t.get('est_compat_rate', 'Compatibility rate, %') }}</label>
+        <input id="f-compatibility-rate" type="number" name="compatibility_rate" min="0" max="10" step="0.05"
                value="{{ last.compatibility_rate if last.compatibility_rate is defined else 0.3 }}">
         <small>{{ t.get('est_compat_rate_hint', 'Per extra platform (default 0.3%).') }}</small>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_bug_rate', 'Bug reporting rate, %') }}</label>
-        <input type="number" name="bug_report_rate" min="0" max="100" step="1"
+        <label for="f-bug-report-rate">{{ t.get('est_bug_rate', 'Bug reporting rate, %') }}</label>
+        <input id="f-bug-report-rate" type="number" name="bug_report_rate" min="0" max="100" step="1"
                value="{{ last.bug_report_rate if last.bug_report_rate is defined else 15 }}">
         <small>{{ t.get('est_bug_rate_hint', 'Share of Functional+Regression (default 15%).') }}</small>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_pm_overhead', 'PM overhead, %') }}</label>
-        <input type="number" name="pm_overhead" min="0" max="50" step="1"
+        <label for="f-pm-overhead">{{ t.get('est_pm_overhead', 'PM overhead, %') }}</label>
+        <input id="f-pm-overhead" type="number" name="pm_overhead" min="0" max="50" step="1"
                value="{{ last.pm_overhead if last.pm_overhead is defined else 8 }}">
         <small>{{ t.get('est_pm_overhead_hint', 'Project management share (default 8%).') }}</small>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_max_stretch', 'MAX stretch (× MIN)') }}</label>
-        <input type="number" name="max_testing_stretch" min="1" max="3" step="0.05"
+        <label for="f-max-testing-stretch">{{ t.get('est_max_stretch', 'MAX stretch (× MIN)') }}</label>
+        <input id="f-max-testing-stretch" type="number" name="max_testing_stretch" min="1" max="3" step="0.05"
                value="{{ last.max_testing_stretch if last.max_testing_stretch is defined else 1.5 }}">
         <small>{{ t.get('est_max_stretch_hint', 'How much MAX exceeds MIN (default 1.5×).') }}</small>
       </div>
@@ -125,6 +125,7 @@
           </button>
         </div>
         <input type="number" name="team_size" id="ts-input"
+               aria-label="{{ t.est_team_size }}"
                min="1" max="50" step="1"
                value="{{ last.team_size or last.suggested_team_size or 1 }}"
                style="display:none;">
@@ -192,13 +193,13 @@
            'Paste the spec, user stories, or a feature list. The estimator parses bullet points, tables, and free-form prose. You can also attach a .docx / .pdf / .xlsx with the same contents — it will be merged with the textarea below.') }}
       </p>
       <div class="form-group">
-        <label>{{ t.get('est_text_input_label', 'Paste requirements') }}</label>
-        <textarea name="text_input" rows="6" style="width:100%;font-family:inherit;"
+        <label for="f-text-input">{{ t.get('est_text_input_label', 'Paste requirements') }}</label>
+        <textarea id="f-text-input" name="text_input" rows="6" style="width:100%;font-family:inherit;"
                   placeholder="{{ t.est_source_text_ph }}">{{ last.text_input or '' }}</textarea>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_text_attachment_label', 'Or attach a document') }}</label>
-        <input type="file" name="attachment"
+        <label for="f-attachment">{{ t.get('est_text_attachment_label', 'Or attach a document') }}</label>
+        <input id="f-attachment" type="file" name="attachment"
                accept=".txt,.md,.csv,.xlsx,.docx,.pdf">
         <small class="hint">{{ t.get('est_text_attachment_hint',
           'Supported: .txt, .md, .csv, .xlsx, .docx, .pdf. The file is parsed for text only.') }}</small>
@@ -230,19 +231,19 @@
             {{ t.est_diag_title }}
           </strong>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#10b981' if mockup_env.anthropic_key else '#ef4444' }};color:white;">
+                       background:{{ '#0F7B5A' if mockup_env.anthropic_key else '#ef4444' }};color:white;">
             ANTHROPIC_API_KEY: {{ t.est_diag_set if mockup_env.anthropic_key else t.est_diag_missing }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#10b981' if mockup_env.pdf2image_ok else '#94a3b8' }};color:white;">
+                       background:{{ '#0F7B5A' if mockup_env.pdf2image_ok else '#4B5563' }};color:white;">
             pdf2image: {{ t.est_diag_installed if mockup_env.pdf2image_ok else t.est_diag_absent }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#10b981' if mockup_env.poppler_ok else '#94a3b8' }};color:white;">
+                       background:{{ '#0F7B5A' if mockup_env.poppler_ok else '#4B5563' }};color:white;">
             poppler: {{ t.est_diag_installed if mockup_env.poppler_ok else t.est_diag_absent }}
           </span>
           <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#10b981' if mockup_env.figma_pat else '#94a3b8' }};color:white;">
+                       background:{{ '#0F7B5A' if mockup_env.figma_pat else '#4B5563' }};color:white;">
             FIGMA_PAT: {{ t.est_diag_set if mockup_env.figma_pat else t.est_diag_cover_only }}
           </span>
           {# Admin-only: ``estimation_diag`` is "admin" in route_policy, and
@@ -278,23 +279,23 @@
       {% endif %}
 
       <div class="form-group">
-        <label>{{ t.get('est_mockups_files_label', 'Upload mockups (one or many)') }}</label>
-        <input type="file" name="mockup_files" multiple
+        <label for="f-mockup-files">{{ t.get('est_mockups_files_label', 'Upload mockups (one or many)') }}</label>
+        <input id="f-mockup-files" type="file" name="mockup_files" multiple
                accept=".png,.jpg,.jpeg,.webp,.pdf">
         <small class="hint">{{ t.get('est_mockups_files_hint',
           'PNG / JPG / WebP / PDF. PDFs are split into one image per page. Up to 20 images per run.') }}</small>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_mockups_figma_label', 'Or a Figma URL') }}</label>
-        <input type="url" name="figma_url"
+        <label for="f-figma-url">{{ t.get('est_mockups_figma_label', 'Or a Figma URL') }}</label>
+        <input id="f-figma-url" type="url" name="figma_url"
                placeholder="https://www.figma.com/file/..."
                value="{{ last.figma_url or '' }}">
         <small class="hint">{{ t.get('est_mockups_figma_hint',
           'Public Figma file or frame URL. The cover image is fetched and analysed; for richer extraction add the file ID to FIGMA_PAT in env.') }}</small>
       </div>
       <div class="form-group">
-        <label>{{ t.get('est_mockups_context_label', 'Optional context') }}</label>
-        <textarea name="mockup_context" rows="3" style="width:100%;font-family:inherit;"
+        <label for="f-mockup-context">{{ t.get('est_mockups_context_label', 'Optional context') }}</label>
+        <textarea id="f-mockup-context" name="mockup_context" rows="3" style="width:100%;font-family:inherit;"
                   placeholder="{{ t.get('est_mockups_context_ph', 'e.g. \"This is the checkout flow for an e-commerce app — focus on payment validation.\"') }}">{{ last.mockup_context or '' }}</textarea>
       </div>
     </div>
@@ -306,8 +307,8 @@
            'Paste the production / staging URL. The estimator crawls the site, identifies pages and forms, infers the architecture (CMS, SPA, e-commerce, …), and produces an effort breakdown.') }}
       </p>
       <div class="form-group">
-        <label>{{ t.est_source_url }}</label>
-        <input type="url" name="url" style="width:100%;"
+        <label for="f-url">{{ t.est_source_url }}</label>
+        <input id="f-url" type="url" name="url" style="width:100%;"
                placeholder="https://example.com" value="{{ last.url or '' }}">
       </div>
     </div>

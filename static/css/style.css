@@ -313,7 +313,8 @@ a:hover { text-decoration: underline; }
 .form-row-2 > .form-group { flex: 1; }
 .form-row-3 > .form-group { flex: 1; }
 
-input[type="text"], textarea, select {
+input[type="text"], input[type="url"], input[type="email"],
+input[type="password"], input[type="search"], textarea, select {
     width: 100%;
     padding: .6rem .8rem;
     border: 1px solid var(--border);
@@ -1048,7 +1049,7 @@ input[type="number"]:focus {
     grid-template-columns: 1fr 1fr;
     gap: 2rem;
 }
-.chart-block h4 {
+.chart-block h4, .chart-block h3.heading-4 {
     font-size: .85rem;
     text-transform: uppercase;
     color: var(--text-muted);
@@ -1510,7 +1511,9 @@ input[type="search"]:focus, textarea:focus, select:focus {
     gap: var(--space-2);
     min-height: var(--control-md);
     padding: 0 var(--space-4);
-    border: 1px solid transparent;
+    border: 1px solid var(--border-control);   /* variant-less .btn = secondary look */
+    background: #FFFFFF;
+    color: var(--tf-ink);
     border-radius: var(--tf-radius-pill);
     font-family: var(--tf-font-heading);
     font-size: 14px;
@@ -1543,15 +1546,15 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .btn-group  { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .btn-groups { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 
-.btn-primary       { background: var(--accent); color: #FFFFFF; box-shadow: var(--tf-shadow-sm); }
+.btn-primary       { background: var(--accent); color: #FFFFFF; border-color: transparent; }
 .btn-primary:hover { background: var(--accent-hover); color: #FFFFFF; }
 
 .btn-secondary     { background: #FFFFFF; color: var(--tf-ink); border: 1px solid var(--border-control); }
 .btn-secondary:hover { background: var(--tf-line-2); color: var(--tf-ink); }
 
-.btn-success       { background: var(--success); color: #FFFFFF; }
+.btn-success       { background: var(--success); color: #FFFFFF; border-color: transparent; }
 .btn-success:hover { background: var(--success-hover); color: #FFFFFF; }
-.btn-danger        { background: var(--danger); color: #FFFFFF; }
+.btn-danger        { background: var(--danger); color: #FFFFFF; border-color: transparent; }
 .btn-danger:hover  { background: var(--danger-hover); color: #FFFFFF; }
 
 /* Ghost: a quiet button that still looks like one. Link: an action
@@ -1571,7 +1574,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .btn-link:hover    { color: var(--accent-hover); }
 .btn-link:disabled { color: var(--text-subtle); cursor: default; }
-.btn-export        { background: #111111; color: #FFFFFF; }
+.btn-export        { background: #111111; color: #FFFFFF; border-color: transparent; }
 .btn-export:hover  { background: #2A2A2A; }
 
 
@@ -2148,7 +2151,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
     border-radius:14px;max-width:460px;text-align:center;
     box-shadow:0 16px 40px rgba(0,0,0,.35);
 }
-.te-run-card h3{margin:0 0 8px;font-size:18px;font-weight:700}
+.te-run-card h3, .te-run-card h2.heading-3{margin:0 0 8px;font-size:18px;font-weight:700}
 .te-run-card p{margin:0 0 16px;font-size:14px;color:#4B5563;line-height:1.5}
 .te-run-card .te-eta{
     display:block;margin-top:8px;font-size:13px;color:var(--accent);
@@ -3260,3 +3263,179 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
     width: 100%;
     box-sizing: border-box;
 }
+
+/* ── Test Execution page (moved from test_execution.html) ─────────
+   Scoped with :where() so specificity is unchanged from the old
+   in-page <style> block. Its page-wide .btn-sm override is gone —
+   buttons there use the shared size scale now. */
+:where(.page-test-execution) .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+:where(.page-test-execution) .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+:where(.page-test-execution) .form-row .form-group { flex: 1; }
+:where(.page-test-execution) .form-group { margin-bottom: 12px; }
+:where(.page-test-execution) .form-group label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9em; }
+:where(.page-test-execution) .form-group select, :where(.page-test-execution) .form-group input[type="text"], :where(.page-test-execution) .form-group textarea { width: 100%; padding: 8px; border: 1px solid var(--border-control); border-radius: 6px; font-size: 0.9em; }
+:where(.page-test-execution) .tester-select { width: 100%; padding: 10px; border: 1px solid var(--border-control); border-radius: 6px; font-size: 0.95em; }
+:where(.page-test-execution) .checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+:where(.page-test-execution) .checkbox-card { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border-control); border-radius: 6px; cursor: pointer; font-size: 0.9em; }
+:where(.page-test-execution) .checkbox-card:hover { border-color: var(--primary); }
+:where(.page-test-execution) .checkbox-card input:checked + span { font-weight: 600; color: var(--primary); }
+:where(.page-test-execution) .radio-card { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border: 2px solid var(--border-control); border-radius: 8px; cursor: pointer; font-size: 1em; margin-right: 12px; }
+:where(.page-test-execution) .radio-card:hover { border-color: var(--primary); }
+:where(.page-test-execution) .radio-card input:checked + span { font-weight: 600; }
+:where(.page-test-execution) .radio-card input { display: none; }
+:where(.page-test-execution) .radio-card:has(input:checked) { border-color: var(--primary); background: var(--primary-light, #f0f0ff); }
+/* Resource URLs */
+:where(.page-test-execution) .resource-urls-card { background: #f8fafe; }
+:where(.page-test-execution) .url-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+:where(.page-test-execution) .url-chip { display: inline-block; padding: 6px 14px; background: white; border: 1px solid var(--primary); border-radius: 20px; color: var(--primary); font-size: 0.85em; text-decoration: none; word-break: break-all; }
+:where(.page-test-execution) .url-chip:hover { background: var(--primary); color: white; }
+/* Item selection */
+:where(.page-test-execution) .item-select-list { max-height: 460px; overflow-y: auto; border: 1px solid #e8eaf0; border-radius: 8px; padding: 8px; }
+:where(.page-test-execution) .item-section-label { font-weight: 700; color: var(--primary); padding: 8px 6px 4px; font-size: 0.85em; border-bottom: 1px solid #e8eaf0; margin-bottom: 4px; }
+:where(.page-test-execution) .item-select-row { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 4px; font-size: 0.88em; flex-wrap: wrap; }
+:where(.page-test-execution) .item-select-row:hover { background: #f4f5f7; }
+:where(.page-test-execution) .item-id { font-weight: 700; color: var(--primary); min-width: 78px; font-size: 0.85em; }
+:where(.page-test-execution) .item-summary { flex: 1; min-width: 220px; }
+:where(.page-test-execution) .item-badge { font-size: 0.75em; padding: 2px 8px; border-radius: 10px; }
+:where(.page-test-execution) .item-status-select { width: 110px; padding: 4px 6px; border: 1px solid var(--border-control); border-radius: 4px; font-size: 0.82em; background: #fff; }
+:where(.page-test-execution) .item-status-select:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+:where(.page-test-execution) .item-bug-input { width: 110px; padding: 4px 8px; border: 1px solid var(--border-control); border-radius: 4px; font-size: 0.82em; }
+:where(.page-test-execution) .item-bug-input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
+:where(.page-test-execution) .select-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+/* Test Run cards */
+:where(.page-test-execution) .run-card { margin-bottom: 16px; padding: 0; overflow: hidden; }
+:where(.page-test-execution) .run-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #f8f9fb; cursor: pointer; flex-wrap: wrap; gap: 8px; }
+:where(.page-test-execution) .run-header:hover { background: #eef0f5; }
+:where(.page-test-execution) .run-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+:where(.page-test-execution) .run-meta { font-size: 0.82em; color: var(--text-subtle); }
+:where(.page-test-execution) .run-stats-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+:where(.page-test-execution) .run-stat { font-size: 0.85em; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+:where(.page-test-execution) .run-stat.stat-passed { color: var(--badge-green); background: #f0fdf4; }
+:where(.page-test-execution) .run-stat.stat-failed { color: var(--badge-red); background: #fef2f2; }
+:where(.page-test-execution) .run-stat.stat-blocked { color: var(--badge-amber); background: #fffbeb; }
+:where(.page-test-execution) .run-rate { color: var(--primary); background: #eff6ff; }
+:where(.page-test-execution) .run-bugs { color: var(--danger); }
+:where(.page-test-execution) .run-toggle { font-size: 0.8em; color: var(--text-subtle); margin-left: 4px; }
+:where(.page-test-execution) .run-details { padding: 0 18px 14px; }
+/* Results table */
+:where(.page-test-execution) .results-table { width: 100%; border-collapse: collapse; font-size: 0.85em; margin-top: 8px; }
+:where(.page-test-execution) .results-table th { background: #f0f1f5; padding: 7px 10px; text-align: left; font-size: 0.85em; font-weight: 700; color: #4B5563; }
+:where(.page-test-execution) .results-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+:where(.page-test-execution) .result-row.result-failed { background: #fef8f8; }
+:where(.page-test-execution) .result-row.result-blocked { background: #fffcf0; }
+:where(.page-test-execution) .item-summary-cell { font-size: 0.88em; }
+:where(.page-test-execution) .comment-cell { font-size: 0.82em; color: var(--text-subtle); max-width: 250px; }
+/* Status badges */
+:where(.page-test-execution) .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.82em; font-weight: 700; }
+:where(.page-test-execution) .status-passed { color: var(--badge-green); background: #f0fdf4; border: 1px solid #bbf7d0; }
+:where(.page-test-execution) .status-failed { color: var(--badge-red); background: #fef2f2; border: 1px solid #fca5a5; }
+:where(.page-test-execution) .status-blocked { color: var(--badge-amber); background: #fffbeb; border: 1px solid #fcd34d; }
+/* Bug link */
+:where(.page-test-execution) .bug-link { color: var(--danger); font-weight: 700; font-size: 0.85em; text-decoration: none; }
+:where(.page-test-execution) .bug-link:hover { text-decoration: underline; }
+:where(.page-test-execution) .stat-passed { color: var(--badge-green); font-weight: 600; }
+:where(.page-test-execution) .stat-failed { color: var(--danger); font-weight: 600; }
+:where(.page-test-execution) .stat-blocked { color: var(--badge-amber); font-weight: 600; }
+:where(.page-test-execution) .hint { color: var(--text-subtle); font-size: 0.85em; margin-bottom: 8px; }
+@media (max-width: 768px) {
+    :where(.page-test-execution) .form-grid { grid-template-columns: 1fr; }
+    :where(.page-test-execution) .form-row { flex-direction: column; }
+}
+
+/* ── Bug Reports page (moved from bug_reports.html) ───────────────
+   Scoped with :where() so specificity is unchanged; the page's own
+   .badge redefinition no longer leaks to other pages. */
+:where(.page-bug-reports) .bug-stats-row { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+:where(.page-bug-reports) .bug-stat-card { background: white; border: 2px solid #e8eaf0; border-radius: 10px; padding: 16px 24px; text-align: center; min-width: 100px; }
+:where(.page-bug-reports) .bug-stat-card .stat-value { display: block; font-size: 2em; font-weight: 800; color: var(--primary); }
+:where(.page-bug-reports) .bug-stat-card .stat-label { font-size: 0.85em; color: var(--text-subtle); }
+:where(.page-bug-reports) .bug-stat-card.stat-open .stat-value { color: #2563eb; }
+:where(.page-bug-reports) .bug-stat-card.stat-critical .stat-value { color: var(--danger); }
+:where(.page-bug-reports) .bug-stat-card.stat-major .stat-value { color: var(--badge-orange); }
+:where(.page-bug-reports) .bug-actions { margin-bottom: 20px; }
+:where(.page-bug-reports) .bug-card { border: 2px solid #e8eaf0; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+:where(.page-bug-reports) .bug-card.severity-critical { border-left: 5px solid #dc2626; }
+:where(.page-bug-reports) .bug-card.severity-major { border-left: 5px solid #ea580c; }
+:where(.page-bug-reports) .bug-card.severity-minor { border-left: 5px solid #f59e0b; }
+:where(.page-bug-reports) .bug-card.severity-trivial { border-left: 5px solid #6b7280; }
+:where(.page-bug-reports) .bug-header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: #f8f9fb; flex-wrap: wrap; }
+:where(.page-bug-reports) .bug-id { font-weight: 800; font-size: 1em; color: var(--primary); white-space: nowrap; }
+:where(.page-bug-reports) .bug-title-text { font-weight: 600; font-size: 1em; flex: 1; min-width: 200px; }
+:where(.page-bug-reports) .bug-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+:where(.page-bug-reports) .badge { padding: 3px 10px; border-radius: 12px; font-size: 0.78em; font-weight: 700; }
+:where(.page-bug-reports) .severity-badge-critical { background: #fef2f2; color: var(--badge-red); border: 1px solid #fca5a5; }
+:where(.page-bug-reports) .severity-badge-major { background: #fff7ed; color: var(--badge-orange); border: 1px solid #fdba74; }
+:where(.page-bug-reports) .severity-badge-minor { background: #fffbeb; color: var(--badge-amber); border: 1px solid #fcd34d; }
+:where(.page-bug-reports) .severity-badge-trivial { background: #f3f4f6; color: var(--badge-grey); border: 1px solid #d1d5db; }
+:where(.page-bug-reports) .priority-badge { background: #eff6ff; color: #2563eb; border: 1px solid #93c5fd; }
+:where(.page-bug-reports) .status-badge-open { background: #ecfdf5; color: var(--badge-emerald); border: 1px solid #6ee7b7; }
+:where(.page-bug-reports) .status-badge-in-progress { background: #eff6ff; color: #2563eb; border: 1px solid #93c5fd; }
+:where(.page-bug-reports) .status-badge-resolved { background: #f0fdf4; color: var(--badge-green); border: 1px solid #86efac; }
+:where(.page-bug-reports) .status-badge-closed { background: #f3f4f6; color: var(--badge-grey); border: 1px solid #d1d5db; }
+:where(.page-bug-reports) .status-badge-reopened { background: #fef2f2; color: var(--badge-red); border: 1px solid #fca5a5; }
+:where(.page-bug-reports) .bug-body { padding: 14px 18px; }
+:where(.page-bug-reports) .bug-details-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+:where(.page-bug-reports) .bug-details-table td { padding: 6px 10px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+:where(.page-bug-reports) .bug-details-table .label { font-weight: 600; color: #4B5563; width: 160px; white-space: nowrap; }
+:where(.page-bug-reports) .actual-result { color: var(--danger); font-weight: 500; }
+:where(.page-bug-reports) pre.steps { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.92em; margin: 0; line-height: 1.5; }
+:where(.page-bug-reports) .bug-label { display: inline-block; background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; border-radius: 8px; padding: 1px 8px; font-size: 0.78em; margin-right: 4px; margin-bottom: 2px; }
+:where(.page-bug-reports) .bug-details-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+@media (max-width: 768px) {
+    :where(.page-bug-reports) .bug-stats-row { flex-direction: column; }
+}
+/* Sprint 4 task 4.2 — bulk-edit checkbox + sticky toolbar */
+:where(.page-bug-reports) .bug-checkbox-label { display: inline-flex; align-items: center; cursor: pointer; padding: 2px 4px; }
+:where(.page-bug-reports) .bug-checkbox { width: 18px; height: 18px; cursor: pointer; }
+:where(.page-bug-reports) .bug-select-all { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 0.9em; color: #475569; cursor: pointer; }
+/* PR-H: Reset Project confirm modal. Hidden by default via the
+   ``hidden`` attribute on the wrapper; the JS at the bottom of the
+   template toggles it. Uses ``:not([hidden])`` to scope the flex
+   layout — same specificity pattern PR-A established for the bulk
+   toolbar so the ``hidden`` attribute actually wins over our CSS. */
+:where(.page-bug-reports) .bug-reset-modal[hidden] { display: none !important; }
+:where(.page-bug-reports) .bug-reset-modal:not([hidden]) {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+:where(.page-bug-reports) .bug-reset-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+}
+:where(.page-bug-reports) .bug-reset-modal-panel {
+    position: relative;
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 480px;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+}
+
+/* ── Heading levels vs. heading looks ──────────────────────────────
+   Heading *levels* follow the document outline (no h1 → h3 skips, for
+   screen-reader navigation); where a promoted heading should keep its
+   smaller look it carries .heading-3 / .heading-4. */
+h2.heading-3 {
+    display: block;
+    font-size: 1.17em;
+    font-weight: 600;
+    color: var(--tf-ink-2);
+    margin-bottom: .4rem;
+}
+h2.heading-4, h3.heading-4 {
+    display: block;
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--tf-ink-2);
+}
+
+/* .alert-info is used by the unconfirmed-address banner in base.html
+   but was never defined. */
+.alert-info { background: var(--info-bg); color: #1E40AF; border: 1px solid var(--info-border); }
+

@@ -2089,4 +2089,14 @@ TRANSLATIONS = {
     # member whose address is somehow blank. A key rather than a literal
     # so the sentence does not end up half-translated.
     "om_that_member": "that member",
+    # Accessibility labels (design-tokens pass): the skip link, the
+    # sidebar landmark, and aria-labels for controls that had no
+    # visible <label> to associate with.
+    "skip_to_content": "Skip to main content",
+    "nav_aria": "Main navigation",
+    "bug_bulk_action_label": "Bulk action",
+    "cl_comment_label": "Comment",
+    "tc_step_kind_label": "Step kind",
+    "te_custom_resolution": "Custom resolution",
+    "te_custom_device": "Custom device model",
 }

@@ -24,9 +24,9 @@
 <div class="card" style="margin-bottom:14px;">
     <div style="display:flex;align-items:center;justify-content:space-between;
                 flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-        <h3 style="margin:0;font-size:1.05em;">
+        <h2 class="heading-3" style="margin:0;font-size:1.05em;">
             🕒 {{ t.get('recent_projects_title', 'Recent projects') }}
-        </h3>
+        </h2>
         <small style="color:#64748b;">
             {{ t.get('recent_projects_hint',
                 'Click Open to load a project — your TCs, checklist, bugs, last estimation and run history come back from the database.') }}
@@ -54,13 +54,13 @@
                       style="margin:0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="next" value="{{ url_for('index') }}">
-                    <button type="submit" class="btn btn-secondary"
-                            style="padding:3px 10px;font-size:0.78em;white-space:nowrap;">
+                    <button type="submit" class="btn btn-xs btn-secondary"
+                            style="white-space:nowrap;">
                         {{ t.get('recent_projects_open', 'Open →') }}
                     </button>
                 </form>
                 {% else %}
-                <span style="font-size:0.78em;color:#16a34a;font-weight:600;
+                <span style="font-size:0.78em;color:var(--badge-green);font-weight:600;
                              padding:3px 8px;background:#dcfce7;border-radius:4px;
                              white-space:nowrap;">
                     {{ t.get('recent_projects_active', 'Active') }}
@@ -74,7 +74,7 @@
                 <span>🐞 {{ p.bug_count or 0 }} {{ plural(p.bug_count or 0, "dm_unit_bugs") }}</span>
             </div>
             {% if p.updated_at %}
-            <div style="margin-top:4px;font-size:0.75em;color:#94a3b8;">
+            <div style="margin-top:4px;font-size:0.75em;color:var(--text-subtle);">
                 {{ t.get('recent_projects_updated', 'Last activity:') }}
                 {{ p.updated_at | when }}
             </div>
@@ -401,7 +401,7 @@
         {% if metrics.tc_total > 0 %}
         <div class="chart-row">
             <div class="chart-block">
-                <h4>{{ t.dm_by_category }}</h4>
+                <h3 class="heading-4">{{ t.dm_by_category }}</h3>
                 <div class="bar-chart">
                     {% for cat, cnt in metrics.tc_by_category.items() %}
                     <div class="bar-row">
@@ -416,7 +416,7 @@
                 </div>
             </div>
             <div class="chart-block">
-                <h4>{{ t.dm_by_priority }}</h4>
+                <h3 class="heading-4">{{ t.dm_by_priority }}</h3>
                 <div class="bar-chart">
                     {% for pri, cnt in metrics.tc_by_priority.items() %}
                     <div class="bar-row">
@@ -445,7 +445,7 @@
         {% if metrics.cl_total > 0 %}
         <div class="chart-row">
             <div class="chart-block">
-                <h4>{{ t.dm_by_category }}</h4>
+                <h3 class="heading-4">{{ t.dm_by_category }}</h3>
                 <div class="bar-chart">
                     {% for cat, cnt in metrics.cl_by_category.items() %}
                     <div class="bar-row">
@@ -460,7 +460,7 @@
                 </div>
             </div>
             <div class="chart-block">
-                <h4>{{ t.dm_by_priority }}</h4>
+                <h3 class="heading-4">{{ t.dm_by_priority }}</h3>
                 <div class="bar-chart">
                     {% for pri, cnt in metrics.cl_by_priority.items() %}
                     <div class="bar-row">
@@ -711,14 +711,18 @@
                           hidden>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="text" name="project_name" required
+                               aria-label="{{ t.get('project_name', 'Project name') }}"
                                value="{{ p.project_name }}"
                                placeholder="{{ t.get('project_name', 'Project name') }}">
                         <input type="text" name="base_url"
+                               aria-label="{{ t.get('base_url_label', 'Base URL') }}"
                                value="{{ p.get('base_url') or '' }}"
                                placeholder="{{ t.get('base_url_label', 'Base URL') }}">
+                        <span class="btn-group">
                         <button type="submit" class="btn btn-xs btn-primary">{{ t.get('save', 'Save') }}</button>
                         <button type="button" class="btn btn-xs btn-ghost rename-cancel"
                                 data-target="rename-{{ p.folder }}">{{ t.get('cancel', 'Cancel') }}</button>
+                        </span>
                     </form>
                     {% endif %}
                 </td>

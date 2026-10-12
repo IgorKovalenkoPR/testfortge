@@ -15,7 +15,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <nav class="sidebar">
+    <a class="skip-link" href="#main-content">{{ t.get('skip_to_content', 'Skip to main content') }}</a>
+    <nav class="sidebar" aria-label="{{ t.get('nav_aria', 'Main navigation') }}">
         <a href="{{ url_for('index') }}" class="sidebar-brand" aria-label="TestForTge — {{ t.brand_aria }}">
             <img src="{{ url_for('static', filename='img/testfortge-mark.svg') }}"
                  alt="" class="brand-icon" width="44" height="44">
@@ -146,7 +147,8 @@
         {% endif %}
     </nav>
 
-    <main class="main-content">
+    {#- page_class scopes a page's own rules in style.css (e.g. page-bug-reports) -#}
+    <main class="main-content{% block page_class %}{% endblock %}" id="main-content" tabindex="-1">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, message in messages %}

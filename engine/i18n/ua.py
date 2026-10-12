@@ -2019,4 +2019,14 @@ TRANSLATIONS = {
                        "паролем \u2014 передайте його самі, ця сторінка "
                        "більше його не покаже.",
     "om_that_member": "цієї людини",
+    # Accessibility labels (design-tokens pass): the skip link, the
+    # sidebar landmark, and aria-labels for controls that had no
+    # visible <label> to associate with.
+    "skip_to_content": "Перейти до основного вмісту",
+    "nav_aria": "Головна навігація",
+    "bug_bulk_action_label": "Масова дія",
+    "cl_comment_label": "Коментар",
+    "tc_step_kind_label": "Тип кроку",
+    "te_custom_resolution": "Своя роздільна здатність",
+    "te_custom_device": "Своя модель пристрою",
 }
