@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from engine import ai_mode
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.log import get_logger
 from engine.site_recon import SiteProfile
@@ -44,6 +46,9 @@ _logger = get_logger(__name__)
 # Routed by work kind at call time — see engine/llm_models.py.
 _STRATEGY_KIND = "analysis"
 _STRATEGY_MAX_TOKENS = int(os.environ.get("STRATEGY_MAX_TOKENS", "4000"))
+
+#: Part of the result cache key (ADR 0003 §4.9).
+_PROMPT_VERSION = "test_strategy/1"
 
 
 # Closed enum — generator and Live Executor (Stage 3) both consume
@@ -108,6 +113,16 @@ class TestStrategy:
 def build_strategy(profile: SiteProfile, *,
                    force_llm: bool = False) -> TestStrategy:
     """Produce a :class:`TestStrategy` for ``profile``."""
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9). The deterministic strategy is
+    # built from the profile's flags, so it is only as good as the profile:
+    # in ``assist`` the model is for a profile that could not say what kind
+    # of site this is.
+    if ai_mode.effective_mode() == ai_mode.OFF:
+        return _rule_based_strategy(profile)
+    if ai_mode.rules_first() and not ai_mode.llm_allowed(
+            low_confidence=_low_confidence(profile), explicit=force_llm):
+        return _rule_based_strategy(profile)
+
     from engine.llm_keys import platform_key
     api_key_set = bool(platform_key())
     if not api_key_set and not force_llm:
@@ -129,6 +144,13 @@ def build_strategy(profile: SiteProfile, *,
         return _rule_based_strategy(profile)
 
     return _build_strategy_from_parsed(parsed, profile, source="llm")
+
+
+def _low_confidence(profile: SiteProfile | None) -> bool:
+    """True when the rule strategy would be generic for this profile."""
+    if profile is None:
+        return True
+    return (getattr(profile, "site_type", "generic") or "generic") == "generic"
 
 
 # ── ISTQB grounding ──────────────────────────────────────────────
@@ -248,8 +270,11 @@ def _build_user_prompt(profile: SiteProfile) -> str:
 
 
 def _call_llm(profile: SiteProfile, grounding: str) -> str:
-    resp = call_messages(
-        kind=_STRATEGY_KIND,
+    resp = cached_call(
+        _STRATEGY_KIND,
+        prompt_version=_PROMPT_VERSION,
+        call=call_messages,
+        accept=lambda text: _parse_llm_response(text) is not None,
         max_tokens=_STRATEGY_MAX_TOKENS,
         system=_system_blocks(grounding),
         messages=[{

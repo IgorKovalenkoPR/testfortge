@@ -756,6 +756,31 @@ TRANSLATIONS = {
                                'allowed tiers.',
     'ms_err_unknown_tier': 'That is not a model tier this server offers.',
 
+    # ── Automation AI mode (ADR 0003 §4.9) ──
+    'ai_enhance_btn': 'Improve with AI',
+    'ai_enhance_hint': 'Generate with the rules, then let AI fill the gaps '
+                       'they leave. Uses your AI allowance.',
+    'aim_heading': 'AI in automation',
+    'aim_intro': 'How much test-case, checklist and site-analysis '
+                 'generation may use AI. Off uses the rule engines only. '
+                 'Assist runs the rules first and calls AI only for the '
+                 'gaps they leave, or when someone presses "Improve with '
+                 'AI". Full calls AI every time. Test execution never uses '
+                 'AI.',
+    'aim_now': 'Now: %s',
+    'aim_label': 'AI mode for this team',
+    'aim_server_default': 'Server setting (%s)',
+    'aim_mode_off': 'Off — rules only',
+    'aim_mode_assist': 'Assist — rules first, AI for the gaps',
+    'aim_mode_full': 'Full — AI every time',
+    'aim_ceiling_note': 'Your team can lower this but not raise it above '
+                        'the server setting.',
+    'aim_saved': 'AI mode saved.',
+    'aim_save_failed': 'Could not save the AI mode — see server logs.',
+    'aim_err_invalid': 'That is not an AI mode this server offers.',
+    'aim_err_above': 'Your team can lower the AI mode but not raise it '
+                     'above what the server allows.',
+
     'os_capacity_heading': 'Capacity',
     # Named because an empty DATABASE_URL degrades to SQLite quietly, and
     # a declared variable is not the same claim as a database in force.

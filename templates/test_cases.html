@@ -61,8 +61,22 @@
     {% set input_title = t.input_title_default %}
     {% with show_tc_format = true %}{% include '_input_block.html' %}{% endwith %}
 
+    {# "Improve with AI" (ADR 0003 §4.9): only in assist mode, where the
+       rules go first and the model is otherwise called just for the gaps
+       they leave. ``off`` refuses it and ``full`` already does it. The
+       hidden field carries the choice through the async submit, which
+       builds FormData from the form and so never sees the clicked button. #}
+    {% set tc_ai_assist = automation_ai_mode is defined and automation_ai_mode() == 'assist' %}
     <div class="form-actions">
+        {% if tc_ai_assist %}
+        <input type="hidden" name="enhance" value="0" id="tc-enhance-flag">
+        <div class="btn-group">
+            <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
+            <button type="submit" id="tc-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg" title="{{ t.ai_enhance_hint }}">{{ t.ai_enhance_btn }}</button>
+        </div>
+        {% else %}
         <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
+        {% endif %}
     </div>
 </form>
 
@@ -406,6 +420,12 @@
 
     function onSubmit(ev) {
         ev.preventDefault();
+        // Which button was pressed — Generate or "Improve with AI".
+        var enhanceFlag = document.getElementById('tc-enhance-flag');
+        if (enhanceFlag) {
+            enhanceFlag.value = (ev.submitter &&
+                ev.submitter.id === 'tc-enhance-button') ? '1' : '0';
+        }
         // Reset internal state so a second submit on the same page works.
         // csrfRetried is reset here and NOT in submitJob(), so the token
         // refresh can fire once per user-initiated submit without

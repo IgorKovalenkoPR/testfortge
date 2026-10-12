@@ -51,8 +51,22 @@
     {% set input_title = t.input_title_default %}
     {% include '_input_block.html' %}
 
+    {# "Improve with AI" (ADR 0003 §4.9): only in assist mode, where the
+       rules go first and the model is otherwise called just for the gaps
+       they leave. ``off`` refuses it and ``full`` already does it. The
+       hidden field carries the choice through the async submit, which
+       builds FormData from the form and so never sees the clicked button. #}
+    {% set cl_ai_assist = automation_ai_mode is defined and automation_ai_mode() == 'assist' %}
     <div class="form-actions">
+        {% if cl_ai_assist %}
+        <input type="hidden" name="enhance" value="0" id="cl-enhance-flag">
+        <div class="btn-group">
+            <button type="submit" id="cl-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
+            <button type="submit" id="cl-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg" title="{{ t.ai_enhance_hint }}">{{ t.ai_enhance_btn }}</button>
+        </div>
+        {% else %}
         <button type="submit" id="cl-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
+        {% endif %}
     </div>
 </form>
 
@@ -283,6 +297,12 @@
 
     function onSubmit(ev) {
         ev.preventDefault();
+        // Which button was pressed — Generate or "Improve with AI".
+        var enhanceFlag = document.getElementById('cl-enhance-flag');
+        if (enhanceFlag) {
+            enhanceFlag.value = (ev.submitter &&
+                ev.submitter.id === 'cl-enhance-button') ? '1' : '0';
+        }
         stopped = false; fallbackTriggered = false; consecErrors = 0;
         csrfRetried = false;
         startedAt = Date.now();

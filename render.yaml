@@ -325,6 +325,18 @@ services:
       # rather than erroring (engine/llm_client.LLMBudgetExceeded).
       - key: LLM_ORG_BUDGET_USD
         value: "5"
+      # How much automation (test cases, checklists, recon, strategy,
+      # segmentation, mockups) may use the model — ADR 0003 §4.9.
+      # off | assist | full. "assist" runs the rule engines first and calls
+      # the model only for the gaps they leave or on "Improve with AI". An
+      # org admin can lower it, never raise it. Chat and test execution are
+      # not governed by it.
+      - key: AUTOMATION_AI_MODE
+        value: "assist"
+      # Days an identical automation request is answered from the result
+      # cache instead of the model (llm_result_cache, ADR 0003 §4.9).
+      - key: LLM_RESULT_CACHE_DAYS
+        value: "30"
       # Fernet key encrypting each org's own Anthropic key at rest.
       # `generateValue: true` so Render mints it and it never exists in
       # this repo — same handling as SECRET_KEY and MCP_BEARER_TOKEN.
@@ -963,6 +975,10 @@ services:
       # here as there.
       - key: LLM_ORG_BUDGET_USD
         value: "5"
+      - key: AUTOMATION_AI_MODE
+        value: "assist"
+      - key: LLM_RESULT_CACHE_DAYS
+        value: "30"
       - key: MAIL_DAILY_LIMIT
         value: "100"
       - key: ORG_QUOTA_ROWS

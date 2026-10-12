@@ -35,6 +35,8 @@ import re
 from dataclasses import dataclass, field
 
 from engine.automation_qa import AutomationStep
+from engine import ai_mode
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.log import get_logger
 from engine.suite_classifier import (SUITE_SMOKE, SuiteVerdict,
@@ -54,6 +56,14 @@ import os
 # verifiably good enough rather than hopefully good enough.
 _KIND = "segmentation"
 _MAX_TOKENS = int(os.environ.get("SESSION_SEGMENTER_MAX_TOKENS", "1500"))
+
+#: Part of the result cache key (ADR 0003 §4.9).
+_PROMPT_VERSION = "session_segmenter/1"
+
+#: In ``assist`` mode the deterministic split is trusted unless it found
+#: only one flow in a session at least this long — the case where the
+#: recording carried no boundary markers and a model may still see two.
+_ASSIST_MIN_STEPS = 3
 
 
 @dataclass
@@ -98,6 +108,16 @@ def segment(steps: list[AutomationStep]) -> list[ProposedTC]:
     if len(steps) == 1:
         return [_single_flow(steps, summary="Single-step flow",
                               intent="One recorded action")]
+
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9): ``off`` never asks the model;
+    # ``assist`` asks only when the deterministic split found no boundary.
+    if ai_mode.effective_mode() == ai_mode.OFF:
+        return _segment_deterministically(steps)
+    if ai_mode.rules_first():
+        split = _segment_deterministically(steps)
+        gap = len(split) <= 1 and len(steps) >= _ASSIST_MIN_STEPS
+        if not ai_mode.llm_allowed(low_confidence=gap):
+            return split
 
     flows = _call_llm(steps)
     if not flows:
@@ -149,8 +169,11 @@ def _call_llm(steps: list[AutomationStep]) -> list[dict]:
     end_idx}]`` with validated, in-bounds indices. Empty on any
     failure path so the caller can fall back."""
     try:
-        resp = call_messages(
-            kind=_KIND,
+        resp = cached_call(
+            _KIND,
+            prompt_version=_PROMPT_VERSION,
+            call=call_messages,
+            accept=lambda text: _extract_json(text) is not None,
             max_tokens=_MAX_TOKENS,
             system=_SYSTEM_PROMPT,
             messages=[{

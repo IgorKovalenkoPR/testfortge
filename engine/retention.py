@@ -335,6 +335,12 @@ def delete_project_data(project_id: str, *, org_id: str | None = None,
         if row is not None:
             sess.delete(row)
 
+    # Cached AI results produced inside this project are its requirements
+    # rewritten (ADR 0003 §4.9). Not in CONTENT_TABLES: they are a cache,
+    # not content anybody exports or counts, but they must not outlive the
+    # data they were made from.
+    _db.delete_llm_result_cache_for_project(project_id)
+
     # 3. The audit, written last so it records what actually happened rather
     #    than what was about to be attempted. Its own row survives the
     #    deletion because audit_log.project_id carries no foreign key —
@@ -519,6 +525,9 @@ _SWEEPERS: tuple[tuple[str, str], ...] = (
     ("purge_expired_browser_control", "browser control"),
     ("purge_expired_auth_tokens", "auth tokens"),
     ("purge_expired_sessions", "sessions"),
+    # ADR 0003 §4.9: cached automation results past LLM_RESULT_CACHE_DAYS.
+    # Reads check expiry themselves; this keeps the table bounded.
+    ("purge_expired_llm_result_cache", "AI result cache"),
 )
 
 

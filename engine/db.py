@@ -285,8 +285,24 @@ def init_db() -> None:
     _renumber_duplicate_public_ids(engine)
     _ensure_public_id_unique_indexes(engine)
     _ensure_search_schema(engine)
+    _ensure_llm_result_cache(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+
+def _ensure_llm_result_cache(engine: Engine) -> None:
+    """Make sure ``llm_result_cache`` exists (ADR 0003 §4.9).
+
+    ``create_all`` already creates a new table, so on a healthy boot this is
+    a no-op; it is spelled out, like the other ``_ensure_*`` helpers, so a
+    database whose ``create_all`` was run from an older model list still
+    gets the table. Never raises — the cache is an optimisation, and a boot
+    must not fail over it.
+    """
+    try:
+        LlmResultCache.__table__.create(engine, checkfirst=True)
+    except Exception as exc:  # pragma: no cover — defensive
+        log.warning("could not ensure llm_result_cache: %s", exc)
 
 
 def _ensure_walkthrough_columns(engine: Engine) -> None:
@@ -2064,6 +2080,42 @@ class LlmUsage(Base):
                                           default=_utcnow, index=True)
 
 
+class LlmResultCache(Base):
+    """One automation LLM result, kept so an identical request costs
+    nothing the second time (ADR 0003 §4.9).
+
+    ``key`` is the sha256 :func:`engine.llm_cache.cache_key` builds over the
+    tenant scope, the kind, the caller's prompt version, the model, the house
+    style and the request itself, so any change to any of them is a miss
+    rather than a stale answer.
+
+    ``org_id`` is the **tenant scope**, never shared: the organisation's id,
+    or ``"u:<user id>"`` on a deployment without organisations (production
+    runs ``ORG_MODE=0``), so one account never reads another's results. It
+    is also what the per-scope LRU cap counts by.
+
+    ``project_id`` is attribution only — what the request ran inside — and
+    is what lets a project deletion take the results derived from its data
+    with it (:func:`delete_llm_result_cache_for_project`).
+    """
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(40), nullable=False,
+                                         index=True)
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                    index=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    response_text: Mapped[str] = mapped_column(Text, nullable=False)
+    usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=_utcnow, index=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                       server_default="0")
+    last_hit_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                   default=_utcnow)
+
+
 class AuditLog(Base):
     """Who changed what, when — E2.7.
 
@@ -3107,6 +3159,170 @@ def record_llm_usage(*, kind: str, model: str,
         return None
 
 
+# ── Automation LLM result cache (ADR 0003 §4.9) ────────────────────
+
+#: Default lifetime of a cached result, in days (``LLM_RESULT_CACHE_DAYS``).
+LLM_RESULT_CACHE_DAYS_DEFAULT = 30
+#: Default per-scope row cap (``LLM_RESULT_CACHE_MAX_ROWS``), LRU by
+#: ``last_hit_at``.
+LLM_RESULT_CACHE_MAX_ROWS_DEFAULT = 2000
+
+
+def llm_result_cache_days() -> int:
+    try:
+        return max(1, int(os.environ.get(
+            "LLM_RESULT_CACHE_DAYS", LLM_RESULT_CACHE_DAYS_DEFAULT)))
+    except (TypeError, ValueError):
+        return LLM_RESULT_CACHE_DAYS_DEFAULT
+
+
+def llm_result_cache_max_rows() -> int:
+    try:
+        return max(1, int(os.environ.get(
+            "LLM_RESULT_CACHE_MAX_ROWS", LLM_RESULT_CACHE_MAX_ROWS_DEFAULT)))
+    except (TypeError, ValueError):
+        return LLM_RESULT_CACHE_MAX_ROWS_DEFAULT
+
+
+def get_llm_result_cache(key: str, *, scope: str) -> dict | None:
+    """Return the live cached result for *key* in *scope*, bumping its hit
+    counter — or ``None``.
+
+    Both the key and the scope must match: the scope is part of the key
+    already, and checking it again means a key collision (or a bug that
+    hands this function the wrong scope) still cannot read across tenants.
+    An expired row reads as a miss and is deleted on the spot. Never raises.
+    """
+    if not (key and scope):
+        return None
+    cutoff = _utcnow() - timedelta(days=llm_result_cache_days())
+    try:
+        with session_scope() as sess:
+            row = sess.get(LlmResultCache, key)
+            if row is None or row.org_id != scope:
+                return None
+            created = row.created_at
+            if created is not None and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created is not None and created < cutoff:
+                sess.delete(row)
+                return None
+            row.hits = int(row.hits or 0) + 1
+            row.last_hit_at = _utcnow()
+            return {"key": row.key, "org_id": row.org_id,
+                    "project_id": row.project_id, "kind": row.kind,
+                    "prompt_version": row.prompt_version,
+                    "model": row.model, "response_text": row.response_text,
+                    "usage": row.usage, "hits": row.hits}
+    except SQLAlchemyError as exc:
+        log.warning("llm result cache read failed: %s", exc)
+        return None
+
+
+def put_llm_result_cache(*, key: str, scope: str, kind: str,
+                         prompt_version: str, model: str,
+                         response_text: str, usage: dict | None = None,
+                         project_id: str | None = None) -> bool:
+    """Store (or replace) one result, then hold the scope to its row cap.
+
+    Replace rather than skip on an existing key: a ``bypass_cache``
+    regeneration is exactly the case where the old answer should go.
+    Never raises — a cache that cannot write is just a cache that misses.
+    """
+    if not (key and scope and kind and response_text):
+        return False
+    try:
+        with session_scope() as sess:
+            row = sess.get(LlmResultCache, key)
+            now = _utcnow()
+            if row is None:
+                row = LlmResultCache(key=key, org_id=scope)
+                sess.add(row)
+            row.org_id = scope
+            row.project_id = project_id
+            row.kind = kind[:30]
+            row.prompt_version = (prompt_version or "")[:40]
+            row.model = (model or "unknown")[:80]
+            row.response_text = response_text
+            row.usage = usage or None
+            row.created_at = now
+            row.last_hit_at = now
+            row.hits = 0
+        _enforce_llm_result_cache_cap(scope)
+        return True
+    except SQLAlchemyError as exc:
+        log.warning("llm result cache write failed: %s", exc)
+        return False
+
+
+def _enforce_llm_result_cache_cap(scope: str) -> int:
+    """Delete the least recently used rows of *scope* above the cap."""
+    cap = llm_result_cache_max_rows()
+    with session_scope() as sess:
+        count = sess.query(func.count(LlmResultCache.key)).filter(
+            LlmResultCache.org_id == scope).scalar() or 0
+        if count <= cap:
+            return 0
+        stale = [k for (k,) in sess.query(LlmResultCache.key)
+                 .filter(LlmResultCache.org_id == scope)
+                 .order_by(LlmResultCache.last_hit_at.asc(),
+                           LlmResultCache.created_at.asc())
+                 .limit(count - cap).all()]
+        if not stale:
+            return 0
+        result = sess.execute(delete(LlmResultCache).where(
+            LlmResultCache.key.in_(stale)))
+        return int(result.rowcount or 0)
+
+
+def purge_expired_llm_result_cache(*, days: int | None = None) -> int:
+    """Delete cached results older than the TTL. Returns rows removed.
+
+    Run by :func:`engine.retention.sweep_expired`. Expiry is also checked
+    on every read, so this only bounds the table — it is not what keeps a
+    stale answer from being served.
+    """
+    keep = days if days is not None else llm_result_cache_days()
+    cutoff = _utcnow() - timedelta(days=max(1, int(keep)))
+    with session_scope() as sess:
+        result = sess.execute(delete(LlmResultCache).where(
+            LlmResultCache.created_at < cutoff))
+        return int(result.rowcount or 0)
+
+
+def delete_llm_result_cache_for_project(project_id: str) -> int:
+    """Drop every cached result produced inside *project_id*.
+
+    A cached authoring result is the project's requirements rewritten, so a
+    project deletion that left it behind would keep the content it just
+    claimed to remove. Never raises.
+    """
+    if not project_id:
+        return 0
+    try:
+        with session_scope() as sess:
+            result = sess.execute(delete(LlmResultCache).where(
+                LlmResultCache.project_id == project_id))
+            return int(result.rowcount or 0)
+    except SQLAlchemyError as exc:
+        log.warning("llm result cache project delete failed: %s", exc)
+        return 0
+
+
+def delete_llm_result_cache_for_scope(scope: str) -> int:
+    """Drop every cached result of one tenant scope (an org, or ``u:<id>``)."""
+    if not scope:
+        return 0
+    try:
+        with session_scope() as sess:
+            result = sess.execute(delete(LlmResultCache).where(
+                LlmResultCache.org_id == scope))
+            return int(result.rowcount or 0)
+    except SQLAlchemyError as exc:
+        log.warning("llm result cache scope delete failed: %s", exc)
+        return 0
+
+
 def _month_start(now: datetime | None = None) -> datetime:
     now = now or _utcnow()
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -3954,6 +4170,9 @@ def delete_project(project_id: str) -> None:
         p = sess.get(Project, project_id)
         if p:
             sess.delete(p)
+    # No foreign key on llm_result_cache.project_id (a cache row must not
+    # block a delete), so its rows go explicitly — ADR 0003 §4.9.
+    delete_llm_result_cache_for_project(project_id)
 
 
 # ── Test cases ─────────────────────────────────────────────────────
@@ -6104,7 +6323,7 @@ __all__ = [
     "purge_expired_browser_control",
     # identity / tenancy / audit (E0.2, E1.1, E2.1, E2.7)
     "ServerSession", "User", "Identity", "Organization", "OrgMember",
-    "Invite", "AuditLog", "OrgSecret", "LlmUsage",
+    "Invite", "AuditLog", "OrgSecret", "LlmUsage", "LlmResultCache",
     "ORG_ROLES", "ROLE_RANK", "INVITE_TTL_HOURS", "normalize_email",
     "create_user", "get_user", "get_user_by_email",
     "link_identity", "get_user_by_identity",
@@ -6114,6 +6333,10 @@ __all__ = [
     "has_org_secret",
     # LLM usage accounting
     "record_llm_usage", "org_spend_micros", "llm_usage_summary",
+    "get_llm_result_cache", "put_llm_result_cache",
+    "purge_expired_llm_result_cache", "delete_llm_result_cache_for_project",
+    "delete_llm_result_cache_for_scope", "llm_result_cache_days",
+    "llm_result_cache_max_rows",
     "purge_llm_usage",
     "create_organization", "add_org_member", "get_org_role",
     "list_org_members", "count_org_admins", "count_users",

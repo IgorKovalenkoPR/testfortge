@@ -46,6 +46,8 @@ from functools import lru_cache
 from typing import Any
 
 from engine import glossary
+from engine import ai_mode
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.log import get_logger
 
@@ -74,6 +76,12 @@ _AUTHOR_MAX_TOKENS = int(os.environ.get("TC_AUTHOR_MAX_TOKENS", "8000"))
 # thread, not in the request. The sync POST blocks for at most
 # SYNC_GEN_BUDGET_S (90 s) and then hands off to the background drain.
 _AUTHOR_TIMEOUT = int(os.environ.get("TC_AUTHOR_TIMEOUT_S", "300"))
+
+
+#: Bumped when the prompt or the shape :func:`_parse_llm_response` expects
+#: changes in a way the request text would not show. Part of the result
+#: cache key (ADR 0003 §4.9), so a bump retires every cached pack at once.
+_PROMPT_VERSION = "tc_author/1"
 
 
 def _author_enabled() -> bool:
@@ -607,9 +615,12 @@ def _build_user_prompt(profile, strategy, artifacts: Artifacts) -> str:
 # ── LLM call ─────────────────────────────────────────────────────────
 
 def _call_llm(profile, strategy, artifacts: Artifacts, grounding: str) -> str:
-    resp = call_messages(
+    resp = cached_call(
+        _AUTHOR_KIND,
+        prompt_version=_PROMPT_VERSION,
+        call=call_messages,
+        accept=lambda text: _parse_llm_response(text) is not None,
         timeout=_AUTHOR_TIMEOUT,
-        kind=_AUTHOR_KIND,
         max_tokens=_AUTHOR_MAX_TOKENS,
         system=_system_blocks(grounding),
         messages=[{"role": "user",
@@ -1371,6 +1382,20 @@ def author_test_cases(*, profile=None, strategy=None,
         _logger.info("tc_author: disabled via TC_AUTHOR_ENABLED")
         return _deterministic_result(profile, strategy, arts)
 
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9). ``off``: the rules, full stop.
+    # ``assist``: the rules first, and the model only for the gap they
+    # leave or when somebody asked for it.
+    if ai_mode.effective_mode() == ai_mode.OFF:
+        return _deterministic_result(profile, strategy, arts)
+    if ai_mode.rules_first():
+        ruled = _deterministic_result(profile, strategy, arts)
+        if not ai_mode.llm_allowed(coverage=_rule_coverage(ruled),
+                                   explicit=force_llm):
+            _logger.info("tc_author: assist mode — rules cover it "
+                         "(source=%s, %d cases), no model call",
+                         ruled.source, len(ruled.cases))
+            return ruled
+
     from engine.llm_keys import platform_key
     api_key_set = bool(platform_key())
     if not api_key_set and not force_llm:
@@ -1425,6 +1450,22 @@ def author_test_cases(*, profile=None, strategy=None,
         gaps=gaps[:20],
         lint_findings=findings[:60],
     )
+
+
+def _rule_coverage(result: AuthoringResult) -> float:
+    """How much of the job the no-model path did, for ``assist`` mode.
+
+    The control-inventory enumeration (``rules``) is the coverage model
+    applied to every declared control — complete by construction. The 1:1
+    strategy expansion is one generic case per check: a skeleton, so it
+    reads as half. Nothing at all (prompt-only input has no inventory to
+    enumerate) is the gap the model is for.
+    """
+    if not result.cases:
+        return 0.0
+    if result.source == "rules":
+        return 1.0
+    return 0.5
 
 
 def _deterministic_result(profile, strategy,
