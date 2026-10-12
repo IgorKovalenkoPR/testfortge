@@ -2165,6 +2165,9 @@ TRANSLATIONS = {
     # visible <label> to associate with.
     "skip_to_content": "Skip to main content",
     "nav_aria": "Main navigation",
+    # The hamburger that opens the sidebar at phone width; its state is
+    # aria-expanded, so the name stays the same open or closed.
+    "nav_menu": "Menu",
     "bug_bulk_action_label": "Bulk action",
     "cl_comment_label": "Comment",
     "tc_step_kind_label": "Step kind",

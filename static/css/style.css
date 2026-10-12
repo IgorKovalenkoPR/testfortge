@@ -694,22 +694,25 @@ details p { padding: .3rem 0 .5rem 1rem; font-size: .88rem; color: #475569; }
 }
 
 @media (max-width: 768px) {
+    /* The sidebar is a drawer at phone width. It used to turn into a
+       horizontal strip that kept `height: 100vh` from the desktop rule,
+       so at 375px it filled the entire first screen before any content.
+       Now it is off-canvas until the .mobile-bar toggle opens it
+       (static/js/app.js); `visibility: hidden` keeps its links out of
+       the tab order and the accessibility tree while closed. */
     .sidebar {
-        width: 100%;
-        min-height: auto;
-        position: relative;
-        flex-direction: row;
-        overflow-x: auto;
-        padding: .5rem;
+        width: min(280px, 85vw);
+        height: 100vh;
+        transform: translateX(-100%);
+        visibility: hidden;
+        transition: transform .2s ease, visibility 0s linear .2s;
+        z-index: 300;
     }
-    .sidebar-brand { display: none; }
-    .nav-steps { display: flex; gap: 0; }
-    .nav-steps li a { padding: .5rem .8rem; font-size: .8rem; border-left: none; border-bottom: 2px solid transparent; }
-    .nav-steps li.active a { border-bottom-color: var(--primary); }
-    .nav-divider { display: none; }
-    .nav-section-label { display: none; }
-    .lang-toggle { padding: .3rem .5rem; }
-    .sidebar-project { display: none; }
+    .sidebar.is-open {
+        transform: none;
+        visibility: visible;
+        transition: transform .2s ease;
+    }
 
     body { flex-direction: column; }
     .main-content { margin-left: 0; padding: 1rem; max-width: 100%; }
@@ -1825,36 +1828,9 @@ input[type="search"]:focus, textarea:focus, select:focus {
     gap: 8px;
     justify-content: flex-end;
 }
-.qa-chat-bugform button {
-    font: inherit;
-    padding: 6px 14px;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    cursor: pointer;
-}
-.qa-chat-bugform button[type=submit] {
-    background: var(--accent);
-    color: #fff;
-    border-radius: var(--tf-radius-pill, 999px);
-    font-family: var(--tf-font-heading, inherit);
-    font-weight: 600;
-    padding: 6px 16px;
-    box-shadow: 0 2px 8px rgba(255, 134, 92, .25);
-}
-.qa-chat-bugform button[type=submit]:hover {
-    background: var(--accent-hover);
-    box-shadow: 0 4px 12px rgba(255, 134, 92, .35);
-}
-.qa-chat-bugform button[type=submit]:disabled {
-    opacity: .55;
-    cursor: not-allowed;
-    box-shadow: none;
-}
-.qa-chat-bugform button[type=button] {
-    background: #fff;
-    color: #404040;
-    border-color: var(--border-control);
-}
+/* The form's Cancel / Create buttons are .btn .btn-sm (secondary /
+   primary), sized by the --control-* scale like every other button —
+   they used to carry their own hand-set padding and colours here. */
 .qa-chat-bugform .qa-bug-error {
     color: #B23C2D;
     font-size: .8rem;
@@ -3934,4 +3910,72 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
         clip: rect(0, 0, 0, 0);
         white-space: nowrap;
     }
+}
+
+/* ── Phone-width navigation (≤768px) ──────────────────────────────
+   A top bar with a hamburger that opens the sidebar as a drawer (the
+   drawer itself is in the 768px block under "Responsive"). Hidden above
+   768px, where the sidebar is always shown. These rules sit at the end of
+   the file on purpose: the "Main content" block above sets a desktop
+   padding that otherwise wins over the responsive one at phone width. */
+.mobile-bar { display: none; }
+.nav-toggle-bars,
+.nav-toggle-bars::before,
+.nav-toggle-bars::after {
+    display: block;
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
+}
+.nav-toggle-bars { position: relative; }
+.nav-toggle-bars::before,
+.nav-toggle-bars::after { content: ""; position: absolute; left: 0; }
+.nav-toggle-bars::before { top: -6px; }
+.nav-toggle-bars::after  { top: 6px; }
+/* Tedgie's [[REF]] citations (ADR 0003 T8). */
+.qa-chat-ref { font-weight: 600; text-decoration: underline; }
+
+@media (max-width: 768px) {
+    .mobile-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        position: sticky;
+        top: 0;
+        z-index: 200;
+        min-height: var(--control-lg);
+        padding: var(--space-1) var(--space-4);
+        background: #0F1115;
+        border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .mobile-bar-brand,
+    .mobile-bar-brand:hover { color: #FFFFFF; font-weight: 700; }
+    .mobile-bar :focus-visible { outline-color: var(--focus-on-dark); }
+    .nav-toggle,
+    .nav-toggle:hover {
+        background: transparent;
+        color: #FFFFFF;
+        border: 1px solid rgba(255,255,255,.24);
+        box-shadow: none;
+        transform: none;
+    }
+    .nav-toggle:hover { background: rgba(255,255,255,.08); }
+    /* The scrim. A click on it lands on <body>, which app.js reads as
+       "outside the drawer" — so nothing underneath is activated. */
+    body.nav-open::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 250;
+        background: rgba(15, 17, 21, .5);
+    }
+    .main-content {
+        margin-left: 0;
+        max-width: 100%;
+        padding: var(--space-4);
+    }
+}
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+    .sidebar, .sidebar.is-open { transition: none; }
 }

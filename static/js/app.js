@@ -3,6 +3,54 @@
  * Handles: tooltips, tabs, filters, collapsibles, drag-drop
  */
 
+/* ── Phone-width navigation drawer ─────────────────────────────────
+   At ≤768px (style.css) the sidebar is off-canvas and the .mobile-bar
+   hamburger ([data-nav-toggle], aria-controls="sidebar-nav") opens it.
+   aria-expanded carries the state; Esc, a click outside the drawer (the
+   scrim) or following a link closes it, and closing by Esc or the scrim
+   returns focus to the toggle. Above 768px the toggle is not displayed
+   and an open drawer is closed, so a rotated tablet never keeps the
+   scrim. */
+(function () {
+    const toggle = document.querySelector('[data-nav-toggle]');
+    const nav = toggle && document.getElementById(toggle.getAttribute('aria-controls'));
+    if (!toggle || !nav) return;
+    const mq = window.matchMedia('(max-width: 768px)');
+
+    function isOpen() { return toggle.getAttribute('aria-expanded') === 'true'; }
+    function open() {
+        toggle.setAttribute('aria-expanded', 'true');
+        nav.classList.add('is-open');
+        document.body.classList.add('nav-open');
+        const first = nav.querySelector('a[href], button:not([disabled]), select, input');
+        if (first) first.focus();
+    }
+    function close(returnFocus) {
+        if (!isOpen()) return;
+        toggle.setAttribute('aria-expanded', 'false');
+        nav.classList.remove('is-open');
+        document.body.classList.remove('nav-open');
+        if (returnFocus) toggle.focus();
+    }
+
+    toggle.addEventListener('click', () => { if (isOpen()) close(true); else open(); });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(true); }
+    });
+    document.addEventListener('click', (e) => {
+        if (!isOpen()) return;
+        if (nav.contains(e.target) || toggle.contains(e.target)) return;
+        e.preventDefault();
+        close(true);
+    }, true);
+    nav.addEventListener('click', (e) => {
+        if (e.target.closest && e.target.closest('a[href]')) close(false);
+    });
+    const onChange = () => { if (!mq.matches) close(false); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     // Auto-hide alerts after 5 seconds
     document.querySelectorAll('.alert').forEach(alert => {
@@ -358,8 +406,8 @@ function applyStatusColor(select) {
             </label>
             <div class="qa-bug-error" hidden></div>
             <div class="qa-bug-actions">
-                <button type="button" data-bug-cancel>${escapeHtml(L.cancel)}</button>
-                <button type="submit">${escapeHtml(L.submit)}</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bug-cancel>${escapeHtml(L.cancel)}</button>
+                <button type="submit" class="btn btn-primary btn-sm">${escapeHtml(L.submit)}</button>
             </div>
         `;
         body.appendChild(wrap);
