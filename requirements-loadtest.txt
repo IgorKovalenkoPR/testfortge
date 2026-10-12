@@ -1,0 +1,6 @@
+# Release load-test kit only (tools/loadtest/locustfile.py). Runs on the
+# operator's machine, never in the app container — deliberately NOT part of
+# requirements.txt. Install into a separate virtualenv:
+#     python -m venv .venv-loadtest && .venv-loadtest/bin/pip install -r requirements-loadtest.txt
+# smoke_live.py needs only `requests`, which locust pulls in.
+locust==2.43.3

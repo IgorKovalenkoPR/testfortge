@@ -55,6 +55,13 @@ tools/*
 !tools/measure_prompts.py
 !tools/tfg_record.py
 !tools/search_backfill.py
+# Release load-test kit (docs/runbooks/release-2026-10-testing.md); its
+# reports land in the operator's cwd, never in the tree.
+!tools/loadtest/
+tools/loadtest/__pycache__/
+loadtest_report_*.json
+loadtest_report_*.md
+smoke_*.json
 
 # Temporary DOCX build helpers and generated artefacts
 _build_requirements_docx.js
