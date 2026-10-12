@@ -66,9 +66,9 @@ backend and is not in CI, so the owner has to provide it.
 ### 0.4 Check the process model before the load run
 
 The brief assumes **one gunicorn worker × 4 threads** on **port 8080**. The
-`Dockerfile` on this branch (87039b8) still says `--workers 2`, port 5000; the
-launchpad repo's Dockerfile was fixed separately (`WEB_CONCURRENCY` default 1,
-port from `$PORT` = 8080). Confirm with the `/proc/1/cmdline` line above (or
+`Dockerfile` on this branch was copied from launchpad/main (a8c2281):
+`--workers ${WEB_CONCURRENCY:-1} --threads 4`, port from `$PORT` = 8080 — but a
+`APP_WEB_CONCURRENCY` CI variable would override it. Confirm with the `/proc/1/cmdline` line above (or
 `ps -ef` in the container). Two workers break async jobs (the JobQueue is
 per process — a poll lands in the other worker and reports the job lost), so
 **do not load-test a two-worker container**; the generation task would fail
