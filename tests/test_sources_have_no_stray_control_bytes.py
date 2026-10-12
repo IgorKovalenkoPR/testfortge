@@ -30,8 +30,12 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 #: Directories that are not this repository's source.
+#: ``vendor`` holds third-party files copied in byte for byte (axe-core
+#: for the accessibility tests); a pinned checksum guards those instead,
+#: and the minified bundle legitimately carries bytes 0x01 and 0x02 in strings.
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".claude", "storage",
-             ".pytest_cache", "venv", ".venv", "htmlcov", "dist", "build"}
+             ".pytest_cache", "venv", ".venv", "htmlcov", "dist", "build",
+             "vendor"}
 
 SUFFIXES = {".py", ".html", ".yml", ".yaml", ".md", ".json", ".txt", ".css",
             ".js", ".cfg", ".toml", ".ini"}

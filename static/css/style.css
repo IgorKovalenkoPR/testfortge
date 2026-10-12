@@ -3979,3 +3979,30 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {
     .sidebar, .sidebar.is-open { transition: none; }
 }
+
+/* ── Phone width: nothing scrolls the page sideways (375 px) ──────────
+   Measured on the dashboard at 375 px: the page was 572 px wide. Two
+   causes, both inline minimum widths sized for a desktop row:
+     * the active-project picker (_project_picker.html) — a 280 px row
+       minimum holding a 200 px select plus the Switch button;
+     * the dashboard's data tables, five columns that cannot shrink.
+   Overridden here rather than in the markup, so the picker and the
+   sidebar keep their structure; !important only because the minimums
+   are inline styles. Tables scroll inside themselves instead of
+   widening the page. The chat mascot is scaled to the same corner
+   footprint as the round button so it never reaches past the edge.
+   Pinned by tests/test_e2e_search.py::TestNarrowViewport. */
+@media (max-width: 600px) {
+    .project-picker > div > div { min-width: 0 !important; flex-basis: 100% !important; flex-wrap: wrap; }
+    .project-picker label[for="pp-select"] { white-space: normal !important; }
+    #pp-select-form { min-width: 0; flex-wrap: wrap; }
+    #pp-select { min-width: 0 !important; width: 100%; max-width: 100%; }
+    .main-content .data-table { display: block; max-width: 100%; overflow-x: auto; }
+    .qa-chat-toggle.qa-chat-mascot {
+        width: 56px;
+        height: 66px;
+        right: var(--space-3);
+        bottom: var(--space-3);
+        padding: var(--space-1);
+    }
+}

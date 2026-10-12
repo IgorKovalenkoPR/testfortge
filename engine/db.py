@@ -3279,28 +3279,40 @@ def put_llm_result_cache(*, key: str, scope: str, kind: str,
     """
     if not (key and scope and kind and response_text):
         return False
-    try:
-        with session_scope() as sess:
-            row = sess.get(LlmResultCache, key)
-            now = _utcnow()
-            if row is None:
-                row = LlmResultCache(key=key, org_id=scope)
-                sess.add(row)
-            row.org_id = scope
-            row.project_id = project_id
-            row.kind = kind[:30]
-            row.prompt_version = (prompt_version or "")[:40]
-            row.model = (model or "unknown")[:80]
-            row.response_text = response_text
-            row.usage = usage or None
-            row.created_at = now
-            row.last_hit_at = now
-            row.hits = 0
-        _enforce_llm_result_cache_cap(scope)
-        return True
-    except SQLAlchemyError as exc:
-        log.warning("llm result cache write failed: %s", exc)
-        return False
+    # Two attempts: two threads that miss on the same key both find no row
+    # and both INSERT; the second commit is an IntegrityError on the
+    # primary key. The row exists by then, so the retry UPDATEs it — the
+    # put is an upsert, and the later writer's result is the one kept
+    # (tests/test_ask_concurrency.py forces that interleaving).
+    for attempt in (1, 2):
+        try:
+            with session_scope() as sess:
+                row = sess.get(LlmResultCache, key)
+                now = _utcnow()
+                if row is None:
+                    row = LlmResultCache(key=key, org_id=scope)
+                    sess.add(row)
+                row.org_id = scope
+                row.project_id = project_id
+                row.kind = kind[:30]
+                row.prompt_version = (prompt_version or "")[:40]
+                row.model = (model or "unknown")[:80]
+                row.response_text = response_text
+                row.usage = usage or None
+                row.created_at = now
+                row.last_hit_at = now
+                row.hits = 0
+            _enforce_llm_result_cache_cap(scope)
+            return True
+        except IntegrityError as exc:
+            if attempt == 1:
+                continue
+            log.warning("llm result cache write failed: %s", exc)
+            return False
+        except SQLAlchemyError as exc:
+            log.warning("llm result cache write failed: %s", exc)
+            return False
+    return False  # pragma: no cover — the loop always returns
 
 
 def _enforce_llm_result_cache_cap(scope: str) -> int:
@@ -3427,27 +3439,36 @@ def put_rag_answer(*, key: str, scope: str, model: str, lang: str,
     """Store (or replace) one answer. Never raises."""
     if not (key and scope and answer):
         return False
-    try:
-        with session_scope() as sess:
-            row = sess.get(RagAnswerCache, key)
-            now = _utcnow()
-            if row is None:
-                row = RagAnswerCache(key=key, org_id=scope)
-                sess.add(row)
-            row.org_id = scope[:80]
-            row.project_id = project_id
-            row.model = (model or "unknown")[:80]
-            row.lang = (lang or "en")[:4]
-            row.answer_json = answer
-            row.created_at = now
-            row.last_hit_at = now
-            row.hits = 0
-            row.helpful_up = row.helpful_up or 0
-            row.helpful_down = row.helpful_down or 0
-        return True
-    except SQLAlchemyError as exc:
-        log.warning("rag answer cache write failed: %s", exc)
-        return False
+    # Same two-attempt upsert as put_llm_result_cache, for the same race:
+    # two identical questions answered at once both INSERT the key.
+    for attempt in (1, 2):
+        try:
+            with session_scope() as sess:
+                row = sess.get(RagAnswerCache, key)
+                now = _utcnow()
+                if row is None:
+                    row = RagAnswerCache(key=key, org_id=scope)
+                    sess.add(row)
+                row.org_id = scope[:80]
+                row.project_id = project_id
+                row.model = (model or "unknown")[:80]
+                row.lang = (lang or "en")[:4]
+                row.answer_json = answer
+                row.created_at = now
+                row.last_hit_at = now
+                row.hits = 0
+                row.helpful_up = row.helpful_up or 0
+                row.helpful_down = row.helpful_down or 0
+            return True
+        except IntegrityError as exc:
+            if attempt == 1:
+                continue
+            log.warning("rag answer cache write failed: %s", exc)
+            return False
+        except SQLAlchemyError as exc:
+            log.warning("rag answer cache write failed: %s", exc)
+            return False
+    return False  # pragma: no cover — the loop always returns
 
 
 def rate_rag_answer(key: str, *, scope: str, helpful: bool) -> bool:

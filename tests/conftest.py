@@ -476,3 +476,38 @@ def suite_identity():
     strings when authentication is off."""
     return dict(_test_identity()) if _auth_active() else {"user_id": "",
                                                           "org_id": ""}
+
+
+# ── Level markers (unit / integration / functional / e2e / smoke) ─────
+#
+# Added at collection from the file name (see tests/_levels.py), so a new
+# file is classified the moment it exists and ``-m unit`` or ``-m "not
+# e2e"`` select by level. The markers themselves are registered in
+# pytest.ini. A test that already carries a level marker keeps it.
+
+def pytest_collection_modifyitems(config, items):
+    from tests._levels import LEVELS, level_for
+
+    def _path(item) -> str:
+        return str(getattr(item, "path", None) or item.fspath)
+
+    # Per *file*, not per test: a file that drives the app in one test is
+    # an integration file, including its helper tests that do not.
+    fixtures: dict[str, set] = {}
+    for item in items:
+        fixtures.setdefault(_path(item), set()).update(
+            getattr(item, "fixturenames", ()))
+    sources: dict[str, str] = {}
+    for item in items:
+        if any(item.get_closest_marker(level) for level in LEVELS):
+            continue
+        path = _path(item)
+        if path not in sources:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    sources[path] = fh.read()
+            except OSError:
+                sources[path] = ""
+        stem = os.path.splitext(os.path.basename(path))[0]
+        level = level_for(stem, fixtures[path], sources[path])
+        item.add_marker(getattr(pytest.mark, level))

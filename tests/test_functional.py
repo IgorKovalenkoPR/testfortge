@@ -46,6 +46,8 @@ class TestTestCasesRoute:
         assert b"SC1_001" in resp.data
         assert b"Verify that" in resp.data
 
+    # Fetches https://testfort.com live — see docs/testing/quarantine.md.
+    @pytest.mark.network
     def test_post_url_generates_test_cases(self, client):
         resp = client.post("/test-cases", data={
             "input_text": "https://testfort.com/software-testing-services",
@@ -76,6 +78,8 @@ class TestChecklistRoute:
         assert resp.status_code == 200
         assert b"Generate" in resp.data
 
+    # Fetches https://testfort.com live — see docs/testing/quarantine.md.
+    @pytest.mark.network
     def test_post_url_generates_professional_checklist(self, client):
         resp = client.post("/checklist", data={
             "input_text": "https://testfort.com/software-testing-services",
@@ -84,6 +88,8 @@ class TestChecklistRoute:
         assert b"HDR_001" in resp.data  # Header section
         assert b"Verify that" in resp.data
 
+    # Fetches https://testfort.com live — see docs/testing/quarantine.md.
+    @pytest.mark.network
     def test_post_instruction_filtered(self, client):
         """Instructions must NOT appear as checklist items."""
         resp = client.post("/checklist", data={

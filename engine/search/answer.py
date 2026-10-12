@@ -552,6 +552,78 @@ def over_daily_cap(*, org_id: str | None, user_id: str | None) -> bool:
     return used >= cap
 
 
+class DailyCapGate:
+    """The daily org cap as a **reservation**, not a check.
+
+    :func:`over_daily_cap` counts the ``LlmUsage`` rows written so far, and
+    a row is written only when an answer has finished streaming. Checked on
+    its own, two asks racing for the last slot both read ``cap - 1``, both
+    pass, and the cap is exceeded by one per concurrent request — gunicorn
+    runs ``gthread`` with four threads, so up to four. (Found by
+    ``tests/test_ask_concurrency.py``, which forces exactly that
+    interleaving.)
+
+    So the count and an in-flight reservation are taken together under one
+    lock: an ask that passes holds a slot until its usage row exists, and
+    the next ask counts that slot. Release happens after metering, so at
+    every moment ``rows + in flight`` covers each admitted ask exactly once.
+
+    Per process, like :class:`AskLimiter`: across N gunicorn *workers* the
+    cap can still be exceeded by up to N-1 concurrent asks. The deployments
+    run one worker; the monthly budget, counted in the database, stands
+    behind it either way.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._inflight: dict[str, int] = {}
+
+    @staticmethod
+    def scope_key(org_id: str | None, user_id: str | None) -> str:
+        # The same three tenants count_llm_usage_today distinguishes.
+        if org_id:
+            return f"o:{org_id}"
+        if user_id:
+            return f"u:{user_id}"
+        return "deployment"
+
+    def try_reserve(self, *, org_id: str | None,
+                    user_id: str | None) -> str | None:
+        """A reservation token when the ask may go ahead, else ``None``."""
+        from engine import db as _db
+        cap = daily_cap_per_org()
+        key = self.scope_key(org_id, user_id)
+        with self._lock:
+            used = _db.count_llm_usage_today(KIND, org_id=org_id,
+                                             user_id=user_id,
+                                             deployment=True)
+            if used + self._inflight.get(key, 0) >= cap:
+                return None
+            self._inflight[key] = self._inflight.get(key, 0) + 1
+            return key
+
+    def release(self, key: str | None) -> None:
+        if not key:
+            return
+        with self._lock:
+            left = self._inflight.get(key, 0) - 1
+            if left > 0:
+                self._inflight[key] = left
+            else:
+                self._inflight.pop(key, None)
+
+    def in_flight(self, key: str) -> int:
+        with self._lock:
+            return self._inflight.get(key, 0)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._inflight.clear()
+
+
+cap_gate = DailyCapGate()
+
+
 def tenant_scope(org_id: str | None, user_id: str | None,
                  sid: str | None) -> str:
     """The cache's and the feedback's tenant: org, else user, else the
@@ -710,84 +782,100 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
     if not api_key:
         yield from finish("no_key", chips=det_only, key=key)
         return
-    if over_daily_cap(org_id=req.org_id, user_id=req.user_id):
+    reservation = cap_gate.try_reserve(org_id=req.org_id,
+                                       user_id=req.user_id)
+    if reservation is None:
         yield from finish("rate_limited", chips=det_only, key=key,
                           reason="org_day")
         return
-    bucket = req.user_id or tenant_scope(None, None, req.sid)
-    refused = limiter.try_acquire(bucket)
-    if refused:
-        yield from finish("rate_limited", chips=det_only, key=key,
-                          reason=f"user_{refused}")
-        return
-    try:
-        llm_client.check_budget(req.org_id, key_source=key_source)
-    except llm_client.LLMBudgetExceeded as exc:
-        log.info("ask over budget: %s", exc)
-        yield from finish("budget", chips=det_only, key=key)
-        return
+    held = [reservation]
 
-    # 4. The call.
-    proc = AnswerStream([it.ref for it in packed.items] + refs)
-    stream = None
-    final = None
+    def release_slot() -> None:
+        # Idempotent: called right after metering (so the usage row takes
+        # the slot over) and again on every way out of the generator.
+        if held[0]:
+            cap_gate.release(held[0])
+            held[0] = None
+
     try:
-        client = _client_factory(api_key)
-        with client.messages.stream(
-                model=model, max_tokens=MAX_TOKENS, system=packed.system,
-                messages=packed.messages) as stream:
-            for delta in stream.text_stream:
-                out = proc.feed(delta or "")
-                if out:
-                    yield {"type": "text", "text": out}
-            try:
-                final = stream.get_final_message()
-            except Exception:  # pragma: no cover — defensive
-                final = None
-        tail = proc.finish()
-        if tail:
-            yield {"type": "text", "text": tail}
-    except GeneratorExit:
-        # The tokens were spent whether or not anyone is still reading —
-        # meter what the stream had (as routes/chat.py does).
+        bucket = req.user_id or tenant_scope(None, None, req.sid)
+        refused = limiter.try_acquire(bucket)
+        if refused:
+            yield from finish("rate_limited", chips=det_only, key=key,
+                              reason=f"user_{refused}")
+            return
         try:
-            snap = getattr(stream, "current_message_snapshot", None)
-            if snap is not None:
-                _meter(snap, model=model, key_source=key_source,
-                       org_id=req.org_id, project_id=req.project_id,
-                       user_id=req.user_id)
-        except Exception:  # pragma: no cover
-            pass
-        raise
-    except Exception as exc:
-        log.warning("ask stream failed: %s: %s", type(exc).__name__, exc)
-        if stream is not None:
-            snap = getattr(stream, "current_message_snapshot", None)
-            if snap is not None:
-                _meter(snap, model=model, key_source=key_source,
-                       org_id=req.org_id, project_id=req.project_id,
-                       user_id=req.user_id)
-        yield from finish("upstream", chips=det_only, key=None)
-        return
+            llm_client.check_budget(req.org_id, key_source=key_source)
+        except llm_client.LLMBudgetExceeded as exc:
+            log.info("ask over budget: %s", exc)
+            yield from finish("budget", chips=det_only, key=key)
+            return
 
-    usage = _meter(final, model=model, key_source=key_source,
-                   org_id=req.org_id, project_id=req.project_id,
-                   user_id=req.user_id)
-    if proc.stripped:
-        log.info("ask: stripped %d citation(s) not in the retrieved set",
-                 len(proc.stripped))
-    truncated = getattr(final, "stop_reason", None) == "max_tokens"
-    if proc.text and not truncated:
-        _db.put_rag_answer(
-            key=key, scope=scope, model=model, lang=lang,
-            project_id=req.project_id,
-            answer={"text": proc.text, "suggestions": proc.suggestions,
-                    "citations": proc.citations,
-                    "items": [it.ref for it in packed.items],
-                    "prompt_version": PROMPT_VERSION})
-    yield from finish(None, chips=merge_chips(det_chips, proc.suggestions),
-                      key=key, citations=proc.citations,
-                      usage=usage)
+        # 4. The call.
+        proc = AnswerStream([it.ref for it in packed.items] + refs)
+        stream = None
+        final = None
+        try:
+            client = _client_factory(api_key)
+            with client.messages.stream(
+                    model=model, max_tokens=MAX_TOKENS, system=packed.system,
+                    messages=packed.messages) as stream:
+                for delta in stream.text_stream:
+                    out = proc.feed(delta or "")
+                    if out:
+                        yield {"type": "text", "text": out}
+                try:
+                    final = stream.get_final_message()
+                except Exception:  # pragma: no cover — defensive
+                    final = None
+            tail = proc.finish()
+            if tail:
+                yield {"type": "text", "text": tail}
+        except GeneratorExit:
+            # The tokens were spent whether or not anyone is still reading —
+            # meter what the stream had (as routes/chat.py does).
+            try:
+                snap = getattr(stream, "current_message_snapshot", None)
+                if snap is not None:
+                    _meter(snap, model=model, key_source=key_source,
+                           org_id=req.org_id, project_id=req.project_id,
+                           user_id=req.user_id)
+            except Exception:  # pragma: no cover
+                pass
+            raise
+        except Exception as exc:
+            log.warning("ask stream failed: %s: %s", type(exc).__name__, exc)
+            if stream is not None:
+                snap = getattr(stream, "current_message_snapshot", None)
+                if snap is not None:
+                    _meter(snap, model=model, key_source=key_source,
+                           org_id=req.org_id, project_id=req.project_id,
+                           user_id=req.user_id)
+            yield from finish("upstream", chips=det_only, key=None)
+            return
+
+        usage = _meter(final, model=model, key_source=key_source,
+                       org_id=req.org_id, project_id=req.project_id,
+                       user_id=req.user_id)
+        release_slot()
+        if proc.stripped:
+            log.info("ask: stripped %d citation(s) not in the retrieved set",
+                     len(proc.stripped))
+        truncated = getattr(final, "stop_reason", None) == "max_tokens"
+        if proc.text and not truncated:
+            _db.put_rag_answer(
+                key=key, scope=scope, model=model, lang=lang,
+                project_id=req.project_id,
+                answer={"text": proc.text, "suggestions": proc.suggestions,
+                        "citations": proc.citations,
+                        "items": [it.ref for it in packed.items],
+                        "prompt_version": PROMPT_VERSION})
+        yield from finish(None,
+                          chips=merge_chips(det_chips, proc.suggestions),
+                          key=key, citations=proc.citations,
+                          usage=usage)
+    finally:
+        release_slot()
 
 
 __all__ = ["PROMPT_VERSION", "SYSTEM_PROMPT", "KIND", "MESSAGES",
@@ -795,4 +883,5 @@ __all__ = ["PROMPT_VERSION", "SYSTEM_PROMPT", "KIND", "MESSAGES",
            "ask_events", "answer_key", "estimate_tokens", "is_grounded",
            "load_items", "merge_chips", "normalise_history", "pack_prompt",
            "parse_suggestions", "limiter", "over_daily_cap", "tenant_scope",
+           "DailyCapGate", "cap_gate",
            "min_grounding", "daily_cap_per_org"]

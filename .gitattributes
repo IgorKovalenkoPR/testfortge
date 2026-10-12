@@ -1,0 +1,3 @@
+# Third-party files are pinned by checksum (tests/vendor/axe-core/VERSION);
+# a CRLF checkout would change the bytes and fail the pin.
+tests/vendor/** -text
