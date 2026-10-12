@@ -297,7 +297,12 @@
     <div class="bug-header">
         {% if bug.db_id %}
         <label class="bug-checkbox-label" title="{{ t.get('bug_select_one', 'Select for bulk action') }}">
-            <input type="checkbox" name="bug_ids" value="{{ bug.db_id }}" class="bug-checkbox">
+            {#- The wrapping label has no text, and a label's title is not a
+                name: without aria-label every checkbox was announced as
+                just "checkbox" (axe label, WCAG 4.1.2). Names the bug so
+                fifty of them can be told apart. -#}
+            <input type="checkbox" name="bug_ids" value="{{ bug.db_id }}" class="bug-checkbox"
+                   aria-label="{{ t.get('bug_select_one', 'Select for bulk action') }}: {{ bug.id }}">
         </label>
         {% endif %}
         <span class="bug-id">{{ bug.id }}</span>

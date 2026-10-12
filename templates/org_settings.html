@@ -58,7 +58,11 @@
     {{ plural(orphans.count, 'os_orphans_body')|format(orphans.count) }}
   </p>
 
-  <ul class="settings-orphan-list">
+  {#- Focusable and named: the list scrolls (max-height in style.css), and a
+      scroll box a keyboard cannot reach hides its overflow from anyone
+      without a mouse (axe scrollable-region-focusable, WCAG 2.1.1). -#}
+  <ul class="settings-orphan-list" tabindex="0"
+      aria-label="{{ t.os_orphans_heading }}">
     {% for name in orphans.names %}
     <li>{{ name }}</li>
     {% endfor %}

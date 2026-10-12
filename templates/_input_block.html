@@ -16,16 +16,20 @@
     </div>
 
     <div class="form-group">
-        <label for="inputFilesField">{{ t.file_upload }}</label>
+        <label for="inputFilesField" id="inputFilesLabel">{{ t.file_upload }}</label>
         <div class="file-upload-area" id="inputFilesDropZone">
-            <div class="upload-icon icon-coral"><i data-lucide="cloud-upload" class="icon-lg"></i></div>
-            <p>{{ t.file_upload_hint }}</p>
+            <div class="upload-icon icon-coral"><i data-lucide="cloud-upload" class="icon-lg" aria-hidden="true"></i></div>
+            <p id="inputFilesHint">{{ t.file_upload_hint }}</p>
             <p class="meta-text">{{ t.supported_formats }}</p>
-            <input type="file" name="input_files" multiple
-                   accept=".txt,.md,.docx,.xlsx,.csv,.pdf,.png,.jpg,.jpeg,.mp4,.webm,.avi,.mov,.mkv,.flv,.wmv,.gif,.m4v,.3gp,.ts,.mts,.vob,.ogv"
-                   class="file-input-hidden"
-                   id="inputFilesField">
         </div>
+        {#- Beside the zone, not inside it: the zone is a role=button, and a
+            control nested in a button is unreachable to assistive tech
+            whatever its tabindex (axe nested-interactive, WCAG 4.1.2). The
+            zone opens this picker by click, Enter and Space. -#}
+        <input type="file" name="input_files" multiple
+               accept=".txt,.md,.docx,.xlsx,.csv,.pdf,.png,.jpg,.jpeg,.mp4,.webm,.avi,.mov,.mkv,.flv,.wmv,.gif,.m4v,.3gp,.ts,.mts,.vob,.ogv"
+               class="file-input-hidden"
+               id="inputFilesField">
         <div class="file-list" id="uploadedFiles"></div>
     </div>
 
@@ -138,6 +142,10 @@
     // the picker too.
     zone.setAttribute('tabindex', '0');
     zone.setAttribute('role', 'button');
+    zone.setAttribute('aria-labelledby', 'inputFilesLabel inputFilesHint');
+    // The zone is the one keyboard stop for the picker; the (visually
+    // hidden) input beside it would otherwise be a second, invisible one.
+    input.setAttribute('tabindex', '-1');
     zone.addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter' || ev.key === ' ') {
             ev.preventDefault();

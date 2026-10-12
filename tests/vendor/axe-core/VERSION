@@ -1,0 +1,5 @@
+axe-core 4.13.0
+license MPL-2.0 (see LICENSE in this directory; file used unmodified)
+source npm package axe-core@4.13.0, file axe.min.js
+sha256 c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1
+sri sha256-wk8Je9L0UdT5M+i8fY1Tn4ZyouvLXMn58+7IypRwoME= (matches the package's own sri-history.json for 4.13.0)

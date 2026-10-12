@@ -67,7 +67,9 @@
                 </span>
                 {% endif %}
             </div>
-            <div style="margin-top:8px;font-size:0.82em;color:#64748b;
+            {#- --text-muted, not #64748b: on the active card's #fff7ed tint
+                #64748b is 4.48:1 at 13 px (axe color-contrast, AA 4.5). -#}
+            <div style="margin-top:8px;font-size:0.82em;color:var(--text-muted);
                         display:flex;gap:10px;flex-wrap:wrap;">
                 <span>📋 {{ p.test_cases_count or 0 }} {{ t.dm_unit_tc }}</span>
                 <span>✅ {{ p.checklist_count or 0 }} {{ t.dm_unit_cl }}</span>
