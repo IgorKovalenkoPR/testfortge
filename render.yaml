@@ -239,6 +239,11 @@ services:
       # WORKSPACE_DB_FIRST, which engine/features.py enforces.
       - key: PLATFORM_SEARCH
         value: "0"
+      # The Ask answer (ADR 0003 §4.6): the only LLM call in search. Requires
+      # PLATFORM_SEARCH; off until ADR §6 gate 3 (groundedness, latency,
+      # cache hit rate) has been measured on staging.
+      - key: PLATFORM_SEARCH_AI
+        value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
         value: "0"
       # The model switcher (ADR 0003 §4.7): org policy and per-user choice of
@@ -811,6 +816,10 @@ services:
       # Off here too until the backfill has run (ADR 0003 §8 step 2): flip
       # to "1", then run `python -m tools.search_backfill --global --all`.
       - key: PLATFORM_SEARCH
+        value: "0"
+      # The Ask answer (ADR 0003 §4.6). Requires PLATFORM_SEARCH, so it is
+      # inert until that is on; flip after the backfill and gate 3.
+      - key: PLATFORM_SEARCH_AI
         value: "0"
       - key: RECORDER_ENABLED
         value: "1"

@@ -286,6 +286,7 @@ def init_db() -> None:
     _ensure_public_id_unique_indexes(engine)
     _ensure_search_schema(engine)
     _ensure_llm_result_cache(engine)
+    _ensure_rag_answer_cache(engine)
     _engine = engine
     _Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
@@ -303,6 +304,15 @@ def _ensure_llm_result_cache(engine: Engine) -> None:
         LlmResultCache.__table__.create(engine, checkfirst=True)
     except Exception as exc:  # pragma: no cover — defensive
         log.warning("could not ensure llm_result_cache: %s", exc)
+
+
+def _ensure_rag_answer_cache(engine: Engine) -> None:
+    """Make sure ``rag_answer_cache`` exists (ADR 0003 §4.6) — the same
+    belt-and-braces as :func:`_ensure_llm_result_cache`. Never raises."""
+    try:
+        RagAnswerCache.__table__.create(engine, checkfirst=True)
+    except Exception as exc:  # pragma: no cover — defensive
+        log.warning("could not ensure rag_answer_cache: %s", exc)
 
 
 def _ensure_walkthrough_columns(engine: Engine) -> None:
@@ -2116,6 +2126,44 @@ class LlmResultCache(Base):
                                                    default=_utcnow)
 
 
+class RagAnswerCache(Base):
+    """One search answer (``POST /api/ask``), kept so the same question over
+    the same evidence costs nothing the second time (ADR 0003 §4.6).
+
+    ``key`` is :func:`engine.search.answer.answer_key`: a sha256 over the
+    tenant scope, the prompt version, the model, the answer language, the
+    normalised question, the ``(doc_id, content_hash)`` pairs of the items
+    the model was shown, and the follow-up history. Tying it to the
+    *evidence* rather than to the corpus version means an unrelated edit
+    leaves it valid and an edit to any cited item makes it a miss.
+
+    ``org_id`` is the **tenant scope**, as in :class:`LlmResultCache`: the
+    org id, ``u:<user id>`` without organisations, ``s:<session>`` without
+    accounts. ``project_id`` is the project the question was asked in (none
+    for an org-wide question), so a project deletion takes its answers with
+    it. ``helpful_up`` / ``helpful_down`` count the thumbs of
+    ``POST /api/ask/feedback``.
+    """
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(80), nullable=False,
+                                         index=True)
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True,
+                                                    index=True)
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    lang: Mapped[str] = mapped_column(String(4), nullable=False, default="en")
+    answer_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=_utcnow, index=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                       server_default="0")
+    last_hit_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                   default=_utcnow)
+    helpful_up: Mapped[int] = mapped_column(Integer, nullable=False,
+                                             default=0, server_default="0")
+    helpful_down: Mapped[int] = mapped_column(Integer, nullable=False,
+                                               default=0, server_default="0")
+
+
 class AuditLog(Base):
     """Who changed what, when — E2.7.
 
@@ -3320,6 +3368,175 @@ def delete_llm_result_cache_for_scope(scope: str) -> int:
             return int(result.rowcount or 0)
     except SQLAlchemyError as exc:
         log.warning("llm result cache scope delete failed: %s", exc)
+        return 0
+
+
+# ── Search answer cache (ADR 0003 §4.6) ─────────────────────────────
+
+#: Default lifetime of a cached search answer, in days
+#: (``RAG_ANSWER_CACHE_DAYS``).
+RAG_ANSWER_CACHE_DAYS_DEFAULT = 14
+
+
+def rag_answer_cache_days() -> int:
+    try:
+        return max(1, int(os.environ.get(
+            "RAG_ANSWER_CACHE_DAYS", RAG_ANSWER_CACHE_DAYS_DEFAULT)))
+    except (TypeError, ValueError):
+        return RAG_ANSWER_CACHE_DAYS_DEFAULT
+
+
+def get_rag_answer(key: str, *, scope: str, bump: bool = True
+                   ) -> dict | None:
+    """The live cached answer for *key* in *scope* — or ``None``.
+
+    The scope is checked as well as the key (it is part of the key), so a
+    collision or a wrong scope still cannot read across tenants. An expired
+    row reads as a miss and is deleted on the spot. ``bump`` counts the read
+    as a hit. Never raises.
+    """
+    if not (key and scope):
+        return None
+    cutoff = _utcnow() - timedelta(days=rag_answer_cache_days())
+    try:
+        with session_scope() as sess:
+            row = sess.get(RagAnswerCache, key)
+            if row is None or row.org_id != scope:
+                return None
+            created = row.created_at
+            if created is not None and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created is not None and created < cutoff:
+                sess.delete(row)
+                return None
+            if bump:
+                row.hits = int(row.hits or 0) + 1
+                row.last_hit_at = _utcnow()
+            return {"key": row.key, "org_id": row.org_id,
+                    "project_id": row.project_id, "model": row.model,
+                    "lang": row.lang, "answer": dict(row.answer_json or {}),
+                    "hits": row.hits, "helpful_up": row.helpful_up or 0,
+                    "helpful_down": row.helpful_down or 0}
+    except SQLAlchemyError as exc:
+        log.warning("rag answer cache read failed: %s", exc)
+        return None
+
+
+def put_rag_answer(*, key: str, scope: str, model: str, lang: str,
+                   answer: dict, project_id: str | None = None) -> bool:
+    """Store (or replace) one answer. Never raises."""
+    if not (key and scope and answer):
+        return False
+    try:
+        with session_scope() as sess:
+            row = sess.get(RagAnswerCache, key)
+            now = _utcnow()
+            if row is None:
+                row = RagAnswerCache(key=key, org_id=scope)
+                sess.add(row)
+            row.org_id = scope[:80]
+            row.project_id = project_id
+            row.model = (model or "unknown")[:80]
+            row.lang = (lang or "en")[:4]
+            row.answer_json = answer
+            row.created_at = now
+            row.last_hit_at = now
+            row.hits = 0
+            row.helpful_up = row.helpful_up or 0
+            row.helpful_down = row.helpful_down or 0
+        return True
+    except SQLAlchemyError as exc:
+        log.warning("rag answer cache write failed: %s", exc)
+        return False
+
+
+def rate_rag_answer(key: str, *, scope: str, helpful: bool) -> bool:
+    """Count one thumbs-up (``helpful``) or thumbs-down on the caller's own
+    cached answer. ``False`` when there is no such answer in *scope*. Never
+    raises."""
+    if not (key and scope):
+        return False
+    try:
+        with session_scope() as sess:
+            row = sess.get(RagAnswerCache, key)
+            if row is None or row.org_id != scope:
+                return False
+            if helpful:
+                row.helpful_up = int(row.helpful_up or 0) + 1
+            else:
+                row.helpful_down = int(row.helpful_down or 0) + 1
+            return True
+    except SQLAlchemyError as exc:
+        log.warning("rag answer feedback failed: %s", exc)
+        return False
+
+
+def rag_answer_owner(key: str) -> str | None:
+    """The tenant scope a cached answer belongs to, or ``None``."""
+    if not key:
+        return None
+    try:
+        with session_scope() as sess:
+            row = sess.get(RagAnswerCache, key)
+            return row.org_id if row is not None else None
+    except SQLAlchemyError:
+        return None
+
+
+def purge_expired_rag_answer_cache(*, days: int | None = None) -> int:
+    """Delete cached answers older than the TTL. Returns rows removed.
+
+    Run by :func:`engine.retention.sweep_expired`; reads check expiry
+    themselves, so this only keeps the table bounded."""
+    keep = days if days is not None else rag_answer_cache_days()
+    cutoff = _utcnow() - timedelta(days=max(1, int(keep)))
+    with session_scope() as sess:
+        result = sess.execute(delete(RagAnswerCache).where(
+            RagAnswerCache.created_at < cutoff))
+        return int(result.rowcount or 0)
+
+
+def delete_rag_answers_for_project(project_id: str) -> int:
+    """Drop every cached answer asked inside *project_id*. Never raises."""
+    if not project_id:
+        return 0
+    try:
+        with session_scope() as sess:
+            result = sess.execute(delete(RagAnswerCache).where(
+                RagAnswerCache.project_id == project_id))
+            return int(result.rowcount or 0)
+    except SQLAlchemyError as exc:
+        log.warning("rag answer cache project delete failed: %s", exc)
+        return 0
+
+
+def count_llm_usage_today(kind: str, *, org_id: str | None = None,
+                          user_id: str | None = None,
+                          deployment: bool = False) -> int:
+    """``LlmUsage`` rows of *kind* since UTC midnight: for one org, else one
+    user, else (``deployment=True``) every call made without an org — the
+    platform's own key on an instance without organisations.
+
+    Used by the daily ask cap (ADR 0003 §4.6). Fails **open** (0): a meter
+    outage must not switch the AI answer off; the monthly budget gate still
+    stands behind it.
+    """
+    start = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        with session_scope() as sess:
+            q = sess.query(func.count(LlmUsage.id)).filter(
+                LlmUsage.kind == kind, LlmUsage.at >= start)
+            if org_id:
+                q = q.filter(LlmUsage.org_id == org_id)
+            elif user_id:
+                q = q.filter(LlmUsage.user_id == user_id)
+            elif deployment:
+                q = q.filter(LlmUsage.org_id.is_(None))
+            else:
+                return 0
+            return int(q.scalar() or 0)
+    except SQLAlchemyError as exc:
+        log.warning("llm usage count failed: %s", exc)
         return 0
 
 
@@ -6332,6 +6549,7 @@ __all__ = [
     # identity / tenancy / audit (E0.2, E1.1, E2.1, E2.7)
     "ServerSession", "User", "Identity", "Organization", "OrgMember",
     "Invite", "AuditLog", "OrgSecret", "LlmUsage", "LlmResultCache",
+    "RagAnswerCache",
     "ORG_ROLES", "ROLE_RANK", "INVITE_TTL_HOURS", "normalize_email",
     "create_user", "get_user", "get_user_by_email",
     "link_identity", "get_user_by_identity",
@@ -6345,6 +6563,10 @@ __all__ = [
     "purge_expired_llm_result_cache", "delete_llm_result_cache_for_project",
     "delete_llm_result_cache_for_scope", "llm_result_cache_days",
     "llm_result_cache_max_rows",
+    "get_rag_answer", "put_rag_answer", "rate_rag_answer",
+    "rag_answer_owner", "purge_expired_rag_answer_cache",
+    "delete_rag_answers_for_project", "rag_answer_cache_days",
+    "count_llm_usage_today",
     "purge_llm_usage",
     "create_organization", "add_org_member", "get_org_role",
     "list_org_members", "count_org_admins", "count_users",

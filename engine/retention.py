@@ -347,6 +347,9 @@ def delete_project_data(project_id: str, *, org_id: str | None = None,
     # not content anybody exports or counts, but they must not outlive the
     # data they were made from.
     _db.delete_llm_result_cache_for_project(project_id)
+    # …and so are the search answers asked inside it (ADR 0003 §4.6): an
+    # answer is the project's items summarised.
+    _db.delete_rag_answers_for_project(project_id)
 
     # 3. The audit, written last so it records what actually happened rather
     #    than what was about to be attempted. Its own row survives the
@@ -535,6 +538,8 @@ _SWEEPERS: tuple[tuple[str, str], ...] = (
     # ADR 0003 §4.9: cached automation results past LLM_RESULT_CACHE_DAYS.
     # Reads check expiry themselves; this keeps the table bounded.
     ("purge_expired_llm_result_cache", "AI result cache"),
+    # ADR 0003 §4.6: search answers past RAG_ANSWER_CACHE_DAYS.
+    ("purge_expired_rag_answer_cache", "search answer cache"),
 )
 
 
