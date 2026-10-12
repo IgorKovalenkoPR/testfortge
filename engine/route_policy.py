@@ -200,6 +200,9 @@ POLICY: dict[str, str] = {
     # §4.7). Self-enforcing via @require_role("admin"); listed so the table
     # answers "who can move the team onto Opus".
     "org_settings_models": "admin",
+    # Lowering AUTOMATION_AI_MODE for the team (ADR 0003 §4.9) — it decides
+    # whether generation spends on the model at all, so it is an admin's.
+    "org_settings_ai_mode": "admin",
     # A member's own model choice, within that policy. Member-level: it
     # changes nothing but the caller's own calls.
     "api_me_model_preference": "user",

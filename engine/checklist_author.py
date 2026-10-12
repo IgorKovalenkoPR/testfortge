@@ -39,7 +39,9 @@ from functools import lru_cache
 from typing import Any
 
 from engine import checklist_rules as _rules
+from engine import ai_mode
 from engine import glossary
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.llm_keys import platform_key as _platform_key
 from engine.log import get_logger
@@ -48,6 +50,10 @@ _logger = get_logger(__name__)
 
 # Routed by work kind at call time — see engine/llm_models.py.
 _AUTHOR_KIND = "authoring"
+
+#: Part of the result cache key (ADR 0003 §4.9). Bump when the prompt or
+#: the payload shape the coercion expects changes.
+_PROMPT_VERSION = "checklist_author/1"
 
 # A 60-row checklist is ~4k tokens of JSON. 6k leaves room for the
 # rationale and gaps without letting a runaway response cost real money.
@@ -331,9 +337,12 @@ def _baseline_text(checklist: _rules.LowLevelChecklist,
 # ── LLM call ─────────────────────────────────────────────────────────
 
 def _call_llm(artifacts: Artifacts, profile: Any) -> str:
-    resp = call_messages(
+    resp = cached_call(
+        _AUTHOR_KIND,
+        prompt_version=_PROMPT_VERSION,
+        call=call_messages,
+        accept=lambda text: _parse_llm_response(text) is not None,
         timeout=_AUTHOR_TIMEOUT,
-        kind=_AUTHOR_KIND,
         max_tokens=_AUTHOR_MAX_TOKENS,
         system=_system_blocks(),
         messages=[{"role": "user",
@@ -570,6 +579,25 @@ def _coerce_result(payload: dict, artifacts: Artifacts
 
 # ── Entry point ──────────────────────────────────────────────────────
 
+def _rule_coverage(checklist: _rules.LowLevelChecklist,
+                   artifacts: "Artifacts") -> float:
+    """Share of the crawled pages the enumeration expanded, for ``assist``.
+
+    Only the gap a model could close counts. A page past the content-section
+    cap is one; a Header or Footer the markup never declared is not — the
+    author agent is told not to invent rows for controls no artefact
+    evidences, and drops them when it does, so calling it for that gap
+    buys nothing. An empty sheet is zero.
+    """
+    if not checklist.total:
+        return 0.0
+    pages = len(getattr(artifacts, "pages", None) or [])
+    if not pages:
+        return 0.0
+    cap = int(getattr(_rules, "MAX_CONTENT_SECTIONS", pages) or pages)
+    return min(pages, cap) / float(pages)
+
+
 def author_checklist(*, artifacts: Artifacts | None = None,
                      profile: Any = None,
                      force_llm: bool = False) -> AuthoredChecklist:
@@ -596,6 +624,20 @@ def author_checklist(*, artifacts: Artifacts | None = None,
         return _fallback("no artefacts")
     if not _author_enabled():
         return _fallback("CL_AUTHOR_ENABLED=0")
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9): the enumeration first unless the
+    # mode is ``full``; the model only for the gap it leaves, or on request.
+    mode = ai_mode.effective_mode()
+    if mode == ai_mode.OFF:
+        return _fallback("AUTOMATION_AI_MODE=off")
+    if ai_mode.rules_first():
+        enumerated = _fallback("")
+        if not ai_mode.llm_allowed(
+                coverage=_rule_coverage(enumerated.checklist, artifacts),
+                explicit=force_llm):
+            _logger.info("checklist_author: assist mode — the enumeration "
+                         "covers it (%d rows), no model call",
+                         enumerated.total)
+            return enumerated
     if not force_llm and not _platform_key():
         return _fallback("no API key")
 

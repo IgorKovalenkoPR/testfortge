@@ -45,6 +45,7 @@ from engine.imports import parse_test_cases as import_parse_test_cases
 from engine.imports import parse_checklist as import_parse_checklist
 from engine.job_queue import get_queue, DONE, FAILED
 
+from engine import ai_mode as _ai_mode
 from engine import db as _db
 from engine import gherkin as _gherkin
 # The pilot flag the recorder owns. One route here shares it —
@@ -286,6 +287,21 @@ def _run_authored_without_url(custom_prompt: str,
         _log.warning("authoring without URL failed: %s", exc)
         return []
     return [tc_to_dict(tc) for tc in tcs]
+
+
+def _enhance_requested() -> bool:
+    """Did the operator press "Improve with AI" (ADR 0003 §4.9)?
+
+    Read in the request, carried into the job by
+    :func:`engine.ai_mode.bind_enhance`. ``getlist`` because the form holds
+    a hidden ``enhance`` field the page script sets *and*, on a no-script
+    submit, the button's own ``enhance=1`` — either saying yes is a yes.
+    It only matters in ``assist``: ``off`` refuses it and ``full`` does not
+    need it.
+    """
+    values = request.form.getlist("enhance") + request.args.getlist("enhance")
+    return any(str(v).strip().lower() in ("1", "true", "yes", "on")
+               for v in values)
 
 
 def _requested_tc_format() -> str:
@@ -619,6 +635,13 @@ def _drain_cl_job_into_session() -> None:
 
 
 def register(app: Flask) -> None:
+    @app.context_processor
+    def _automation_ai_mode_ctx():
+        # A callable, not a value: only the two generation pages ask, and
+        # resolving the org's mode is a database read every other render
+        # should not pay for.
+        return {"automation_ai_mode": _ai_mode.effective_mode}
+
     # Hard-coded blocking budget for the legacy sync POST. Render's
     # gunicorn timeout is 300 s; anything we let block beyond ~250 s
     # risks a worker kill and a 502 on the user's tab. The async
@@ -751,8 +774,10 @@ def register(app: Flask) -> None:
                 )
                 return redirect(url_for("test_cases_page"))
 
-            job_id = get_queue().submit("tc_gen", _sync_worker,
-                                        meta={"session_id": sid})
+            job_id = get_queue().submit(
+                "tc_gen",
+                _ai_mode.bind_enhance(_sync_worker, _enhance_requested()),
+                meta={"session_id": sid})
             session["tc_gen_job_id"] = job_id
 
             import time as _time
@@ -992,8 +1017,10 @@ def register(app: Flask) -> None:
                 )
                 return redirect(url_for("checklist_page"))
 
-            job_id = get_queue().submit("cl_gen", _sync_worker,
-                                        meta={"session_id": sid})
+            job_id = get_queue().submit(
+                "cl_gen",
+                _ai_mode.bind_enhance(_sync_worker, _enhance_requested()),
+                meta={"session_id": sid})
             session["cl_gen_job_id"] = job_id
 
             import time as _time
@@ -1521,7 +1548,8 @@ def register(app: Flask) -> None:
             }
 
         job_id = get_queue().submit(
-            "tc_gen", _worker, meta={"session_id": sid})
+            "tc_gen", _ai_mode.bind_enhance(_worker, _enhance_requested()),
+            meta={"session_id": sid})
         session["tc_gen_job_id"] = job_id
         return jsonify({"job_id": job_id, "status": "pending"})
 
@@ -1650,7 +1678,8 @@ def register(app: Flask) -> None:
             }
 
         job_id = get_queue().submit(
-            "cl_gen", _worker, meta={"session_id": sid})
+            "cl_gen", _ai_mode.bind_enhance(_worker, _enhance_requested()),
+            meta={"session_id": sid})
         session["cl_gen_job_id"] = job_id
         return jsonify({"job_id": job_id, "status": "pending"})
 

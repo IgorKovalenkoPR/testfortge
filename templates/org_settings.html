@@ -319,6 +319,33 @@
 </div>
 {% endif %}
 
+{# ── Automation AI mode (ADR 0003 §4.9). The server's AUTOMATION_AI_MODE
+     is the ceiling; an admin may only lower it for the team. #}
+{% if is_admin and ai_modes %}
+{% set aim_label = {'off': t.aim_mode_off, 'assist': t.aim_mode_assist, 'full': t.aim_mode_full} %}
+<div class="card">
+  <h2>{{ t.aim_heading }}</h2>
+  <p class="text-muted">{{ t.aim_intro }}</p>
+  <p class="settings-status">{{ t.aim_now|format(aim_label[ai_mode_effective]) }}</p>
+  <form method="post" action="{{ url_for('org_settings_ai_mode') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="settings-row">
+      <label for="aim-mode">{{ t.aim_label }}</label>
+      <select id="aim-mode" name="automation_ai_mode" class="form-select">
+        <option value="" {% if not ai_mode_org %}selected{% endif %}>{{ t.aim_server_default|format(aim_label[ai_mode_ceiling]) }}</option>
+        {% for mode in ai_modes %}
+        {% if loop.index0 <= ai_modes.index(ai_mode_ceiling) %}
+        <option value="{{ mode }}" {% if ai_mode_org == mode %}selected{% endif %}>{{ aim_label[mode] }}</option>
+        {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <p class="text-muted settings-note">{{ t.aim_ceiling_note }}</p>
+    <button type="submit" class="btn btn-secondary">{{ t.os_save }}</button>
+  </form>
+</div>
+{% endif %}
+
 {# ── Capacity and availability (E0.11 / E0.12) ────────────────────
      Read-only for everyone. Two ceilings decide whether this deployment
      keeps working, and neither is visible from anywhere else in the

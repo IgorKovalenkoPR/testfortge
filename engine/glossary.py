@@ -38,6 +38,7 @@ one.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from functools import lru_cache
@@ -125,6 +126,41 @@ def glossary_text() -> str:
 def wording_rules_text() -> str:
     """Raw ``wording_rules.yaml`` for the authoring agents' system block."""
     return _read(_WORDING_PATH)
+
+
+#: Everything else that decides how an authored artefact is worded, read
+#: as raw text for :func:`house_style_hash`. The YAML packs are prompt
+#: material; ``tc_house_style.py`` holds the column rules as code, so its
+#: source is what changes when those rules do.
+_STYLE_DIR = os.path.join(_HERE, "qa_knowledge", "style")
+_HOUSE_STYLE_FILES = (
+    os.path.join(_STYLE_DIR, "house_style.yaml"),
+    os.path.join(_STYLE_DIR, "coverage_rules.yaml"),
+    os.path.join(_STYLE_DIR, "checklist_style.yaml"),
+    os.path.join(_HERE, "tc_house_style.py"),
+)
+
+
+@lru_cache(maxsize=1)
+def _house_style_files_text() -> str:
+    return "\x1f".join(_read(p) for p in _HOUSE_STYLE_FILES)
+
+
+def house_style_hash() -> str:
+    """sha256 over every style input an authored result depends on.
+
+    The glossary, the wording rules, the house-style and coverage YAML packs
+    and the ``tc_house_style`` rules. Part of every automation cache key
+    (ADR 0003 §4.9), so a style change invalidates exactly the results it
+    could have changed and nothing else. Not cached itself — the parts are,
+    so this costs one hash over text already in memory.
+    """
+    h = hashlib.sha256()
+    for part in (glossary_text(), wording_rules_text(),
+                 _house_style_files_text()):
+        h.update(part.encode("utf-8"))
+        h.update(b"\x1e")
+    return h.hexdigest()
 
 
 @lru_cache(maxsize=1)
@@ -799,7 +835,7 @@ def starts_from_entry_point(steps: Iterable[Any], *,
 
 __all__ = [
     "PAGE_REGIONS",
-    "glossary_text", "wording_rules_text",
+    "glossary_text", "wording_rules_text", "house_style_hash",
     "terms", "element_terms", "banned_phrases", "approved_verbs",
     "canonical_term", "suggest", "control_type_for",
     "capitalise_regions", "canonicalise_spellings", "strip_trailing_period",

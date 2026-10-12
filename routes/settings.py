@@ -7,6 +7,7 @@
   * POST /org/settings/budget           — admin: monthly LLM allowance
   * POST /org/settings/adopt-projects   — admin: claim pre-ORG_MODE projects
   * POST /org/settings/models           — admin: model-switcher policy (ADR 0003)
+  * POST /org/settings/ai-mode          — admin: lower AUTOMATION_AI_MODE (ADR 0003 §4.9)
   * GET/PUT /api/me/model-preference    — user: their own model choice
 
 Also the read-only surface for three things the product cannot otherwise
@@ -80,6 +81,7 @@ from engine import db as _db
 from engine import features as _features
 from engine import llm_cost as _llm_cost
 from engine import llm_keys as _llm_keys
+from engine import ai_mode as _ai_mode
 from engine import llm_models as _llm_models
 from engine import llm_prefs as _llm_prefs
 from engine import mailer as _mailer
@@ -192,6 +194,12 @@ def register(app: Flask) -> None:
                 k for k in _llm_models.SWITCHABLE_KINDS
                 if _llm_models.operator_pin(k)),
             model_legacy_pin=bool(_llm_models.legacy_global_pin()),
+            # ── Automation AI mode (ADR 0003 §4.9) ──
+            # The env value is the ceiling; the team may only go lower.
+            ai_modes=_ai_mode.MODES,
+            ai_mode_ceiling=_ai_mode.env_mode(),
+            ai_mode_org=_ai_mode.org_mode(org_id),
+            ai_mode_effective=_ai_mode.effective_mode(org_id),
             # ── Capacity and availability (E0.11 / E0.12) ──
             # Shown to every member, like the LLM meter: a plain user whose
             # generation quietly stopped, or who waited a minute for the
@@ -626,6 +634,45 @@ def register(app: Flask) -> None:
                          user_id=_perm.current_user_id(), org_id=org_id,
                          diff={"llm_models": [before, policy]})
         flash(g.t.get("ms_policy_saved", "Model policy saved."), "success")
+        return _settings_redirect()
+
+    # ── Automation AI mode (ADR 0003 §4.9) ───────────────────────────
+    #
+    # An admin may lower AUTOMATION_AI_MODE for the team, never raise it:
+    # the server's value is what the operator agreed to pay for. An empty
+    # choice clears the team's setting and follows the server again.
+
+    @app.route("/org/settings/ai-mode", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_settings_ai_mode():
+        org_id = _perm.current_org_id()
+        if not (org_id and _require_admin_or_flash()):
+            return _settings_redirect()
+
+        wanted = (request.form.get("automation_ai_mode") or "").strip().lower()
+        ceiling = _ai_mode.env_mode()
+        if wanted and wanted not in _ai_mode.MODES:
+            flash(g.t.get("aim_err_invalid",
+                          "That is not an AI mode this server offers."),
+                  "error")
+            return _settings_redirect()
+        if wanted and _ai_mode.clamp(wanted, ceiling) != wanted:
+            flash(g.t.get("aim_err_above",
+                          "Your team can lower the AI mode but not raise it "
+                          "above what the server allows."), "error")
+            return _settings_redirect()
+
+        before = _ai_mode.org_mode(org_id)
+        if not _db.update_org_settings(
+                org_id, {_ai_mode.ORG_SETTING: wanted or None}):
+            flash(g.t.get("aim_save_failed",
+                          "Could not save the AI mode — see server logs."),
+                  "error")
+            return _settings_redirect()
+        _db.append_audit(entity="organization", action="set_ai_mode",
+                         user_id=_perm.current_user_id(), org_id=org_id,
+                         diff={_ai_mode.ORG_SETTING: [before, wanted or None]})
+        flash(g.t.get("aim_saved", "AI mode saved."), "success")
         return _settings_redirect()
 
     @app.route("/api/me/model-preference", methods=["GET", "PUT"])

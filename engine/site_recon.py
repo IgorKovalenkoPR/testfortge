@@ -35,6 +35,8 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from engine import ai_mode
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 from engine.log import get_logger
 
@@ -47,6 +49,9 @@ _logger = get_logger(__name__)
 # Routed by work kind at call time — see engine/llm_models.py.
 _RECON_KIND = "analysis"
 _RECON_MAX_TOKENS = int(os.environ.get("RECON_MAX_TOKENS", "1500"))
+
+#: Part of the result cache key (ADR 0003 §4.9).
+_PROMPT_VERSION = "site_recon/1"
 
 
 # Closed enum for site_type — Strategy Agent matches on this verbatim,
@@ -111,6 +116,18 @@ def recon_site(site_analysis, *, force_llm: bool = False) -> SiteProfile:
         ``profile.source`` whether the LLM was reachable.
     """
     evidence = _build_evidence(site_analysis)
+
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9). The rule profile is trusted unless
+    # it could not tell what kind of site this is ("generic") — that is the
+    # low-confidence case the model is for in ``assist``.
+    if ai_mode.effective_mode() == ai_mode.OFF:
+        return _rule_based_profile(site_analysis, evidence)
+    if ai_mode.rules_first():
+        ruled = _rule_based_profile(site_analysis, evidence)
+        if not ai_mode.llm_allowed(
+                low_confidence=ruled.site_type == "generic",
+                explicit=force_llm):
+            return ruled
 
     from engine.llm_keys import platform_key
     api_key_set = bool(platform_key())
@@ -222,8 +239,11 @@ def _call_llm(evidence: dict) -> str:
     """Issue the Anthropic call. Raises :class:`LLMUnavailable` on
     transient or terminal failure (caller turns that into a rule-based
     fallback)."""
-    resp = call_messages(
-        kind=_RECON_KIND,
+    resp = cached_call(
+        _RECON_KIND,
+        prompt_version=_PROMPT_VERSION,
+        call=call_messages,
+        accept=lambda text: _parse_llm_response(text) is not None,
         max_tokens=_RECON_MAX_TOKENS,
         system=[{
             "type": "text",

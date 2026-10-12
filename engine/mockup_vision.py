@@ -41,6 +41,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from engine import ai_mode
+from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
 
 _logger = logging.getLogger(__name__)
@@ -48,6 +50,10 @@ _logger = logging.getLogger(__name__)
 # Hard limits — vision calls are expensive and the model context is
 # bounded. 20 images is a generous PDF + a few extra screens.
 MAX_IMAGES = 20
+
+#: Part of the result cache key (ADR 0003 §4.9). The images themselves are
+#: in the request hash, so the same mockup set re-analysed is a hit.
+_PROMPT_VERSION = "mockup_vision/1"
 MAX_BYTES_PER_IMAGE = 4 * 1024 * 1024  # 4 MB after re-encode
 TARGET_LONG_EDGE = 1600                # px — Anthropic recommends ≤1568
 
@@ -403,6 +409,12 @@ def _call_claude_vision(
     """
     if not images:
         return "", "", ""
+    # AUTOMATION_AI_MODE (ADR 0003 §4.9). There is no rule engine that
+    # reads a picture, so ``assist`` treats an uploaded mockup as the
+    # explicit request it is; ``off`` declines and says so.
+    if not ai_mode.llm_allowed(explicit=True):
+        return "", "", ("Mockup analysis uses AI, which is turned off for "
+                        "automation on this server or for your team.")
     from engine.llm_keys import platform_key
     api_key = platform_key() or ""
     if not api_key:
@@ -425,8 +437,10 @@ def _call_claude_vision(
         })
     content.append({"type": "text", "text": _build_user_text(len(images), context)})
     try:
-        resp = call_messages(
-            kind=kind,
+        resp = cached_call(
+            kind,
+            prompt_version=_PROMPT_VERSION,
+            call=call_messages,
             max_tokens=max_tokens,
             # System-blocks list so the persona block honours the
             # ``cache_control={"type": "ephemeral"}`` marker — repeated
