@@ -54,6 +54,7 @@ tools/*
 !tools/build_istqb_corpus.py
 !tools/measure_prompts.py
 !tools/tfg_record.py
+!tools/search_backfill.py
 
 # Temporary DOCX build helpers and generated artefacts
 _build_requirements_docx.js

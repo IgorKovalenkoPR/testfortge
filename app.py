@@ -87,6 +87,20 @@ except Exception:  # pragma: no cover — never block boot on this
     log.exception("first-admin bootstrap raised; continuing without it.")
 
 
+# Platform search (ADR 0003 §4.4). The ORM listeners are registered
+# unconditionally and do nothing while PLATFORM_SEARCH is off, so flipping
+# the flag needs no restart. The global corpora (Guide, ISTQB syllabus) are
+# indexed on a daemon thread after a delay — never in the boot path, and a
+# fingerprint compare when nothing changed. Wrapped like the two blocks
+# above: search is optional and must not be why the service fails to start.
+try:
+    from engine.search import hooks as _search_hooks
+    _search_hooks.install()
+    _search_hooks.start_boot_indexing()
+except Exception:  # pragma: no cover — never block boot on search
+    log.exception("search hooks failed to install; continuing without them.")
+
+
 def _start_snapshot_catchup_thread() -> None:
     """Daemon thread that fills gaps in ``DashboardMetricSnapshot``.
 

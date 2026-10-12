@@ -3,7 +3,9 @@
 This package is the retrieval layer over the platform's own data. T3 lays
 the foundation only: text processing (:mod:`engine.search.text`), the
 deterministic embedder (:mod:`engine.search.embed`), the lexicons, and the
-capability record below. Indexing hooks and endpoints come later.
+capability record below. T4 adds the indexer
+(:mod:`engine.search.indexer`) and the ORM hooks that keep it current
+(:mod:`engine.search.hooks`); retrieval and endpoints come later.
 
 Kept import-light on purpose. ``import engine.search`` must not pull in
 NumPy, onnxruntime or any database driver (ADR 0003 §4.11, guarded by

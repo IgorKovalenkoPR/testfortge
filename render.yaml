@@ -234,6 +234,11 @@ services:
         value: "1"
       - key: DASHBOARD_V2
         value: "0"
+      # Platform search (ADR 0003, E13). Off until the staging backfill and
+      # the golden-set gate (ADR §6, gate 2) have passed; requires
+      # WORKSPACE_DB_FIRST, which engine/features.py enforces.
+      - key: PLATFORM_SEARCH
+        value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
         value: "0"
       # The model switcher (ADR 0003 §4.7): org policy and per-user choice of
@@ -790,6 +795,10 @@ services:
       # Merged off, like every ADR 0003 flag (§8 step 1). Flip to "1" here
       # first — ORG_MODE is already on — to exercise the switcher.
       - key: MODEL_SWITCHER
+        value: "0"
+      # Off here too until the backfill has run (ADR 0003 §8 step 2): flip
+      # to "1", then run `python -m tools.search_backfill --global --all`.
+      - key: PLATFORM_SEARCH
         value: "0"
       - key: RECORDER_ENABLED
         value: "1"

@@ -3953,6 +3953,14 @@ def delete_project(project_id: str) -> None:
     with session_scope() as sess:
         p = sess.get(Project, project_id)
         if p:
+            # search_doc cascades off the FK; search_scope_state has none
+            # (ADR 0003). Same cleanup as retention.delete_project_data.
+            sess.query(SearchDoc).filter(
+                SearchDoc.project_id == project_id).delete(
+                    synchronize_session=False)
+            sess.query(SearchScopeState).filter(
+                SearchScopeState.scope_key == project_id).delete(
+                    synchronize_session=False)
             sess.delete(p)
 
 

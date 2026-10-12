@@ -115,6 +115,16 @@ FLAGS: dict[str, Flag] = {
             "engine/llm_models.KIND_TIER exactly as before, which is "
             "Haiku for every kind.",
         ),
+        Flag(
+            "PLATFORM_SEARCH", False, "E13",
+            "Platform-wide search (ADR 0003): the indexing hooks, the "
+            "background index of the Guide and the ISTQB syllabus, and — "
+            "once they land — /api/search, /api/hints and the search "
+            "field. Requires WORKSPACE_DB_FIRST: the index reads the "
+            "project's rows in Postgres, and with the session as the "
+            "source of truth it would index a copy nobody is looking at. "
+            "While off the hooks stay registered and write nothing.",
+        ),
     )
 }
 
@@ -186,6 +196,9 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
     "DASHBOARD_V2": ("WORKSPACE_DB_FIRST",),
     # An org policy with no organisations has nobody to belong to.
     "MODEL_SWITCHER": ("ORG_MODE",),
+    # ADR 0003 §4.10: the index is built from the database, so it describes
+    # what a page shows only once the database is the source of truth.
+    "PLATFORM_SEARCH": ("WORKSPACE_DB_FIRST",),
 }
 
 
