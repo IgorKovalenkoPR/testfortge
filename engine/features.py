@@ -106,6 +106,16 @@ FLAGS: dict[str, Flag] = {
             "AUTH_ENABLED is off — see engine/basic_auth.py — because "
             "that combination has nothing behind it.",
         ),
+        Flag(
+            "PLATFORM_SEARCH", False, "E13",
+            "Platform-wide search (ADR 0003): the indexing hooks, the "
+            "background index of the Guide and the ISTQB syllabus, and — "
+            "once they land — /api/search, /api/hints and the search "
+            "field. Requires WORKSPACE_DB_FIRST: the index reads the "
+            "project's rows in Postgres, and with the session as the "
+            "source of truth it would index a copy nobody is looking at. "
+            "While off the hooks stay registered and write nothing.",
+        ),
     )
 }
 
@@ -175,6 +185,9 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
     # Same reason: per-project metrics computed from the caller's session
     # are per-browser metrics wearing a project's name.
     "DASHBOARD_V2": ("WORKSPACE_DB_FIRST",),
+    # ADR 0003 §4.10: the index is built from the database, so it describes
+    # what a page shows only once the database is the source of truth.
+    "PLATFORM_SEARCH": ("WORKSPACE_DB_FIRST",),
 }
 
 

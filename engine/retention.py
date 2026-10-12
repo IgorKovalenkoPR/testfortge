@@ -331,6 +331,13 @@ def delete_project_data(project_id: str, *, org_id: str | None = None,
             sess.query(model).filter(
                 model.project_id == project_id).delete(
                     synchronize_session=False)
+        # The search index (ADR 0003 §4.2). ``search_doc`` cascades off the
+        # project's foreign key on both engines, but it is deleted here by
+        # name so the guarantee does not rest on a pragma, and the scope
+        # state has no foreign key at all — left behind, it would tell the
+        # lag check a recreated project id was already indexed.
+        from engine.search import indexer as _search_indexer
+        _search_indexer.drop_project(project_id, sess=sess)
         row = sess.get(_db.Project, project_id)
         if row is not None:
             sess.delete(row)

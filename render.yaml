@@ -234,6 +234,11 @@ services:
         value: "1"
       - key: DASHBOARD_V2
         value: "0"
+      # Platform search (ADR 0003, E13). Off until the staging backfill and
+      # the golden-set gate (ADR §6, gate 2) have passed; requires
+      # WORKSPACE_DB_FIRST, which engine/features.py enforces.
+      - key: PLATFORM_SEARCH
+        value: "0"
       - key: STORAGE_BACKEND_CONFIGURABLE
         value: "0"
       # Where artefacts go (E8.2, ADR 0002). "local" is this dyno's disk,
@@ -781,6 +786,10 @@ services:
         value: "1"
       - key: WORKSPACE_DB_FIRST
         value: "1"
+      # Off here too until the backfill has run (ADR 0003 §8 step 2): flip
+      # to "1", then run `python -m tools.search_backfill --global --all`.
+      - key: PLATFORM_SEARCH
+        value: "0"
       - key: RECORDER_ENABLED
         value: "1"
       - key: WALKTHROUGH_MODE_ENABLED
