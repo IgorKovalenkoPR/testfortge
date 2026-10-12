@@ -11,15 +11,22 @@ rounded floats drifts, and this number ends up in front of whoever pays.
 
 Prices
 ------
-Per million tokens, as of 2026-08. Verify at anthropic.com/pricing before
-quoting these to anyone; they are a moving target and this table is a
-snapshot, not an authority.
+Per million tokens, Anthropic first-party API rates as published on
+2026-10-06 (checked 2026-10-12 for ADR 0003). Verify at
+anthropic.com/pricing before quoting these to anyone; they are a moving
+target and this table is a snapshot, not an authority.
 
-Cache multipliers are Anthropic's published ones: a cache **read** costs
-10% of the input rate, a cache **write** 125%. Both are counted separately
-because collapsing them into "input" gets the cost wrong in both
-directions at once — undercounting the writes and massively overcounting
-the reads, which is exactly the case prompt caching creates most of.
+Priced **by model first, then by tier**. The tier-only table this used to
+be stopped being enough when Haiku 5.5 arrived at a tenth of Haiku 4.5's
+price: pricing both as "haiku" would overstate one of them tenfold.
+
+Cache multipliers are Anthropic's published defaults: a cache **read**
+costs 10% of the input rate, a cache **write** 125%. A model whose read
+rate is published separately (Opus 5.5 and Sonnet 5.5: $0.20) carries it
+in its row. Both are counted separately because collapsing them into
+"input" gets the cost wrong in both directions at once — undercounting the
+writes and massively overcounting the reads, which is exactly the case
+prompt caching creates most of.
 """
 from __future__ import annotations
 
@@ -35,17 +42,46 @@ MICROS_PER_USD = 1_000_000
 
 
 class Price(NamedTuple):
-    """USD per million tokens."""
+    """USD per million tokens.
+
+    ``cache_read_per_mtok`` is the published cache-read rate when it is
+    not the default 10% of input. ``long_*`` apply to the whole call when
+    its prompt (input + cache reads + cache writes) exceeds
+    ``long_prompt_threshold`` tokens — Haiku 5.5's >100K tier.
+    """
     input_per_mtok: float
     output_per_mtok: float
+    cache_read_per_mtok: float | None = None
+    long_prompt_threshold: int = 0
+    long_input_per_mtok: float | None = None
+    long_output_per_mtok: float | None = None
 
 
-#: Tier → price. Keyed by tier rather than by model id so a dated model
-#: (``claude-haiku-4-5-20251001``) does not need its own row, and a model
-#: we have never seen still prices as its family.
+#: Model id (or id prefix) → price. Matched by the **longest** prefix, so
+#: ``claude-sonnet-5-5`` is not priced as ``claude-sonnet-5`` and a dated id
+#: (``claude-haiku-4-5-20251001``) finds its family row.
+MODEL_PRICES: dict[str, Price] = {
+    # Current generation — the TIER_DEFAULTS in engine/llm_models.py.
+    "claude-haiku-5-5": Price(0.10, 0.50,
+                              long_prompt_threshold=100_000,
+                              long_input_per_mtok=0.50,
+                              long_output_per_mtok=2.50),
+    # TODO(ADR 0003): Haiku 5.5's cache-read rate is not in the published
+    # table we checked; it uses the default 10% multiplier until verified.
+    "claude-sonnet-5-5": Price(2.0, 10.0, cache_read_per_mtok=0.20),
+    "claude-opus-5-5": Price(4.0, 20.0, cache_read_per_mtok=0.20),
+    # Previous ids still in usage history and reachable by env override.
+    "claude-sonnet-5": Price(2.0, 10.0),
+    "claude-opus-5": Price(5.0, 25.0),
+    "claude-haiku-4-5": Price(1.0, 5.0),
+}
+
+#: Tier → price, for a model id no row above matches. Each is the **most
+#: expensive** current member of its family, so an unknown Haiku is priced
+#: as Haiku 4.5 rather than 5.5: overstating spend is the safe direction.
 PRICES: dict[str, Price] = {
     "haiku": Price(1.0, 5.0),
-    "sonnet": Price(2.0, 10.0),
+    "sonnet": Price(3.0, 15.0),
     "opus": Price(5.0, 25.0),
 }
 
@@ -92,6 +128,13 @@ def extract_usage(response: Any) -> Usage:
 
 
 def price_for(model: str) -> Price:
+    m = (model or "").lower()
+    best = ""
+    for prefix in MODEL_PRICES:
+        if m.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    if best:
+        return MODEL_PRICES[best]
     tier = tier_of(model)
     if tier is None or tier not in PRICES:
         log.debug("no price for model %r — pricing as %s",
@@ -110,11 +153,21 @@ def cost_micros(model: str, usage: Usage) -> int:
     price = price_for(model)
     per_input_micro = price.input_per_mtok  # $/Mtok == micros/token
     per_output_micro = price.output_per_mtok
+    prompt = (usage.input_tokens + usage.cache_read_tokens
+              + usage.cache_write_tokens)
+    if price.long_prompt_threshold and prompt > price.long_prompt_threshold:
+        per_input_micro = price.long_input_per_mtok or per_input_micro
+        per_output_micro = price.long_output_per_mtok or per_output_micro
+        read_micro = per_input_micro * _CACHE_READ_MULTIPLIER
+    else:
+        read_micro = (price.cache_read_per_mtok
+                      if price.cache_read_per_mtok is not None
+                      else per_input_micro * _CACHE_READ_MULTIPLIER)
 
     total = (
         usage.input_tokens * per_input_micro
         + usage.output_tokens * per_output_micro
-        + usage.cache_read_tokens * per_input_micro * _CACHE_READ_MULTIPLIER
+        + usage.cache_read_tokens * read_micro
         + usage.cache_write_tokens * per_input_micro * _CACHE_WRITE_MULTIPLIER
     )
     if total <= 0:
@@ -246,7 +299,7 @@ def org_budget_state(org_id: str | None) -> dict:
 
 
 __all__ = [
-    "MICROS_PER_USD", "PRICES", "Price", "Usage",
+    "MICROS_PER_USD", "PRICES", "MODEL_PRICES", "Price", "Usage",
     "extract_usage", "price_for", "cost_micros", "format_usd",
     "default_budget_usd", "org_budget_micros", "budget_state",
     "org_budget_state",

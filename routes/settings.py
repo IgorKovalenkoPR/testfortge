@@ -6,6 +6,8 @@
   * POST /org/settings/llm-key/clear    — admin: forget it
   * POST /org/settings/budget           — admin: monthly LLM allowance
   * POST /org/settings/adopt-projects   — admin: claim pre-ORG_MODE projects
+  * POST /org/settings/models           — admin: model-switcher policy (ADR 0003)
+  * GET/PUT /api/me/model-preference    — user: their own model choice
 
 Also the read-only surface for three things the product cannot otherwise
 tell anyone: whether this instance can send email (E0.4), how much of the
@@ -70,7 +72,8 @@ credential ends up in a screenshot.
 """
 from __future__ import annotations
 
-from flask import (Flask, flash, redirect, render_template, request, url_for)
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
+                   request, url_for)
 
 from engine import capacity as _capacity
 from engine import db as _db
@@ -78,6 +81,7 @@ from engine import features as _features
 from engine import llm_cost as _llm_cost
 from engine import llm_keys as _llm_keys
 from engine import llm_models as _llm_models
+from engine import llm_prefs as _llm_prefs
 from engine import mailer as _mailer
 from engine import permissions as _perm
 from engine import storage as _storage
@@ -177,6 +181,17 @@ def register(app: Flask) -> None:
             micros_per_usd=_llm_cost.MICROS_PER_USD,
             # ── Model routing, for transparency ──
             models=_llm_models.snapshot(),
+            # ── Model switcher policy (ADR 0003 §4.7) ──
+            # None while MODEL_SWITCHER is off, and the card is not drawn.
+            model_policy=(_llm_prefs.org_policy(org_id)
+                          if _llm_prefs.switcher_on() else None),
+            model_tiers=_llm_models.TIERS,
+            model_kinds=sorted(_llm_models.SWITCHABLE_KINDS),
+            model_premium_ok=_llm_prefs.premium_permitted(org_id),
+            model_pinned_kinds=sorted(
+                k for k in _llm_models.SWITCHABLE_KINDS
+                if _llm_models.operator_pin(k)),
+            model_legacy_pin=bool(_llm_models.legacy_global_pin()),
             # ── Capacity and availability (E0.11 / E0.12) ──
             # Shown to every member, like the LLM meter: a plain user whose
             # generation quietly stopped, or who waited a minute for the
@@ -556,6 +571,105 @@ def register(app: Flask) -> None:
               f"team — {'it is' if moved == 1 else 'they are'} now in your "
               f"project list.", "success")
         return _settings_redirect()
+
+    # ── Model switcher (ADR 0003 §4.7) ───────────────────────────────
+    #
+    # Tiers only, never model ids: the form and the API both refuse a
+    # value that is not one of llm_models.TIERS, so nobody can type an
+    # arbitrary model string into a call somebody else pays for. With
+    # MODEL_SWITCHER off both answer 404 — a hidden feature, not a refusal.
+
+    @app.route("/org/settings/models", methods=["POST"])
+    @_perm.require_role("admin")
+    def org_settings_models():
+        if not _llm_prefs.switcher_on():
+            abort(404)
+        org_id = _perm.current_org_id()
+        if not (org_id and _require_admin_or_flash()):
+            return _settings_redirect()
+
+        form = request.form
+        try:
+            policy = _llm_prefs.validate_policy(
+                default_tier=(form.get("default_tier") or "").strip() or None,
+                per_kind={k: (form.get(f"kind_{k}") or "").strip()
+                          for k in _llm_models.SWITCHABLE_KINDS},
+                allowed_tiers=form.getlist("allowed_tiers"),
+                users_may_choose=bool(form.get("users_may_choose")),
+            )
+        except ValueError as exc:
+            code = str(exc)
+            if code == "ms_err_no_tiers":
+                flash(g.t.get("ms_err_no_tiers",
+                              "Allow at least one model tier."), "error")
+            elif code == "ms_err_default_not_allowed":
+                flash(g.t.get("ms_err_default_not_allowed",
+                              "The team default must be one of the allowed "
+                              "tiers."), "error")
+            elif code == "ms_err_kind_not_allowed":
+                flash(g.t.get("ms_err_kind_not_allowed",
+                              "Each kind of work must use one of the "
+                              "allowed tiers."), "error")
+            else:
+                flash(g.t.get("ms_err_unknown_tier",
+                              "That is not a model tier this server "
+                              "offers."), "error")
+            return _settings_redirect()
+
+        before = _llm_prefs.org_policy(org_id)
+        if not _llm_prefs.save_org_policy(org_id, policy):
+            flash(g.t.get("ms_policy_save_failed",
+                          "Could not save the model policy — see server "
+                          "logs."), "error")
+            return _settings_redirect()
+        _db.append_audit(entity="organization", action="set_model_policy",
+                         user_id=_perm.current_user_id(), org_id=org_id,
+                         diff={"llm_models": [before, policy]})
+        flash(g.t.get("ms_policy_saved", "Model policy saved."), "success")
+        return _settings_redirect()
+
+    @app.route("/api/me/model-preference", methods=["GET", "PUT"])
+    @_perm.require_role("user")
+    def api_me_model_preference():
+        """The caller's own model choice.
+
+        CSRF-protected like every other session-authenticated JSON write
+        here (the editors, the chat): the browser sends ``X-CSRFToken``
+        from the page's meta tag. Exempting it would let any page the user
+        visits change which model — and so whose money — their next
+        generation uses.
+        """
+        if not _llm_prefs.switcher_on():
+            abort(404)
+        org_id = _perm.current_org_id()
+        user_id = _perm.current_user_id()
+        if not (org_id and user_id):
+            return jsonify({"error": "no_org"}), 403
+
+        if request.method == "PUT":
+            body = request.get_json(silent=True)
+            if isinstance(body, dict) and isinstance(body.get("pref"), dict):
+                body = body["pref"]
+            try:
+                pref = _llm_prefs.validate_user_pref(body)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            # Refuse a choice the user could not actually get now, rather
+            # than store it and route around it silently: the control
+            # would claim Opus while every call ran on Haiku.
+            state = _llm_prefs.switcher_state(org_id=org_id, user_id=user_id)
+            if state["pinned"]:
+                return jsonify({"error": "pinned",
+                                "reason": _llm_prefs.REASON_PINNED}), 409
+            reasons = {o["tier"]: o["reason"] for o in state["options"]}
+            for tier in pref.values():
+                if reasons.get(tier):
+                    return jsonify({"error": "not_allowed", "tier": tier,
+                                    "reason": reasons[tier]}), 409
+            _llm_prefs.save_user_pref(user_id, pref)
+
+        state = _llm_prefs.switcher_state(org_id=org_id, user_id=user_id)
+        return jsonify({"pref": _llm_prefs.user_pref(user_id), **state})
 
 
 __all__ = ["register", "MAX_BUDGET_USD"]

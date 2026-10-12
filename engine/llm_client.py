@@ -151,14 +151,16 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         Per-attempt timeout in seconds. Defaults to 60 s.
     kind:
         Work kind from :mod:`engine.llm_models` (``authoring``,
-        ``analysis``, ``consult``, ``segmentation``, ``vision``). When
+        ``analysis``, ``consult``, ``segmentation``, ``vision``,
+        ``search_answer``, ``query_rewrite``). When
         given and ``model`` is not, the model is routed from it. Also the
         dimension the usage report groups by, so passing it is what makes
         "which module is expensive" answerable.
     org_id, project_id, user_id:
         Attribution. ``org_id`` additionally selects the organisation's
         own API key when it has one, and is what the budget is checked
-        against.
+        against. Each one not passed is taken from
+        :mod:`engine.llm_context` — the request or job this call runs in.
     **kwargs:
         Forwarded verbatim to ``messages.create`` (``model``,
         ``max_tokens``, ``system``, ``messages``, …).
@@ -176,19 +178,29 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         No API key, the SDK cannot be imported, or all retry attempts
         have been exhausted on transient errors.
     """
-    # Route the model when the caller named a kind instead of a model.
-    if not kwargs.get("model") and kind:
-        from engine import llm_models
-        kwargs["model"] = llm_models.model_for(kind)
-    model = kwargs.get("model") or "unknown"
+    # Attribution the caller did not pass comes from the request (or the
+    # job) this call runs inside — ADR 0003 §4.7. Six callers never passed
+    # an org_id, so the budget, BYOK and the usage panel all skipped them;
+    # an explicit argument still wins.
+    from engine import llm_context
+    org_id, project_id, user_id = llm_context.fill(org_id, project_id,
+                                                   user_id)
 
-    # Whose key, and therefore whose money.
+    # Whose key, and therefore whose money. Resolved before routing because
+    # the model switcher's premium rule depends on it.
     try:
         from engine import llm_keys
         api_key, key_source = llm_keys.resolve_key(org_id)
     except Exception as exc:  # pragma: no cover — never block on BYOK
         _logger.warning("BYOK resolution failed, using platform key: %s", exc)
         api_key, key_source = None, "platform"
+
+    # Route the model when the caller named a kind instead of a model.
+    if not kwargs.get("model") and kind:
+        from engine import llm_models
+        kwargs["model"] = llm_models.model_for(
+            kind, org_id=org_id, user_id=user_id, key_source=key_source)
+    model = kwargs.get("model") or "unknown"
 
     # Budget gate, before the call rather than after it.
     check_budget(org_id, key_source=key_source)

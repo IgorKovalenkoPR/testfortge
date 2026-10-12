@@ -93,6 +93,24 @@ def register_all(app: Flask) -> None:
         except Exception:
             return {"llm_budget": None}
 
+    # The model switcher in the sidebar (ADR 0003 §4.7). ``None`` unless
+    # MODEL_SWITCHER is on and somebody is signed in to a team, so with the
+    # flag off nothing is queried and nothing renders. Same defensive shape.
+    @app.context_processor
+    def _inject_model_switcher():
+        try:
+            from engine import llm_prefs as _llm_prefs
+            from engine import permissions as _perm
+            if not _llm_prefs.switcher_on():
+                return {"model_switcher": None}
+            org_id, user_id = _perm.current_org_id(), _perm.current_user_id()
+            if not (org_id and user_id):
+                return {"model_switcher": None}
+            return {"model_switcher": _llm_prefs.switcher_state(
+                org_id=org_id, user_id=user_id)}
+        except Exception:
+            return {"model_switcher": None}
+
     # Access policy for every route (E2.3). Installed last so its
     # before_request hook runs after the HTTP Basic gate — that gate is the
     # outer perimeter during the rollout and should reject first — and

@@ -710,6 +710,52 @@ TRANSLATIONS = {
     'os_models_note': 'Set on the server, not per team. Cheaper models handle '
                       'work whose output can be checked automatically.',
 
+    # ── Model switcher (ADR 0003 §4.7) ──
+    'ms_label': 'Model',
+    'ms_tier_haiku': 'Haiku (fast, default)',
+    'ms_tier_sonnet': 'Sonnet',
+    'ms_tier_opus': 'Opus',
+    'ms_team_default': 'Team default',
+    'ms_reason_org': 'not allowed by your org',
+    'ms_reason_pinned': 'pinned by operator',
+    'ms_reason_premium_key': 'premium needs your own key',
+    'ms_now_using': 'Now: %s',
+    'ms_saved': 'Saved',
+    'ms_save_failed': 'Not saved — that choice is not available.',
+    'ms_policy_heading': 'Model choice',
+    'ms_policy_intro': 'Every kind of work runs on Haiku unless you choose '
+                       'otherwise here. Sonnet and Opus cost more: on the '
+                       "platform key they need the operator's permission, "
+                       'on your own key they bill to your Anthropic account.',
+    'ms_policy_allowed': 'Tiers your team may use',
+    'ms_policy_server_default': 'Server default (Haiku)',
+    'ms_policy_per_kind': 'Per kind of work',
+    'ms_policy_users_choose': 'Members may choose their own model within '
+                              'these tiers',
+    'ms_policy_premium_platform': 'This team is on the platform key and the '
+                                  'operator has not allowed Sonnet or Opus on '
+                                  'it, so those choices fall back to Haiku. '
+                                  'Add your own API key above to use them.',
+    'ms_policy_pinned': 'Pinned by the operator — choices here do not apply '
+                        'to:',
+    'ms_policy_legacy_pin': 'The operator has pinned one model for '
+                            'everything (ANTHROPIC_MODEL), so choices here '
+                            'do not apply until that is removed.',
+    'ms_kind_consult': 'Tedgie (consultations)',
+    'ms_kind_authoring': 'Writing test cases and checklists',
+    'ms_kind_analysis': 'Site and specification analysis',
+    'ms_kind_vision': 'Reading mockups',
+    'ms_kind_search_answer': 'Search answers',
+    'ms_policy_saved': 'Model policy saved.',
+    'ms_policy_save_failed': 'Could not save the model policy — see server '
+                             'logs.',
+    'ms_err_no_tiers': 'Allow at least one model tier.',
+    'ms_err_default_not_allowed': 'The team default must be one of the '
+                                  'allowed tiers.',
+    'ms_err_kind_not_allowed': 'Each kind of work must use one of the '
+                               'allowed tiers.',
+    'ms_err_unknown_tier': 'That is not a model tier this server offers.',
+
     'os_capacity_heading': 'Capacity',
     # Named because an empty DATABASE_URL degrades to SQLite quietly, and
     # a declared variable is not the same claim as a database in force.

@@ -709,3 +709,50 @@ function applyStatusColor(select) {
         return fallback || 'Something went wrong.';
     };
 })();
+
+/* ── Model switcher (ADR 0003 §4.7) ─────────────────────────────────
+ * The sidebar <select> rendered by base.html when MODEL_SWITCHER is on.
+ * PUTs {"*": tier} to /api/me/model-preference with the page's CSRF
+ * token; an empty tier clears the choice (team default). The server
+ * re-checks the org's allow-list and the premium-key rule, so a refused
+ * choice reverts the control and says it was not saved. */
+(function () {
+    'use strict';
+    document.addEventListener('DOMContentLoaded', function () {
+        var box = document.querySelector('[data-model-switcher]');
+        if (!box) return;
+        var select = box.querySelector('select');
+        var status = box.querySelector('[data-model-switcher-status]');
+        if (!select) return;
+        var previous = select.value;
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        function fail() {
+            select.value = previous;
+            if (status) status.textContent = box.getAttribute('data-msg-failed');
+        }
+        select.addEventListener('change', function () {
+            var headers = {'Content-Type': 'application/json',
+                           'Accept': 'application/json'};
+            if (meta) headers['X-CSRFToken'] = meta.getAttribute('content');
+            select.disabled = true;
+            fetch(box.getAttribute('data-url'), {
+                method: 'PUT', credentials: 'same-origin', headers: headers,
+                body: JSON.stringify({'*': select.value})
+            })
+            .then(function (resp) {
+                return resp.json().catch(function () { return {}; })
+                    .then(function (body) { return {ok: resp.ok, body: body}; });
+            })
+            .then(function (res) {
+                if (!res.ok) { fail(); return; }
+                previous = select.value;
+                if (status) {
+                    status.textContent = box.getAttribute('data-msg-saved') +
+                        (res.body.effective_model ? ' · ' + res.body.effective_model : '');
+                }
+            })
+            .catch(fail)
+            .then(function () { select.disabled = false; });
+        });
+    });
+})();

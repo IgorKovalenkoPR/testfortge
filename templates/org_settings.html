@@ -249,6 +249,76 @@
   </p>
 </div>
 
+{# ── Model choice policy (ADR 0003 §4.7). Only with MODEL_SWITCHER on:
+     ``model_policy`` is None otherwise. Tiers, never model ids — the route
+     refuses anything outside llm_models.TIERS. #}
+{% if is_admin and model_policy %}
+{% set ms_tier_label = {'haiku': t.ms_tier_haiku, 'sonnet': t.ms_tier_sonnet, 'opus': t.ms_tier_opus} %}
+{% set ms_kind_label = {'consult': t.ms_kind_consult, 'authoring': t.ms_kind_authoring, 'analysis': t.ms_kind_analysis, 'vision': t.ms_kind_vision, 'search_answer': t.ms_kind_search_answer} %}
+<div class="card">
+  <h2>{{ t.ms_policy_heading }}</h2>
+  <p class="text-muted">{{ t.ms_policy_intro }}</p>
+
+  {% if model_legacy_pin %}
+  <p class="settings-status settings-status-warn">{{ t.ms_policy_legacy_pin }}</p>
+  {% elif model_pinned_kinds %}
+  <p class="settings-status settings-status-warn">
+    {{ t.ms_policy_pinned }}
+    {% for kind in model_pinned_kinds %}{{ ms_kind_label[kind] }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  {% if not model_premium_ok %}
+  <p class="settings-status">{{ t.ms_policy_premium_platform }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('org_settings_models') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <fieldset>
+      <legend>{{ t.ms_policy_allowed }}</legend>
+      {% for tier in model_tiers %}
+      <div class="settings-row">
+        <input type="checkbox" id="ms-allow-{{ tier }}" name="allowed_tiers"
+               value="{{ tier }}"
+               {% if tier in model_policy.allowed_tiers %}checked{% endif %}>
+        <label for="ms-allow-{{ tier }}">{{ ms_tier_label[tier] }}</label>
+      </div>
+      {% endfor %}
+    </fieldset>
+
+    <div class="settings-row">
+      <label for="ms-default-tier">{{ t.ms_team_default }}</label>
+      <select id="ms-default-tier" name="default_tier" class="form-select">
+        <option value="">{{ t.ms_policy_server_default }}</option>
+        {% for tier in model_tiers %}
+        <option value="{{ tier }}" {% if model_policy.default_tier == tier %}selected{% endif %}>{{ ms_tier_label[tier] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <h3>{{ t.ms_policy_per_kind }}</h3>
+    {% for kind in model_kinds %}
+    <div class="settings-row">
+      <label for="ms-kind-{{ kind }}">{{ ms_kind_label[kind] }}</label>
+      <select id="ms-kind-{{ kind }}" name="kind_{{ kind }}" class="form-select">
+        <option value="">{{ t.ms_team_default }}</option>
+        {% for tier in model_tiers %}
+        <option value="{{ tier }}" {% if model_policy.per_kind.get(kind) == tier %}selected{% endif %}>{{ ms_tier_label[tier] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+
+    <div class="settings-row">
+      <input type="checkbox" id="ms-users-choose" name="users_may_choose" value="1"
+             {% if model_policy.users_may_choose %}checked{% endif %}>
+      <label for="ms-users-choose">{{ t.ms_policy_users_choose }}</label>
+    </div>
+
+    <button type="submit" class="btn btn-secondary">{{ t.os_save }}</button>
+  </form>
+</div>
+{% endif %}
+
 {# ── Capacity and availability (E0.11 / E0.12) ────────────────────
      Read-only for everyone. Two ceilings decide whether this deployment
      keeps working, and neither is visible from anywhere else in the

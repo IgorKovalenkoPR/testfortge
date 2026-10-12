@@ -729,6 +729,14 @@ def before_request():
     g.t = get_lang(lang)
 
 
+# Who this request's LLM calls are on behalf of (ADR 0003 §4.7): org, user
+# and project, read from the session into a context variable that
+# engine.llm_client and JobQueue jobs pick up — so callers that never pass
+# an org_id still meet the budget, BYOK and the usage meter.
+from engine import llm_context as _llm_context  # noqa: E402
+_llm_context.install(app)
+
+
 # ── Route registration ───────────────────────────────────────────
 
 register_all(app)
