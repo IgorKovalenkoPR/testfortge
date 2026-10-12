@@ -14,7 +14,7 @@ from . import (auth, members, settings, dashboard, projects, generation,
                edit, execution,
                execution_live, execution_results, execution_manual,
                bugs, automation, recorder,
-               estimation, chat, ops, guide, debug)
+               estimation, chat, ops, guide, debug, search)
 
 
 def register_all(app: Flask) -> None:
@@ -62,6 +62,8 @@ def register_all(app: Flask) -> None:
     ops.register(app)
     guide.register(app)
     debug.register(app)
+    # Platform search (ADR 0003 §4.8). 404 while PLATFORM_SEARCH is off.
+    search.register(app)
 
     # Global context processor — exposes ``projects`` (the user's
     # owned project list) and ``active_project_id`` to EVERY template

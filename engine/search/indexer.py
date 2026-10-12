@@ -774,6 +774,56 @@ def _record_state(scope_key: str, *, started: datetime, changed: bool,
     return 0   # pragma: no cover
 
 
+# ── "Did you mean" vocabulary (ADR §4.1 ``vocab_json``, §4.5 typo) ────
+
+#: Most terms kept per scope (ADR §4.1: ≤20k), highest document frequency
+#: first.
+VOCAB_MAX = 20_000
+#: Bump when the vocabulary's shape or tokenisation changes; a stored
+#: vocabulary of another version is rebuilt on the next pass.
+VOCAB_VERSION = 1
+
+
+def build_vocab(doc_filter) -> dict:
+    """``{"v": VOCAB_VERSION, "terms": {word: df}}`` over the stored
+    documents matching *doc_filter* (SQLAlchemy criteria on ``SearchDoc``).
+
+    Words, not stems: the corrector suggests something a person typed, and
+    "registr" is not a word anybody wants offered back. Same tokeniser as
+    the query side (:func:`engine.search.text.search_tokens`), so a query
+    token and a vocabulary entry are comparable. Digits are left out —
+    they are never corrected. Streams in pages; holds only the counter.
+    """
+    from engine import db as _db
+    from engine.db import SearchDoc
+    from engine.search.text import search_tokens
+    df: dict[str, int] = {}
+    with _db.session_scope() as sess:
+        q = sess.query(SearchDoc.title, SearchDoc.body).filter(*doc_filter)
+        for title, body in q.yield_per(BATCH):
+            seen = set()
+            for tok in search_tokens(f"{title or ''} {body or ''}"):
+                if len(tok) < 3 or tok.isdigit() or tok in seen:
+                    continue
+                seen.add(tok)
+                df[tok] = df.get(tok, 0) + 1
+    if len(df) > VOCAB_MAX:
+        keep = sorted(df, key=lambda w: (-df[w], w))[:VOCAB_MAX]
+        df = {w: df[w] for w in keep}
+    return {"v": VOCAB_VERSION, "terms": df}
+
+
+def _vocab_current(scope_key: str) -> bool:
+    """The scope's stored vocabulary exists and has this version."""
+    from engine import db as _db
+    from engine.db import SearchScopeState
+    with _db.session_scope() as sess:
+        st = sess.get(SearchScopeState, scope_key)
+        vj = (st.vocab_json if st is not None else None) or {}
+        return (isinstance(vj, dict) and vj.get("v") == VOCAB_VERSION
+                and isinstance(vj.get("terms"), dict))
+
+
 # ── Public API ────────────────────────────────────────────────────────
 
 def _flag_on() -> bool:
@@ -822,9 +872,17 @@ def reindex_project(project_id: str, *, rebuild: bool = False,
                 pass
             raise
         changed = bool(result.upserted or result.deleted)
+        doc_filter = (SearchDoc.project_id == project_id,)
+        # The "did you mean" vocabulary follows the documents: rebuilt when
+        # they changed, or when the stored one is missing/outdated (a scope
+        # indexed before the vocabulary existed). An unchanged pass stays
+        # the read-only pass it was.
+        vocab = None
+        if changed or rebuild or not _vocab_current(project_id):
+            vocab = build_vocab(doc_filter)
         result.doc_count = _record_state(
             project_id, started=started, changed=changed,
-            doc_filter=(SearchDoc.project_id == project_id,))
+            doc_filter=doc_filter, vocab=vocab)
         log.info("search: indexed project %s in %.0f ms — %d written, "
                  "%d unchanged, %d deleted", project_id[:8],
                  (time.monotonic() - t0) * 1000, result.upserted,
@@ -893,8 +951,14 @@ def index_global(*, force: bool = False, rebuild: bool = False,
                             SearchDoc.kind.in_(list(kinds))),
                 vocab={"source_hash": fp})
             out[corpus] = res.as_dict()
+        # The per-corpus rows keep their source fingerprint in vocab_json;
+        # the corrector's vocabulary for all global kinds lives on "global".
+        global_filter = (SearchDoc.scope == "global",)
+        vocab = None
+        if any_change or not _vocab_current("global"):
+            vocab = build_vocab(global_filter)
         _record_state("global", started=started, changed=any_change,
-                      doc_filter=(SearchDoc.scope == "global",))
+                      doc_filter=global_filter, vocab=vocab)
     return out
 
 
@@ -959,5 +1023,5 @@ __all__ = [
     "GLOBAL_KINDS", "GLOBAL_CORPORA", "INDEXER_VERSION", "chunk_body",
     "content_hash", "doc_key", "drop_project", "fill_pgvector",
     "index_global", "iter_project_drafts", "is_stale", "reindex_project",
-    "corpus_fingerprint",
+    "corpus_fingerprint", "build_vocab", "VOCAB_MAX", "VOCAB_VERSION",
 ]
