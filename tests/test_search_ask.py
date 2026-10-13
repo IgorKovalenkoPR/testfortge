@@ -306,6 +306,36 @@ class TestAnswer:
         events = _ask(client, shop)
         _assert_contract(events)
         assert _error(events)["code"] == "upstream"
+        assert _error(events)["reason"] == "other"
+
+    def test_upstream_failure_says_which_kind(self, client, shop, llm):
+        # Live 2026-10-13 every Ask failed in 0.3 s and only the container
+        # log knew why; the category (never the message) goes to the page.
+        import anthropic
+        import httpx
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        resp = httpx.Response(401, request=req)
+        llm.fail = anthropic.AuthenticationError(
+            "invalid x-api-key sk-ant-secret", response=resp, body=None)
+        err = _error(_ask(client, shop))
+        assert (err["code"], err["reason"]) == ("upstream", "auth")
+        assert "sk-ant" not in str(err)
+
+    @pytest.mark.parametrize("make,want", [
+        (lambda a, r: a.APIConnectionError(request=r), "connection"),
+        (lambda a, r: a.APITimeoutError(request=r), "timeout"),
+        (lambda a, r: a.BadRequestError(
+            "x", response=__import__("httpx").Response(400, request=r),
+            body=None), "bad_request"),
+        (lambda a, r: a.InternalServerError(
+            "x", response=__import__("httpx").Response(529, request=r),
+            body=None), "overloaded"),
+        (lambda a, r: ValueError("x"), "other")])
+    def test_upstream_reason_unit(self, make, want):
+        import anthropic
+        import httpx
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        assert answer.upstream_reason(make(anthropic, req)) == want
 
     def test_empty_question_is_400(self, client, shop, llm):
         assert client.post("/api/ask", json={"q": "  "}).status_code == 400
@@ -345,6 +375,42 @@ class TestGrounding:
         assert not answer.is_grounded([{"score": 1.0}])
         assert answer.is_grounded([{"score": 0.03}, {"score": 0.01}])
         assert not answer.is_grounded([{"score": 0.01}, {"score": 0.01}])
+        # Vector closeness alone is not evidence.
+        assert not answer.is_grounded([{"score": 0.0164, "lexical": False},
+                                       {"score": 0.0161, "lexical": False}])
+        assert answer.is_grounded([{"score": 0.0164, "lexical": False},
+                                   {"score": 0.0161, "lexical": True}])
+
+    def test_nonsense_makes_no_call(self, client, shop, llm, monkeypatch):
+        # Live 2026-10-13, verbatim: "зелений слон танцює на Марсі
+        # ксилофоном" matched no word, but three long Ukrainian Guide
+        # sections cleared the vector floor. Rank 1 of the vector list
+        # alone fused to 1/61 >= 0.016 and the model was called.
+        from engine.search import retrieve
+        live = {"results": [
+            {"doc_id": 900 + i, "kind": "guide", "ref": f"guide:{i}",
+             "title": t, "url": "/guide", "snippet": "", "score": sc,
+             "lexical": False, "project": None, "facets": {},
+             "chunk_no": 0}
+            for i, (t, sc) in enumerate([
+                ("Guide · З чого почати", 0.016393),
+                ("Guide · Автоматизація QA", 0.016129),
+                ("Guide · Виконання тестів", 0.015873)])],
+            "chips": [], "query": {"lang": "ua"}}
+        monkeypatch.setattr(retrieve, "search", lambda params: live)
+        events = _ask(client, shop,
+                      q="зелений слон танцює на Марсі ксилофоном")
+        assert events[0]["grounded"] is False
+        assert _error(events)["code"] == "not_grounded"
+        assert llm.calls == []
+
+    def test_search_results_say_whether_they_matched_a_word(self, client,
+                                                            shop):
+        body = client.get("/api/search", query_string={
+            "q": "login", "project_id": shop}).get_json()
+        assert body["results"] and all(
+            isinstance(r["lexical"], bool) for r in body["results"])
+        assert body["results"][0]["lexical"] is True
 
 
 # ── The answer cache ──────────────────────────────────────────────────

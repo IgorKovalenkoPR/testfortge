@@ -247,16 +247,55 @@ def load_items(results: Sequence[dict], allowed: Sequence[str]
     return out
 
 
+def upstream_reason(exc: BaseException) -> str:
+    """A coarse, secret-free category for a failed model call — sent with
+    the ``upstream`` error so an operator can tell a bad key from a blocked
+    network without the container log (2026-10-13: every live Ask failed
+    in 0.3 s and nothing outside the log said why)."""
+    try:
+        import anthropic
+    except Exception:  # pragma: no cover — the SDK is a hard requirement
+        return "other"
+    checks = (
+        ("auth", "AuthenticationError"),
+        ("permission", "PermissionDeniedError"),
+        ("not_found", "NotFoundError"),
+        ("bad_request", "BadRequestError"),
+        ("rate_limit", "RateLimitError"),
+        ("timeout", "APITimeoutError"),
+        ("connection", "APIConnectionError"),
+    )
+    for reason, name in checks:
+        cls = getattr(anthropic, name, None)
+        if isinstance(cls, type) and isinstance(exc, cls):
+            return reason
+    status = getattr(exc, "status_code", None)
+    if status == 529:
+        return "overloaded"
+    if isinstance(status, int) and status >= 500:
+        return "server_error"
+    return "other"
+
+
 def is_grounded(results: Sequence[dict]) -> bool:
-    """The gate (§4.6): at least two results and a top score at or above
-    :func:`min_grounding`. Below it no model is called at all."""
+    """The gate (§4.6): at least two results, a top score at or above
+    :func:`min_grounding`, and at least one result with lexical evidence.
+    Below it no model is called at all.
+
+    The last clause was learnt live (2026-10-13): "зелений слон танцює на
+    Марсі ксилофоном" matched no word anywhere, yet rank 1 of the vector
+    list alone scored 1/61 and passed — hash vectors always have a
+    nearest document. A result without the ``lexical`` key counts as
+    evidence, so callers that never set it keep the old behaviour."""
     if len(results) < 2:
         return False
     try:
         top = float(results[0].get("score") or 0.0)
     except (TypeError, ValueError):
         return False
-    return top >= min_grounding()
+    if top < min_grounding():
+        return False
+    return any(r.get("lexical", True) for r in results)
 
 
 @dataclass
@@ -851,7 +890,8 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
                     _meter(snap, model=model, key_source=key_source,
                            org_id=req.org_id, project_id=req.project_id,
                            user_id=req.user_id)
-            yield from finish("upstream", chips=det_only, key=None)
+            yield from finish("upstream", chips=det_only, key=None,
+                              reason=upstream_reason(exc))
             return
 
         usage = _meter(final, model=model, key_source=key_source,
@@ -881,6 +921,7 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
 __all__ = ["PROMPT_VERSION", "SYSTEM_PROMPT", "KIND", "MESSAGES",
            "AskRequest", "AnswerStream", "AskLimiter", "Item", "Packed",
            "ask_events", "answer_key", "estimate_tokens", "is_grounded",
+           "upstream_reason",
            "load_items", "merge_chips", "normalise_history", "pack_prompt",
            "parse_suggestions", "limiter", "over_daily_cap", "tenant_scope",
            "DailyCapGate", "cap_gate",

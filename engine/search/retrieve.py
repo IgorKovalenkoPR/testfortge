@@ -755,6 +755,37 @@ def _id_matches(allowed, kinds, id_query: tuple[str, int]) -> list[int]:
     return out
 
 
+#: Kinds whose ``ref`` is the team's own external id.
+REF_KINDS = ("test_case", "checklist_item", "bug")
+
+
+def _ref_matches(allowed, kinds, ref: str) -> list[int]:
+    """Doc ids (chunk 0) whose ref *is* the queried external id, ignoring
+    case — "lgn_010" finds the test case or checklist item LGN_010."""
+    from sqlalchemy import func, select
+
+    from engine import db as _db
+    from engine.db import SearchDoc
+    want = [k for k in REF_KINDS if not kinds or k in kinds]
+    if not want:
+        return []
+    stmt = _filtered(select(SearchDoc.id), allowed, want,
+                     include_global=False).where(
+        SearchDoc.chunk_no == 0, func.upper(SearchDoc.ref) == ref.upper())
+    with _db.session_scope() as sess:
+        return [int(did) for (did,) in sess.execute(stmt)]
+
+
+def _exact_id_hits(allowed, kinds, raw: str,
+                   id_query: tuple[str, int] | None) -> list[int]:
+    """The ID fast path: TC/CL/BUG/RUN numbers, else the team's own ids."""
+    from engine.search.text import parse_ref_query
+    if id_query:
+        return _id_matches(allowed, kinds, id_query)
+    ref = parse_ref_query(raw)
+    return _ref_matches(allowed, kinds, ref) if ref else []
+
+
 # ── The search itself ─────────────────────────────────────────────────
 
 @dataclass
@@ -941,7 +972,10 @@ def search(params: SearchParams) -> dict:
         linked_set = _linked_refs(allowed, params.linked)
         for did in _doc_ids_for(allowed, linked_set):
             fused.setdefault(did, 0.0)
-    docs = _hydrate(sorted(fused, key=lambda d: -fused[d])[:LIST_DEPTH * 3],
+    # Pinned ids first: an exact id hit may share no text with the query
+    # (fused 0.0) and must not be cut by the depth limit before its boost.
+    docs = _hydrate(sorted(fused, key=lambda d: (d not in pinned,
+                                                 -fused[d]))[:LIST_DEPTH * 3],
                     allowed)
     lex_rank = {d: i for i, (d, _s) in enumerate(run["lex"], 1)}
     vec_rank = {d: i for i, (d, _s) in enumerate(run["vec"], 1)}
@@ -1054,6 +1088,10 @@ def search(params: SearchParams) -> dict:
                          "name": params.project_names.get(d.project_id)}
                         if d.project_id else None),
             "facets": d.facets, "score": round(s, 6),
+            # Evidence beyond vector closeness: a lexical hit (own words,
+            # translation, synonym, typo fix) or an exact id. The Ask gate
+            # reads it — hash vectors always have a "closest" document.
+            "lexical": d.id in lex_rank or d.id in pinned,
         }
         if with_why:
             labels = [t.label for t in pq.terms if t.stem in hit_stems]
@@ -1194,8 +1232,7 @@ def _retrieve(allowed, kinds, pq: ParsedQuery, embedder, qvec) -> dict:
                            "fused": {}, "id_hits": [], "mode": "lexical",
                            "lex_engine": None, "vec_engine": None,
                            "candidates": None}
-    if pq.id_query:
-        out["id_hits"] = _id_matches(allowed, kinds, pq.id_query)
+    out["id_hits"] = _exact_id_hits(allowed, kinds, pq.raw, pq.id_query)
 
     version = getattr(embedder, "version", None) if embedder else None
     use_pg_fts = pg and caps.get("fts")
@@ -1324,9 +1361,7 @@ def quick_search(q: str, allowed: list[str], *, kinds=None,
     if a.tokens and a.tokens[-1] not in terms and len(a.tokens[-1]) >= 2:
         terms.append(a.tokens[-1])
     id_query = parse_id_query(q)
-    id_hits: set[int] = set()
-    if id_query:
-        id_hits = set(_id_matches(allowed, kinds, id_query))
+    id_hits = set(_exact_id_hits(allowed, kinds, q, id_query))
 
     rows = []
     if terms or id_hits:

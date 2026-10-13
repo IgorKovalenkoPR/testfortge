@@ -476,6 +476,27 @@ def parse_id_query(query: str) -> tuple[str, int] | None:
     return m.group(1).upper(), int(m.group(2))
 
 
+#: A team's own ids — "LGN_010", "SC2-7", "E2E_002": letters first, a
+#: separator, a digit last, one word. TC/CL/BUG/RUN are taken first by
+#: :func:`parse_id_query`.
+_REF_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]*[-_][A-Za-z0-9_-]*\d)\s*$")
+REF_QUERY_MAX = 40
+
+
+def parse_ref_query(query: str) -> str | None:
+    """``"lgn_010"`` → ``"LGN_010"``: a query that is one of the team's own
+    ids is an exact lookup on ``ref`` (the item's external id), pinned to
+    the top like the TC/CL/BUG/RUN fast path. Without it the lexical side
+    splits the id into "lgn" and "010", and ``SC2_010`` outranks the item
+    that is literally called ``LGN_010``."""
+    if parse_id_query(query) is not None:
+        return None
+    m = _REF_RE.match(query or "")
+    if not m or len(m.group(1)) > REF_QUERY_MAX:
+        return None
+    return m.group(1).upper()
+
+
 # ── Typo correction ───────────────────────────────────────────────────
 
 def levenshtein(a: str, b: str, limit: int | None = None) -> int:
@@ -591,7 +612,7 @@ __all__ = [
     "LEXICON_VERSION", "TOKEN_RE", "ISTQB_STOPWORDS", "tokenize",
     "normalise", "detect_lang", "search_tokens", "SEARCH_STOPWORDS",
     "stem", "stem_ua", "translate", "translate_word", "format_translation",
-    "Analysis", "analyse", "lex_terms", "parse_id_query",
+    "Analysis", "analyse", "lex_terms", "parse_id_query", "parse_ref_query",
     "levenshtein", "trigrams", "TypoCorrector", "did_you_mean",
     "xlate_tables",
 ]

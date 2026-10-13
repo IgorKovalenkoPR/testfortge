@@ -181,6 +181,33 @@ class TestPipeline:
         assert body["results"][0]["ref"] == ref
         assert "id_exact" in body["results"][0]["why"]["boosts"]
 
+    @pytest.mark.parametrize("q", ["LGN_010", "lgn_010", " LGN_010 "])
+    def test_a_teams_own_id_is_pinned_first(self, client, search_on,
+                                            make_project, q):
+        # Live 2026-10-13: "LGN_010" listed SC2_010 first — the id was
+        # split into "lgn" + "010" and the other "010" scored higher.
+        pid = make_project(f"ids {secrets.token_hex(4)}")
+        _db.save_test_cases(pid, [
+            {"id": "SC2_010", "summary": "Checkout 010 total 010 rounding",
+             "test_steps": "1. Add item 010", "expected_result": "010"},
+            {"id": "LGN_010", "summary": "Login with a valid password",
+             "test_steps": "1. Sign in", "expected_result": "Dashboard"},
+            {"id": "LGN_011", "summary": "Login with a locked account",
+             "test_steps": "1. Sign in", "expected_result": "Refused"}])
+        indexer.reindex_project(pid)
+        hooks.reset()
+        body = _search(client, pid, q, explain=1)
+        assert body["results"][0]["ref"] == "LGN_010"
+        assert "id_exact" in body["results"][0]["why"]["boosts"]
+
+    @pytest.mark.parametrize("q,want", [
+        ("LGN_010", "LGN_010"), ("e2e-2", "E2E-2"), ("SC2_010", "SC2_010"),
+        ("TC-18", None), ("bug 15", None),      # the TC/CL/BUG/RUN path
+        ("login 010", None), ("LGN", None), ("010", None), ("_010", None)])
+    def test_ref_query_parse(self, q, want):
+        from engine.search.text import parse_ref_query
+        assert parse_ref_query(q) == want
+
     def test_rrf_weights_are_configurable(self, client, shop, monkeypatch):
         monkeypatch.setenv("SEARCH_W_VEC", "0")
         body = _search(client, shop, "login")
