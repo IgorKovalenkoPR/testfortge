@@ -181,6 +181,19 @@ class ParsedQuery:
     #: title cover" counts words, not stems.
     token_groups: list[set[str]] = field(default_factory=list)
     concepts: list[str] = field(default_factory=list)
+    #: The same groups without what only a typo correction contributed —
+    #: "слон→сон" is a guess, not a word the user wrote, so it is no
+    #: evidence that the corpus knows what they asked about.
+    direct_groups: list[set[str]] = field(default_factory=list)
+
+    def covered_words(self, stems: set[str]) -> list[int]:
+        """Indices of the query words *stems* match directly (own stem or
+        its translation, never a typo fix)."""
+        return [i for i, g in enumerate(self.direct_groups) if g & stems]
+
+    @property
+    def word_count(self) -> int:
+        return sum(1 for g in self.token_groups if g)
 
     def title_coverage(self, title_stems: set[str]) -> float:
         groups = [g for g in self.token_groups if g]
@@ -215,11 +228,14 @@ def parse_query(raw: str, corrector: "Vocabulary | None" = None
     seen: set[str] = set()
 
     groups: list[set[str]] = [set() for _ in a.tokens]
+    direct: list[set[str]] = [set() for _ in a.tokens]
 
     def add(stem_: str, label: str, source: str, w: float = 1.0,
-            token: int | None = None) -> None:
+            token: int | None = None, guessed: bool = False) -> None:
         if token is not None and stem_:
             groups[token].add(stem_)
+            if not guessed:
+                direct[token].add(stem_)
         if stem_ and stem_ not in seen:
             seen.add(stem_)
             terms.append(Term(stem_, label, source, w))
@@ -242,12 +258,12 @@ def parse_query(raw: str, corrector: "Vocabulary | None" = None
                 continue
             corrections[tok] = fix
             fix_stem = stem(fix, a.lang)
-            add(fix_stem, f"{tok}→{fix}", "typo", token=i)
+            add(fix_stem, f"{tok}→{fix}", "typo", token=i, guessed=True)
             hit = translate_word(fix, a.lang)
             if hit:
                 for word in hit.split():
                     add(stem(word, "en"), f"{fix}→{word}", "translation",
-                        token=i)
+                        token=i, guessed=True)
     embed_text = norm
     if corrections:
         embed_text = f"{norm} {' '.join(corrections.values())}"
@@ -256,7 +272,7 @@ def parse_query(raw: str, corrector: "Vocabulary | None" = None
         stems=list(a.stems), translated=dict(a.mapping),
         corrections=corrections, terms=terms,
         id_query=parse_id_query(raw), embed_text=embed_text,
-        token_groups=groups)
+        token_groups=groups, direct_groups=direct)
 
 
 # ── "Did you mean" vocabulary, cached per scope version ───────────────
@@ -1092,6 +1108,12 @@ def search(params: SearchParams) -> dict:
             # translation, synonym, typo fix) or an exact id. The Ask gate
             # reads it — hash vectors always have a "closest" document.
             "lexical": d.id in lex_rank or d.id in pinned,
+            # Which query words this document matches directly, and how
+            # many words the query has: the Ask gate wants the results
+            # together to cover enough of the question, not one stray word.
+            "covered": pq.covered_words(hit_stems),
+            "words": pq.word_count,
+            "pinned": d.id in pinned,
         }
         if with_why:
             labels = [t.label for t in pq.terms if t.stem in hit_stems]

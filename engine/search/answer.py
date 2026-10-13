@@ -70,6 +70,10 @@ MAX_SUGGESTIONS = 3
 #: asks that the best item was the best of at least one list (or did well
 #: in both); ADR §6 gate 3 tunes it on real questions.
 DEFAULT_MIN_GROUNDING = 0.016
+#: Share of the question's words the results must match directly (own
+#: word or its translation — a typo guess does not count) before a model
+#: is called. One word in five ("зелений" in a Guide page) is noise.
+DEFAULT_MIN_COVERAGE = 0.5
 DEFAULT_DAILY_CAP_PER_ORG = 300
 DEFAULT_USER_PER_MIN = 6
 DEFAULT_USER_PER_DAY = 60
@@ -136,6 +140,10 @@ def _env_int(name: str, default: int) -> int:
 
 def min_grounding() -> float:
     return _env_float("RAG_MIN_GROUNDING", DEFAULT_MIN_GROUNDING)
+
+
+def min_coverage() -> float:
+    return _env_float("RAG_MIN_COVERAGE", DEFAULT_MIN_COVERAGE)
 
 
 def daily_cap_per_org() -> int:
@@ -277,16 +285,31 @@ def upstream_reason(exc: BaseException) -> str:
     return "other"
 
 
+def coverage(results: Sequence[dict]) -> float | None:
+    """Share of the query's words that at least one result matches
+    directly, or ``None`` when the results do not say (older callers)."""
+    words = max((int(r.get("words") or 0) for r in results), default=0)
+    if not words or not any("covered" in r for r in results):
+        return None
+    hit: set[int] = set()
+    for r in results:
+        hit.update(int(i) for i in r.get("covered") or ())
+    return len(hit) / words
+
+
 def is_grounded(results: Sequence[dict]) -> bool:
     """The gate (§4.6): at least two results, a top score at or above
-    :func:`min_grounding`, and at least one result with lexical evidence.
-    Below it no model is called at all.
+    :func:`min_grounding`, and the results together match at least
+    :func:`min_coverage` of the question's words directly — or one of
+    them is the exact item the query names by id. Below it no model is
+    called at all.
 
     The last clause was learnt live (2026-10-13): "зелений слон танцює на
-    Марсі ксилофоном" matched no word anywhere, yet rank 1 of the vector
-    list alone scored 1/61 and passed — hash vectors always have a
-    nearest document. A result without the ``lexical`` key counts as
-    evidence, so callers that never set it keep the old behaviour."""
+    Марсі ксилофоном" passed with three Guide pages — two matched only
+    through the typo guess "слон→сон", one through the word "зелений".
+    One word of five, and none of it vector evidence (that list was
+    empty). Results without ``covered`` fall back to the ``lexical`` flag,
+    and without that to the old score-only behaviour."""
     if len(results) < 2:
         return False
     try:
@@ -295,6 +318,11 @@ def is_grounded(results: Sequence[dict]) -> bool:
         return False
     if top < min_grounding():
         return False
+    if any(r.get("pinned") for r in results):
+        return True
+    share = coverage(results)
+    if share is not None:
+        return share >= min_coverage()
     return any(r.get("lexical", True) for r in results)
 
 
@@ -920,7 +948,8 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
 
 __all__ = ["PROMPT_VERSION", "SYSTEM_PROMPT", "KIND", "MESSAGES",
            "AskRequest", "AnswerStream", "AskLimiter", "Item", "Packed",
-           "ask_events", "answer_key", "estimate_tokens", "is_grounded",
+           "ask_events", "answer_key", "coverage", "estimate_tokens",
+           "is_grounded", "min_coverage",
            "upstream_reason",
            "load_items", "merge_chips", "normalise_history", "pack_prompt",
            "parse_suggestions", "limiter", "over_daily_cap", "tenant_scope",

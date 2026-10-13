@@ -217,7 +217,7 @@ q_raw
 - the user clicked "Ask" in the panel, or
 - the query looks like a question (ends with `?`, starts with how/what/why/як/що/чому/как/что/почему, or has ≥4 words), the results have already been shown, and the AI block is requested lazily, debounced by 600 ms after typing stops. It never fires on each keystroke.
 
-**Grounding gate:** if the top-1 RRF score is below `RAG_MIN_GROUNDING` or there are fewer than 2 results, **no LLM call is made**. The response is a deterministic "Not enough related items found" plus the chips.
+**Grounding gate:** if the top-1 RRF score is below `RAG_MIN_GROUNDING`, there are fewer than 2 results, or the results together match directly (own word or translation — a typo correction does not count) less than `RAG_MIN_COVERAGE` (default 0.5) of the question's words — unless one result is an exact id hit — **no LLM call is made**. (Coverage clause added 2026-10-13 after a nonsense question passed live on one word plus a typo guess.) The response is a deterministic "Not enough related items found" plus the chips.
 
 **Prompt (kind `search_answer` → Haiku):**
 - system: a static instruction of about 300 tokens. It asks for 2–3 sentences in the user's language, using only facts from the items, citing `[[TC-012]]`, with a last line of `SUGGESTIONS: a | b | c`.
@@ -347,7 +347,7 @@ The errors `{"type":"error","code":"budget|cap|ungrounded|llm_unavailable","mess
 | `PLATFORM_SEARCH_AI` | off | `PLATFORM_SEARCH` | `/api/ask`, the AI block, the Ask panel |
 | `MODEL_SWITCHER` | off | `ORG_MODE` | org policy and user preferences. With it off, routing is env + `KIND_TIER` exactly as today, with the Haiku defaults |
 
-Plain settings (not flags): `EMBEDDINGS_PROVIDER=hash|voyage`, `SEARCH_W_LEX`, `SEARCH_W_VEC`, `SEARCH_PY_VECTOR_MAX_DOCS=20000`, `RAG_MIN_GROUNDING`, `RAG_ASK_DAILY_CAP_PER_ORG`, `RAG_ANSWER_CACHE_DAYS`, `LLM_RESULT_CACHE_DAYS`, `LLM_ALLOW_PREMIUM_ON_PLATFORM_KEY`, `AUTOMATION_AI_MODE`.
+Plain settings (not flags): `EMBEDDINGS_PROVIDER=hash|voyage`, `SEARCH_W_LEX`, `SEARCH_W_VEC`, `SEARCH_PY_VECTOR_MAX_DOCS=20000`, `RAG_MIN_GROUNDING`, `RAG_MIN_COVERAGE`, `RAG_ASK_DAILY_CAP_PER_ORG`, `RAG_ANSWER_CACHE_DAYS`, `LLM_RESULT_CACHE_DAYS`, `LLM_ALLOW_PREMIUM_ON_PLATFORM_KEY`, `AUTOMATION_AI_MODE`.
 
 With a flag off, the routes return 404 (a hidden feature, not a 403). The hooks are still registered but do nothing, so turning a flag on does not need a restart, as in `features.py`. `features.snapshot()` and `/readyz` show the flags. `/readyz` also gets a `search: {fts, pgvector, provider}` block.
 
