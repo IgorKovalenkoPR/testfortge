@@ -130,6 +130,7 @@ TEXT_PAIRS = [
     ("--text-subtle", "--tf-bg", "hints on the page background"),
     ("--text-light", WHITE, "legacy --text-light"),
     ("--text-muted", WHITE, "muted text"),
+    ("--text-muted", "--tf-bg", "muted text and hints on the page background"),
     ("--warning", WHITE, "warning text"),
     ("--warning", "--warning-light", "warning text on its tint"),
     ("--badge-amber", "#FFFBEB", "amber badge"),
@@ -201,14 +202,32 @@ _CLASS = re.compile(r"\bclass\s*=\s*\"([^\"]*)\"", re.S)
 _STYLE = re.compile(r"\bstyle\s*=\s*\"([^\"]*)\"", re.S)
 
 
+_INPUT_BUTTON = re.compile(r"\btype\s*=\s*\"(?:submit|button|reset)\"", re.I)
+
+
+def _is_button(tag: str, attrs: str) -> bool:
+    """A <button>, an input that renders as one, or anything wearing .btn.
+
+    The class alone was the test until 2026-10-14, so an unclassed
+    <button style="padding:5px 12px…"> (estimation's Override) passed the
+    check it was the example of."""
+    tag = tag.lower()
+    if tag == "button":
+        return True
+    if tag == "input" and _INPUT_BUTTON.search(attrs):
+        return True
+    c = _CLASS.search(attrs)
+    return bool(c and "btn" in c.group(1).split())
+
+
 def inline_sized_buttons(html: str) -> list[str]:
     found = []
     for m in _TAG.finditer(html):
         attrs = m.group(2)
-        c, s = _CLASS.search(attrs), _STYLE.search(attrs)
-        if not (c and s):
+        s = _STYLE.search(attrs)
+        if not s or not _is_button(m.group(1), attrs):
             continue
-        if "btn" in c.group(1).split() and re.search(r"\b(padding|font-size)\s*:", s.group(1)):
+        if re.search(r"\b(padding|font-size|height)\s*:", s.group(1)):
             line = html.count("\n", 0, m.start()) + 1
             found.append(f"line {line}: {' '.join(s.group(1).split())}")
     return found
@@ -237,6 +256,11 @@ def test_the_inline_sizing_check_catches_a_violation():
     assert not inline_sized_buttons('<button class="btn" style="margin-top:8px">x</button>')
     # btn-sm is not "btn"
     assert not inline_sized_buttons('<i class="btn-icon" style="font-size:2em"></i>')
+    # …but a button is a button with or without the class.
+    assert inline_sized_buttons(
+        '<button type="button" id="x"\n  style="padding:5px 12px;">Override</button>')
+    assert inline_sized_buttons('<input type="submit" style="font-size:.85em">')
+    assert not inline_sized_buttons('<input type="text" style="font-size:.85em">')
 
 
 # ── (c) never remove an outline without putting one back ──────────────
@@ -342,3 +366,116 @@ def test_allowlisted_style_blocks_stay_small_and_hidden_only(name):
 def test_the_style_block_check_catches_a_violation():
     assert style_blocks("<div></div>\n<style>.a{}</style>") == 1
     assert style_blocks("{# a <style> mention in a comment #}") == 0
+
+
+# ── (e) every custom property used is defined ─────────────────────────
+
+_VAR_USE = re.compile(r"var\(\s*(--[\w-]+)")
+_VAR_DEF = re.compile(r"(--[\w-]+)\s*:")
+
+
+def _sources():
+    return ([CSS_PATH] + _templates()
+            + sorted((ROOT / "static" / "js").glob("*.js")))
+
+
+def undefined_properties(texts: list[str]) -> set[str]:
+    defined: set[str] = set()
+    used: set[str] = set()
+    for text in texts:
+        defined |= set(_VAR_DEF.findall(text))
+        used |= set(_VAR_USE.findall(text))
+    return used - defined
+
+
+def test_no_custom_property_is_used_without_a_definition():
+    """``var(--tf-primary, #FF865C)`` read like the accessible primary and
+    rendered the coral it was meant to retire, because --tf-primary was
+    never defined; ``var(--color-text-muted, #888)`` rendered 3.5:1 text
+    the same way (2026-10-14). A fallback is not a definition."""
+    missing = undefined_properties(
+        [p.read_text(encoding="utf-8") for p in _sources()])
+    assert not missing, f"used but never defined: {sorted(missing)}"
+
+
+def test_the_undefined_property_check_catches_a_violation():
+    assert undefined_properties(
+        [":root{--a:1px}", "x{color:var(--b, #888)}"]) == {"--b"}
+    assert not undefined_properties([":root{--a:1px}", "x{gap:var(--a)}"])
+
+
+# ── (f) no low-contrast text colour hard-coded in a page ──────────────
+
+_STYLE_ATTR = re.compile(r"\bstyle\s*=\s*\"([^\"]*)\"", re.S)
+_COLOUR_LITERAL = re.compile(
+    r"(?<![-\w])color\s*:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})\b")
+
+
+def _hex6(h: str) -> str:
+    h = h.lstrip("#")
+    return "#" + (h if len(h) == 6 else "".join(c * 2 for c in h))
+
+
+def low_contrast_inline_colours(html: str,
+                                backgrounds=(WHITE,)) -> list[str]:
+    """Inline text colours under 4.5:1 on any of *backgrounds*, in a style
+    attribute that does not also set its own background (a dark chip may
+    use light text)."""
+    found = []
+    for m in _STYLE_ATTR.finditer(html):
+        style = m.group(1)
+        if "background" in style:
+            continue
+        for c in _COLOUR_LITERAL.finditer(style):
+            ratio = min(contrast(_hex6(c.group(1)), bg) for bg in backgrounds)
+            if ratio < 4.5:
+                line = html.count("\n", 0, m.start()) + 1
+                found.append(f"line {line}: {c.group(1)} is {ratio:.2f}:1")
+    return found
+
+
+def test_no_page_hard_codes_a_low_contrast_text_colour(tokens):
+    """#64748b was typed into 26 places; it passes on white (4.76:1) and
+    fails on the page background (4.48:1) — the one failure a live scan
+    of twelve pages found. So both backgrounds are checked."""
+    backgrounds = (WHITE, colour("--tf-bg", tokens))
+    offenders = {}
+    for path in _templates():
+        hits = low_contrast_inline_colours(
+            path.read_text(encoding="utf-8"), backgrounds)
+        if hits:
+            offenders[str(path.relative_to(ROOT))] = hits
+    assert not offenders, f"use var(--text-muted) or darker: {offenders}"
+
+
+def test_the_inline_colour_check_catches_a_violation():
+    assert low_contrast_inline_colours('<p style="color:#888;">x</p>')
+    # Fine on white, not on the grey page background.
+    assert not low_contrast_inline_colours('<p style="color:#64748b">x</p>')
+    assert low_contrast_inline_colours('<p style="color:#64748b">x</p>',
+                                       (WHITE, "#F7F8FA"))
+    assert not low_contrast_inline_colours('<p style="color:#475569">x</p>')
+    assert not low_contrast_inline_colours(
+        '<pre style="background:#0f172a;color:#e2e8f0">x</pre>')
+
+
+# ── (g) one gap between buttons ───────────────────────────────────────
+
+#: Containers that lay buttons out in a row.
+BUTTON_ROWS = (".btn-group", ".form-actions", ".dashboard-actions", ".te-tabs")
+
+
+@pytest.mark.parametrize("selector", BUTTON_ROWS)
+def test_button_rows_share_one_gap(css, selector):
+    """The live pages spaced side-by-side buttons 6, 8, 12 or 14 px apart
+    depending on which container held them (2026-10-14)."""
+    gaps = [m.group(1).strip() for sels, body in _rules(css)
+            if selector in sels
+            for m in [re.search(r"(?<![-\w])gap\s*:\s*([^;]+)", body)] if m]
+    assert gaps, f"{selector} sets no gap"
+    assert all(g == "var(--gap-buttons)" for g in gaps), (selector, gaps)
+
+
+def test_the_button_gap_is_on_the_spacing_scale(tokens):
+    assert tokens["--gap-buttons"] in {
+        f"var(--space-{i})" for i in range(1, 7)}

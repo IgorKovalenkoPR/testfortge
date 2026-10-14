@@ -434,7 +434,7 @@
                                 <video src="{{ url_for('automation_asset', path=r.video) }}"
                                        controls preload="metadata" muted
                                        style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
-                                <div style="font-size:0.72em;color:#64748b;margin-top:2px;">
+                                <div style="font-size:0.72em;color:var(--text-muted);margin-top:2px;">
                                     🎥 {{ t.get('te_evidence_video', 'recorded video') }}
                                 </div>
                             </div>
@@ -907,7 +907,7 @@
                   style="font-size:0.92em;color:#0f172a;font-weight:600;">
                 {{ t.te_cases_progress|format(0, active_automation_run.case_count) }}
             </span>
-            <span style="font-size:0.85em;color:#64748b;margin-left:auto;">
+            <span style="font-size:0.85em;color:var(--text-muted);margin-left:auto;">
                 run_id: <code>{{ active_automation_run.run_id }}</code>
             </span>
         </div>
@@ -950,7 +950,7 @@
                 <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
                 <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm with visible click / scroll / redirect') }}</option>
             </select>
-            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--color-text-muted,#888);">
+            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--text-muted);">
                 {{ t.get('te_record_video_hint',
                    'When on, every action is slowed and elements flash a red outline before being clicked so the .webm is legible.') }}
             </p>
@@ -964,7 +964,7 @@
     <p class="hint">{{ t.get('te_env_hint',
         'Pick one or more environments. Each selected environment produces its own run record with status tracking, bug links, screenshots and (when enabled) video.') }}</p>
 
-    <div class="te-env-tabs" role="tablist" data-te-env-tabs>
+    <div class="te-env-tabs" role="group" aria-label="{{ t.get('te_environment', 'Test Environment') }}" data-te-env-tabs>
         <label class="te-env-tab">
             <input type="checkbox" name="env_type" value="web" checked>
             <span><strong>{{ t.te_env_web }}</strong><small>{{ t.get('te_env_web_help', 'desktop browser on Windows / macOS / Linux') }}</small></span>
@@ -1238,10 +1238,9 @@
        the gunicorn 300 s ceiling on cold-start runs and the browser is
        left staring at this overlay. The X dismisses the modal so the
        operator can refresh manually. #}
-    <button type="button" id="te-overlay-close" aria-label="{{ t.guide_close }}"
-            style="position:absolute;top:8px;right:10px;border:none;
-                   background:transparent;font-size:1.4em;color:#475569;
-                   cursor:pointer;line-height:1;">&times;</button>
+    <button type="button" id="te-overlay-close" class="btn-close"
+            aria-label="{{ t.guide_close }}"
+            style="position:absolute;top:8px;right:10px;">&times;</button>
     <h3>{{ t.get('te_overlay_title', 'Live automation view — run in progress') }}</h3>
     <p style="margin-bottom:10px;">
       {{ t.get('te_overlay_body',

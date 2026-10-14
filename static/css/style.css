@@ -77,6 +77,8 @@
     --space-4:           16px;
     --space-5:           24px;
     --space-6:           32px;
+    /* The one gap between buttons that sit side by side */
+    --gap-buttons:       var(--space-2);
 
     /* Control heights — one scale for every button-like control */
     --control-xs:        24px;
@@ -121,6 +123,12 @@ body {
 
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* A link inside running text needs more than colour to stand out
+   (WCAG 1.4.1; axe link-in-text-block). Buttons and chips keep theirs. */
+:where(p, li, small, .hint, td) > a:not(.btn):not([class*="chip"]):not([role="button"]) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
 .sidebar {
@@ -295,10 +303,6 @@ a:hover { text-decoration: underline; }
 
 .card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
 
-.story-card { border-left: 4px solid var(--primary); }
-.tc-card { border-left: 4px solid #2563eb; }
-.technique-card { border-left: 4px solid #7c3aed; }
-.guide-card { border-left: 4px solid var(--primary); }
 
 /* ── Collapsible ──────────────────────────────────────────────── */
 .collapsible-header { cursor: pointer; user-select: none; }
@@ -330,7 +334,7 @@ input[type="text"]:focus, textarea:focus, select:focus {
 textarea { resize: vertical; font-family: 'Consolas', 'Monaco', monospace; font-size: .85rem; }
 select { cursor: pointer; }
 
-.form-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin: 1.5rem 0; align-items: center; }
+.form-actions { display: flex; gap: var(--gap-buttons); flex-wrap: wrap; margin: 1.5rem 0; align-items: center; }
 
 /* Checkbox grid */
 .checkbox-grid { display: flex; flex-wrap: wrap; gap: .5rem .5rem; }
@@ -562,7 +566,7 @@ select { cursor: pointer; }
 .export-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
 
 /* ── Dashboard features ───────────────────────────────────────── */
-.dashboard-actions { display: flex; gap: .75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.dashboard-actions { display: flex; gap: var(--gap-buttons); margin-bottom: 1.5rem; flex-wrap: wrap; }
 .features-overview { margin-top: 2rem; }
 .features-overview h2 { color: var(--primary-dark); margin-bottom: 1rem; }
 .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
@@ -1453,7 +1457,6 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
 .story-card          { border-left: 4px solid var(--tf-coral); }
 .tc-card             { border-left: 4px solid var(--tf-blue); }
 .technique-card      { border-left: 4px solid #7C5BFF; }
-.guide-card          { border-left: 4px solid var(--tf-coral); }
 
 /* ── Forms ────────────────────────────────────────────────────── */
 /* Every text-entry control gets a ≥3:1 border (WCAG 1.4.11). The focus
@@ -1546,7 +1549,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .btn-icon { display: inline-flex; font-size: 1.1rem; }
 
 /* Adjacent buttons: 8px inside a group, 16px between groups. */
-.btn-group  { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.btn-group  { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-buttons); }
 .btn-groups { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 
 .btn-primary       { background: var(--accent); color: #FFFFFF; border-color: transparent; }
@@ -1977,7 +1980,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .te-env-tab span small {
     font-size: 11.5px;
-    color: #6A7488;
+    color: var(--text-muted);
     line-height: 1.35;
 }
 .te-env-tab:hover {
@@ -2000,7 +2003,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
     align-items: flex-start;
     gap: 10px;
     padding: 12px 14px;
-    border: 1px solid var(--tf-border, #E5E7EB);
+    border: 1px solid var(--border);
     border-radius: 10px;
     cursor: pointer;
     background: #fff;
@@ -2025,7 +2028,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .te-walkthrough-panel {
     margin-top: 14px;
     padding: 10px 12px;
-    border: 1px dashed var(--tf-border, #E5E7EB);
+    border: 1px dashed var(--border);
     border-radius: 8px;
     background: #fafbfc;
 }
@@ -2039,7 +2042,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .te-subtabs {
     display: flex;
     gap: 4px;
-    border-bottom: 1px solid var(--tf-border, #E5E7EB);
+    border-bottom: 1px solid var(--border);
     margin-bottom: 10px;
 }
 .te-subtab {
@@ -2054,7 +2057,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .te-subtab[aria-selected="true"] {
     background: #fff;
-    border-color: var(--tf-border, #E5E7EB);
+    border-color: var(--border);
     color: #0f172a;
     font-weight: 600;
     margin-bottom: -1px;
@@ -2079,7 +2082,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .project-picker .picker-status .icon-sm { color: var(--tf-coral, #FF865C); }
 .project-picker .picker-active-badge strong { color: var(--accent); margin-left: 4px; }
-.project-picker .picker-empty { color: #6A7488; }
+.project-picker .picker-empty { color: var(--text-muted); }
 .project-picker .picker-create-form .form-actions {
     margin-top: 10px; display: flex; justify-content: flex-end;
 }
@@ -2139,7 +2142,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 }
 .te-run-bar::after{
     content:"";position:absolute;left:-30%;top:0;bottom:0;width:30%;
-    background:var(--tf-grad,linear-gradient(135deg,#FF865C 0%,#FF6A36 100%));
+    background:linear-gradient(135deg,#FF865C 0%,#FF6A36 100%);
     animation:te-run-slide 1.2s linear infinite;
 }
 @keyframes te-run-slide{
@@ -2430,7 +2433,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .set-password > summary {
     cursor: pointer;
     font-size: .82rem;
-    color: var(--muted, #64748b);
+    color: var(--text-muted);
 }
 .set-password-form {
     display: flex;
@@ -2893,7 +2896,7 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
     margin: 0 0 16px 0;
 }
 
-.cl-editor-hint { font-size: 0.85em; color: #64748b; }
+.cl-editor-hint { font-size: 0.85em; color: var(--text-muted); }
 
 .cl-editor-status {
     font-size: 0.85em;
@@ -3025,7 +3028,7 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 
 .est-edit-field input[aria-invalid="true"] { border-color: #dc2626; }
 
-.est-edit-help { color: #64748b; font-size: 0.78em; }
+.est-edit-help { color: var(--text-muted); font-size: 0.78em; }
 
 .est-edit-actions {
     align-items: center;
@@ -3200,7 +3203,7 @@ textarea.ie-control { resize: vertical; line-height: 1.5; }
 }
 
 .dash-kpi-label { font-size: 0.88em; color: #334155; margin-top: 2px; }
-.dash-kpi-target { font-size: 0.78em; color: #64748b; margin-top: 4px; }
+.dash-kpi-target { font-size: 0.78em; color: var(--text-muted); margin-top: 4px; }
 .dash-kpi-untargeted { font-style: italic; }
 
 .dash-customise > summary { cursor: pointer; font-weight: 600; }
@@ -4006,3 +4009,33 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
         padding: var(--space-1);
     }
 }
+
+/* Estimation source tabs (were inline styles plus a script that rewrote them) */
+.te-tabs {
+    display: flex; gap: var(--gap-buttons);
+    border-bottom: 2px solid var(--border); margin-bottom: 14px;
+}
+.te-tab {
+    padding: 10px 16px; border: 0; border-bottom: 3px solid transparent;
+    background: transparent; font: inherit; font-weight: 500;
+    color: var(--text-muted); cursor: pointer;
+}
+.te-tab.is-active { border-bottom-color: var(--primary); color: var(--text); font-weight: 600; }
+
+/* Guide topic cards (were inline styles on each card) */
+.guide-card {
+    text-align: left; padding: 18px; border: 1px solid var(--border);
+    border-left: 4px solid var(--tf-coral);
+    background: var(--surface); border-radius: 8px; cursor: pointer;
+    font: inherit; color: inherit;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+
+/* The "×" that closes a dialog — one size everywhere */
+.btn-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: var(--control-sm); min-height: var(--control-sm); padding: 0;
+    border: 0; background: transparent; cursor: pointer;
+    font-size: 1.5rem; line-height: 1; color: var(--text-muted);
+}
+.btn-close:hover { color: var(--text); }

@@ -631,7 +631,7 @@
                     {{ t.get('recorder_pending_tc_count', 'proposed test case(s)') }}
                 </span>
                 {% if draft.created_at %}
-                <span style="color:#64748b;font-size:0.92em;">
+                <span style="color:var(--text-muted);font-size:0.92em;">
                     · {{ t.get('recorder_pending_captured', 'captured') }}
                     {{ draft.created_at | when }}
                 </span>
@@ -1095,7 +1095,7 @@
                             'Flip a step to an assertion (visible / text / URL) to make the runner check expectations instead of issuing a click.') }}
                     </p>
                     <table style="width:100%;font-size:0.82em;border-collapse:collapse;">
-                        <thead style="color:#64748b;text-align:left;">
+                        <thead style="color:var(--text-muted);text-align:left;">
                             <tr>
                                 <th style="padding:2px 4px;width:32px;">#</th>
                                 <th style="padding:2px 4px;">{{ t.get('tc_recorder_step_action', 'Recorded step') }}</th>

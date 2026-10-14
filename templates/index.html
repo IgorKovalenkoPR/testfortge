@@ -27,7 +27,7 @@
         <h2 class="heading-3" style="margin:0;font-size:1.05em;">
             🕒 {{ t.get('recent_projects_title', 'Recent projects') }}
         </h2>
-        <small style="color:#64748b;">
+        <small style="color:var(--text-muted);">
             {{ t.get('recent_projects_hint',
                 'Click Open to load a project — your TCs, checklist, bugs, last estimation and run history come back from the database.') }}
         </small>
@@ -37,14 +37,14 @@
         <div class="card" style="margin:0;padding:12px 14px;background:#f8fafc;
                                   border:1px solid #e2e8f0;
                                   {% if p.id == active_project_id %}
-                                  border-color:var(--tf-primary,#FF865C);
+                                  border-color:var(--primary);
                                   background:#fff7ed;
                                   {% endif %}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <strong style="font-size:0.95em;color:#0f172a;line-height:1.25;
                                word-break:break-word;">
                     {% if p.id == active_project_id %}
-                    <span style="color:var(--tf-primary,#FF865C);">●</span>
+                    <span style="color:var(--primary);">●</span>
                     {% endif %}
                     {{ p.name }}
                 </strong>
@@ -85,7 +85,7 @@
         {% endfor %}
     </div>
     {% if projects|length > 5 %}
-    <p style="margin:10px 0 0 0;font-size:0.82em;color:#64748b;">
+    <p style="margin:10px 0 0 0;font-size:0.82em;color:var(--text-muted);">
         {{ t.get('recent_projects_more', 'Showing the 5 most recent — ') }}
         <a href="#all-projects">
             {{ t.recent_projects_more_link|format(projects|length) }}
@@ -513,7 +513,7 @@
                             stroke-dashoffset="{{ -(p_dash + f_dash) }}"
                             transform="rotate(-90 60 60)"/>
                     <text x="60" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">{{ metrics.exec_pass_rate }}%</text>
-                    <text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">{{ t.dm_pass_rate }}</text>
+                    <text x="60" y="74" text-anchor="middle" font-size="9" style="fill:var(--text-muted)">{{ t.dm_pass_rate }}</text>
                 </svg>
             </div>
             <div class="donut-legend">

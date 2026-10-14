@@ -154,7 +154,7 @@
         📝 {{ t.get('bug_source_manual_tc', 'TC / manual only') }}
     </a>
     {% if source_filter %}
-    <span style="font-size:0.78em;color:#64748b;margin-left:auto;">
+    <span style="font-size:0.78em;color:var(--text-muted);margin-left:auto;">
         {{ t.get('bug_source_filtered_count', 'showing') }}
         <strong>{{ stats.total }}</strong>
         {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
@@ -241,7 +241,7 @@
            class="btn btn-sm btn-secondary">
             {{ t.get('bug_run_clear', 'Clear run filter') }}
         </a>
-        <span style="font-size:0.78em;color:#64748b;margin-left:auto;">
+        <span style="font-size:0.78em;color:var(--text-muted);margin-left:auto;">
             {{ t.get('bug_source_filtered_count', 'showing') }}
             <strong>{{ stats.total }}</strong>
             {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
@@ -373,7 +373,7 @@
                             <video src="{{ url_for('automation_asset', path=att) }}"
                                    controls preload="metadata" muted
                                    style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
-                            <div style="font-size:0.72em;color:#64748b;margin-top:2px;">🎥 {{ t.bug_video }}</div>
+                            <div style="font-size:0.72em;color:var(--text-muted);margin-top:2px;">🎥 {{ t.bug_video }}</div>
                         </div>
                     {% elif lower.endswith('.png') or lower.endswith('.jpg') or lower.endswith('.jpeg') or lower.endswith('.gif') or lower.endswith('.webp') %}
                         <a href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener"

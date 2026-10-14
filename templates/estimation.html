@@ -118,10 +118,7 @@
             {{ t.get('est_team_suggested', 'Suggested') }}:
             <strong id="ts-value">{{ last.suggested_team_size or last.team_size or 1 }}</strong>
           </span>
-          <button type="button" id="ts-override-btn"
-                  style="padding:5px 12px;border:1px solid #cbd5e1;
-                         background:#fff;border-radius:6px;cursor:pointer;
-                         font-size:.85em;color:#475569;">
+          <button type="button" id="ts-override-btn" class="btn btn-secondary btn-sm">
             {{ t.get('est_team_override', 'Override') }}
           </button>
         </div>
@@ -165,21 +162,17 @@
        (data-source) double as the form's `source` value, so the
        backend dispatch in routes/estimation.py stays unchanged.
        Inactive tabs are display:none — their fields don't submit. #}
-    <div class="te-tabs" role="tablist"
-         style="display:flex;gap:6px;border-bottom:2px solid #e5e7eb;margin-bottom:14px;">
+    <div class="te-tabs" role="tablist">
       <button type="button" class="te-tab is-active" role="tab"
-              data-tab="text" aria-selected="true"
-              style="padding:10px 16px;border:none;border-bottom:3px solid var(--tf-primary,#FF865C);background:transparent;font-weight:600;cursor:pointer;">
+              data-tab="text" aria-selected="true">
         📝 {{ t.get('est_tab_text', 'Requirements text') }}
       </button>
       <button type="button" class="te-tab" role="tab"
-              data-tab="mockups" aria-selected="false"
-              style="padding:10px 16px;border:none;border-bottom:3px solid transparent;background:transparent;font-weight:500;color:#64748b;cursor:pointer;">
+              data-tab="mockups" aria-selected="false">
         🎨 {{ t.get('est_tab_mockups', 'Mockups') }}
       </button>
       <button type="button" class="te-tab" role="tab"
-              data-tab="url" aria-selected="false"
-              style="padding:10px 16px;border:none;border-bottom:3px solid transparent;background:transparent;font-weight:500;color:#64748b;cursor:pointer;">
+              data-tab="url" aria-selected="false">
         🌐 {{ t.get('est_tab_url', 'URL crawl') }}
       </button>
     </div>
@@ -334,9 +327,6 @@
         var on = t.dataset.tab === name;
         t.classList.toggle('is-active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
-        t.style.borderBottomColor = on ? 'var(--tf-primary,#FF865C)' : 'transparent';
-        t.style.color = on ? '' : '#64748b';
-        t.style.fontWeight = on ? '600' : '500';
       });
       panes.forEach(function (p) {
         p.hidden = (p.dataset.pane !== name);

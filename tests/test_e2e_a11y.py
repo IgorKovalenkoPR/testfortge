@@ -181,6 +181,30 @@ class TestNoSeriousViolations:
         _assert_clean(admin.page, axe_source, "organisation settings")
 
 
+#: Every other page in the signed-in admin's navigation (2026-10-14: the
+#: gate covered six screens of twelve, and the one live contrast failure
+#: was on a page it never opened). Path, what to wait for, label.
+OTHER_PAGES = [
+    ("/estimation?lang=en", "#main-content", "estimation"),
+    ("/checklist?lang=en", "#main-content", "checklist"),
+    ("/test-execution?lang=en", "#main-content", "test execution"),
+    ("/test-execution/runs?lang=en", "#main-content", "runs"),
+    ("/test-execution/live?lang=en", "#live-toolbar", "live automation view"),
+    ("/automation?lang=en", "#main-content", "automation"),
+    ("/guide?lang=en", "#main-content", "guide"),
+    ("/org/members?lang=en", "#main-content", "team members"),
+]
+
+
+class TestEveryPageInTheNavigation:
+    @pytest.mark.parametrize("path, ready, where", OTHER_PAGES,
+                             ids=[p[2] for p in OTHER_PAGES])
+    def test_page(self, admin, axe_source, path, ready, where):
+        admin.go(path)
+        admin.page.wait_for_selector(ready, timeout=WAIT)
+        _assert_clean(admin.page, axe_source, where)
+
+
 class TestTheGateWouldNotice:
     def test_axe_finds_a_planted_violation(self, admin, axe_source):
         """A gate that cannot fail is not a gate: plant an image without
