@@ -233,6 +233,8 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         response = _do_call()
         _meter(response, kind=kind, model=model, key_source=key_source,
                org_id=org_id, project_id=project_id, user_id=user_id)
+        _warn_if_truncated(response, kind=kind, model=model,
+                           max_tokens=kwargs.get("max_tokens"))
         return response
     try:
         response = _do_call()
@@ -246,7 +248,28 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         ) from exc
     _meter(response, kind=kind, model=model, key_source=key_source,
            org_id=org_id, project_id=project_id, user_id=user_id)
+    _warn_if_truncated(response, kind=kind, model=model,
+                       max_tokens=kwargs.get("max_tokens"))
     return response
+
+
+def _warn_if_truncated(response: Any, *, kind: str | None, model: str,
+                       max_tokens: Any) -> None:
+    """Say so when a call hit its ``max_tokens``.
+
+    Every caller survives a cut-off reply — the parser rejects it and a
+    rule-based fallback answers — so without this line the only trace of
+    a cap spent on thinking (Haiku 5.5 thinks by default; on 2026-10-14
+    the 300-token Ask cap came back with no text at all) is a worse
+    result and a billed row."""
+    if getattr(response, "stop_reason", None) != "max_tokens":
+        return
+    usage = getattr(response, "usage", None)
+    _logger.warning(
+        "LLM reply cut off at max_tokens: kind=%s model=%s max_tokens=%s "
+        "output_tokens=%s — the caller will fall back; raise the cap or "
+        "pass short_answer=True",
+        kind, model, max_tokens, getattr(usage, "output_tokens", None))
 
 
 def check_budget(org_id: str | None, *, key_source: str = "platform") -> None:

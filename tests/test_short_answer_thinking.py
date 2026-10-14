@@ -233,3 +233,77 @@ def test_the_streamed_chat_turns_thinking_off(client, monkeypatch):
     assert calls, "the LLM path was not taken"
     assert calls[-1]["thinking"] == {"type": "disabled"}
     assert b"Hello " in payload
+
+
+# ── The 1500-token JSON calls (site recon, session segmenter) ─────────
+
+def _segmenter_steps():
+    from engine.automation_qa import AutomationStep
+    return [AutomationStep(action="goto", target="https://app/login"),
+            AutomationStep(action="fill", target="label=Email", value="a@b.c"),
+            AutomationStep(action="click", target='role=button[name="Go"]')]
+
+
+class TestJsonCallsTurnThinkingOff:
+    """Both parse JSON out of a 1500-token reply. With Haiku 5.5's default
+    thinking the cap could be spent before the JSON, and both fall back
+    silently (rules / one flow) — so the request itself is what to pin."""
+
+    def test_site_recon(self, sdk):
+        from engine import site_recon
+        site_recon._call_llm({"url": "https://example.test", "pages": []})
+        assert sdk[-1]["model"] == "claude-haiku-5-5"
+        assert sdk[-1]["thinking"] == {"type": "disabled"}
+        assert sdk[-1]["max_tokens"] == site_recon._RECON_MAX_TOKENS
+
+    def test_session_segmenter(self, sdk):
+        from engine import session_segmenter
+        session_segmenter._call_llm(_segmenter_steps())
+        assert sdk[-1]["model"] == "claude-haiku-5-5"
+        assert sdk[-1]["thinking"] == {"type": "disabled"}
+        assert sdk[-1]["max_tokens"] == session_segmenter._MAX_TOKENS
+
+
+# ── A cut-off reply is logged ─────────────────────────────────────────
+
+class TestTruncationIsLogged:
+    def _call(self, monkeypatch, stop_reason):
+        seen = []
+
+        class _Messages:
+            @staticmethod
+            def create(**kwargs):
+                seen.append(kwargs)
+                return SimpleNamespace(
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=1500,
+                                          cache_read_input_tokens=0,
+                                          cache_creation_input_tokens=0),
+                    content=[], stop_reason=stop_reason)
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform-test")
+        monkeypatch.delenv(llm_keys.ENCRYPTION_KEY_ENV, raising=False)
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+        monkeypatch.setattr(llm_client, "_build_client",
+                            lambda api_key=None: SimpleNamespace(
+                                messages=_Messages()))
+        monkeypatch.setattr(llm_client, "_retryable_exception_types",
+                            lambda: ())
+        llm_client.call_messages(kind="analysis", max_tokens=1500,
+                                 messages=[{"role": "user", "content": "x"}])
+
+    def _warned(self, monkeypatch):
+        lines = []
+        monkeypatch.setattr(llm_client._logger, "warning",
+                            lambda msg, *a, **k: lines.append(msg % a))
+        return lines
+
+    def test_max_tokens_is_warned(self, monkeypatch):
+        lines = self._warned(monkeypatch)
+        self._call(monkeypatch, "max_tokens")
+        assert any("cut off at max_tokens" in l and "kind=analysis" in l
+                   and "output_tokens=1500" in l for l in lines), lines
+
+    def test_a_finished_reply_is_not(self, monkeypatch):
+        lines = self._warned(monkeypatch)
+        self._call(monkeypatch, "end_turn")
+        assert not [l for l in lines if "cut off" in l], lines

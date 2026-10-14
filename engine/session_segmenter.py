@@ -175,6 +175,8 @@ def _call_llm(steps: list[AutomationStep]) -> list[dict]:
             call=call_messages,
             accept=lambda text: _extract_json(text) is not None,
             max_tokens=_MAX_TOKENS,
+            # Index ranges in JSON: thinking would only eat the cap.
+            short_answer=True,
             system=_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",

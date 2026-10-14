@@ -245,6 +245,9 @@ def _call_llm(evidence: dict) -> str:
         call=call_messages,
         accept=lambda text: _parse_llm_response(text) is not None,
         max_tokens=_RECON_MAX_TOKENS,
+        # A JSON profile, not a problem to reason through: Haiku 5.5's
+        # default thinking would come out of the same 1500-token cap.
+        short_answer=True,
         system=[{
             "type": "text",
             "text": _SYSTEM_PROMPT,
