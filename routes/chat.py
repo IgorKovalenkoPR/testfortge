@@ -416,6 +416,9 @@ def register(app: Flask) -> None:
                                "content": _chatbot_mod.grounded_user_content(
                                    message,
                                    grounded.block if grounded else None)}],
+                    # Haiku 5.5 thinks by default; at a 600-token cap the
+                    # thinking can eat the whole reply.
+                    **_llm_models.short_answer_params(stream_model),
                 ) as stream:
                     for text in stream.text_stream:
                         # Heartbeat if the upstream went quiet — Render's

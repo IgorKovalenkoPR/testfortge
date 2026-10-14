@@ -886,7 +886,8 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
             client = _client_factory(api_key)
             with client.messages.stream(
                     model=model, max_tokens=MAX_TOKENS, system=packed.system,
-                    messages=packed.messages) as stream:
+                    messages=packed.messages,
+                    **llm_models.short_answer_params(model)) as stream:
                 for delta in stream.text_stream:
                     out = proc.feed(delta or "")
                     if out:
@@ -929,8 +930,19 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
         if proc.stripped:
             log.info("ask: stripped %d citation(s) not in the retrieved set",
                      len(proc.stripped))
-        truncated = getattr(final, "stop_reason", None) == "max_tokens"
-        if proc.text and not truncated:
+        stop_reason = getattr(final, "stop_reason", None)
+        if not proc.text:
+            # Billed and silent: the tokens went somewhere the user never
+            # sees (thinking, a refusal). Say so rather than end the
+            # stream as if it had answered.
+            log.warning("ask: model returned no visible text "
+                        "(stop_reason=%s, output_tokens=%s)", stop_reason,
+                        usage.get("output_tokens"))
+            yield from finish("upstream", chips=det_only, key=None,
+                              usage=usage, reason="empty_answer")
+            return
+        truncated = stop_reason == "max_tokens"
+        if not truncated:
             _db.put_rag_answer(
                 key=key, scope=scope, model=model, lang=lang,
                 project_id=req.project_id,

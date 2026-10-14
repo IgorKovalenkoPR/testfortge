@@ -52,6 +52,7 @@ cares about: an org or user choice never beats it.
 """
 from __future__ import annotations
 
+import copy
 import os
 
 from engine.log import get_logger
@@ -236,6 +237,45 @@ def tier_of(model: str) -> str | None:
     return None
 
 
+#: Family → the request fields that keep a short-capped call from spending
+#: its whole ``max_tokens`` on thinking. Haiku 5.5 thinks by default and
+#: its thinking is billed as output but never streamed as text: with the
+#: 300-token Ask cap every answer came back empty (live, 2026-10-14).
+#: Matched by the longest prefix, so ``claude-opus-5-5`` is not read as
+#: ``claude-opus-5``. Per family, from the API's thinking table:
+#:
+#: * Haiku 5.5 / Opus 5 / Sonnet 5 accept ``disabled`` (at effort ≤ high,
+#:   and their default effort is ≤ high);
+#: * Sonnet 5.5 rejects ``disabled``; ``between_tools`` is its off switch;
+#: * Opus 5.5 and Fable cannot turn thinking off — low effort is the most
+#:   that can be asked;
+#: * anything older does not think unless asked, so nothing is sent.
+_NO_THINKING: dict[str, dict] = {
+    "claude-haiku-5-5": {"thinking": {"type": "disabled"}},
+    "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
+    "claude-sonnet-5": {"thinking": {"type": "disabled"}},
+    "claude-opus-5-5": {"output_config": {"effort": "low"}},
+    "claude-opus-5": {"thinking": {"type": "disabled"}},
+    "claude-fable-5": {"output_config": {"effort": "low"}},
+    "claude-mythos-5": {"output_config": {"effort": "low"}},
+}
+
+
+def short_answer_params(model: str) -> dict:
+    """Extra request fields for a call whose ``max_tokens`` is sized for
+    the visible answer alone (Ask, the streamed Tedgie chat).
+
+    Returns a fresh dict for ``**`` into ``messages.stream``; empty for a
+    model that does not think by default or that is not recognised.
+    """
+    m = (model or "").lower()
+    best = ""
+    for prefix in _NO_THINKING:
+        if m.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    return copy.deepcopy(_NO_THINKING[best]) if best else {}
+
+
 def routing_warnings() -> list[str]:
     """Boot-time warnings about configuration that does not do what it
     looks like it does."""
@@ -267,5 +307,6 @@ __all__ = [
     "TIER_DEFAULTS", "TIERS", "PREMIUM_TIERS", "KIND_TIER", "KINDS",
     "SWITCHABLE_KINDS", "UnknownKind",
     "model_for", "model_for_tier", "tier_for", "env_tier", "operator_pin",
-    "tier_of", "routing_warnings", "snapshot", "legacy_global_pin",
+    "tier_of", "short_answer_params", "routing_warnings", "snapshot",
+    "legacy_global_pin",
 ]

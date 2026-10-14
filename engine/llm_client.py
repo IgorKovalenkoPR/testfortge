@@ -136,6 +136,7 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
                   org_id: str | None = None,
                   project_id: str | None = None,
                   user_id: str | None = None,
+                  short_answer: bool = False,
                   **kwargs: Any) -> Any:
     """Call ``Anthropic().messages.create(**kwargs)`` with retry + timeout.
 
@@ -161,6 +162,12 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         own API key when it has one, and is what the budget is checked
         against. Each one not passed is taken from
         :mod:`engine.llm_context` — the request or job this call runs in.
+    short_answer:
+        ``max_tokens`` is sized for the visible reply alone: add the
+        routed model's thinking-off fields
+        (:func:`engine.llm_models.short_answer_params`) so a model that
+        thinks by default does not spend the cap where nobody sees it.
+        Fields the caller passed win.
     **kwargs:
         Forwarded verbatim to ``messages.create`` (``model``,
         ``max_tokens``, ``system``, ``messages``, …).
@@ -201,6 +208,10 @@ def call_messages(*, timeout: int = DEFAULT_TIMEOUT,
         kwargs["model"] = llm_models.model_for(
             kind, org_id=org_id, user_id=user_id, key_source=key_source)
     model = kwargs.get("model") or "unknown"
+    if short_answer:
+        from engine import llm_models
+        for field, value in llm_models.short_answer_params(model).items():
+            kwargs.setdefault(field, value)
 
     # Budget gate, before the call rather than after it.
     check_budget(org_id, key_source=key_source)

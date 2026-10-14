@@ -1588,6 +1588,7 @@ def _ai_respond(message: str, lang: str, *,
         resp = call_messages(
             kind=_CHAT_KIND,
             max_tokens=_ANTHROPIC_MAX_TOKENS,
+            short_answer=True,
             org_id=org_id,
             project_id=project_id,
             user_id=user_id,
