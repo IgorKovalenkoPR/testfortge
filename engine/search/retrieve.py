@@ -535,7 +535,7 @@ def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool,
     for s in stems:
         if not df[s]:
             continue
-        idf = math.log(1.0 + (n - df[s] + 0.5) / (df[s] + 0.5))
+        idf = bm25_idf(n, df[s])
         col = tfs[s]
         for i, f in enumerate(col):
             if not f:
@@ -572,11 +572,11 @@ def tsquery_text(terms: Sequence[Term], *, prefix_last: bool = True) -> str:
 
 
 #: On Postgres the full-text index only *finds* the lexical candidates —
-#: this many, by ``ts_rank_cd`` — and :func:`_bm25_py` orders them, with
-#: the document frequencies of the whole scope. ``ts_rank_cd`` has no IDF:
-#: it ranked a page by how often it said "project", and "Base URL" in a
-#: question lost to every page that did. One ranking on both engines also
-#: means the golden set, measured on SQLite, measures production.
+#: this many — and :func:`_bm25_py` orders them with the scope's document
+#: frequencies, so both engines rank alike and the golden set (SQLite)
+#: measures production. The pool is chosen by the summed IDF of the query
+#: terms a document contains, not by ``ts_rank_cd``: that has no IDF, and a
+#: page that said "project" often would push the one with "Base URL" out.
 PG_LEX_POOL = 400
 
 
@@ -587,22 +587,44 @@ def term_tsquery(stem_: str) -> str:
     return " & ".join(dict.fromkeys(parts))
 
 
-def fts_statement(allowed, kinds, tsq: str, *, limit: int = PG_LEX_POOL):
+def bm25_idf(n: int, df: int) -> float:
+    return math.log(1.0 + (n - df + 0.5) / (df + 0.5))
+
+
+def fts_statement(allowed, kinds, tsq: str, *,
+                  weights: Sequence[tuple[str, float]] = (),
+                  limit: int = PG_LEX_POOL):
     """The Postgres full-text statement (scope clause included): the
-    candidate rows, with their lex, best ``ts_rank_cd`` first. Separate so
-    a test can compile it against the PG dialect without a server."""
-    from sqlalchemy import literal_column, select, text
+    candidate rows with their lex. With *weights* — ``(tsquery, idf)`` per
+    term — the best are those whose matching terms are rarest; without,
+    ``ts_rank_cd``. Separate so a test can compile it against the PG
+    dialect without a server.
+
+    Every parameter goes through ``text()``: ``literal_column("… :tsq …")``
+    handed the colon-name to the driver verbatim, so every FTS query since
+    the ADR 0003 build raised a syntax error and search fell back to Python
+    BM25 unseen (found live 2026-10-15, explain said "python-bm25").
+    """
+    from sqlalchemy import select, text
 
     from engine.db import SearchDoc
-    rank = literal_column(
-        "ts_rank_cd(search_doc.tsv, to_tsquery('simple', :tsq), 32)")
+    params = {"tsq": tsq}
+    if weights:
+        parts = []
+        for i, (q, w) in enumerate(weights):
+            parts.append(f"(CASE WHEN search_doc.tsv @@ to_tsquery('simple', "
+                         f":w{i}) THEN {float(w)!r} ELSE 0 END)")
+            params[f"w{i}"] = q
+        rank = text("(" + " + ".join(parts) + ") DESC")
+    else:
+        rank = text("ts_rank_cd(search_doc.tsv, to_tsquery('simple', :tsq), "
+                    "32) DESC")
     stmt = select(SearchDoc.id, SearchDoc.project_id, SearchDoc.kind,
                   SearchDoc.ref, SearchDoc.chunk_no, SearchDoc.lex_title,
                   SearchDoc.lex_body, SearchDoc.source_updated_at)
     stmt = _filtered(stmt, allowed, kinds)
     stmt = stmt.where(text("search_doc.tsv @@ to_tsquery('simple', :tsq)"))
-    return stmt.order_by(rank.desc(), SearchDoc.id).limit(limit).params(
-        tsq=tsq)
+    return stmt.order_by(rank, SearchDoc.id).limit(limit).params(**params)
 
 
 #: ``search_doc``'s length in tokens, the way :func:`_bm25_py` counts it
@@ -643,17 +665,19 @@ def _lex_pg(allowed, kinds, terms
     stems = [s for s in dict.fromkeys(t.stem for t in terms)
              if term_tsquery(s)]
     with _db.session_scope() as sess:
+        row = sess.execute(corpus_stats_statement(allowed, kinds,
+                                                  stems)).one()
+        n = int(row[0] or 0)
+        df = {s: int(row[2 + i] or 0) for i, s in enumerate(stems)}
+        weights = [(term_tsquery(s), bm25_idf(n, df[s])) for s in stems
+                   if df[s]]
         pool = [Cand(id=int(r[0]), project_id=r[1], kind=r[2], ref=r[3],
                      chunk_no=r[4], lex_title=r[5] or "", lex_body=r[6] or "",
                      vec_version=None, vec_blob=None, source_updated_at=r[7])
-                for r in sess.execute(fts_statement(allowed, kinds,
-                                                         tsq))]
-        if not pool:
-            return [], {}
-        row = sess.execute(corpus_stats_statement(allowed, kinds,
-                                                  stems)).one()
-    n = int(row[0] or 0)
-    df = {s: int(row[2 + i] or 0) for i, s in enumerate(stems)}
+                for r in sess.execute(fts_statement(allowed, kinds, tsq,
+                                                    weights=weights))]
+    if not pool:
+        return [], {}
     avgdl = float(row[1]) if row[1] is not None else None
     return _bm25_py(pool, terms, prefix_last=True, corpus=(n, df, avgdl))
 
@@ -687,12 +711,21 @@ def _vec_py(cands: list[Cand], qvec, version: str, *, minimum: float
 def vector_statement(allowed, kinds, qvec_literal: str, *,
                      limit: int = LIST_DEPTH):
     """The pgvector statement (scope clause included)."""
-    from sqlalchemy import column, literal_column, select, table
+    from sqlalchemy import bindparam, cast, column, select, table
+    from sqlalchemy.types import UserDefinedType
 
     from engine.db import SearchDoc
+
+    class _Vector(UserDefinedType):
+        cache_ok = True
+
+        def get_col_spec(self, **_kw):
+            return "vector"
+
     sv = table("search_vector", column("doc_id"), column("embedding"))
-    dist = literal_column(
-        "search_vector.embedding <=> CAST(:qv AS vector)")
+    # A real bind parameter: ":qv" inside literal_column() reached the
+    # driver verbatim (see fts_statement).
+    dist = sv.c.embedding.op("<=>")(cast(bindparam("qv"), _Vector()))
     stmt = select(SearchDoc.id, (1 - dist).label("cos")).select_from(
         SearchDoc.__table__.join(sv, sv.c.doc_id == SearchDoc.id))
     stmt = _filtered(stmt, allowed, kinds)

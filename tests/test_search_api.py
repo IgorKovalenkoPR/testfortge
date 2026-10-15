@@ -501,6 +501,26 @@ class TestPostgresStatements:
         assert "tsv @@ to_tsquery('simple'" in sql
         assert "search_doc.kind IN" in sql
 
+    RAW_BIND = re.compile(r"(?<![:\w]):[a-z_]\w*")
+
+    @pytest.mark.parametrize("build,bind", [
+        (lambda: retrieve.fts_statement(["p1"], None, "login | pay:*"), "tsq"),
+        (lambda: retrieve.fts_statement(["p1"], None, "base | url",
+                                        weights=[("url", 4.5)]), "w0"),
+        (lambda: retrieve.vector_statement(["p1"], None, "[0.1]"), "qv"),
+        (lambda: retrieve.corpus_stats_statement(["p1"], None, ["login"]),
+         "q0"),
+    ], ids=["fts", "fts_idf_pool", "vector", "corpus_stats"])
+    def test_every_parameter_is_bound_not_left_in_the_sql(self, build, bind):
+        """literal_column("… :tsq …") compiles the colon-name verbatim, and
+        psycopg2 rejects it: every Postgres FTS query failed and search fell
+        back to Python BM25 unseen until a live explain said so
+        (2026-10-15). A bound parameter compiles to %(name)s."""
+        compiled = retrieve_pg_compile(build())
+        sql = str(compiled)
+        assert not self.RAW_BIND.findall(sql), sql
+        assert bind in compiled.params and f"%({bind})s" in sql
+
     def test_fts_statement_returns_the_lex_bm25_reorders(self):
         sql = self._sql(retrieve.fts_statement(["p1"], None, "login"))
         assert "search_doc.lex_title" in sql and "search_doc.lex_body" in sql
@@ -529,3 +549,8 @@ class TestPostgresStatements:
                  retrieve.Term("об'єкт", "x", "query"),
                  retrieve.Term("regist", "regist", "query")]
         assert retrieve.tsquery_text(terms) == "login | об | єкт | regist:*"
+
+
+def retrieve_pg_compile(stmt):
+    from sqlalchemy.dialects import postgresql
+    return stmt.compile(dialect=postgresql.dialect())
