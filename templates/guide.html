@@ -42,6 +42,7 @@
      ('tips',           '💡'),
    ] %}
 
+{% block page_class %}{{ ' page-guide' }}{% endblock %}
 {% block content %}
 <div class="page-header">
     <h1>📖 TestForTge — {{ t.guide_page_h1 }}</h1>
@@ -56,34 +57,23 @@
    classes that may move. Each card is a button that opens a modal
    populated from the matching <template> in the content partial.
    Esc / overlay click close. No JS framework — vanilla DOM. #}
-<div class="guide-grid"
-     style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-            gap:14px;margin-top:14px;">
+<div class="guide-grid gd-grid">
 
     {% for section, emoji in guide_cards %}
     <button type="button" class="guide-card" data-section="{{ section }}">
-        <div style="font-size:2.2em;line-height:1;margin-bottom:6px;">{{ emoji }}</div>
-        <strong style="display:block;font-size:1.05em;margin-bottom:4px;"
-        >{{ t['guide_card_' ~ section|replace('-', '_') ~ '_title'] }}</strong>
-        <small style="color:var(--text-muted);"
-        >{{ t['guide_card_' ~ section|replace('-', '_') ~ '_sub'] }}</small>
+        <div class="gd-card-icon">{{ emoji }}</div>
+        <strong class="gd-card-title">{{ t['guide_card_' ~ section|replace('-', '_') ~ '_title'] }}</strong>
+        <small class="gd-text-muted">{{ t['guide_card_' ~ section|replace('-', '_') ~ '_sub'] }}</small>
     </button>
     {% endfor %}
 </div>
 
 {# ── Modal scaffold (one shared modal, content swapped in JS) ── #}
-<div id="guide-modal" hidden role="dialog" aria-modal="true"
-     aria-labelledby="guide-modal-title"
-     style="position:fixed;inset:0;background:rgba(15,23,42,0.55);
-            z-index:1000;display:none;align-items:flex-start;
-            justify-content:center;padding:5vh 16px;overflow-y:auto;">
-    <div id="guide-modal-card" role="document"
-         style="background:white;max-width:760px;width:100%;
-                border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.25);
-                padding:24px 28px;max-height:90vh;overflow-y:auto;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;
-                    gap:14px;margin-bottom:14px;">
-            <h2 id="guide-modal-title" style="margin:0;font-size:1.35em;"></h2>
+<div class="gd-modal" id="guide-modal" hidden role="dialog" aria-modal="true"
+     aria-labelledby="guide-modal-title">
+    <div class="gd-modal-card" id="guide-modal-card" role="document">
+        <div class="gd-modal-head">
+            <h2 class="gd-modal-title" id="guide-modal-title"></h2>
             <button type="button" id="guide-modal-close" class="btn-close"
                     aria-label="{{ t.guide_close }}">×</button>
         </div>
@@ -113,7 +103,6 @@
         bodyEl.innerHTML = '';
         bodyEl.appendChild(tpl.content.cloneNode(true));
         modal.hidden = false;
-        modal.style.display = 'flex';
         // Move focus into the modal for keyboard users.
         setTimeout(function () { closeBtn && closeBtn.focus(); }, 50);
         // Lock background scroll.
@@ -121,7 +110,6 @@
     }
     function closeModal() {
         modal.hidden = true;
-        modal.style.display = 'none';
         bodyEl.innerHTML = '';
         document.body.style.overflow = '';
     }

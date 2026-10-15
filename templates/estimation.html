@@ -9,6 +9,7 @@
 {% set est_edit = estimation_edit_state() %}
 {% set est_inputs = estimation_inputs() %}
 
+{% block page_class %}{{ ' page-estimation' }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>{{ t.est_title }}</h1>
@@ -25,12 +26,12 @@
      aria-busy="true" aria-live="polite">
     <div class="te-run-card">
         <h2 class="heading-3">{{ t.get('est_gen_title', 'Computing estimation…') }}</h2>
-        <p id="est-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
+        <p class="est-gen-stage" id="est-gen-stage">
             {{ t.get('est_gen_stage_init', 'Analyzing input…') }}
         </p>
-        <p id="est-gen-elapsed" style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;"></p>
+        <p class="est-gen-elapsed" id="est-gen-elapsed"></p>
         <div class="te-run-bar" aria-hidden="true"></div>
-        <p id="est-gen-error" style="margin-top:14px;color:#dc2626;font-size:0.88em;display:none;"></p>
+        <p class="est-gen-error" id="est-gen-error" hidden></p>
     </div>
 </div>
 
@@ -45,8 +46,8 @@
        full card width, so the placeholder is never clipped. #}
     <div class="form-group">
       <label for="f-project-name">{{ t.est_project_name }}</label>
-      <input id="f-project-name" type="text" name="project_name" value="{{ last.project_name or '' }}"
-             placeholder="{{ t.est_project_name_ph }}" style="width:100%">
+      <input class="est-full" id="f-project-name" type="text" name="project_name" value="{{ last.project_name or '' }}"
+             placeholder="{{ t.est_project_name_ph }}">
     </div>
     <div class="form-row form-row-4">
       <div class="form-group">
@@ -70,8 +71,8 @@
       </div>
     </div>
 
-    <h3 style="margin-top:1.25rem">{{ t.get('est_coefficients', 'Coefficients (editable)') }}</h3>
-    <p class="muted" style="margin-top:-.25rem">
+    <h3 class="est-section-title">{{ t.get('est_coefficients', 'Coefficients (editable)') }}</h3>
+    <p class="muted est-section-sub">
       <small>{{ t.get('est_coefficients_hint',
         'Defaults match the QA Team Lead reference template. Adjust to fit your project risk profile.') }}</small>
     </p>
@@ -107,14 +108,9 @@
            so a manual team_size still flows through the form POST. The
            input's value attribute is pre-filled with the suggestion so
            a no-op override behaves exactly as picking the suggestion. #}
-        <div id="ts-suggested-view"
-             style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <span id="ts-badge"
-                style="display:inline-flex;align-items:center;gap:6px;
-                       padding:6px 12px;background:#fef3c7;color:#92400e;
-                       border:1px solid #fcd34d;border-radius:14px;
-                       font-weight:600;font-size:.9em;">
-            <i data-lucide="lightbulb" style="width:14px;height:14px;"></i>
+        <div class="est-row" id="ts-suggested-view">
+          <span class="est-team-badge" id="ts-badge">
+            <i class="est-icon-14" data-lucide="lightbulb"></i>
             {{ t.get('est_team_suggested', 'Suggested') }}:
             <strong id="ts-value">{{ last.suggested_team_size or last.team_size or 1 }}</strong>
           </span>
@@ -125,8 +121,7 @@
         <input type="number" name="team_size" id="ts-input"
                aria-label="{{ t.est_team_size }}"
                min="1" max="50" step="1"
-               value="{{ last.team_size or last.suggested_team_size or 1 }}"
-               style="display:none;">
+               value="{{ last.team_size or last.suggested_team_size or 1 }}" hidden>
         <small>{{ t.get('est_team_size_hint',
           'TestForTge suggests a headcount from the estimate. Override only if you have a fixed team — it feeds Brooks\'s-law communication overhead.') }}</small>
       </div>
@@ -144,8 +139,8 @@
           var inp  = document.getElementById('ts-input');
           if (!btn || !view || !inp) return;
           btn.addEventListener('click', function () {
-            view.style.display = 'none';
-            inp.style.display = '';
+            view.hidden = true;
+            inp.hidden = false;
             inp.focus();
             inp.select();
           });
@@ -153,7 +148,7 @@
       </script>
     </div>
 
-    <h3 style="margin-top:1.25rem">{{ t.est_source }}</h3>
+    <h3 class="est-section-title">{{ t.est_source }}</h3>
 
     {# ── Three-tab source selector ─────────────────────────────────
        2026-05-04 redesign: a single Estimation page now exposes the
@@ -182,13 +177,13 @@
 
     {# ── TAB 1 · Requirements text + .docx/.pdf upload ────────── #}
     <div class="te-tab-pane" data-pane="text">
-      <p class="hint" style="margin-top:0;">
+      <p class="hint est-mt-0">
         {{ t.get('est_tab_text_hint',
            'Paste the spec, user stories, or a feature list. The estimator parses bullet points, tables, and free-form prose. You can also attach a .docx / .pdf / .xlsx with the same contents — it will be merged with the textarea below.') }}
       </p>
       <div class="form-group">
         <label for="f-text-input">{{ t.get('est_text_input_label', 'Paste requirements') }}</label>
-        <textarea id="f-text-input" name="text_input" rows="6" style="width:100%;font-family:inherit;"
+        <textarea class="est-textarea" id="f-text-input" name="text_input" rows="6"
                   placeholder="{{ t.est_source_text_ph }}">{{ last.text_input or '' }}</textarea>
       </div>
       <div class="form-group">
@@ -202,7 +197,7 @@
 
     {# ── TAB 2 · Mockups (PNG/JPG/PDF + Figma URL) ─────────────── #}
     <div class="te-tab-pane" data-pane="mockups" hidden>
-      <p class="hint" style="margin-top:0;">
+      <p class="hint est-mt-0">
         {{ t.get('est_tab_mockups_hint',
            'Upload design screens (PNG / JPG / PDF) or paste a Figma file URL. The estimator analyses the visual UI to identify forms, navigation, dialogs, error states, and other testable elements — then computes Min/Max effort and a starter test-case set.') }}
       </p>
@@ -215,29 +210,22 @@
          The full JSON is one click away for support requests. #}
       {% if mockup_env %}
       {% set _all_ok = mockup_env.mockups_minimum and mockup_env.mockups_pdf and mockup_env.mockups_figma_full %}
-      <div style="margin:0 0 14px 0;padding:10px 14px;border-radius:6px;
-                  border:1px solid {{ '#86efac' if _all_ok else ('#fbbf24' if mockup_env.mockups_minimum else '#fca5a5') }};
-                  background:{{ '#ecfdf5' if _all_ok else ('#fffbeb' if mockup_env.mockups_minimum else '#fef2f2') }};
-                  color:{{ '#065f46' if _all_ok else ('#92400e' if mockup_env.mockups_minimum else '#991b1b') }};">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <div class="est-env est-env--{{ 'ok' if _all_ok else ('partial' if mockup_env.mockups_minimum else 'fail') }}">
+        <div class="est-row">
           <strong>
             {% if _all_ok %}✓{% elif mockup_env.mockups_minimum %}⚠{% else %}✗{% endif %}
             {{ t.est_diag_title }}
           </strong>
-          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#0F7B5A' if mockup_env.anthropic_key else '#ef4444' }};color:white;">
+          <span class="est-chip est-chip--{{ 'ok' if mockup_env.anthropic_key else 'bad' }}">
             ANTHROPIC_API_KEY: {{ t.est_diag_set if mockup_env.anthropic_key else t.est_diag_missing }}
           </span>
-          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#0F7B5A' if mockup_env.pdf2image_ok else '#4B5563' }};color:white;">
+          <span class="est-chip est-chip--{{ 'ok' if mockup_env.pdf2image_ok else 'off' }}">
             pdf2image: {{ t.est_diag_installed if mockup_env.pdf2image_ok else t.est_diag_absent }}
           </span>
-          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#0F7B5A' if mockup_env.poppler_ok else '#4B5563' }};color:white;">
+          <span class="est-chip est-chip--{{ 'ok' if mockup_env.poppler_ok else 'off' }}">
             poppler: {{ t.est_diag_installed if mockup_env.poppler_ok else t.est_diag_absent }}
           </span>
-          <span style="padding:2px 8px;border-radius:999px;font-size:0.78em;
-                       background:{{ '#0F7B5A' if mockup_env.figma_pat else '#4B5563' }};color:white;">
+          <span class="est-chip est-chip--{{ 'ok' if mockup_env.figma_pat else 'off' }}">
             FIGMA_PAT: {{ t.est_diag_set if mockup_env.figma_pat else t.est_diag_cover_only }}
           </span>
           {# Admin-only: ``estimation_diag`` is "admin" in route_policy, and
@@ -247,22 +235,21 @@
              they are already rendered, and knowing poppler is missing is
              what stops a member re-running a pass that cannot work. #}
           {% if is_admin %}
-          <a href="{{ url_for('estimation_diag') }}" target="_blank"
-             style="margin-left:auto;font-size:0.85em;">{{ t.est_diag_json }}</a>
+          <a class="est-env-link" href="{{ url_for('estimation_diag') }}" target="_blank">{{ t.est_diag_json }}</a>
           {% endif %}
         </div>
         {% if not mockup_env.anthropic_key %}
-        <p style="margin:8px 0 0 0;font-size:0.88em;">
+        <p class="est-env-note">
           <strong>{{ t.est_diag_no_key_title }}</strong>
           {{ t.est_diag_no_key_body|safe }}
         </p>
         {% elif not (mockup_env.pdf2image_ok and mockup_env.poppler_ok) %}
-        <p style="margin:8px 0 0 0;font-size:0.88em;">
+        <p class="est-env-note">
           <strong>{{ t.est_diag_pdf_title }}</strong>
           {{ t.est_diag_pdf_body|safe }}
         </p>
         {% elif not mockup_env.figma_pat %}
-        <p style="margin:8px 0 0 0;font-size:0.88em;">
+        <p class="est-env-note">
           <strong>{{ t.est_diag_figma_title }}</strong>
           {{ t.est_diag_figma_body|safe }}
           <a href="https://www.figma.com/settings" target="_blank">figma.com/settings</a>
@@ -289,20 +276,20 @@
       </div>
       <div class="form-group">
         <label for="f-mockup-context">{{ t.get('est_mockups_context_label', 'Optional context') }}</label>
-        <textarea id="f-mockup-context" name="mockup_context" rows="3" style="width:100%;font-family:inherit;"
+        <textarea class="est-textarea" id="f-mockup-context" name="mockup_context" rows="3"
                   placeholder="{{ t.get('est_mockups_context_ph', 'e.g. \"This is the checkout flow for an e-commerce app — focus on payment validation.\"') }}">{{ last.mockup_context or '' }}</textarea>
       </div>
     </div>
 
     {# ── TAB 3 · URL crawl ─────────────────────────────────────── #}
     <div class="te-tab-pane" data-pane="url" hidden>
-      <p class="hint" style="margin-top:0;">
+      <p class="hint est-mt-0">
         {{ t.get('est_tab_url_hint',
            'Paste the production / staging URL. The estimator crawls the site, identifies pages and forms, infers the architecture (CMS, SPA, e-commerce, …), and produces an effort breakdown.') }}
       </p>
       <div class="form-group">
         <label for="f-url">{{ t.est_source_url }}</label>
-        <input id="f-url" type="url" name="url" style="width:100%;"
+        <input class="est-full" id="f-url" type="url" name="url"
                placeholder="https://example.com" value="{{ last.url or '' }}">
       </div>
     </div>
@@ -407,24 +394,24 @@
       if (inFlight) { try { inFlight.abort(); } catch (_) {} inFlight = null; }
     }
     function showError(msg) {
-      if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+      if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
       stopAll();
     }
     function fallbackToSync(reason) {
       stopAll();
       if (errorEl) {
         errorEl.innerHTML = '';
-        errorEl.style.display = 'block';
+        errorEl.hidden = false;
         var msg = document.createElement('div');
         msg.textContent = reason || "{{ t.get('est_gen_offline', 'Estimation could not finish — try again.') }}";
         errorEl.appendChild(msg);
         var retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'btn btn-primary';
-        retry.style.marginTop = '10px';
+        retry.classList.add('est-mt-10');
         retry.textContent = "{{ t.get('est_gen_retry', 'Retry') }}";
         retry.addEventListener('click', function () {
-          errorEl.style.display = 'none';
+          errorEl.hidden = true;
           overlay.hidden = true;
           onSubmit(new Event('submit'));
         });
@@ -501,7 +488,7 @@
       csrfRetried = false;
       currentSrc = (input && input.value) || 'text';
       startedAt = Date.now();
-      if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+      if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
       tick();
       if (tickHandle) clearInterval(tickHandle);
       tickHandle = setInterval(tick, 1000);
@@ -602,9 +589,9 @@
     <div class="stat-card"><div class="stat-number">{{ result.full_total_expected | round(1) }} h</div>
       <div class="stat-label">{{ t.est_full_total }}</div></div>
   </div>
-  <p style="margin-top:.75rem"><em>{{ t.est_source_label }}:</em>
+  <p class="est-mt-3q"><em>{{ t.est_source_label }}:</em>
     {{ result.source }}{% if result.source_ref %} — {{ result.source_ref }}{% endif %}</p>
-  <p style="display:flex;gap:8px;flex-wrap:wrap;">
+  <p class="est-actions">
     <a class="btn btn-secondary" href="{{ url_for('estimation_export') }}">
       <i data-lucide="save" class="icon-sm"></i> {{ t.est_export }}
     </a>
@@ -624,7 +611,7 @@
 {# ── History calibration hint (always visible — actionable). #}
 {% if result and result.history_hint %}
 <div class="card est-history-card">
-  <p class="hint" style="margin:0">
+  <p class="hint est-m0">
     <i data-lucide="history" class="icon-sm"></i>
     <strong>{{ t.get('est_history_label', 'Calibration vs your past projects') }}:</strong>
     {{ result.history_hint }}
@@ -637,11 +624,11 @@
      when the user wants statistical detail). #}
 {% if result and result.pert_expected %}
 <details class="card est-pert-card">
-  <summary style="cursor:pointer;font-weight:600">
+  <summary class="est-summary">
     <i data-lucide="bar-chart-3" class="icon icon-coral"></i>
     {{ t.get('est_pert_toggle', 'Show PERT confidence (advanced)') }}
   </summary>
-  <p class="hint" style="margin-top:.75rem">
+  <p class="hint est-mt-3q">
     <strong>{{ t.get('est_pert_what', 'What this is.') }}</strong>
     {{ t.get('est_pert_explainer',
         'A second-opinion view of the same estimate, expressed as a '
@@ -652,13 +639,13 @@
         'conversations with stakeholders. The XLSX deliverable stays '
         'on the legacy figures above; this panel is informational only.') }}
   </p>
-  <p class="hint" style="margin-top:.25rem;font-size:12px">
+  <p class="hint est-hint-small">
     <em>{{ t.get('est_pert_formula',
         'Formulae: μ = (O + 4M + P) / 6 · σ = (P − O) / 6 · '
         'bands follow the 68-95-99.7 rule for a normal approximation '
         'of the Beta-PERT distribution.') }}</em>
   </p>
-  <div class="dashboard-stats" style="margin-top:.5rem">
+  <div class="dashboard-stats est-mt-half">
     <div class="stat-card">
       <div class="stat-number">{{ result.pert_expected | round(1) }} h</div>
       <div class="stat-label">{{ t.get('est_pert_expected', 'PERT expected (μ)') }}</div>

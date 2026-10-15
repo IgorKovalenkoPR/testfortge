@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('nav_automation', 'Automation') }}{% endblock %}
 
+{% block page_class %}{{ ' page-automation' }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>{{ t.get('automation_title', 'Automation') }}</h1>
@@ -14,8 +15,8 @@
    module?" The page explained what it does and never what it is not, and
    the two names are close enough that the difference has to be stated
    rather than inferred. #}
-<div class="card" style="border-left:4px solid var(--primary);">
-    <p style="margin:0;">
+<div class="card au-intro">
+    <p class="au-m0">
         <strong>{{ t.get('automation_vs_execution_title', 'This module does not run anything.') }}</strong>
         {{ t.get('automation_vs_execution_body',
            'It writes a TypeScript + Playwright suite you run on your own machine or in CI, and it reads the Allure results back. To run a browser from inside TestForTge — against the test cases you select, right now — use Test Execution.') }}
@@ -140,14 +141,14 @@
     </details>
     {% endif %}
 
-    <div class="export-row" style="margin-top:1rem">
+    <div class="export-row au-mt-1">
         <a href="{{ url_for('automation_bundle') }}" class="btn btn-primary">
             <i data-lucide="download" class="icon-sm"></i>
             {{ t.get('automation_download', 'Download the suite') }}
             (v{{ bundle_version }})
         </a>
         {% if base_url %}
-        <span class="hint" style="margin-left:.75rem">
+        <span class="hint au-ml-3q">
             {{ t.get('automation_base_url', 'BASE_URL') }}: <code>{{ base_url }}</code>
         </span>
         {% endif %}

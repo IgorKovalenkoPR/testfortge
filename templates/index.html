@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.dashboard_title }}{% endblock %}
 
+{% block page_class %}{{ ' page-dashboard' }}{% endblock %}
 {% block content %}
 <div class="page-header">
     <h1>{{ t.dashboard_title }}</h1>
@@ -21,62 +22,50 @@
    but a visible "your recent work" surface is more discoverable
    and feels more like a real workspace. #}
 {% if projects %}
-<div class="card" style="margin-bottom:14px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;
-                flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-        <h2 class="heading-3" style="margin:0;font-size:1.05em;">
+<div class="card dash-recent">
+    <div class="dash-recent-head">
+        <h2 class="heading-3 dash-recent-title">
             🕒 {{ t.get('recent_projects_title', 'Recent projects') }}
         </h2>
-        <small style="color:var(--text-muted);">
+        <small class="dash-text-muted">
             {{ t.get('recent_projects_hint',
                 'Click Open to load a project — your TCs, checklist, bugs, last estimation and run history come back from the database.') }}
         </small>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+    <div class="dash-recent-grid">
         {% for p in projects[:5] %}
-        <div class="card" style="margin:0;padding:12px 14px;background:#f8fafc;
-                                  border:1px solid #e2e8f0;
-                                  {% if p.id == active_project_id %}
-                                  border-color:var(--primary);
-                                  background:#fff7ed;
-                                  {% endif %}">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <strong style="font-size:0.95em;color:#0f172a;line-height:1.25;
-                               word-break:break-word;">
+        <div class="card dash-recent-card{% if p.id == active_project_id %} dash-recent-card--active{% endif %}">
+            <div class="dash-recent-card-head">
+                <strong class="dash-recent-name">
                     {% if p.id == active_project_id %}
-                    <span style="color:var(--primary);">●</span>
+                    <span class="dash-text-primary">●</span>
                     {% endif %}
                     {{ p.name }}
                 </strong>
                 {% if p.id != active_project_id %}
-                <form method="POST"
-                      action="{{ url_for('db_select_project', project_id=p.id) }}"
-                      style="margin:0;">
+                <form class="dash-m0" method="POST"
+                      action="{{ url_for('db_select_project', project_id=p.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="next" value="{{ url_for('index') }}">
-                    <button type="submit" class="btn btn-xs btn-secondary"
-                            style="white-space:nowrap;">
+                    <button type="submit" class="btn btn-xs btn-secondary dash-nowrap">
                         {{ t.get('recent_projects_open', 'Open →') }}
                     </button>
                 </form>
                 {% else %}
-                <span style="font-size:0.78em;color:var(--badge-green);font-weight:600;
-                             padding:3px 8px;background:#dcfce7;border-radius:4px;
-                             white-space:nowrap;">
+                <span class="dash-active-badge">
                     {{ t.get('recent_projects_active', 'Active') }}
                 </span>
                 {% endif %}
             </div>
             {#- --text-muted, not #64748b: on the active card's #fff7ed tint
                 #64748b is 4.48:1 at 13 px (axe color-contrast, AA 4.5). -#}
-            <div style="margin-top:8px;font-size:0.82em;color:var(--text-muted);
-                        display:flex;gap:10px;flex-wrap:wrap;">
+            <div class="dash-recent-counts">
                 <span>📋 {{ p.test_cases_count or 0 }} {{ t.dm_unit_tc }}</span>
                 <span>✅ {{ p.checklist_count or 0 }} {{ t.dm_unit_cl }}</span>
                 <span>🐞 {{ p.bug_count or 0 }} {{ plural(p.bug_count or 0, "dm_unit_bugs") }}</span>
             </div>
             {% if p.updated_at %}
-            <div style="margin-top:4px;font-size:0.75em;color:var(--text-subtle);">
+            <div class="dash-recent-time">
                 {{ t.get('recent_projects_updated', 'Last activity:') }}
                 {{ p.updated_at | when }}
             </div>
@@ -85,7 +74,7 @@
         {% endfor %}
     </div>
     {% if projects|length > 5 %}
-    <p style="margin:10px 0 0 0;font-size:0.82em;color:var(--text-muted);">
+    <p class="dash-recent-hint">
         {{ t.get('recent_projects_more', 'Showing the 5 most recent — ') }}
         <a href="#all-projects">
             {{ t.recent_projects_more_link|format(projects|length) }}
@@ -237,12 +226,12 @@
     <div class="card-actions">
         <a href="{{ url_for('test_cases_page') }}" class="btn btn-sm">{{ t.nav_test_cases }}</a>
         <a href="{{ url_for('checklist_page') }}" class="btn btn-sm">{{ t.nav_checklist }}</a>
-        <form method="POST" action="{{ url_for('save_project') }}" style="display:inline">
+        <form class="dash-inline-form" method="POST" action="{{ url_for('save_project') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="project_name" value="{{ session.get('project_setup', {}).get('project_name', '') }}">
             <button type="submit" class="btn btn-sm btn-success"><i data-lucide="save" class="icon-sm"></i> {{ t.save_project }}</button>
         </form>
-        <form method="POST" action="{{ url_for('new_session') }}" style="display:inline"
+        <form class="dash-inline-form" method="POST" action="{{ url_for('new_session') }}"
               onsubmit="return confirm('{{ t.new_session_confirm }}')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger"><i data-lucide="x" class="icon-sm"></i> {{ t.new_session }}</button>
@@ -513,22 +502,22 @@
                             stroke-dashoffset="{{ -(p_dash + f_dash) }}"
                             transform="rotate(-90 60 60)"/>
                     <text x="60" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">{{ metrics.exec_pass_rate }}%</text>
-                    <text x="60" y="74" text-anchor="middle" font-size="9" style="fill:var(--text-muted)">{{ t.dm_pass_rate }}</text>
+                    <text class="dash-donut-caption" x="60" y="74" text-anchor="middle" font-size="9">{{ t.dm_pass_rate }}</text>
                 </svg>
             </div>
             <div class="donut-legend">
                 <div class="legend-item">
-                    <span class="legend-dot" style="background:#22c55e"></span>
+                    <span class="legend-dot series-pass"></span>
                     <span class="legend-label">{{ t.passed }}</span>
                     <span class="legend-value">{{ metrics.exec_passed }}</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-dot" style="background:#ef4444"></span>
+                    <span class="legend-dot series-fail"></span>
                     <span class="legend-label">{{ t.failed }}</span>
                     <span class="legend-value">{{ metrics.exec_failed }}</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-dot" style="background:#f59e0b"></span>
+                    <span class="legend-dot series-block"></span>
                     <span class="legend-label">{{ t.blocked }}</span>
                     <span class="legend-value">{{ metrics.exec_blocked }}</span>
                 </div>
@@ -555,22 +544,22 @@
         {% if automation %}
         <div class="metric-legend">
             <div class="legend-item">
-                <span class="legend-dot" style="background:#22c55e"></span>
+                <span class="legend-dot series-pass"></span>
                 <span class="legend-label">{{ t.passed }}</span>
                 <span class="legend-value">{{ automation.passed }}</span>
             </div>
             <div class="legend-item">
-                <span class="legend-dot" style="background:#ef4444"></span>
+                <span class="legend-dot series-fail"></span>
                 <span class="legend-label">{{ t.failed }}</span>
                 <span class="legend-value">{{ (automation.failed or 0) + (automation.broken or 0) }}</span>
             </div>
             <div class="legend-item">
-                <span class="legend-dot" style="background:#94a3b8"></span>
+                <span class="legend-dot series-neutral"></span>
                 <span class="legend-label">{{ t.dm_skipped }}</span>
                 <span class="legend-value">{{ automation.skipped }}</span>
             </div>
         </div>
-        <p class="metric-empty" style="margin-top:.5rem">
+        <p class="metric-empty dash-mt-half">
             {{ automation.origin }}{% if automation.label %} · {{ automation.label }}{% endif %}
             · {{ ((automation.duration_ms or 0) / 1000)|round(1) }}s ·
             <a href="{{ url_for('automation_run_detail', run_id=automation.id) }}">{{ t.dm_details }}</a>
@@ -590,14 +579,14 @@
         {% if metrics.bug_total > 0 %}
         <div class="bar-chart bar-chart-wide">
             {% set sev_order = ['Critical', 'Major', 'Normal', 'Minor', 'Low'] %}
-            {% set sev_colors = {'Critical': '#dc2626', 'Major': '#ef4444', 'Normal': '#f59e0b', 'Minor': '#3b82f6', 'Low': '#94a3b8'} %}
+            {% set sev_series = {'Critical': 'crit', 'Major': 'fail', 'Normal': 'block', 'Minor': 'info', 'Low': 'neutral'} %}
             {% for sev in sev_order %}
             {% set cnt = metrics.bug_by_severity.get(sev, 0) %}
             {% if cnt > 0 %}
             <div class="bar-row">
                 <span class="bar-label">{{ sev }}</span>
                 <div class="bar-track">
-                    <div class="bar-fill" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%; background: {{ sev_colors.get(sev, '#94a3b8') }}"></div>
+                    <div class="bar-fill series-{{ sev_series.get(sev, 'neutral') }}" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%"></div>
                 </div>
                 <span class="bar-value">{{ cnt }}</span>
             </div>
@@ -623,14 +612,14 @@
         {% if metrics.bug_total > 0 %}
         <div class="bar-chart bar-chart-wide">
             {% set pri_order = ['High', 'Medium', 'Low'] %}
-            {% set pri_colors = {'High': '#dc2626', 'Medium': '#f59e0b', 'Low': '#22c55e'} %}
+            {% set pri_series = {'High': 'crit', 'Medium': 'block', 'Low': 'pass'} %}
             {% for pri in pri_order %}
             {% set cnt = metrics.bug_by_priority.get(pri, 0) %}
             {% if cnt > 0 %}
             <div class="bar-row">
                 <span class="bar-label">{{ pri }}</span>
                 <div class="bar-track">
-                    <div class="bar-fill" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%; background: {{ pri_colors.get(pri, '#94a3b8') }}"></div>
+                    <div class="bar-fill series-{{ pri_series.get(pri, 'neutral') }}" style="width: {{ (cnt / metrics.bug_total * 100)|round }}%"></div>
                 </div>
                 <span class="bar-value">{{ cnt }}</span>
             </div>
@@ -734,7 +723,7 @@
                 <td class="meta-text">{{ p.saved_at | when }}</td>
                 <td>
                     {% if p.folder != active_project_id %}
-                    <form method="POST" action="{{ url_for('db_select_project', project_id=p.folder) }}" style="display:inline">
+                    <form class="dash-inline-form" method="POST" action="{{ url_for('db_select_project', project_id=p.folder) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs btn-secondary" aria-label="{{ t.activate }}">
                             <i data-lucide="check" class="icon-sm"></i> {{ t.get('activate', 'Activate') }}
@@ -758,7 +747,7 @@
                        because they answer different questions: "keep a
                        copy where I can reach it" and "keep a copy where
                        the deployment can reach it". #}
-                    <form method="POST" action="{{ url_for('backup_project', project_id=p.folder) }}" style="display:inline">
+                    <form class="dash-inline-form" method="POST" action="{{ url_for('backup_project', project_id=p.folder) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs"
                                 title="{{ t.get('backup_project_title', 'Write a bundle of this project to the configured storage') }}">
@@ -766,7 +755,7 @@
                             {{ t.get('backup_project', 'Back up') }}
                         </button>
                     </form>
-                    <form method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}" style="display:inline"
+                    <form class="dash-inline-form" method="POST" action="{{ url_for('delete_project', project_id=p.folder) }}"
                           onsubmit="return confirm('{{ t.delete_confirm }}')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-xs btn-danger" aria-label="{{ t.delete }}"><i data-lucide="trash-2" class="icon-sm"></i></button>

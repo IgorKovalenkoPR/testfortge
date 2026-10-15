@@ -153,7 +153,7 @@ function filterTC(category, btn) {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     document.querySelectorAll('.tc-card').forEach(card => {
-        card.style.display = (category === 'all' || card.dataset.category === category) ? '' : 'none';
+        card.hidden = !(category === 'all' || card.dataset.category === category);
     });
 }
 

@@ -20,6 +20,7 @@
 {%- endmacro %}
 {% block title %}TestForTge — {{ t.cl_title }}{% endblock %}
 
+{% block page_class %}{{ ' page-checklist' }}{% endblock %}
 {% block content %}
 <div class="page-header">
     <h1>{{ t.cl_title }}</h1>
@@ -75,12 +76,12 @@
 <div id="cl-gen-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
     <div class="te-run-card">
         <h2 class="heading-3">{{ t.get('cl_gen_title', 'Generating checklist…') }}</h2>
-        <p id="cl-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
+        <p class="cl-gen-stage" id="cl-gen-stage">
             {{ t.get('cl_gen_stage_init', 'Analyzing input…') }}
         </p>
-        <p id="cl-gen-elapsed" style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;"></p>
+        <p class="cl-gen-elapsed" id="cl-gen-elapsed"></p>
         <div class="te-run-bar" aria-hidden="true"></div>
-        <p id="cl-gen-error" style="margin-top:14px;color:#dc2626;font-size:0.88em;display:none;"></p>
+        <p class="cl-gen-error" id="cl-gen-error" hidden></p>
     </div>
 </div>
 
@@ -158,7 +159,7 @@
         if (overlay) overlay.hidden = true;
         if (!errorEl) return;
         errorEl.innerHTML = '';
-        errorEl.style.display = 'block';
+        errorEl.hidden = false;
         var msg = document.createElement('div');
         msg.textContent =
             "{{ t.get('cl_gen_session_expired', 'Your session expired. Reload the page and generate again.') }}";
@@ -187,7 +188,7 @@
     }
 
     function showError(msg) {
-        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
         stopAll();
         // Return focus to the Generate button so a keyboard
         // user can immediately retry without tab-fishing.
@@ -209,7 +210,7 @@
             "{{ t.get('cl_gen_stage_fallback', 'Generation could not finish — try again.') }}";
         if (errorEl) {
             errorEl.innerHTML = "";
-            errorEl.style.display = 'block';
+            errorEl.hidden = false;
             var msg = document.createElement('div');
             msg.textContent = reason || "{{ t.get('cl_gen_offline', 'Generation could not finish — try again.') }}";
             errorEl.appendChild(msg);
@@ -219,7 +220,7 @@
             retry.style.marginTop = '10px';
             retry.textContent = "{{ t.get('cl_gen_retry', 'Retry generation') }}";
             retry.addEventListener('click', function () {
-                errorEl.style.display = 'none';
+                errorEl.hidden = true;
                 overlay.hidden = true;
                 fallbackTriggered = false;
                 onSubmit(new Event('submit'));
@@ -307,7 +308,7 @@
         stopped = false; fallbackTriggered = false; consecErrors = 0;
         csrfRetried = false;
         startedAt = Date.now();
-        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
         tick();
         if (tickHandle) clearInterval(tickHandle);
         tickHandle = setInterval(tick, 1000);
@@ -348,7 +349,7 @@
                     'Please add requirements (text, file, or URL) before generating.');
                 if (errorEl) {
                     errorEl.textContent = msg;
-                    errorEl.style.display = 'block';
+                    errorEl.hidden = false;
                 }
                 if (window.alert) { try { window.alert(msg); } catch (_) {} }
                 return;
@@ -377,7 +378,7 @@
         ev.preventDefault();
         stopAll();
         overlay.hidden = true;
-        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
         var btn = document.getElementById('cl-gen-button');
         if (btn) { try { btn.focus(); } catch (_) {} }
     });
@@ -396,8 +397,8 @@
         {{ t.get('cl_upload_hint',
             'Drop an existing checklist (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the items in the session for manual or automated execution. Recognised headers include any variant of ID, Section, Objective, Category, Priority, Status, Testing Type.') }}
     </p>
-    <div class="form-row" style="align-items:flex-end; gap:12px;">
-        <div class="form-group" style="flex:1">
+    <div class="form-row cl-gen-row">
+        <div class="form-group cl-grow">
             <label for="f-upload-file">{{ t.get('cl_upload_file', 'File') }}</label>
             <input id="f-upload-file" type="file" name="upload_file" required
                    accept=".xlsx,.csv,.md,.markdown,.json">
@@ -423,11 +424,11 @@
 </form>
 
 {% if resource_urls %}
-<div class="card" style="background:#f8fafe; margin-bottom:16px;">
-    <h3 class="card-title" style="font-size:0.95em;"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
-    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+<div class="card cl-recent-urls">
+    <h3 class="card-title cl-recent-title"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
+    <div class="cl-chip-row">
         {% for url in resource_urls %}
-        <a href="{{ url }}" target="_blank" rel="noopener" style="display:inline-block; padding:5px 14px; background:white; border:1px solid var(--primary); border-radius:20px; color:var(--primary); font-size:0.85em; text-decoration:none; word-break:break-all;">{{ url }}</a>
+        <a class="cl-url-chip" href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a>
         {% endfor %}
     </div>
 </div>
@@ -616,7 +617,7 @@ function filterCL(category, btn) {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     document.querySelectorAll('.cl-row').forEach(row => {
-        row.style.display = (category === 'all' || row.dataset.category === category) ? '' : 'none';
+        row.hidden = !(category === 'all' || row.dataset.category === category);
     });
 }
 </script>

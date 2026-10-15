@@ -29,23 +29,18 @@
    project from any module — Estimation no longer requires a side
    trip to /dashboard. #}
 
-<div class="card project-picker"
-     style="margin-bottom:14px;padding:14px 18px;background:#f8fafc;
-            border:1px solid #e2e8f0;">
-  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-    <div style="display:flex;align-items:center;gap:8px;flex:1 1 360px;min-width:280px;">
-      <label for="pp-select"
-             style="font-weight:600;color:#0f172a;white-space:nowrap;">
+<div class="card project-picker pp-card">
+  <div class="pp-row">
+    <div class="pp-switch">
+      <label class="pp-label" for="pp-select">
         🗂 {{ t.get('pp_active_project', 'Active project:') }}
       </label>
-      <form method="POST" id="pp-select-form"
-            style="display:flex;gap:6px;flex:1;align-items:center;"
+      <form class="pp-switch-form" method="POST" id="pp-select-form"
+           
             data-base-action="{{ url_for('db_select_project', project_id='__ID__') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ picker_next|default(request.path, true) }}">
-        <select id="pp-select" name="project_id"
-                style="flex:1;min-width:200px;padding:6px 10px;
-                       border:1px solid #cbd5e1;border-radius:4px;background:white;">
+        <select class="pp-select" id="pp-select" name="project_id">
           {% if not projects %}
           <option value="" disabled selected>
             {{ t.get('pp_none', 'No projects yet — create one →') }}
@@ -93,18 +88,14 @@
        not offering it. `is_admin` is true whenever ORG_MODE is off, so the
        legacy single-tenant UI is unchanged. #}
     {% if is_admin %}
-    <div style="flex:1 1 340px;min-width:280px;">
-      <form method="POST" action="{{ url_for('db_create_project') }}"
-            style="display:flex;gap:6px;align-items:center;">
+    <div class="pp-create">
+      <form class="pp-create-form" method="POST" action="{{ url_for('db_create_project') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ picker_next|default(request.path, true) }}">
-        <input type="text" name="project_name" required
+        <input class="pp-name" type="text" name="project_name" required
                aria-label="{{ t.get('pp_new_placeholder', 'New project name…') }}"
-               placeholder="{{ t.get('pp_new_placeholder', 'New project name…') }}"
-               style="flex:1;min-width:160px;padding:6px 10px;
-                      border:1px solid #cbd5e1;border-radius:4px;">
-        <button type="submit" class="btn btn-sm btn-primary"
-                style="white-space:nowrap;">
+               placeholder="{{ t.get('pp_new_placeholder', 'New project name…') }}">
+        <button type="submit" class="btn btn-sm btn-primary pp-nowrap">
           + {{ t.get('pp_create', 'Create') }}
         </button>
       </form>
@@ -112,7 +103,7 @@
     {% endif %}
   </div>
 
-  <p style="margin:8px 0 0 0;font-size:0.82em;color:var(--text-muted);">
+  <p class="pp-hint">
     {{ t.get('pp_hint',
        'All activities (estimations, test cases, checklist items, runs and bugs) attach to the active project automatically. Switch any time — your work persists in the database.') }}
   </p>

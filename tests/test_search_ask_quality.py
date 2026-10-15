@@ -308,6 +308,13 @@ def test_ask_hands_the_model_the_excerpt_not_the_opening(corpus, monkeypatch):
     for name in ("RAG_MIN_GROUNDING", "RAG_MIN_COVERAGE", "ANTHROPIC_MODEL",
                  "LLM_MODEL_FOR_SEARCH_ANSWER", "MODEL_SWITCHER"):
         monkeypatch.delenv(name, raising=False)
+    # The daily cap and the monthly budget count usage rows in the worker's
+    # database, which other Ask tests on the same xdist worker fill; this
+    # test is about the prompt, not those gates.
+    from engine import llm_client
+    monkeypatch.setattr(answer, "over_daily_cap", lambda **_kw: False)
+    monkeypatch.setattr(llm_client, "check_budget", lambda *_a, **_kw: None)
+    answer.cap_gate.reset()
     answer.limiter.reset()
     q = f"How do I move test cases to another project? {secrets.token_hex(2)}"
     events = list(answer.ask_events(answer.AskRequest(

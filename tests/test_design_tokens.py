@@ -175,6 +175,11 @@ TEXT_PAIRS = [
     ("--blue-text", "--indigo-bg", "live status: running a test case"),
     ("--danger-text-strong", "--danger-light", "live status: out of memory"),
     ("--badge-grey", "--tf-line-2", "live status: idle"),
+    ("--success-hover", "--success-bg", "estimation diagnostics: all present"),
+    (WHITE, "--badge-grey", "estimation chip: dependency absent"),
+    ("--slate-text", WHITE, "bug reset dialog warning"),
+    (WHITE, "--error-text", "bug reset confirm button"),
+    ("--badge-red", WHITE, "bug reset title and button"),
 ]
 
 #: 3:1 — WCAG 1.4.11 non-text contrast.
@@ -548,29 +553,17 @@ def test_the_model_switcher_is_compact_and_clear_of_its_status_line(css):
 # counted like the rest and are why a ceiling can end above zero.
 
 INLINE_STYLE_CEILING = {
-    "_project_picker.html": 11,
-    "automation.html": 4,
-    "bug_reports.html": 27,
-    "checklist.html": 9,
-    "estimation.html": 34,
-    "guide.html": 8,
-    "index.html": 34,
-    "org_settings.html": 2,
-    "test_execution_manual.html": 11,
-    "test_execution_runs.html": 2,
-    "guide/_sections_en.html": 2,
-    "guide/_sections_ua.html": 2,
+    # Every one left is a bar whose width IS the data — the exception list
+    # the block was asked to end with (target: at most 40; it ended at 9).
+    "index.html": 6,                 # dashboard category / severity bars
+    "org_settings.html": 2,          # AI budget and storage meters
+    "test_execution_manual.html": 1,  # manual-run progress bar
 }
 
 #: Script-side styling the same way: el.style.display / .color /
 #: .background written from JS. Visibility goes through el.hidden (with
-#: the global [hidden] rule), colours through classes.
-JS_STYLE_CEILING = {
-    "static/js/app.js": 1,
-    "templates/checklist.html": 8,
-    "templates/estimation.html": 6,
-    "templates/guide.html": 2,
-}
+#: the global [hidden] rule), colours through classes. None left.
+JS_STYLE_CEILING: dict[str, int] = {}
 
 _INLINE_STYLE = re.compile(r"""\sstyle\s*=\s*["']""", re.I)
 _JS_STYLE = re.compile(r"\.style\.(?:display|color|background(?:Color)?)\s*=")
@@ -654,3 +647,60 @@ def test_link_styled_buttons_keep_the_smallest_button_height(css):
     body = _body(css, ".btn-link")
     assert re.search(r"min-height\s*:\s*var\(--control-xs\)", body), body
     assert not re.search(r"min-height\s*:\s*0(?![.\d])", body), body
+
+
+_DYNAMIC_WIDTH = re.compile(r"^\s*width\s*:\s*\{\{.*\}\}\s*%\s*$", re.S)
+
+
+def test_the_inline_styles_left_are_data_driven_widths_only():
+    """The exceptions are exceptions: each remaining style="" is one
+    declaration, a width computed from the data. A colour or a margin
+    slipping in next to it would pass the count but not this."""
+    found = []
+    for name in INLINE_STYLE_CEILING:
+        html = _JINJA_COMMENT.sub("", (TEMPLATES / name).read_text(encoding="utf-8"))
+        for value in re.findall(r'\sstyle="([^"]*)"', html):
+            found.append(value)
+            assert _DYNAMIC_WIDTH.match(value), f"{name}: style=\"{value}\""
+    assert len(found) == sum(INLINE_STYLE_CEILING.values())
+
+
+_RULE_FG = re.compile(r"(?<![-\w])color\s*:\s*(var\(--[\w-]+\)|#[0-9a-fA-F]{3,6})")
+_RULE_BG = re.compile(
+    r"background(?:-color)?\s*:\s*(var\(--[\w-]+\)|#[0-9a-fA-F]{3,6})\s*(?:;|$)")
+
+
+def _token_or_hex(value: str) -> str:
+    return value[4:-1] if value.startswith("var(") else value
+
+
+def rule_pairs_below_aa(css: str, tokens: dict) -> list:
+    """Every rule that sets both a text colour and a flat background:
+    the pair has to meet 4.5:1 on its own. Block B snapped colours within
+    dE 5 to the nearest token, and one snap (#dcfce7 -> --success-light)
+    took a badge's green text from about 4.6 to 4.42:1 — TEXT_PAIRS only
+    knew the pairs someone thought to list; axe caught it."""
+    bad = []
+    for sels, body in _rules(css):
+        fg, bg = _RULE_FG.search(body), _RULE_BG.search(body)
+        if not (fg and bg):
+            continue
+        try:
+            ratio = contrast(colour(_token_or_hex(fg.group(1)), tokens),
+                             colour(_token_or_hex(bg.group(1)), tokens))
+        except ValueError:      # a gradient or a token that is not a colour
+            continue
+        if ratio < 4.5:
+            name = ", ".join(sels) if isinstance(sels, (list, tuple)) else sels
+            bad.append((name.strip()[:80], round(ratio, 2)))
+    return bad
+
+
+def test_every_rule_with_text_and_background_meets_aa(css, tokens):
+    assert not rule_pairs_below_aa(css, tokens)
+
+
+def test_the_rule_pair_scan_reads_rules():
+    toks = {"--fg": "#15803d", "--bg": "#d1fae5"}
+    css = ".a { color: var(--fg); background: var(--bg); } .b { color: #000; }"
+    assert rule_pairs_below_aa(css, toks) == [(".a", 4.42)]

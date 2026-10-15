@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('runs_title', 'Runs') }}{% endblock %}
 
+{% block page_class %}{{ ' page-runs' }}{% endblock %}
 {% block content %}
 <div class="page-head">
     <h1>{{ t.get('runs_title', 'Runs') }}</h1>
@@ -85,7 +86,7 @@
             <span class="badge">{{ r.status or t.get('runs_closed', 'Closed') }}</span>
             {% endif %}
         </td>
-        <td style="white-space:nowrap;">
+        <td class="rn-nowrap">
             {# Only a manual run has a walk to resume; the automated modes
                have a results page instead, which until now nothing linked
                to — the only route to it was the dispatching tab's own
@@ -106,7 +107,7 @@
             {# The way out of "a browser run is already in progress". It
                releases the concurrency slot; it cannot kill a subprocess,
                and the confirm text says so. #}
-            <form method="POST" style="display:inline;"
+            <form class="rn-inline-form" method="POST"
                   action="{{ url_for('execution_run_cancel', run_id=r.id) }}"
                   onsubmit="return confirm('{{ (t.get('runs_cancel_confirm', 'Mark this run cancelled? This frees the one-browser-run slot so you can start another. It does not kill a browser that is still running in the background.')) | e }}');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

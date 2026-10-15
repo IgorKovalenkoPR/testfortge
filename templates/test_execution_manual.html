@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('manual_run_title', 'Manual run') }} #{{ run_id }}{% endblock %}
 
+{% block page_class %}{{ ' page-manual-run' }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>{{ t.get('manual_run_title', 'Manual run') }} #{{ run_id }}</h1>
@@ -14,10 +15,10 @@
    looked at, so counting it as either a pass or a failure would
    misreport the run — the same rule the automation ingest applies. #}
 <div class="card">
-    <div class="progress-bar" style="height:8px;background:#eee;border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:{{ progress.percent }}%;background:var(--primary);transition:width .3s ease"></div>
+    <div class="progress-bar mr-progress">
+        <div class="mr-progress-fill" style="width:{{ progress.percent }}%"></div>
     </div>
-    <p class="hint" style="margin-top:.5rem">
+    <p class="hint mr-mt-half">
         <strong>{{ progress.done }} / {{ progress.total }}</strong>
         {{ t.get('manual_run_judged', 'judged') }}
         {% if progress.executed %}
@@ -47,8 +48,8 @@
 
 {% if current %}
 <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap">
-        <h2 style="margin:0">
+    <div class="mr-head">
+        <h2 class="mr-m0">
             {% if current.item_num %}<span class="cl-num">{{ current.item_num }}</span> {% endif %}
             <span class="badge">{{ current.external_id }}</span>
             {{ current.summary }}
@@ -65,7 +66,7 @@
        deleted or regenerated it mid-walk. Rendered as an ordinary item it
        is a blank card with five verdict buttons: unjudgeable, and with no
        hint as to why. Say it, and name the honest verdict. #}
-    <div class="alert alert-warning" style="margin-top:.75rem">
+    <div class="alert alert-warning mr-mt-3q">
         <strong>{{ t.get('manual_run_missing_title',
             'This item is no longer in the pack.') }}</strong>
         {{ t.get('manual_run_missing_body',
@@ -79,7 +80,7 @@
        "add" button created and nobody filled in yet. Blank card, five
        verdict buttons, nothing to judge. Point at the fix rather than
        inviting a guess. #}
-    <div class="alert alert-warning" style="margin-top:.75rem">
+    <div class="alert alert-warning mr-mt-3q">
         <strong>{{ t.get('manual_run_empty_title',
             'This item has no steps and no expected result yet.') }}</strong>
         {{ t.get('manual_run_empty_body',
@@ -89,7 +90,7 @@
             restarting the run.') }}
     </div>
     {% elif current.kind == 'test_case' %}
-    <table class="tc-detail-table" style="margin-top:.75rem">
+    <table class="tc-detail-table mr-mt-3q">
         {% if current.preconditions %}
         <tr><th>{{ t.get('tc_preconditions', 'Preconditions') }}</th>
             <td>{{ current.preconditions }}</td></tr>
@@ -113,7 +114,7 @@
     {# A checklist row IS the observation — no steps, no separate expected
        result. Rendering an empty Steps table for it would imply the
        author left something out. #}
-    <p class="hint" style="margin-top:.5rem">
+    <p class="hint mr-mt-half">
         {{ t.get('manual_run_cl_hint', 'Checklist item — the objective above is the whole check.') }}
     </p>
     {% endif %}
@@ -147,7 +148,7 @@
                           'The actual result, in your words. Required reading if this becomes a bug — it is what the report will say happened.') }}">{{ current_verdict.notes or '' }}</textarea>
         </div>
 
-        <label class="radio-inline" style="margin-bottom:.6rem">
+        <label class="radio-inline mr-radio-gap">
             <input type="checkbox" name="file_bug" value="1">
             {{ t.get('manual_run_file_bug',
                'File a bug from this item (Failed / Passed but only)') }}
@@ -181,8 +182,7 @@
         <a href="{{ url_for('manual_run_page', run_id=run_id, i=index+1) }}"
            class="btn btn-sm">{{ t.get('manual_run_next', 'Next') }} →</a>
         {% endif %}
-        <form method="POST" action="{{ url_for('manual_run_finish', run_id=run_id) }}"
-              style="display:inline">
+        <form class="mr-inline-form" method="POST" action="{{ url_for('manual_run_finish', run_id=run_id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm">
                 {{ t.get('manual_run_close_early', 'Close the run early') }}

@@ -432,13 +432,12 @@
        them deterministically. Pilot feature — gated on
        <code>RECORDER_ENABLED=1</code> per host.</p>
     <h4>One-time setup on the tester's machine</h4>
-    <pre style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
-                 border-radius:4px;font-size:0.85em;">pip install playwright
+    <pre class="gd-code">pip install playwright
 python -m playwright install chromium</pre>
     <h4>Recording + review flow</h4>
     <ol>
       <li>From a TestForTge checkout, start review-mode capture:
-          <pre style="background:#0f172a;color:#e2e8f0;padding:6px 10px;border-radius:4px;font-size:0.82em;">RECORDER_ENABLED=1 python -m tools.tfg_record \
+          <pre class="gd-code-sm">RECORDER_ENABLED=1 python -m tools.tfg_record \
     --project &lt;PID&gt; --url &lt;START_URL&gt;</pre>
           (Omit <code>--tc</code> to get review-mode. With
           <code>--tc</code> the recording attaches to an existing TC

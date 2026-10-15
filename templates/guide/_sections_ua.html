@@ -433,13 +433,12 @@
        Пілотна функція — вмикається прапорцем
        <code>RECORDER_ENABLED=1</code> на хості.</p>
     <h4>Одноразове налаштування на машині тестувальника</h4>
-    <pre style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
-                 border-radius:4px;font-size:0.85em;">pip install playwright
+    <pre class="gd-code">pip install playwright
 python -m playwright install chromium</pre>
     <h4>Запис і перегляд</h4>
     <ol>
       <li>З чекауту TestForTge запустіть захват у режимі перегляду:
-          <pre style="background:#0f172a;color:#e2e8f0;padding:6px 10px;border-radius:4px;font-size:0.82em;">RECORDER_ENABLED=1 python -m tools.tfg_record \
+          <pre class="gd-code-sm">RECORDER_ENABLED=1 python -m tools.tfg_record \
     --project &lt;PID&gt; --url &lt;START_URL&gt;</pre>
           (Не вказуйте <code>--tc</code> — і отримаєте режим перегляду.
           З <code>--tc</code> запис натомість прикріпиться до наявного

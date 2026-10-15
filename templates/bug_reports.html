@@ -54,9 +54,8 @@
    day than not offering it". ``is_admin`` is true whenever ORG_MODE is
    off, so the single-tenant UI is unchanged. #}
 {% if is_admin %}
-<div class="bug-actions" style="margin-bottom:14px;">
-    <button type="button" class="btn btn-secondary" id="bug-reset-open"
-            style="color:#b91c1c; border-color:#fecaca;">
+<div class="bug-actions br-mb-14">
+    <button type="button" class="btn btn-secondary br-reset-btn" id="bug-reset-open">
         <i data-lucide="trash-2" class="icon-sm"></i>
         {{ t.get('bug_reset_button', 'Reset Project bugs') }}
         {# Unfiltered project total — reset wipes every bug regardless
@@ -76,27 +75,25 @@
     <div class="bug-reset-modal-backdrop"></div>
     <div class="bug-reset-modal-panel" role="dialog"
          aria-labelledby="bug-reset-title">
-        <h2 class="heading-3" id="bug-reset-title" style="margin-top:0;color:#b91c1c;">
+        <h2 class="heading-3 br-reset-title" id="bug-reset-title">
             {{ t.get('bug_reset_title', 'Reset Project bugs?') }}
         </h2>
-        <p style="color:#475569;font-size:0.95em;">
+        <p class="br-reset-text">
             {{ t.get(
                 'bug_reset_body',
                 'This deletes every bug attached to the active project. The project itself, its test cases, and its checklists are NOT touched. The action cannot be undone.') }}
         </p>
-        <p style="color:#1e293b;font-size:0.95em;">
+        <p class="br-reset-warn">
             <strong>{{ project_bug_total|default(0) }}</strong>
             {{ t.get('bug_reset_count_suffix', 'bug(s) will be deleted.') }}
         </p>
-        <form method="POST" action="{{ url_for('bugs_reset') }}"
-              style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;">
+        <form class="br-reset-actions" method="POST" action="{{ url_for('bugs_reset') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="confirm" value="yes">
             <button type="button" class="btn btn-secondary" id="bug-reset-cancel">
                 {{ t.get('bug_reset_cancel', 'Cancel') }}
             </button>
-            <button type="submit" class="btn btn-primary"
-                    style="background:#dc2626;border-color:#dc2626;">
+            <button type="submit" class="btn btn-primary br-reset-confirm">
                 {{ t.get('bug_reset_confirm', 'Yes, delete all bugs') }}
             </button>
         </form>
@@ -131,11 +128,8 @@
    server-side (no JS); aria-current marks the selected option for
    assistive tech. Filter combines with the existing project picker
    above — both narrow the bug set on the same render. #}
-<div class="bug-source-filter"
-     style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;
-            padding:6px 10px;border:1px solid #e2e8f0;
-            border-radius:8px;background:#f8fafc;align-items:center;">
-    <span style="font-size:0.85em;color:#475569;font-weight:600;">
+<div class="bug-source-filter br-filter">
+    <span class="br-filter-label">
         {{ t.get('bug_source_filter_label', 'Source:') }}
     </span>
     <a href="{{ url_for('bug_reports_page', run=(run_filter or None)) }}"
@@ -154,7 +148,7 @@
         📝 {{ t.get('bug_source_manual_tc', 'TC / manual only') }}
     </a>
     {% if source_filter %}
-    <span style="font-size:0.78em;color:var(--text-muted);margin-left:auto;">
+    <span class="br-filter-count">
         {{ t.get('bug_source_filtered_count', 'showing') }}
         <strong>{{ stats.total }}</strong>
         {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
@@ -170,11 +164,8 @@
    Every chip is shown even at zero, deliberately. A chip that vanished
    when its bucket was empty would read as "this product has no
    accessibility defects", when what it means is "nobody has looked". #}
-<div class="bug-area-filter"
-     style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;
-            padding:6px 10px;border:1px solid #e2e8f0;
-            border-radius:8px;background:#f8fafc;align-items:center;">
-    <span style="font-size:0.85em;color:#475569;font-weight:600;">
+<div class="bug-area-filter br-filter">
+    <span class="br-filter-label">
         {{ t.get('bug_area_filter_label', 'Area:') }}
     </span>
     <a href="{{ url_for('bug_reports_page', source=(source_filter or None), run=(run_filter or None)) }}"
@@ -202,23 +193,16 @@
    hidden field so the two filters compose. No JS beyond auto-submit
    on change (with a no-JS Apply fallback). #}
 {% if run_options %}
-<div class="bug-run-filter"
-     style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;
-            padding:6px 10px;border:1px solid #e2e8f0;
-            border-radius:8px;background:#f8fafc;align-items:center;">
-    <form method="get" action="{{ url_for('bug_reports_page') }}"
-          style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0;">
+<div class="bug-run-filter br-filter-run">
+    <form class="br-filter-form" method="get" action="{{ url_for('bug_reports_page') }}">
         {% if source_filter %}
         <input type="hidden" name="source" value="{{ source_filter }}">
         {% endif %}
-        <label for="bug-run-select"
-               style="font-size:0.85em;color:#475569;font-weight:600;">
+        <label class="br-filter-label" for="bug-run-select">
             🎯 {{ t.get('bug_run_filter_label', 'Run:') }}
         </label>
-        <select id="bug-run-select" name="run" class="form-select"
-                onchange="this.form.submit()"
-                style="font-size:0.85em;padding:4px 8px;border:1px solid #cbd5e1;
-                       border-radius:6px;max-width:420px;">
+        <select id="bug-run-select" name="run" class="form-select br-run-select"
+                onchange="this.form.submit()">
             <option value="all" {% if not run_filter %}selected{% endif %}>
                 {{ t.get('bug_run_all', 'All runs') }}
             </option>
@@ -241,7 +225,7 @@
            class="btn btn-sm btn-secondary">
             {{ t.get('bug_run_clear', 'Clear run filter') }}
         </a>
-        <span style="font-size:0.78em;color:var(--text-muted);margin-left:auto;">
+        <span class="br-filter-count">
             {{ t.get('bug_source_filtered_count', 'showing') }}
             <strong>{{ stats.total }}</strong>
             {{ t.get('bug_source_filtered_unit', 'bug(s)') }}
@@ -365,26 +349,23 @@
                showed confusion when the row silently disappeared. #}
             <tr><td class="label">{{ t.get('bug_attachments', 'Attachment(s)') }}</td><td>
                 {% if bug.attachments %}
-                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;">
+                <div class="br-evidence-row">
                 {% for att in bug.attachments %}
                     {% set lower = att | lower %}
                     {% if lower.endswith('.webm') or lower.endswith('.mp4') %}
-                        <div style="flex:0 0 auto;">
-                            <video src="{{ url_for('automation_asset', path=att) }}"
-                                   controls preload="metadata" muted
-                                   style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
-                            <div style="font-size:0.72em;color:var(--text-muted);margin-top:2px;">🎥 {{ t.bug_video }}</div>
+                        <div class="br-evidence-item">
+                            <video class="br-evidence-video" src="{{ url_for('automation_asset', path=att) }}"
+                                   controls preload="metadata" muted></video>
+                            <div class="br-evidence-caption">🎥 {{ t.bug_video }}</div>
                         </div>
                     {% elif lower.endswith('.png') or lower.endswith('.jpg') or lower.endswith('.jpeg') or lower.endswith('.gif') or lower.endswith('.webp') %}
-                        <a href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener"
-                           style="flex:0 0 auto;display:block;">
-                            <img src="{{ url_for('automation_asset', path=att) }}"
+                        <a class="br-evidence-link" href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener">
+                            <img class="br-evidence-thumb" src="{{ url_for('automation_asset', path=att) }}"
                                  alt="{{ t.bug_alt_evidence }}"
-                                 style="width:140px;height:90px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;background:#fff;" />
+                                 />
                         </a>
                     {% else %}
-                        <a href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener"
-                           style="font-size:0.85em;color:#0369a1;">📎 {{ att }}</a>
+                        <a class="br-evidence-more" href="{{ url_for('automation_asset', path=att) }}" target="_blank" rel="noopener">📎 {{ att }}</a>
                     {% endif %}
                 {% endfor %}
                 </div>
@@ -396,14 +377,13 @@
                    Rewritten to state the symptom honestly and list the
                    actual causes; the wire-break (cause #2) is addressed
                    by PR-B. #}
-                <div style="padding:10px 14px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;color:#92400e;font-size:0.85em;">
+                <div class="br-evidence-note">
                     <strong>{{ t.get('bug_no_attachments_title', 'No attachments captured') }}</strong>
-                    <p style="margin:4px 0 0 0;">
+                    <p class="br-evidence-note-text">
                         {{ t.get('bug_no_attachments_body',
                             'No screenshot or video was linked to this bug. Possible reasons: (1) the run was started without a Base URL, so Playwright was skipped; (2) the run terminated before evidence could be saved. Re-run with a Base URL set to maximise the chance of attached evidence.') }}
                     </p>
-                    <a href="{{ url_for('test_execution_page') }}" class="btn btn-xs btn-secondary"
-                       style="margin-top:8px;">
+                    <a href="{{ url_for('test_execution_page') }}" class="btn btn-xs btn-secondary br-mt-8">
                         {{ t.get('bug_no_attachments_link', 'Open Test Execution') }}
                     </a>
                 </div>
