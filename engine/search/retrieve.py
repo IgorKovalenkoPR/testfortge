@@ -37,6 +37,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -63,6 +64,13 @@ DEFAULT_PY_VECTOR_MAX_DOCS = 20_000
 BOOST_ID = 1.0
 BOOST_TITLE = 0.002
 BOOST_OPEN_BUG = 0.0005
+#: Two adjacent query words adjacent in the document too ("Base URL",
+#: "live executor"), counted at most twice; and a Guide section whose
+#: multi-word module name the question spells out ("Test Execution").
+#: Chosen on the ADR gate-3 questions with the golden set as the guard
+#: (tests/test_search_ask_quality.py).
+BOOST_PHRASE = 0.008
+BOOST_MODULE = 0.01
 #: BM25.
 BM25_K1 = 1.2
 BM25_B = 0.75
@@ -97,10 +105,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+#: The hash vectors are a weak signal — lexical-only recall equals hybrid
+#: on the golden set — and at equal weight any document in *both* lists
+#: outranked the best lexical hit without a vector neighbour: the bug
+#: titled "Live executor stopped early" came 12th for "live executor
+#: stopping early" (ADR gate 3, 2026-10-15).
+DEFAULT_W_VEC = 0.4
+
+
 def weights() -> tuple[float, float]:
-    """``(SEARCH_W_LEX, SEARCH_W_VEC)`` — both 1.0 by default."""
+    """``(SEARCH_W_LEX, SEARCH_W_VEC)`` — 1.0 and :data:`DEFAULT_W_VEC`."""
     return (max(0.0, _env_float("SEARCH_W_LEX", 1.0)),
-            max(0.0, _env_float("SEARCH_W_VEC", 1.0)))
+            max(0.0, _env_float("SEARCH_W_VEC", DEFAULT_W_VEC)))
 
 
 def py_vector_max_docs() -> int:
@@ -209,6 +225,23 @@ class ParsedQuery:
         for typo, fix in self.corrections.items():
             out = re.sub(rf"(?<![\w']){re.escape(typo)}(?![\w'])", fix, out)
         return out if out != self.normalised else None
+
+    @property
+    def phrases(self) -> list[str]:
+        """Adjacent query stems as ``" a b "`` — the stored lex keeps the
+        document's word order (stop-words dropped on both sides), so
+        "Base URL" in a question is found as "base url" in a page."""
+        out: list[str] = []
+        for a, b in zip(self.stems, self.stems[1:]):
+            pair = f" {a} {b} "
+            if a and b and a != b and pair not in out:
+                out.append(pair)
+        return out
+
+    @property
+    def stem_sequence(self) -> str:
+        """The query's own stems in order, space-padded."""
+        return f" {' '.join(s for s in self.stems if s)} "
 
     def term_stems(self) -> list[str]:
         seen: list[str] = []
@@ -435,7 +468,8 @@ def _load_candidates(allowed, kinds, *, with_vectors: bool) -> list[Cand]:
 
 # ── Lexical: Python BM25 ──────────────────────────────────────────────
 
-def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool
+def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool,
+             corpus: tuple[int, Mapping[str, int], float | None] | None = None
              ) -> tuple[list[tuple[int, float]], dict[int, set[str]]]:
     """``([(doc_id, score)] best first, {doc_id: matched stems})``.
 
@@ -443,6 +477,11 @@ def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool
     *prefix_last*, the last query term also matches as a prefix when it has
     no exact occurrence anywhere (what ``last:*`` does on Postgres) —
     "regist" finds "registr".
+
+    *cands* is the whole scope on SQLite. On Postgres it is only the pool
+    the FTS index found, and *corpus* — ``(documents, {stem: df},
+    average length)`` of the whole scope — supplies the statistics a pool
+    cannot.
     """
     if not cands or not terms:
         return [], {}
@@ -451,12 +490,19 @@ def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool
         if t.stem not in stems:
             stems.append(t.stem)
     w = {t.stem: t.weight for t in terms}
-    n = len(cands)
     split = [(c.lex_title.split(), c.lex_body.split()) for c in cands]
     total_len = 0
     for ti, bo in split:
         total_len += len(ti) * TITLE_WEIGHT + len(bo)
-    avgdl = (total_len / n) if n else 1.0
+    n_pool = len(cands)
+    avgdl = total_len / n_pool
+    n = n_pool
+    corpus_df: Mapping[str, int] = {}
+    if corpus is not None:
+        n = max(n_pool, int(corpus[0] or 0))
+        corpus_df = corpus[1] or {}
+        if corpus[2]:
+            avgdl = float(corpus[2])
     avgdl = avgdl or 1.0
 
     prefix_term = None
@@ -469,7 +515,7 @@ def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool
     tfs: dict[str, list[float]] = {}
     df: dict[str, int] = {}
     for s in stems:
-        col = [0.0] * n
+        col = [0.0] * n_pool
         cnt = 0
         for i, (ti, bo) in enumerate(split):
             if s == prefix_term:
@@ -481,7 +527,9 @@ def _bm25_py(cands: list[Cand], terms: list[Term], *, prefix_last: bool
                 col[i] = f
                 cnt += 1
         tfs[s] = col
-        df[s] = cnt
+        # The scope's count, never below what the pool itself shows (a
+        # prefix match has no exact-stem count in the scope).
+        df[s] = max(cnt, int(corpus_df.get(s, 0)))
     scores: dict[int, float] = {}
     matched: dict[int, set[str]] = {}
     for s in stems:
@@ -523,29 +571,91 @@ def tsquery_text(terms: Sequence[Term], *, prefix_last: bool = True) -> str:
     return " | ".join(parts)
 
 
-def fts_statement(allowed, kinds, tsq: str, *, limit: int = LIST_DEPTH):
-    """The Postgres full-text statement (scope clause included) — separate
-    so a test can compile it against the PG dialect without a server."""
+#: On Postgres the full-text index only *finds* the lexical candidates —
+#: this many, by ``ts_rank_cd`` — and :func:`_bm25_py` orders them, with
+#: the document frequencies of the whole scope. ``ts_rank_cd`` has no IDF:
+#: it ranked a page by how often it said "project", and "Base URL" in a
+#: question lost to every page that did. One ranking on both engines also
+#: means the golden set, measured on SQLite, measures production.
+PG_LEX_POOL = 400
+
+
+def term_tsquery(stem_: str) -> str:
+    """One stem as a tsquery: its word-character pieces ANDed — the stored
+    lex is split the same way by ``to_tsvector('simple', …)``."""
+    parts = [p for p in _TSQ_SAFE.split(stem_.lower()) if p]
+    return " & ".join(dict.fromkeys(parts))
+
+
+def fts_statement(allowed, kinds, tsq: str, *, limit: int = PG_LEX_POOL):
+    """The Postgres full-text statement (scope clause included): the
+    candidate rows, with their lex, best ``ts_rank_cd`` first. Separate so
+    a test can compile it against the PG dialect without a server."""
     from sqlalchemy import literal_column, select, text
 
     from engine.db import SearchDoc
     rank = literal_column(
         "ts_rank_cd(search_doc.tsv, to_tsquery('simple', :tsq), 32)")
-    stmt = select(SearchDoc.id, rank.label("rank"))
+    stmt = select(SearchDoc.id, SearchDoc.project_id, SearchDoc.kind,
+                  SearchDoc.ref, SearchDoc.chunk_no, SearchDoc.lex_title,
+                  SearchDoc.lex_body, SearchDoc.source_updated_at)
     stmt = _filtered(stmt, allowed, kinds)
     stmt = stmt.where(text("search_doc.tsv @@ to_tsquery('simple', :tsq)"))
     return stmt.order_by(rank.desc(), SearchDoc.id).limit(limit).params(
         tsq=tsq)
 
 
-def _lex_pg(allowed, kinds, terms) -> list[tuple[int, float]]:
+#: ``search_doc``'s length in tokens, the way :func:`_bm25_py` counts it
+#: (title weighted :data:`TITLE_WEIGHT`): spaces + 1, 0 for an empty field.
+_PG_DOC_LEN = (
+    "(CASE WHEN coalesce(search_doc.lex_title, '') = '' THEN 0 ELSE "
+    "length(search_doc.lex_title) - length(replace(search_doc.lex_title, "
+    "' ', '')) + 1 END) * {tw} + "
+    "(CASE WHEN coalesce(search_doc.lex_body, '') = '' THEN 0 ELSE "
+    "length(search_doc.lex_body) - length(replace(search_doc.lex_body, "
+    "' ', '')) + 1 END)")
+
+
+def corpus_stats_statement(allowed, kinds, stems: Sequence[str]):
+    """One row: documents in scope, their average length, and the document
+    frequency of each stem (``df0``, ``df1``, … in *stems* order)."""
+    from sqlalchemy import func, literal_column, select, text
+
+    from engine.db import SearchDoc
+    cols = [func.count().label("n"),
+            literal_column(f"avg({_PG_DOC_LEN.format(tw=TITLE_WEIGHT)})")
+            .label("avgdl")]
+    params = {}
+    for i, s in enumerate(stems):
+        cols.append(func.count().filter(text(
+            f"search_doc.tsv @@ to_tsquery('simple', :q{i})")).label(f"df{i}"))
+        params[f"q{i}"] = term_tsquery(s)
+    stmt = _filtered(select(*cols).select_from(SearchDoc), allowed, kinds)
+    return stmt.params(**params)
+
+
+def _lex_pg(allowed, kinds, terms
+            ) -> tuple[list[tuple[int, float]], dict[int, set[str]]]:
     from engine import db as _db
     tsq = tsquery_text(terms)
     if not tsq:
-        return []
+        return [], {}
+    stems = [s for s in dict.fromkeys(t.stem for t in terms)
+             if term_tsquery(s)]
     with _db.session_scope() as sess:
-        return [(int(r[0]), float(r[1] or 0.0))
-                for r in sess.execute(fts_statement(allowed, kinds, tsq))]
+        pool = [Cand(id=int(r[0]), project_id=r[1], kind=r[2], ref=r[3],
+                     chunk_no=r[4], lex_title=r[5] or "", lex_body=r[6] or "",
+                     vec_version=None, vec_blob=None, source_updated_at=r[7])
+                for r in sess.execute(fts_statement(allowed, kinds,
+                                                         tsq))]
+        if not pool:
+            return [], {}
+        row = sess.execute(corpus_stats_statement(allowed, kinds,
+                                                  stems)).one()
+    n = int(row[0] or 0)
+    df = {s: int(row[2 + i] or 0) for i, s in enumerate(stems)}
+    avgdl = float(row[1]) if row[1] is not None else None
+    return _bm25_py(pool, terms, prefix_last=True, corpus=(n, df, avgdl))
 
 
 # ── Vectors ───────────────────────────────────────────────────────────
@@ -642,6 +752,7 @@ class Doc:
     facets: dict
     lang: str | None
     source_updated_at: Any
+    lex_body: str = ""
 
 
 def _hydrate(ids: Iterable[int], allowed) -> dict[int, Doc]:
@@ -658,7 +769,8 @@ def _hydrate(ids: Iterable[int], allowed) -> dict[int, Doc]:
                 SearchDoc.kind, SearchDoc.ref, SearchDoc.chunk_no,
                 SearchDoc.title, SearchDoc.body, SearchDoc.lex_title,
                 SearchDoc.url, SearchDoc.facets, SearchDoc.lang,
-                SearchDoc.source_updated_at), allowed, None).where(
+                SearchDoc.source_updated_at, SearchDoc.lex_body),
+                allowed, None).where(
                     SearchDoc.id.in_(ids[start:start + 500]))
             for r in sess.execute(stmt):
                 out[r[0]] = Doc(id=r[0], project_id=r[1], scope=r[2],
@@ -666,7 +778,8 @@ def _hydrate(ids: Iterable[int], allowed) -> dict[int, Doc]:
                                 title=r[6] or "", body=r[7] or "",
                                 lex_title=r[8] or "", url=r[9],
                                 facets=dict(r[10] or {}), lang=r[11],
-                                source_updated_at=r[12])
+                                source_updated_at=r[12],
+                                lex_body=r[13] or "")
     return out
 
 
@@ -933,6 +1046,23 @@ def _chips(hits: list[dict], pq: ParsedQuery, params: SearchParams,
     return chips
 
 
+_GUIDE_TITLE_PREFIX = re.compile(r"^.*?·\s*")
+
+
+@lru_cache(maxsize=256)
+def module_phrase(title: str) -> str | None:
+    """A Guide section's module name as space-padded stems — "Guide · Test
+    Execution" → " test execut " — when it has two words or more. One-word
+    names ("Projects", "Runs", "Settings") are words every question uses.
+    """
+    from engine.search.text import analyse
+    name = _GUIDE_TITLE_PREFIX.sub("", title or "", count=1)
+    stems = [x for x in analyse(name).stems if x]
+    if len(stems) < 2:
+        return None
+    return f" {' '.join(stems)} "
+
+
 def search(params: SearchParams) -> dict:
     """Full search: ranked, grouped, explained. See the module docstring."""
     from engine.search.embed import NotConfigured, get_embedder
@@ -1004,6 +1134,10 @@ def search(params: SearchParams) -> dict:
     boosts: dict[int, list[str]] = {}
     boost_title = _env_float("SEARCH_BOOST_TITLE", BOOST_TITLE)
     boost_open = _env_float("SEARCH_BOOST_OPEN_BUG", BOOST_OPEN_BUG)
+    boost_phrase = _env_float("SEARCH_BOOST_PHRASE", BOOST_PHRASE)
+    boost_module = _env_float("SEARCH_BOOST_MODULE", BOOST_MODULE)
+    phrases = pq.phrases
+    query_seq = pq.stem_sequence
     for did, base in fused.items():
         doc = docs.get(did)
         if doc is None:
@@ -1021,6 +1155,17 @@ def search(params: SearchParams) -> dict:
                 set(doc.lex_title.split())) >= 0.5:
             s += boost_title
             b.append("title_match")
+        if boost_module and doc.kind == "guide" and query_seq:
+            name = module_phrase(doc.title)
+            if name and name in query_seq:
+                s += boost_module
+                b.append("module")
+        if boost_phrase and phrases:
+            lex = f" {doc.lex_title} {doc.lex_body} "
+            hits = sum(1 for p in phrases if p in lex)
+            if hits:
+                s += boost_phrase * min(hits, 2)
+                b.append("phrase")
         if doc.kind == "bug" and \
                 _norm_facet(doc.facets.get("status")) in _OPEN_STATUSES:
             s += boost_open
@@ -1276,8 +1421,8 @@ def _retrieve(allowed, kinds, pq: ParsedQuery, embedder, qvec) -> dict:
     if pq.terms:
         if use_pg_fts:
             try:
-                lex = _lex_pg(allowed, kinds, pq.terms)
-                out["lex_engine"] = "postgres-fts"
+                lex, matched = _lex_pg(allowed, kinds, pq.terms)
+                out["lex_engine"] = "postgres-fts+bm25"
             except Exception as exc:   # noqa: BLE001 — fall back, never fail
                 log.warning("search: FTS failed (%s); Python BM25", exc)
                 use_pg_fts = False
@@ -1490,6 +1635,7 @@ def similar_to(project_id: str, kind: str, ref: str, *, allowed: list[str],
 
 __all__ = ["search", "quick_search", "similar_to", "SearchParams",
            "TenancyError", "parse_query", "rrf", "snippet", "weights",
-           "tsquery_text", "fts_statement", "vector_statement",
+           "tsquery_text", "fts_statement", "corpus_stats_statement",
+           "vector_statement", "module_phrase",
            "ref_number", "vocabulary_for", "clear_caches", "Vocabulary",
            "ID_KINDS", "FACET_FILTERS"]

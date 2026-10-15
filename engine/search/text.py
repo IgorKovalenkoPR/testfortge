@@ -42,7 +42,7 @@ from typing import Iterable, Mapping
 
 #: Part of ``content_hash`` and ``vec_version``. Bump on any change to the
 #: lexicons, the stop-words, the stemmers or the tokeniser below.
-LEXICON_VERSION = 1
+LEXICON_VERSION = 2
 
 LEXICON_DIR = Path(__file__).resolve().parent / "lexicon"
 
@@ -175,7 +175,7 @@ must have has had i you he she we they me my your our their them his her
 than then so if but also just very too any all each some such via per vs
 etc i'm it's don't doesn't can't won't isn't aren't cannot unable
 і й та а але або чи що як це цей ця ці те той та у в на до по з із зі за
-від для про при над під між без не ні так же ж би б є був була було були
+від для про при над під між без через не ні так же ж би б є був була було були
 бути ще вже лише тільки якщо коли де чому хто який яка яке які його її їх
 мій моя моє мої наш наша наше наші ваш ваша ваше ваші свій своя
 и в во на с со к ко о об от до по за из из-за для при над под между без не
@@ -200,6 +200,10 @@ _COMPOUNDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"\bdrop[\s-]*down\b", "dropdown"),
         (r"\bpop[\s-]*up\b", "popup"),
         (r"\bcheck[\s-]*box\b", "checkbox"),
+        # "чек-ліст", "чек-лист", "чеклист", "чек лист": the Guide writes
+        # the first, users the others. The hyphen split it into "чек" +
+        # "лист" (a letter, i.e. email). One spelling; inflections stay.
+        (r"\bчек[\s-]*л[иі]ст", "чекліст"),
     ))
 
 

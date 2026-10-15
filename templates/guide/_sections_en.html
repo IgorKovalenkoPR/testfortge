@@ -146,7 +146,10 @@
           module attaches its work to the active project. The
           sidebar shows the current project name; the 🗂 picker
           card on every module lets you switch without leaving the
-          page (see the dedicated Projects card for details).</li>
+          page (see the dedicated Projects card for details). On the
+          Dashboard itself an admin creates one with a name, an
+          optional Base URL and description, and <em>Create &amp;
+          activate</em>.</li>
       <li><strong>Skim the metrics.</strong> Pass-rate, bug
           severity distribution and environments covered tell you
           at a glance whether the last release was clean.</li>
@@ -154,6 +157,17 @@
           for new scope, Test Cases for design, Test Execution
           for running, Bug Reports for triage.</li>
     </ol>
+    <h3>Customise this dashboard</h3>
+    <p>The fold-out at the bottom of the page.</p>
+    <ul>
+      <li><strong>What to show</strong> — tick the widgets you want
+          and click <em>Save layout</em>. The layout is yours alone; it
+          does not change what anyone else sees.</li>
+      <li><strong>KPI targets for this project</strong> (admins) — a
+          target per KPI, then <em>Save targets</em>. Targets are shared
+          by everyone on the project and show under each KPI's value;
+          leave a field empty for no target.</li>
+    </ul>
     <h3>Common mistakes</h3>
     <ul>
       <li>Not setting a meaningful project name up front —
@@ -957,6 +971,45 @@ python -m playwright install chromium</pre>
        again. No manual import, no lost data — your projects
        live in the database, the session is just a thin pointer
        to the active one.</p>
+    <h3>Export, back up or delete a project</h3>
+    <p>Each row of the <em>Saved Projects</em> table on the Dashboard
+       has these buttons for an admin:</p>
+    <ul>
+      <li><strong>Export</strong> downloads everything the project
+          holds as one zip: <code>project.json</code> (name, Base URL,
+          description), a JSON file per kind of data in
+          <code>data/</code> (test cases, checklist items, bug reports,
+          execution and automation runs, estimations and the rest) and
+          the stored files — screenshots, attachments — in
+          <code>files/</code>. Files stop at 25 MB; the zip's
+          <code>README.txt</code> says when it was cut short or a file
+          could not be read. Each export is written to the audit log.</li>
+      <li><strong>Back up</strong> writes the same kind of bundle to
+          the storage the team configured (Settings → Storage) instead
+          of downloading it, and keeps only the newest few.</li>
+      <li><strong>Delete</strong> (the bin) removes the project and
+          everything in it. Export first — it sits just before Delete
+          for exactly that reason.</li>
+    </ul>
+    <h3>Move artefacts to another project</h3>
+    <p>When work landed in the wrong project — often an auto-created
+       "Untitled project …" — the Dashboard card <em>Move artefacts to
+       another project</em> moves it. It takes everything in the
+       <strong>active</strong> project: test cases, checklist items, bug
+       reports, estimations, test-execution runs, dashboard snapshots and
+       Tedgie submissions. Automation runs, recorder drafts and saved
+       locators stay where they are.</p>
+    <ol>
+      <li>Activate the project the artefacts are in now.</li>
+      <li>In the card, pick the target under <em>Move to existing
+          project</em>, or type a name under <em>Or create a new
+          one</em> to have it created.</li>
+      <li>Click <em>Move artefacts</em> and confirm. A message lists
+          what moved, per kind. The source project itself is not
+          deleted.</li>
+    </ol>
+    <p>The card is for admins, and it moves everything — there is no
+       per-item selection.</p>
     <h3>Common mistakes</h3>
     <ul>
       <li>Generating test cases without a meaningful project name

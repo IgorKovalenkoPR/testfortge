@@ -233,7 +233,7 @@ class TestAnswer:
         assert _error(events) is None
         assert len(llm.calls) == 1
         call = llm.calls[0]
-        assert call["max_tokens"] == 300
+        assert call["max_tokens"] == answer.MAX_TOKENS == 400
         assert call["system"] == answer.SYSTEM_PROMPT
         assert "[[TC-001]]" in llm.prompt
         assert sum(1 for line in llm.prompt.splitlines()

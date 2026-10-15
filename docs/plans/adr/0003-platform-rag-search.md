@@ -197,6 +197,8 @@ q_raw
  → group by (kind, ref), top N, snippet highlighting from matched terms
 ```
 
+**Amended 2026-10-15 (gate 3).** Four of the twenty gate-3 questions missed material that was there. Changes: on Postgres `ts_rank_cd` (no IDF) now only selects a pool of 400 and the same Python BM25 orders it with the scope's document frequencies, so both backends rank alike and the golden set measures production; `w_vec` = 0.4 (hash vectors are a weak signal, and at 1.0 any document in both lists beat the best lexical hit without a vector neighbour); a +0.008 boost per adjacent query-word pair found adjacent in the document (at most two); +0.01 for a Guide section whose multi-word module name the question contains; "чек-лист/чеклист/чек-ліст" joined into one word before tokenising. Pinned in `tests/test_search_ask_quality.py`.
+
 **Why RRF rather than `0.45*BM25 + 0.55*cosine` (the reference site's formula).** `ts_rank_cd` on Postgres and Python BM25 on SQLite have different score scales. A linear blend would rank differently on each backend and need normalisation tuning. RRF uses only ranks, so it behaves the same on both. The weights stay configurable (`SEARCH_W_LEX`, `SEARCH_W_VEC`) for the golden-set experiment.
 
 **How the hash embedder works (`engine/search/embed.py`, `HashEmbedder`):**
@@ -222,7 +224,7 @@ q_raw
 **Prompt (kind `search_answer` → Haiku):**
 - system: a static instruction of about 300 tokens. It asks for 2–3 sentences in the user's language, using only facts from the items, citing `[[TC-012]]`, with a last line of `SUGGESTIONS: a | b | c`.
 - user: the question plus the top 8 items, each `[[ref]] title — body[:400]`.
-- Limits: `max_tokens=300`; input ≤ 3,000 tokens, estimated as characters ÷ 3.2 for Cyrillic. Items are dropped from the end to fit.
+- Limits: `max_tokens=300` (400 since 2026-10-15: gate 3 measured a 285-token Ukrainian answer); input ≤ 3,000 tokens, estimated as characters ÷ 3.2 for Cyrillic. Items are dropped from the end to fit.
 - Up to 2 previous turns of follow-up (questions only, with their answers compressed to ≤200 characters).
 
 **After the answer:**

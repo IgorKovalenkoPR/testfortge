@@ -24,7 +24,7 @@ per line, in this order::
    "lang":"en","items":["TC-001","BUG-15"],
    "cards":[{"n":1,"ref","kind","title","url","snippet","project","score"}],
    "model":"claude-haiku-...","model_tier":"haiku",
-   "answer_key":"<sha256>|null","prompt_version":"ask-v1"}
+   "answer_key":"<sha256>|null","prompt_version":"ask-v2"}
   {"type":"text","text":"Login fails with a 500 [[BUG-15]] ..."}   (0..n)
   {"type":"error","code":"not_grounded|budget|rate_limited|no_key|upstream",
    "message":"...","reason":"org_day|user_minute|user_day"}  (0..1; reason

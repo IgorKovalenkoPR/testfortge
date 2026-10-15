@@ -113,7 +113,8 @@ class TestShape:
                                          "rerank", "total"}
         assert ex["lexical"] == "python-bm25"
         assert ex["vector"] == "python-cosine"
-        assert ex["weights"] == {"lex": 1.0, "vec": 1.0, "rrf_k": 60}
+        assert ex["weights"] == {"lex": 1.0, "vec": retrieve.DEFAULT_W_VEC,
+                                 "rrf_k": 60}
         assert ex["filters"]["before"] >= ex["filters"]["after"] > 0
 
     def test_results_are_grouped_by_kind(self, client, shop):
@@ -499,6 +500,24 @@ class TestPostgresStatements:
         assert "search_doc.scope" in sql and "search_doc.project_id IN" in sql
         assert "tsv @@ to_tsquery('simple'" in sql
         assert "search_doc.kind IN" in sql
+
+    def test_fts_statement_returns_the_lex_bm25_reorders(self):
+        sql = self._sql(retrieve.fts_statement(["p1"], None, "login"))
+        assert "search_doc.lex_title" in sql and "search_doc.lex_body" in sql
+        assert "LIMIT" in sql
+
+    def test_corpus_stats_carry_the_scope_clause(self):
+        """The document frequencies BM25 ranks the pool with must count the
+        caller's scope and nothing wider, or another tenant's data would
+        shape this one's ranking."""
+        stmt = retrieve.corpus_stats_statement(["p1", "p2"], ["bug"],
+                                               ["login", "об'єкт"])
+        sql = self._sql(stmt)
+        assert "search_doc.scope" in sql and "search_doc.project_id IN" in sql
+        assert "search_doc.kind IN" in sql
+        assert sql.count("FILTER (WHERE search_doc.tsv @@") == 2
+        params = stmt.compile().params
+        assert params["q0"] == "login" and params["q1"] == "об & єкт"
 
     def test_vector_statement_carries_the_scope_clause(self):
         sql = self._sql(retrieve.vector_statement(["p1"], None, "[0.1]"))

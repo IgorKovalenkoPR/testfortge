@@ -29,6 +29,7 @@ part is real.
 """
 from __future__ import annotations
 
+import html
 import pathlib
 import re
 
@@ -257,7 +258,21 @@ class TestTheGuidePromisesOnlyExportsThatExist:
         # answer with.
         served |= {ext.lower() for ext in re.findall(
             r"filename=bug_reports_\{name\}\.([a-z]+)", bugs)}
+        # The project export (Dashboard → Saved Projects → Export) is a zip;
+        # what it holds is read from the names it writes into the archive.
+        retention = (self.ROUTES.parent / "engine" / "retention.py").read_text(
+            encoding="utf-8")
+        body = retention.split("def export_project_data", 1)[1]
+        body = body.split("\ndef ", 1)[0]
+        served |= {ext.lower() for ext in re.findall(
+            r'writestr\(\s*f?"[^"]*\.([a-z]+)"', body)}
         return served
+
+    def test_the_project_export_vocabulary_was_read(self):
+        """The zip's own contents: without them the scan would refuse the
+        Guide's description of Export — or, if the regex broke, quietly
+        allow nothing new while looking like it read the file."""
+        assert {"json", "txt"} <= self._served()
 
     def test_the_route_vocabulary_was_actually_read(self):
         served = self._served()
@@ -301,3 +316,70 @@ class TestTheGuidePromisesOnlyExportsThatExist:
         found = {(m.group(1) or m.group(0)).lower()
                  for m in self.TOKEN.finditer(old)}
         assert "docx" in found and any("jira" in f for f in found)
+
+
+class TestTheDashboardsAdminActionsAreDocumented:
+    """ADR 0003 gate 3 (2026-10-15): asked "How do I export a project?"
+    and "How do I move test cases to another project?", Ask honestly said
+    the materials did not cover it — the Guide never mentioned the Export
+    button or the Move-artefacts card. Every gate here compared the Guide
+    with itself, so an omission could not show.
+
+    The list is derived from the product: every button or link label inside
+    an ``{% if is_admin %}`` block of the Dashboard template must appear in
+    the Guide in both languages, as the dictionary renders it.
+    """
+
+    DASHBOARD = GUIDE.parent / "index.html"
+    BLOCK = re.compile(r"{%-?\s*(if|endif)\b([^%]*)%}")
+    CONTROL = re.compile(r"<(button|a)\b[^>]*>(.*?)</\1>", re.S)
+    LABEL = re.compile(r"t\.get\('(\w+)'|\bt\.(\w+)")
+
+    #: Labels with a reason not to be named in the Guide.
+    EXEMPT = {
+        "save": "the inline rename form's own Save",
+        "cancel": "the inline rename form's own Cancel",
+    }
+
+    def _admin_labels(self) -> list[str]:
+        src = self.DASHBOARD.read_text(encoding="utf-8")
+        regions, stack = [], []
+        for m in self.BLOCK.finditer(src):
+            if m.group(1) == "if":
+                stack.append((m.group(2).strip(), m.end()))
+            else:
+                cond, start = stack.pop()
+                if cond == "is_admin":
+                    regions.append(src[start:m.start()])
+        keys: list[str] = []
+        for region in regions:
+            for control in self.CONTROL.finditer(region):
+                for a, b in self.LABEL.findall(control.group(2)):
+                    if (a or b) not in keys:
+                        keys.append(a or b)
+        return keys
+
+    def test_the_derivation_finds_the_actions(self):
+        keys = self._admin_labels()
+        assert {"export_project", "backup_project", "move_btn"} <= set(keys)
+
+    @pytest.mark.parametrize("lang", LANGS)
+    def test_each_admin_action_is_named_in_the_guide(self, lang):
+        text = re.sub(r"\s+", " ", html.unescape(
+            TAGS.sub(" ", _content(lang)))).lower()
+        missing = []
+        for key in self._admin_labels():
+            if key in self.EXEMPT:
+                continue
+            label = TRANSLATIONS[lang].get(key)
+            assert label, f"{lang}: no dictionary entry for {key}"
+            if label.strip().lower() not in text:
+                missing.append(f"{key} = {label!r}")
+        assert not missing, (
+            f"{lang}: Dashboard admin actions the Guide never names: "
+            f"{missing}")
+
+    def test_an_exemption_still_names_a_dashboard_control(self):
+        keys = set(self._admin_labels())
+        stale = sorted(set(self.EXEMPT) - keys)
+        assert not stale, f"exemptions for controls that are gone: {stale}"
