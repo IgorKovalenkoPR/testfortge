@@ -161,6 +161,15 @@ TEXT_PAIRS = [
     ("--tf-line", "--text-strong", "recorder command on its dark block"),
     ("--blue-border", WHITE, "info status line"),
     ("--badge-green", WHITE, "ok status line"),
+    ("--danger", "--tf-line-2", "status code and error on a failed network row"),
+    ("--danger-text", "--tf-line-2", "error banner text"),
+    ("--badge-red", "--tf-line-2", "telemetry error detail"),
+    ("--warning", "--amber-bg", "telemetry warning detail"),
+    ("--info-text", "--tf-blue-soft", "inline code in the info banner"),
+    ("--code-text", "--tf-bg", "telemetry headings and summary"),
+    ("--console-error", "--text-strong", "console error line on its dark block"),
+    ("--console-muted", "--text-strong", "console log line on its dark block"),
+    ("--amber-border", "--text-strong", "console warning line on its dark block"),
 ]
 
 #: 3:1 — WCAG 1.4.11 non-text contrast.
@@ -542,7 +551,6 @@ INLINE_STYLE_CEILING = {
     "guide.html": 8,
     "index.html": 34,
     "org_settings.html": 2,
-    "review_session.html": 59,
     "test_execution_live.html": 51,
     "test_execution_manual.html": 11,
     "test_execution_runs.html": 2,
@@ -558,7 +566,6 @@ JS_STYLE_CEILING = {
     "templates/checklist.html": 8,
     "templates/estimation.html": 6,
     "templates/guide.html": 2,
-    "templates/review_session.html": 1,
     "templates/test_execution_live.html": 8,
 }
 

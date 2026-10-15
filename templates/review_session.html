@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('review_session_title', 'Review recorded session') }}{% endblock %}
 
+{% block page_class %}{{ ' page-review-session' }}{% endblock %}
 {% block content %}
 <div class="page-header">
     <h1>🎬 {{ t.get('review_session_title', 'Review recorded session') }}</h1>
@@ -14,18 +15,18 @@
    draft=None + an error_message string for "not found" / "wrong
    project" so the user always lands on a familiar layout. #}
 {% if error_message %}
-    <div class="card card-error" style="margin-top:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:14px 18px;border-radius:8px;">
+    <div class="card card-error rs-error-banner">
         <strong>{{ t.get('review_session_blocked', 'Review unavailable') }}</strong>
-        <p style="margin:6px 0 0 0;">{{ error_message }}</p>
-        <p style="margin-top:10px;">
+        <p class="rs-banner-text">{{ error_message }}</p>
+        <p class="rs-mt-10">
             <a href="{{ url_for('test_cases_page') }}" class="btn btn-secondary">&larr; {{ t.get('nav_test_cases', 'Test Cases') }}</a>
         </p>
     </div>
 {% elif draft %}
-    <div class="card" style="margin-top:14px;padding:14px 18px;background:#f0f9ff;border:1px solid #bae6fd;color:#075985;border-radius:8px;">
+    <div class="card rs-info-banner">
         <strong>{{ draft.proposed_tcs|length }}</strong>
         {{ t.get('review_session_proposed_n', 'proposed test case(s) for project') }}
-        <code style="background:#e0f2fe;padding:1px 6px;border-radius:3px;">{{ draft.project_id }}</code>.
+        <code class="rs-info-code">{{ draft.project_id }}</code>.
         {{ t.get('review_session_expires', 'Link expires') }}: <small>{{ draft.expires_at }}</small>
     </div>
 
@@ -39,65 +40,65 @@
     {% set n_errors = (counts.console_errors or 0) + (counts.network_failures or 0) %}
 
     {% if not tele.meta.debugger_ok and not tele.network and not tele.console %}
-    <div class="card" style="margin-top:12px;padding:12px 16px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;font-size:0.9em;">
+    <div class="card rs-tele-warning">
         ⚠ {{ t.get('review_session_deepcapture_off',
             'Deep capture (network + console) was unavailable for this session — the debugger could not attach (DevTools open on the tab, a chrome:// page, or the banner was dismissed). Steps were still recorded.') }}
-        {% if tele.meta.debugger_error %}<br><small style="color:#b45309;"><code>{{ tele.meta.debugger_error }}</code></small>{% endif %}
+        {% if tele.meta.debugger_error %}<br><small class="rs-tele-warning-detail"><code>{{ tele.meta.debugger_error }}</code></small>{% endif %}
     </div>
     {% elif n_errors > 0 %}
-    <div class="card" style="margin-top:12px;padding:12px 16px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;">
+    <div class="card rs-tele-error">
         <strong>⚠ {{ n_errors }}</strong>
         {{ t.get('review_session_errors_detected',
             'issue(s) detected during this session') }}
         —
         <span>{{ counts.network_failures or 0 }} {{ t.get('review_session_failed_requests', 'failed request(s)') }}</span>,
         <span>{{ counts.console_errors or 0 }} {{ t.get('review_session_console_errors', 'console error(s)') }}</span>.
-        <small style="display:block;margin-top:4px;color:#b91c1c;">
+        <small class="rs-tele-error-detail">
             {{ t.get('review_session_errors_hint',
                 'These are candidates for bug reports — expand the panel below to inspect.') }}
         </small>
     </div>
     {% endif %}
 
-    <details class="card" style="margin-top:12px;padding:0;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-        <summary style="cursor:pointer;padding:12px 16px;background:#f8fafc;font-weight:600;color:#334155;">
+    <details class="card rs-tele">
+        <summary class="rs-tele-summary">
             🔎 {{ t.get('review_session_telemetry_title', 'Session telemetry') }}
-            <span style="font-weight:400;color:var(--text-muted);font-size:0.9em;">
+            <span class="rs-tele-counts">
                 ({{ counts.network or 0 }} {{ t.get('review_session_requests', 'requests') }},
                  {{ counts.console or 0 }} {{ t.get('review_session_console_msgs', 'console msgs') }},
                  {{ counts.dom_snapshots or 0 }} {{ t.get('review_session_snapshots', 'DOM snapshots') }})
             </span>
         </summary>
-        <div style="padding:14px 16px;">
+        <div class="rs-tele-body">
 
             {# Network requests — failures highlighted. #}
             {% if tele.network %}
-            <h2 class="heading-4" style="margin:0 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4 rs-tele-heading-first">
                 {{ t.get('review_session_network', 'Network requests') }}
             </h2>
-            <div style="max-height:280px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.82em;font-family:monospace;">
+            <div class="rs-net-scroll">
+                <table class="rs-net-table">
                     <thead>
-                        <tr style="background:#f8fafc;color:var(--text-muted);text-align:left;">
-                            <th style="padding:5px 8px;">{{ t.get('review_session_status', 'Status') }}</th>
-                            <th style="padding:5px 8px;">{{ t.get('review_session_method', 'Method') }}</th>
-                            <th style="padding:5px 8px;">{{ t.get('review_session_url', 'URL') }}</th>
-                            <th style="padding:5px 8px;">{{ t.get('review_session_type', 'Type') }}</th>
+                        <tr class="rs-net-head">
+                            <th class="rs-net-th">{{ t.get('review_session_status', 'Status') }}</th>
+                            <th class="rs-net-th">{{ t.get('review_session_method', 'Method') }}</th>
+                            <th class="rs-net-th">{{ t.get('review_session_url', 'URL') }}</th>
+                            <th class="rs-net-th">{{ t.get('review_session_type', 'Type') }}</th>
                         </tr>
                     </thead>
                     <tbody>
                     {% for r in tele.network %}
                         {% set is_fail = (r.ok == false) or (r.status and r.status >= 400) %}
-                        <tr style="border-top:1px solid #f1f5f9;{% if is_fail %}background:#fef2f2;{% endif %}">
-                            <td style="padding:4px 8px;font-weight:600;{% if is_fail %}color:#dc2626;{% elif r.status %}color:var(--badge-green);{% else %}color:var(--text-subtle);{% endif %}">
+                        <tr class="rs-net-row{% if is_fail %} rs-net-row--fail{% endif %}">
+                            <td class="rs-net-status {% if is_fail %}rs-net-status--fail{% elif r.status %}rs-net-status--ok{% else %}rs-net-status--none{% endif %}">
                                 {% if r.error %}✕{% else %}{{ r.status or '—' }}{% endif %}
                             </td>
-                            <td style="padding:4px 8px;color:#475569;">{{ r.method }}</td>
-                            <td style="padding:4px 8px;color:#334155;word-break:break-all;">
+                            <td class="rs-net-method">{{ r.method }}</td>
+                            <td class="rs-net-url">
                                 {{ r.url|truncate(90) }}
-                                {% if r.error %}<em style="color:#dc2626;"> ({{ r.error }})</em>{% endif %}
+                                {% if r.error %}<em class="rs-net-error"> ({{ r.error }})</em>{% endif %}
                             </td>
-                            <td style="padding:4px 8px;color:var(--text-subtle);">{{ r.type }}</td>
+                            <td class="rs-net-type">{{ r.type }}</td>
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -107,14 +108,14 @@
 
             {# Console — errors + warnings colour-coded. #}
             {% if tele.console %}
-            <h2 class="heading-4" style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4 rs-tele-heading">
                 {{ t.get('review_session_console', 'Console output') }}
             </h2>
-            <div style="max-height:240px;overflow:auto;border:1px solid #f1f5f9;border-radius:6px;background:#0f172a;padding:8px 10px;">
+            <div class="rs-console">
                 {% for c in tele.console %}
-                {% set col = '#f87171' if c.level in ('error', 'assert') else ('#fbbf24' if c.level in ('warning', 'warn') else '#94a3b8') %}
-                <div style="font-family:monospace;font-size:0.8em;line-height:1.5;color:{{ col }};word-break:break-word;">
-                    <span style="opacity:0.7;text-transform:uppercase;">[{{ c.level }}]</span>
+                {% set tone = 'error' if c.level in ('error', 'assert') else ('warn' if c.level in ('warning', 'warn') else 'log') %}
+                <div class="rs-console-line rs-console-line--{{ tone }}">
+                    <span class="rs-console-level">[{{ c.level }}]</span>
                     {{ c.text|truncate(300) }}
                 </div>
                 {% endfor %}
@@ -123,15 +124,15 @@
 
             {# DOM snapshots — one line per captured page. #}
             {% if tele.dom_snapshots %}
-            <h2 class="heading-4" style="margin:14px 0 6px 0;font-size:0.95em;color:#334155;">
+            <h2 class="heading-4 rs-tele-heading">
                 {{ t.get('review_session_dom', 'DOM snapshots') }}
             </h2>
-            <ul style="margin:0;padding-left:18px;color:#475569;font-size:0.85em;">
+            <ul class="rs-dom-list">
                 {% for s in tele.dom_snapshots %}
-                <li style="margin:3px 0;">
+                <li class="rs-dom-item">
                     <strong>{{ s.title or s.url|truncate(60) }}</strong>
                     — {{ s.element_count }} {{ t.get('review_session_controls', 'interactive controls') }}
-                    <br><small style="color:var(--text-subtle);word-break:break-all;">{{ s.url|truncate(90) }}</small>
+                    <br><small class="rs-dom-url">{{ s.url|truncate(90) }}</small>
                 </li>
                 {% endfor %}
             </ul>
@@ -141,8 +142,7 @@
     </details>
     {% endif %}
 
-    <form id="review-form" method="POST" action="{{ url_for('test_cases_review_session_save', token=token) }}"
-          style="margin-top:16px;">
+    <form class="rs-mt-16" id="review-form" method="POST" action="{{ url_for('test_cases_review_session_save', token=token) }}">
         {# CSRF token for the form-encoded fallback. The JS fetch in
            the script block at the bottom also passes this value as
            the X-CSRFToken header so the JSON path doesn't bypass the
@@ -150,47 +150,43 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         {% for pc in draft.proposed_tcs %}
-        <div class="card" data-proposed-card="{{ loop.index0 }}"
-             style="margin-top:14px;padding:18px 20px;border:1px solid #e2e8f0;border-radius:8px;background:white;">
-            <div style="display:flex;align-items:flex-start;gap:12px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
-                    <input type="checkbox" name="save_{{ loop.index0 }}" value="on" checked
-                           style="width:18px;height:18px;cursor:pointer;">
-                    <span style="font-size:0.85em;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">
+        <div class="card rs-card" data-proposed-card="{{ loop.index0 }}">
+            <div class="rs-card-head">
+                <label class="rs-card-save">
+                    <input class="rs-card-check" type="checkbox" name="save_{{ loop.index0 }}" value="on" checked>
+                    <span class="rs-card-save-label">
                         {{ t.get('review_session_save_label', 'Save') }} #{{ loop.index }}
                     </span>
                 </label>
-                <div style="flex:1;">
-                    <strong style="display:block;font-size:1.05em;margin-bottom:4px;">
+                <div class="rs-grow">
+                    <strong class="rs-card-title">
                         {{ pc.summary }}
                     </strong>
                     {% if pc.intent %}
-                    <p style="color:#475569;font-size:0.92em;margin:0 0 8px 0;">
+                    <p class="rs-card-intent">
                         <em>{{ t.get('review_session_intent', 'Intent') }}:</em> {{ pc.intent }}
                     </p>
                     {% endif %}
                 </div>
             </div>
 
-            <div style="display:grid;grid-template-columns:160px 1fr;gap:10px;margin-top:12px;align-items:center;">
-                <label style="font-size:0.9em;color:#475569;">
+            <div class="rs-card-fields">
+                <label class="rs-field-label">
                     {{ t.get('review_session_summary_label', 'Summary (editable)') }}
                 </label>
-                <input aria-label="{{ t.get('review_session_summary_label', 'Summary (editable)') }}" type="text" name="summary_{{ loop.index0 }}" value="{{ pc.summary }}"
-                       style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;">
+                <input class="rs-field-input" aria-label="{{ t.get('review_session_summary_label', 'Summary (editable)') }}" type="text" name="summary_{{ loop.index0 }}" value="{{ pc.summary }}">
 
-                <label style="font-size:0.9em;color:#475569;">
+                <label class="rs-field-label">
                     {{ t.get('review_session_suite_label', 'Suite tag') }}
                 </label>
                 <div>
-                    <select aria-label="{{ t.get('review_session_suite_label', 'Suite tag') }}" name="suite_{{ loop.index0 }}"
-                            style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;min-width:180px;">
+                    <select class="rs-field-select" aria-label="{{ t.get('review_session_suite_label', 'Suite tag') }}" name="suite_{{ loop.index0 }}">
                         <option value="Smoke"      {% if pc.suggested_suite == 'Smoke' %}selected{% endif %}>Smoke</option>
                         <option value="Regression" {% if pc.suggested_suite == 'Regression' %}selected{% endif %}>Regression</option>
                         <option value="E2E"        {% if pc.suggested_suite == 'E2E' %}selected{% endif %}>E2E</option>
                     </select>
                     {% if pc.rationale %}
-                    <small style="display:block;color:var(--text-subtle);margin-top:4px;font-size:0.82em;">
+                    <small class="rs-field-hint">
                         {{ t.get('review_session_classifier_hint', 'Classifier suggests') }}
                         <strong>{{ pc.suggested_suite }}</strong>: {{ pc.rationale }}
                     </small>
@@ -198,24 +194,24 @@
                 </div>
             </div>
 
-            <details style="margin-top:12px;">
-                <summary style="cursor:pointer;color:#475569;font-size:0.88em;">
+            <details class="rs-mt-12">
+                <summary class="rs-steps-summary">
                     ▸ {{ t.get('review_session_steps_preview', 'Preview captured steps') }} ({{ pc.steps|length }})
                 </summary>
-                <ol style="margin:8px 0 0 18px;color:#334155;font-size:0.88em;font-family:monospace;">
+                <ol class="rs-steps-list">
                     {% for step in pc.steps %}
-                    <li style="margin:2px 0;">
+                    <li class="rs-step">
                         {% if step.kind == 'assertion' %}◇{% else %}▸{% endif %}
                         <strong>{{ step.action }}</strong>
-                        {% if step.target %}<span style="color:var(--text-subtle);">{{ step.target|truncate(60) }}</span>{% endif %}
-                        {% if step.value %}<em style="color:#0369a1;">= "{{ step.value|truncate(40) }}"</em>{% endif %}
+                        {% if step.target %}<span class="rs-text-subtle">{{ step.target|truncate(60) }}</span>{% endif %}
+                        {% if step.value %}<em class="rs-step-target">= "{{ step.value|truncate(40) }}"</em>{% endif %}
                         {# The recorder stamps a comment on steps that
                            describe something rather than instruct it —
                            today only the synthetic form-submit marker,
                            which addresses no element and so would
                            otherwise render as a bare verb with nothing
                            after it. #}
-                        {% if step.comment %}<span style="color:var(--text-muted);">— {{ step.comment|truncate(40) }}</span>{% endif %}
+                        {% if step.comment %}<span class="rs-text-muted">— {{ step.comment|truncate(40) }}</span>{% endif %}
                     </li>
                     {% endfor %}
                 </ol>
@@ -223,7 +219,7 @@
         </div>
         {% endfor %}
 
-        <div style="margin-top:18px;display:flex;gap:10px;align-items:center;">
+        <div class="rs-actions">
             <button type="submit" class="btn btn-primary" id="review-save-btn">
                 💾 {{ t.get('review_session_save_all', 'Save selected') }}
             </button>
@@ -238,7 +234,7 @@
                     {{ t.get('review_session_cancel', 'Cancel — discard recording') }}
                   </button>
                 </form>
-            <span id="review-status" style="color:var(--text-subtle);font-size:0.88em;"></span>
+            <span class="rs-status" id="review-status"></span>
         </div>
     </form>
 {% endif %}
@@ -253,10 +249,12 @@
     var btn = document.getElementById('review-save-btn');
     var status = document.getElementById('review-status');
 
+    // Tone, not colour: ok / error, or none for the default grey.
     function setStatus(text, color) {
         if (status) {
             status.textContent = text || '';
-            status.style.color = color || '#6B7280';
+            status.classList.remove('rs-status--ok', 'rs-status--error');
+            if (color) status.classList.add('rs-status--' + color);
         }
     }
 
@@ -280,7 +278,7 @@
             });
         });
         if (!selected.length) {
-            setStatus('Select at least one TC to save.', '#dc2626');
+            setStatus('Select at least one TC to save.', 'error');
             if (btn) btn.disabled = false;
             return;
         }
@@ -303,16 +301,16 @@
             });
             var body = await resp.json().catch(function () { return {}; });
             if (!resp.ok) {
-                setStatus('Error: ' + (body.error || resp.status), '#dc2626');
+                setStatus('Error: ' + (body.error || resp.status), 'error');
                 if (btn) btn.disabled = false;
                 return;
             }
             setStatus('Saved ' + body.created_count + ' TC(s). Redirecting…',
-                       '#16a34a');
+                       'ok');
             window.location.assign(body.redirect_url || '/test-cases');
         } catch (e) {
             setStatus('Network error — falling back to plain submit.',
-                       '#dc2626');
+                       'error');
             if (btn) btn.disabled = false;
             form.submit();
         }
