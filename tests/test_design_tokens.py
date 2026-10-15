@@ -479,3 +479,22 @@ def test_button_rows_share_one_gap(css, selector):
 def test_the_button_gap_is_on_the_spacing_scale(tokens):
     assert tokens["--gap-buttons"] in {
         f"var(--space-{i})" for i in range(1, 7)}
+
+
+# ── (h) the sidebar model switcher is a compact control ───────────────
+
+def _body(css: str, selector: str) -> str:
+    return " ".join(body for sels, body in _rules(css) if selector in sels)
+
+
+def test_the_model_switcher_is_compact_and_clear_of_its_status_line(css):
+    """The switcher used the 43 px form select and sat flush on the
+    "Now: claude-haiku-5-5" line, so its focus ring (2 px + 2 px offset)
+    covered the text (owner screenshot, 2026-10-15). It takes the small
+    control height, and the block spaces its children further apart than
+    the ring reaches."""
+    box = _body(css, ".sidebar-model")
+    assert re.search(r"display\s*:\s*flex", box), box
+    assert re.search(r"gap\s*:\s*var\(--space-2\)", box), box
+    sel = _body(css, ".sidebar-model select")
+    assert re.search(r"(?<![-\w])height\s*:\s*var\(--control-sm\)", sel), sel

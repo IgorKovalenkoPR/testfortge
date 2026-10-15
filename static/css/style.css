@@ -4039,3 +4039,15 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
     font-size: 1.5rem; line-height: 1; color: var(--text-muted);
 }
 .btn-close:hover { color: var(--text); }
+
+/* Sidebar model switcher: a compact control with room for its focus ring
+   (the 43 px form select sat flush on the "Now: …" line and its ring
+   covered it, 2026-10-15). */
+.sidebar-model {
+    display: flex; flex-direction: column; gap: var(--space-2);
+}
+.sidebar-model label { margin: 0; }
+.sidebar-model select {
+    height: var(--control-sm); min-height: 0;
+    padding: 0 var(--space-2); font-size: 13px;
+}
