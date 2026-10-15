@@ -151,6 +151,16 @@ TEXT_PAIRS = [
     ("--violet-text", "--violet-bg", "violet item badge"),
     ("--indigo-text", "--indigo-bg", "done pill"),
     ("--danger-text", "--danger-light", "failed pill"),
+    ("--error-text", WHITE, "generation error text"),
+    ("--blue-text", "--tf-line-2", "session-drafts hint and names"),
+    ("--blue-text-strong", "--tf-line-2", "session-drafts title"),
+    ("--orange-text", "--amber-bg", "recorder card notes"),
+    ("--info-strong", "--amber-bg", "recorder install link on its card"),
+    ("--indigo-text", "--indigo-bg-soft", "indigo outline badge"),
+    ("--code-text", WHITE, "recorded step code"),
+    ("--tf-line", "--text-strong", "recorder command on its dark block"),
+    ("--blue-border", WHITE, "info status line"),
+    ("--badge-green", WHITE, "ok status line"),
 ]
 
 #: 3:1 — WCAG 1.4.11 non-text contrast.
@@ -533,7 +543,6 @@ INLINE_STYLE_CEILING = {
     "index.html": 34,
     "org_settings.html": 2,
     "review_session.html": 59,
-    "test_cases.html": 68,
     "test_execution_live.html": 51,
     "test_execution_manual.html": 11,
     "test_execution_runs.html": 2,
@@ -550,7 +559,6 @@ JS_STYLE_CEILING = {
     "templates/estimation.html": 6,
     "templates/guide.html": 2,
     "templates/review_session.html": 1,
-    "templates/test_cases.html": 14,
     "templates/test_execution_live.html": 8,
 }
 

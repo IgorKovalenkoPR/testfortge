@@ -133,6 +133,16 @@
     --indigo-bg:         #e0e7ff;
     --indigo-text:       #3730a3;
     --danger-text:       #991b1b;
+    --error-text:        #dc2626;
+    --blue-border:       #2563eb;
+    --blue-text:         #1e40af;
+    --blue-text-strong:  #1e3a8a;
+    --orange-border:     #d97706;
+    --orange-text:       #7c2d12;
+    --indigo-bg-soft:    #eef2ff;
+    --indigo-border:     #c7d2fe;
+    --code-text:         #334155;
+    --shadow-dialog:     0 20px 60px rgba(0,0,0,0.25);
 }
 
 body {
@@ -4165,3 +4175,71 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .page-test-execution .te-active-pill--failed { background: var(--danger-light); color: var(--danger-text); }
 .page-test-execution .te-slow-notice { margin-top: 14px; padding: 10px; background: var(--warning-light); color: var(--amber-text); border: 1px solid var(--amber-border); border-radius: 6px; font-size: 0.88em; }
 .page-test-execution .te-file-row { display: flex; justify-content: space-between; padding: 4px 8px; background: var(--tf-line-2); border-radius: 4px; margin-top: 4px; font-size: 0.85em; }
+
+/* ── Test Cases (was inline style="", block B 2026-10-15) ─────────────── */
+.page-test-cases .tc-gen-stage { margin-bottom: 10px; color: var(--text-strong); font-weight: 600; }
+.page-test-cases .tc-gen-elapsed { margin: 6px 0 10px 0; font-size: 0.85em; color: var(--badge-grey); }
+.page-test-cases .tc-gen-error { margin-top: 14px; color: var(--error-text); font-size: 0.88em; }
+.page-test-cases .tc-gen-row { align-items: flex-end; gap: 12px; }
+.page-test-cases .tc-grow { flex: 1; }
+.page-test-cases .tc-recent-urls { background: var(--tf-bg); margin-bottom: 16px; }
+.page-test-cases .tc-recent-title { font-size: 0.95em; }
+.page-test-cases .tc-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.page-test-cases .tc-url-chip { display: inline-block; padding: 5px 14px; background: var(--tf-surface); border: 1px solid var(--primary); border-radius: 20px; color: var(--primary); font-size: 0.85em; text-decoration: none; word-break: break-all; }
+.page-test-cases .tc-drafts { margin-top: 14px; padding: 14px; border: 1px solid var(--blue-border); background: var(--indigo-bg-soft); border-radius: 6px; }
+.page-test-cases .tc-drafts-title { font-weight: 600; color: var(--blue-text-strong); margin-bottom: 8px; }
+.page-test-cases .tc-drafts-hint { font-size: 0.85em; color: var(--blue-text); margin: 0 0 10px 0; }
+.page-test-cases .tc-drafts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.page-test-cases .tc-drafts-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.88em; }
+.page-test-cases .tc-drafts-name { color: var(--blue-text); }
+.page-test-cases .tc-drafts-meta { color: var(--text-muted); font-size: 0.92em; }
+.page-test-cases .tc-recorder { margin-top: 14px; padding: 14px; border: 1px dashed var(--orange-border); background: var(--amber-bg); border-radius: 6px; }
+.page-test-cases .tc-recorder-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.page-test-cases .tc-recorder-start { display: flex; align-items: center; gap: 6px; }
+.page-test-cases .tc-recorder-note { color: var(--orange-text); font-size: 0.88em; }
+.page-test-cases .tc-recorder-install { font-size: 0.85em; margin-left: auto; color: var(--info-strong); }
+.page-test-cases .tc-recorder-help { margin: 10px 0 0; font-size: 0.82em; color: var(--orange-text); line-height: 1.5; }
+.page-test-cases .tc-link-info { color: var(--info-strong); }
+.page-test-cases .tc-dialog { background: var(--tf-surface); max-width: 560px; width: 100%; border-radius: 10px; padding: 22px 26px; box-shadow: var(--shadow-dialog); }
+.page-test-cases .tc-dialog-title { margin: 0 0 12px 0; }
+.page-test-cases .tc-dialog-text { font-size: 0.88em; color: var(--badge-grey); margin: 0 0 12px 0; }
+.page-test-cases .tc-dialog-label { font-size: 0.85em; color: var(--badge-grey); }
+.page-test-cases .tc-dialog-url { width: 100%; font-family: monospace; font-size: 0.9em; margin: 4px 0 12px 0; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 4px; }
+.page-test-cases .tc-dialog-status { font-size: 0.82em; color: var(--text-subtle); min-height: 1.2em; margin: 0 0 12px 0; }
+.page-test-cases .tc-dialog-manual { font-size: 0.82em; margin: 0 0 12px 0; word-break: break-all; }
+.page-test-cases .tc-dialog-actions { justify-content: flex-end; }
+.page-test-cases .tc-mt-8 { margin-top: 8px; }
+.page-test-cases .tc-badge-suite { background: var(--violet-bg); color: var(--violet-text); border: 1px solid var(--violet-border); }
+.page-test-cases .tc-badge-indigo { background: var(--indigo-bg-soft); border-color: var(--indigo-border); color: var(--indigo-text); }
+.page-test-cases .tc-edit-panel { margin-top: 10px; border: 1px dashed var(--border-strong); border-radius: 6px; padding: 8px 12px; background: var(--tf-bg); }
+.page-test-cases .tc-edit-summary { cursor: pointer; font-weight: 600; color: var(--badge-grey); font-size: 0.9em; }
+.page-test-cases .tc-edit-summary-note { color: var(--tf-mute-2); font-weight: 400; }
+.page-test-cases .tc-walkthrough-row { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.page-test-cases .tc-walkthrough-field { flex: 1 1 220px; margin: 0; }
+.page-test-cases .tc-field-label { font-size: 0.82em; color: var(--badge-grey); }
+.page-test-cases .tc-mono-input { width: 100%; font-family: monospace; font-size: 0.9em; }
+.page-test-cases .tc-full { width: 100%; }
+.page-test-cases .tc-m0 { margin: 0; }
+.page-test-cases .tc-walkthrough-hint { font-size: 0.78em; color: var(--tf-mute-2); margin: 6px 0 0 0; }
+.page-test-cases .tc-recorded-note { color: var(--badge-green); font-weight: 600; }
+.page-test-cases .tc-edit-hint { font-size: 0.82em; color: var(--badge-grey); margin: 0 0 6px 0; }
+.page-test-cases .tc-recorder-url { width: 100%; font-family: monospace; font-size: 0.85em; margin: 2px 0 8px 0; }
+.page-test-cases .tc-recorder-cmd { background: var(--text-strong); color: var(--tf-line); padding: 8px 10px; border-radius: 4px; font-size: 0.78em; white-space: pre-wrap; word-break: break-all; margin: 0 0 6px 0; }
+.page-test-cases .tc-steps-block { margin-top: 12px; border-top: 1px dashed var(--border-strong); padding-top: 10px; }
+.page-test-cases .tc-steps-table { width: 100%; font-size: 0.82em; border-collapse: collapse; }
+.page-test-cases .tc-steps-head { color: var(--text-muted); text-align: left; }
+.page-test-cases .tc-steps-num { padding: 2px 4px; width: 32px; }
+.page-test-cases .tc-steps-cell { padding: 2px 4px; }
+.page-test-cases .tc-steps-target { padding: 2px 4px; width: 200px; }
+.page-test-cases .tc-steps-index { padding: 2px 4px; color: var(--text-subtle); font-family: monospace; }
+.page-test-cases .tc-steps-code { padding: 2px 4px; font-family: monospace; color: var(--code-text); }
+.page-test-cases .tc-text-subtle { color: var(--text-subtle); }
+.page-test-cases .tc-steps-select { font-size: 0.82em; padding: 2px 4px; width: 100%; }
+.page-test-cases .tc-steps-status { font-size: 0.78em; color: var(--text-subtle); margin: 4px 0 0 0; min-height: 1.2em; }
+.page-test-cases .tc-help-list { padding-left: 1.5rem; margin-top: .5rem; }
+.page-test-cases .tc-mt-10 { margin-top: 10px; }
+/* Status lines (recorder, walkthrough save). Green is --badge-green, not
+   the old #16a34a: that was 3.3:1 on white and failed AA. */
+.page-test-cases .tc-status--ok { color: var(--badge-green); }
+.page-test-cases .tc-status--error { color: var(--error-text); }
+.page-test-cases .tc-status--info { color: var(--blue-border); }

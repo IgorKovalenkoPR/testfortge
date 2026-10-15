@@ -28,6 +28,7 @@
               kind=kind, label=label, readonly=(meta is none)) }}
 {%- endmacro %}
 
+{% block page_class %}{{ ' page-test-cases' }}{% endblock %}
 {% block content %}
 <div class="page-header">
     <h1>{{ t.tc_title }}</h1>
@@ -85,12 +86,12 @@
 <div id="tc-gen-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
     <div class="te-run-card">
         <h2 class="heading-3">{{ t.get('tc_gen_title', 'Generating test cases…') }}</h2>
-        <p id="tc-gen-stage" style="margin-bottom:10px;color:#0f172a;font-weight:600;">
+        <p class="tc-gen-stage" id="tc-gen-stage">
             {{ t.get('tc_gen_stage_init', 'Analyzing input…') }}
         </p>
-        <p id="tc-gen-elapsed" style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;"></p>
+        <p class="tc-gen-elapsed" id="tc-gen-elapsed"></p>
         <div class="te-run-bar" aria-hidden="true"></div>
-        <p id="tc-gen-error" style="margin-top:14px;color:#dc2626;font-size:0.88em;display:none;"></p>
+        <p class="tc-gen-error" id="tc-gen-error" hidden></p>
     </div>
 </div>
 
@@ -203,7 +204,7 @@
             "{{ t.get('tc_gen_stage_saved', 'Finished — the server restarted before the page updated.') }}";
         if (!errorEl) return;
         errorEl.innerHTML = '';
-        errorEl.style.display = 'block';
+        errorEl.hidden = false;
         var msg = document.createElement('div');
         msg.textContent = (
             "{{ t.get('tc_gen_saved_pack', 'Generation finished and NUM test cases were saved for this project, but the server restarted before the page could update. Reload to see them.') }}"
@@ -212,7 +213,7 @@
         var reload = document.createElement('button');
         reload.type = 'button';
         reload.className = 'btn btn-primary';
-        reload.style.marginTop = '10px';
+        reload.classList.add('tc-mt-10');
         reload.textContent = "{{ t.get('tc_gen_show_saved', 'Show saved test cases') }}";
         reload.addEventListener('click', function () { window.location.reload(); });
         errorEl.appendChild(reload);
@@ -225,7 +226,7 @@
             "{{ t.get('tc_gen_stage_fallback', 'Generation could not finish — try again.') }}";
         if (!errorEl) return;
         errorEl.innerHTML = '';
-        errorEl.style.display = 'block';
+        errorEl.hidden = false;
         var msg = document.createElement('div');
         msg.textContent =
             "{{ t.get('tc_gen_worker_died', 'The server restarted before the run finished, so nothing was saved. This happens on the free plan when a generation exceeds the memory limit — try a narrower scope or fewer pages.') }}";
@@ -233,10 +234,10 @@
         var retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'btn btn-primary';
-        retry.style.marginTop = '10px';
+        retry.classList.add('tc-mt-10');
         retry.textContent = "{{ t.get('tc_gen_retry', 'Retry generation') }}";
         retry.addEventListener('click', function () {
-            errorEl.style.display = 'none';
+            errorEl.hidden = true;
             overlay.hidden = true;
             fallbackTriggered = false;
             onSubmit(new Event('submit'));
@@ -249,7 +250,7 @@
         if (overlay) overlay.hidden = true;
         if (!errorEl) return;
         errorEl.innerHTML = '';
-        errorEl.style.display = 'block';
+        errorEl.hidden = false;
         var msg = document.createElement('div');
         msg.textContent =
             "{{ t.get('tc_gen_session_expired', 'Your session expired. Reload the page and generate again.') }}";
@@ -257,7 +258,7 @@
         var reload = document.createElement('button');
         reload.type = 'button';
         reload.className = 'btn btn-primary';
-        reload.style.marginTop = '10px';
+        reload.classList.add('tc-mt-10');
         reload.textContent = "{{ t.get('tc_gen_reload', 'Reload page') }}";
         reload.addEventListener('click', function () { window.location.reload(); });
         errorEl.appendChild(reload);
@@ -278,7 +279,7 @@
     }
 
     function showError(msg) {
-        if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+        if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
         stopAll();
         // Return focus to the Generate button so a keyboard
         // user can immediately retry without tab-fishing.
@@ -300,17 +301,17 @@
             "{{ t.get('tc_gen_stage_fallback', 'Generation could not finish — try again.') }}";
         if (errorEl) {
             errorEl.innerHTML = "";
-            errorEl.style.display = 'block';
+            errorEl.hidden = false;
             var msg = document.createElement('div');
             msg.textContent = reason || "{{ t.get('tc_gen_offline', 'Generation could not finish — try again.') }}";
             errorEl.appendChild(msg);
             var retry = document.createElement('button');
             retry.type = 'button';
             retry.className = 'btn btn-primary';
-            retry.style.marginTop = '10px';
+            retry.classList.add('tc-mt-10');
             retry.textContent = "{{ t.get('tc_gen_retry', 'Retry generation') }}";
             retry.addEventListener('click', function () {
-                errorEl.style.display = 'none';
+                errorEl.hidden = true;
                 overlay.hidden = true;
                 fallbackTriggered = false;
                 onSubmit(new Event('submit'));
@@ -434,7 +435,7 @@
         stopped = false; fallbackTriggered = false; consecErrors = 0;
         csrfRetried = false;
         startedAt = Date.now();
-        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
         tick();
         if (tickHandle) clearInterval(tickHandle);
         tickHandle = setInterval(tick, 1000);
@@ -482,7 +483,7 @@
                     || ('Server returned HTTP ' + res.status + '.');
                 if (errorEl) {
                     errorEl.textContent = msg;
-                    errorEl.style.display = 'block';
+                    errorEl.hidden = false;
                 }
                 if (window.alert) { try { window.alert(msg); } catch (_) {} }
                 return;
@@ -514,7 +515,7 @@
         ev.preventDefault();
         stopAll();
         overlay.hidden = true;
-        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
         var btn = document.getElementById('tc-gen-button');
         if (btn) { try { btn.focus(); } catch (_) {} }
     });
@@ -537,8 +538,8 @@
         {{ t.get('tc_upload_hint',
             'Drop an existing pack (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the cases in the session for manual or automated execution. Supported headers include any case-insensitive variant of TC ID, Section, Summary, Preconditions, Steps to Reproduce, Test Data, Expected Result, Category, Priority, Status, Testing Type.') }}
     </p>
-    <div class="form-row" style="align-items:flex-end; gap:12px;">
-        <div class="form-group" style="flex:1">
+    <div class="form-row tc-gen-row">
+        <div class="form-group tc-grow">
             <label for="f-upload-file">{{ t.get('tc_upload_file', 'File') }}</label>
             <input id="f-upload-file" type="file" name="upload_file" required
                    accept=".xlsx,.csv,.md,.markdown,.json">
@@ -564,11 +565,11 @@
 </form>
 
 {% if resource_urls %}
-<div class="card" style="background:#f8fafe; margin-bottom:16px;">
-    <h3 class="card-title" style="font-size:0.95em;"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
-    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+<div class="card tc-recent-urls">
+    <h3 class="card-title tc-recent-title"><i data-lucide="globe" class="icon-sm"></i> {{ t.get('te_resource_urls', 'Resource Pages') }}</h3>
+    <div class="tc-chip-row">
         {% for url in resource_urls %}
-        <a href="{{ url }}" target="_blank" rel="noopener" style="display:inline-block; padding:5px 14px; background:white; border:1px solid var(--primary); border-radius:20px; color:var(--primary); font-size:0.85em; text-decoration:none; word-break:break-all;">{{ url }}</a>
+        <a class="tc-url-chip" href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a>
         {% endfor %}
     </div>
 </div>
@@ -607,31 +608,28 @@
        Only rendered when there's at least one un-consumed draft for the
        active project (``pending_drafts`` injected by app.inject_globals). #}
     {% if pending_drafts %}
-    <div style="margin-top:14px;padding:14px;border:1px solid #2563eb;
-                 background:#eff6ff;border-radius:6px;">
-        <div style="font-weight:600;color:#1e3a8a;margin-bottom:8px;">
+    <div class="tc-drafts">
+        <div class="tc-drafts-title">
             ⏳ {{ t.get('recorder_pending_title',
                         'Pending recording sessions') }}
         </div>
-        <p style="font-size:0.85em;color:#1e40af;margin:0 0 10px 0;">
+        <p class="tc-drafts-hint">
             {{ t.get('recorder_pending_hint',
                 'These recordings are waiting for review — open one to pick which captured test cases to keep and which suite they land in. Unreviewed sessions expire 24 h after capture.') }}
         </p>
-        <ul style="list-style:none;padding:0;margin:0;display:flex;
-                   flex-direction:column;gap:6px;">
+        <ul class="tc-drafts-list">
             {% for draft in pending_drafts %}
-            <li style="display:flex;align-items:center;gap:10px;
-                       flex-wrap:wrap;font-size:0.88em;">
+            <li class="tc-drafts-item">
                 <a href="/test-cases/review-session/{{ draft.token }}"
                    class="btn btn-sm btn-secondary">
                     📋 {{ t.get('recorder_pending_review', 'Review session') }} →
                 </a>
-                <span style="color:#1e40af;">
+                <span class="tc-drafts-name">
                     {{ draft.tc_count }}
                     {{ t.get('recorder_pending_tc_count', 'proposed test case(s)') }}
                 </span>
                 {% if draft.created_at %}
-                <span style="color:var(--text-muted);font-size:0.92em;">
+                <span class="tc-drafts-meta">
                     · {{ t.get('recorder_pending_captured', 'captured') }}
                     {{ draft.created_at | when }}
                 </span>
@@ -642,16 +640,14 @@
     </div>
     {% endif %}
 
-    <div style="margin-top:14px;padding:14px;border:1px dashed #d97706;
-                 background:#fff7ed;border-radius:6px;">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div class="tc-recorder">
+        <div class="tc-recorder-row">
             <button type="button" id="ext-recorder-start"
-                    class="btn btn-primary"
-                    style="display:flex;align-items:center;gap:6px;">
+                    class="btn btn-primary tc-recorder-start">
                 🎬 {{ t.get('ext_recorder_start',
                             'Start session recording') }}
             </button>
-            <span style="color:#7c2d12;font-size:0.88em;">
+            <span class="tc-recorder-note">
                 {{ t.get('ext_recorder_hint',
                     'Walk through your scenario in any tab — Stop and the captured TCs land in a review screen.') }}
             </span>
@@ -659,22 +655,19 @@
                folder the reader does not have. The href is the route, so
                it works with JavaScript off and can be copied; the JS
                handler below only opens the Guide alongside it. #}
-            <a href="{{ url_for('recorder_extension_zip') }}"
-               id="ext-recorder-install-link" download
-               style="font-size:0.85em;margin-left:auto;color:#0369a1;">
+            <a class="tc-recorder-install" href="{{ url_for('recorder_extension_zip') }}"
+               id="ext-recorder-install-link" download>
                 ⬇ {{ t.get('ext_recorder_install',
                     'Download the extension (.zip)') }}
             </a>
         </div>
         {# Why the download matters, said where the decision is made
            rather than three clicks away in the Guide. #}
-        <p style="margin:10px 0 0;font-size:0.82em;color:#7c2d12;
-                  line-height:1.5;">
+        <p class="tc-recorder-help">
             {{ t.get('ext_recorder_why',
                 'Recording needs the TestForTge browser extension — it is '
                 'the part that watches the tab and captures the steps.') }}
-            <a href="/guide#test-execution" target="_blank" rel="noopener"
-               style="color:#0369a1;">{{ t.get('nav_guide', 'Guide') }} ↗</a>
+            <a class="tc-link-info" href="/guide#test-execution" target="_blank" rel="noopener">{{ t.get('nav_guide', 'Guide') }} ↗</a>
         </p>
 
         {# Hidden modal — shown by the JS handler when the operator
@@ -690,41 +683,29 @@
            fixed for the bulk toolbar and reset-project modal. #}
         <div id="ext-recorder-modal" class="ext-recorder-modal" hidden
              role="dialog" aria-modal="true">
-            <div style="background:white;max-width:560px;width:100%;
-                         border-radius:10px;padding:22px 26px;
-                         box-shadow:0 20px 60px rgba(0,0,0,0.25);">
-                <h3 style="margin:0 0 12px 0;">
+            <div class="tc-dialog">
+                <h3 class="tc-dialog-title">
                     🎬 {{ t.get('ext_recorder_modal_title',
                                 'Start session recording') }}
                 </h3>
-                <p style="font-size:0.88em;color:#475569;
-                          margin:0 0 12px 0;">
+                <p class="tc-dialog-text">
                     {{ t.get('ext_recorder_modal_hint',
                         'The TestForTge recorder extension must be installed in this Chrome profile. The recorder will open the URL below in a new tab — walk the scenario, then click Stop on the floating overlay to land the captured steps in a review screen.') }}
                 </p>
-                <label for="ext-recorder-url"
-                       style="font-size:0.85em;color:#475569;">
+                <label class="tc-dialog-label" for="ext-recorder-url">
                     {{ t.get('ext_recorder_url_label', 'Start URL') }}
                 </label>
-                <input type="url" id="ext-recorder-url"
-                       placeholder="https://app.example.com/login"
-                       style="width:100%;font-family:monospace;
-                              font-size:0.9em;margin:4px 0 12px 0;
-                              padding:8px 10px;
-                              border:1px solid #cbd5e1;border-radius:4px;">
-                <p id="ext-recorder-status"
-                   style="font-size:0.82em;color:var(--text-subtle);
-                          min-height:1.2em;margin:0 0 12px 0;"></p>
+                <input class="tc-dialog-url" type="url" id="ext-recorder-url"
+                       placeholder="https://app.example.com/login">
+                <p class="tc-dialog-status" id="ext-recorder-status"></p>
                 {# Shown only when the browser refused to open the tab.
                    The recording token lives in worker memory and is still
                    valid at that point, so handing the operator the URL is
                    a real recovery rather than an apology — see the
                    launch handler. Populated by JS; empty and hidden
                    otherwise. #}
-                <p id="ext-recorder-manual" hidden
-                   style="font-size:0.82em;margin:0 0 12px 0;
-                          word-break:break-all;"></p>
-                <div class="btn-group" style="justify-content:flex-end;">
+                <p class="tc-dialog-manual" id="ext-recorder-manual" hidden></p>
+                <div class="btn-group tc-dialog-actions">
                     <button type="button" id="ext-recorder-cancel"
                             class="btn btn-sm btn-secondary">
                         {{ t.get('ext_recorder_cancel', 'Cancel') }}
@@ -778,7 +759,7 @@
     {# PR-D suite filter — sits separately from the category chips
        above so the two axes compose (e.g. Positive ∩ Smoke). The
        "All suites" reset is the default. #}
-    <div class="filter-bar" style="margin-top:8px;">
+    <div class="filter-bar tc-mt-8">
         <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
         <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
         <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
@@ -846,14 +827,13 @@
                 <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc_field(tc, "category", tc.category) }}</span>
                 <span class="badge badge-{{ tc.priority|lower }}">{{ tc_field(tc, "priority", tc.priority) }}</span>
                 {% if tc.suite or editors_enabled() %}
-                <span class="badge badge-suite-{{ tc.suite|lower }}"
-                      style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">
+                <span class="badge badge-suite-{{ tc.suite|lower }} tc-badge-suite">
                     {{ tc_field(tc, "suite", tc.suite, label="suite") }}
                 </span>
                 {% endif %}
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
                 {% if tc.trigger and tc.trigger != 'manual' %}
-                <span class="badge badge-outline" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3;"
+                <span class="badge badge-outline tc-badge-indigo"
                       title="{{ t.tc_walkthrough_note }}">
                     🧭 {{ tc.trigger }}
                 </span>
@@ -990,32 +970,28 @@
            pin a URL pattern to the TC + pick a trigger that decides
            when the walkthrough fires it. Plain HTML form so it
            gracefully degrades without JS. #}
-        <details class="tc-walkthrough-edit" style="margin-top:10px;
-                    border:1px dashed #cbd5e1;border-radius:6px;
-                    padding:8px 12px;background:#fafbfc;">
-            <summary style="cursor:pointer;font-weight:600;color:#475569;font-size:0.9em;">
+        <details class="tc-walkthrough-edit tc-edit-panel">
+            <summary class="tc-edit-summary">
                 🧭 {{ t.get('tc_walkthrough_meta_title', 'Walkthrough binding') }}
-                {% if tc.url_pattern %}<small style="color:#6b7280;font-weight:400;">— <code>{{ tc.url_pattern }}</code></small>{% endif %}
+                {% if tc.url_pattern %}<small class="tc-edit-summary-note">— <code>{{ tc.url_pattern }}</code></small>{% endif %}
             </summary>
             <form method="POST"
                   action="{{ url_for('test_cases_update_walkthrough_meta', tc_id=tc.id) }}"
-                  class="tc-walkthrough-form"
-                  style="margin-top:8px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                  class="tc-walkthrough-form tc-walkthrough-row">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="form-group" style="flex:1 1 220px;margin:0;">
-                    <label for="url_pattern_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                <div class="form-group tc-walkthrough-field">
+                    <label class="tc-field-label" for="url_pattern_{{ tc.id }}">
                         {{ t.get('tc_url_pattern_label', 'URL pattern (fnmatch glob)') }}
                     </label>
-                    <input type="text" id="url_pattern_{{ tc.id }}" name="url_pattern"
+                    <input class="tc-mono-input" type="text" id="url_pattern_{{ tc.id }}" name="url_pattern"
                            value="{{ tc.url_pattern or '' }}" maxlength="200"
-                           placeholder="*/checkout/*"
-                           style="width:100%;font-family:monospace;font-size:0.9em;">
+                           placeholder="*/checkout/*">
                 </div>
-                <div class="form-group" style="flex:1 1 220px;margin:0;">
-                    <label for="trigger_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                <div class="form-group tc-walkthrough-field">
+                    <label class="tc-field-label" for="trigger_{{ tc.id }}">
                         {{ t.get('tc_trigger_label', 'Trigger') }}
                     </label>
-                    <select id="trigger_{{ tc.id }}" name="trigger" style="width:100%;">
+                    <select class="tc-full" id="trigger_{{ tc.id }}" name="trigger">
                         <option value="manual" {% if (tc.trigger or 'manual') == 'manual' %}selected{% endif %}>
                             {{ t.get('tc_trigger_manual', 'manual — only user-driven runs') }}
                         </option>
@@ -1027,13 +1003,13 @@
                         </option>
                     </select>
                 </div>
-                <div class="form-group" style="margin:0;">
+                <div class="form-group tc-m0">
                     <button type="submit" class="btn btn-sm btn-secondary">
                         {{ t.get('save', 'Save') }}
                     </button>
                 </div>
             </form>
-            <p class="hint" style="font-size:0.78em;color:#6b7280;margin:6px 0 0 0;">
+            <p class="hint tc-walkthrough-hint">
                 {{ t.get('tc_walkthrough_meta_hint',
                     'Empty URL pattern + trigger "always" makes the walkthrough fire this TC on every visited page. trigger="manual" disables walkthrough firing entirely.') }}
             </p>
@@ -1046,32 +1022,27 @@
            machine; the actual codegen browser belongs there, not on
            the server. #}
         {% if recorder_enabled %}
-        <details class="tc-recorder-edit" style="margin-top:10px;
-                    border:1px dashed #cbd5e1;border-radius:6px;
-                    padding:8px 12px;background:#fafbfc;">
-            <summary style="cursor:pointer;font-weight:600;color:#475569;font-size:0.9em;">
+        <details class="tc-recorder-edit tc-edit-panel">
+            <summary class="tc-edit-summary">
                 🎬 {{ t.get('tc_recorder_title', 'Record steps') }}
                 {% if tc.automation_steps_json %}
-                <small style="color:var(--badge-green);font-weight:600;">— ✓ {{ t.get('tc_recorder_has_steps', 'Has recorded steps') }}</small>
+                <small class="tc-recorded-note">— ✓ {{ t.get('tc_recorder_has_steps', 'Has recorded steps') }}</small>
                 {% endif %}
             </summary>
-            <div style="margin-top:8px;">
-                <p class="hint" style="font-size:0.82em;color:#475569;margin:0 0 6px 0;">
+            <div class="tc-mt-8">
+                <p class="hint tc-edit-hint">
                     {{ t.get('tc_recorder_hint',
                         'Run locally — opens Chromium so you can click through the scenario. Steps land on this TC automatically.') }}
                 </p>
-                <label for="recorder_url_{{ tc.id }}" style="font-size:0.82em;color:#475569;">
+                <label class="tc-field-label" for="recorder_url_{{ tc.id }}">
                     {{ t.get('tc_recorder_url_label', 'Start URL') }}
                 </label>
-                <input type="url" id="recorder_url_{{ tc.id }}"
+                <input class="tc-recorder-url" type="url" id="recorder_url_{{ tc.id }}"
                        placeholder="https://app.example.com/login"
-                       style="width:100%;font-family:monospace;font-size:0.85em;margin:2px 0 8px 0;"
+                      
                        data-recorder-url-input="{{ tc.id }}">
-                <pre id="recorder_cmd_{{ tc.id }}"
-                     style="background:#0f172a;color:#e2e8f0;padding:8px 10px;
-                            border-radius:4px;font-size:0.78em;
-                            white-space:pre-wrap;word-break:break-all;
-                            margin:0 0 6px 0;"
+                <pre class="tc-recorder-cmd" id="recorder_cmd_{{ tc.id }}"
+                    
                      data-recorder-cmd="{{ tc.id }}"
                      data-project="{{ active_project_id }}"
                      data-tc="{{ tc.id }}">RECORDER_ENABLED=1 python -m tools.tfg_record --project {{ active_project_id }} --tc {{ tc.id }} --url &lt;START_URL&gt;</pre>
@@ -1088,18 +1059,18 @@
                    hydrated server-side from the saved JSON so a hard
                    refresh keeps showing the last persisted shape. #}
                 {% if tc.automation_steps_json %}
-                <div style="margin-top:12px;border-top:1px dashed #cbd5e1;padding-top:10px;"
+                <div class="tc-steps-block"
                      data-step-editor="{{ tc.id }}">
-                    <p class="hint" style="font-size:0.82em;color:#475569;margin:0 0 6px 0;">
+                    <p class="hint tc-edit-hint">
                         {{ t.get('tc_recorder_step_kind_hint',
                             'Flip a step to an assertion (visible / text / URL) to make the runner check expectations instead of issuing a click.') }}
                     </p>
-                    <table style="width:100%;font-size:0.82em;border-collapse:collapse;">
-                        <thead style="color:var(--text-muted);text-align:left;">
+                    <table class="tc-steps-table">
+                        <thead class="tc-steps-head">
                             <tr>
-                                <th style="padding:2px 4px;width:32px;">#</th>
-                                <th style="padding:2px 4px;">{{ t.get('tc_recorder_step_action', 'Recorded step') }}</th>
-                                <th style="padding:2px 4px;width:200px;">{{ t.get('tc_recorder_step_kind', 'Kind') }}</th>
+                                <th class="tc-steps-num">#</th>
+                                <th class="tc-steps-cell">{{ t.get('tc_recorder_step_action', 'Recorded step') }}</th>
+                                <th class="tc-steps-target">{{ t.get('tc_recorder_step_kind', 'Kind') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1113,18 +1084,17 @@
                             {% set _atype = s.get('assertion_type') or '' %}
                             {% set _combo = (_kind ~ '/' ~ _atype) if _kind == 'assertion' else 'action' %}
                             <tr>
-                                <td style="padding:2px 4px;color:var(--text-subtle);font-family:monospace;">{{ loop.index }}</td>
-                                <td style="padding:2px 4px;font-family:monospace;color:#334155;">
+                                <td class="tc-steps-index">{{ loop.index }}</td>
+                                <td class="tc-steps-code">
                                     {% if _kind == 'assertion' %}◇{% else %}▸{% endif %}
                                     {{ s.get('action', '') }}
-                                    {% if s.get('target') %} <span style="color:var(--text-subtle);">{{ s.get('target')|truncate(60) }}</span>{% endif %}
+                                    {% if s.get('target') %} <span class="tc-text-subtle">{{ s.get('target')|truncate(60) }}</span>{% endif %}
                                 </td>
-                                <td style="padding:2px 4px;">
-                                    <select data-step-kind-select
+                                <td class="tc-steps-cell">
+                                    <select class="tc-steps-select" data-step-kind-select
                                             aria-label="{{ t.get('tc_step_kind_label', 'Step kind') }}: {{ loop.index }}"
                                             data-tc="{{ tc.id }}"
-                                            data-index="{{ loop.index0 }}"
-                                            style="font-size:0.82em;padding:2px 4px;width:100%;">
+                                            data-index="{{ loop.index0 }}">
                                         <option value="action"
                                                 {% if _combo == 'action' %}selected{% endif %}>{{ t.tc_col_action }}</option>
                                         <option value="assertion/visible"
@@ -1139,8 +1109,7 @@
                             {% endfor %}
                         </tbody>
                     </table>
-                    <p data-step-editor-status="{{ tc.id }}"
-                       style="font-size:0.78em;color:var(--text-subtle);margin:4px 0 0 0;min-height:1.2em;"></p>
+                    <p class="tc-steps-status" data-step-editor-status="{{ tc.id }}"></p>
                 </div>
                 {% endif %}
             </div>
@@ -1199,7 +1168,7 @@
 <div class="card card-info">
     <h3>{{ t.tc_how_to_title }}</h3>
     <p>{{ t.tc_how_to_desc }}</p>
-    <ul style="padding-left:1.5rem; margin-top:.5rem">
+    <ul class="tc-help-list">
         <li>{{ t.tc_how_to_1 }}</li>
         <li>{{ t.tc_how_to_2 }}</li>
         <li>{{ t.tc_how_to_3 }}</li>
@@ -1231,6 +1200,12 @@
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
 <script nonce="{{ csp_nonce }}">
+// Status lines take their colour from a class (block B): ok / error /
+// info, or none for the default subtle grey.
+function tcStatusTone(el, tone) {
+    el.classList.remove('tc-status--ok', 'tc-status--error', 'tc-status--info');
+    if (tone) el.classList.add('tc-status--' + tone);
+}
 function showTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
@@ -1250,7 +1225,7 @@ function _applyFilters() {
                       || card.dataset.category === _activeCategory);
         var suiteOk = (_activeSuite === 'all'
                         || card.dataset.suite === _activeSuite);
-        card.style.display = (catOk && suiteOk) ? '' : 'none';
+        card.hidden = !(catOk && suiteOk);
     });
 }
 
@@ -1337,7 +1312,7 @@ function filterSuite(suite, btn) {
             const setStatus = (txt, color) => {
                 if (status) {
                     status.textContent = txt;
-                    status.style.color = color || '#6B7280';
+                    tcStatusTone(status, color);
                 }
             };
             setStatus('saving…');
@@ -1356,13 +1331,13 @@ function filterSuite(suite, btn) {
                 if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}));
                     setStatus(
-                        `error: ${err.error || resp.status}`, '#dc2626');
+                        `error: ${err.error || resp.status}`, 'error');
                     return;
                 }
-                setStatus('✓ saved', '#16a34a');
+                setStatus('✓ saved', 'ok');
                 setTimeout(() => setStatus(''), 1800);
             } catch (e) {
-                setStatus(`network error: ${e}`, '#dc2626');
+                setStatus(`network error: ${e}`, 'error');
             }
         });
     });
@@ -1386,7 +1361,7 @@ function filterSuite(suite, btn) {
     const setStatus = (txt, colour) => {
         if (!statusEl) return;
         statusEl.textContent = txt;
-        statusEl.style.color = colour || '#6B7280';
+        tcStatusTone(statusEl, colour);
     };
 
     startBtn.addEventListener('click', () => {
@@ -1414,7 +1389,7 @@ function filterSuite(suite, btn) {
     launchBtn.addEventListener('click', async () => {
         const startUrl = (urlInput.value || '').trim();
         if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
-            setStatus('Enter an http:// or https:// URL.', '#dc2626');
+            setStatus('Enter an http:// or https:// URL.', 'error');
             return;
         }
         launchBtn.disabled = true;
@@ -1444,7 +1419,7 @@ function filterSuite(suite, btn) {
             });
             const body = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                setStatus(`error: ${body.error || resp.status}`, '#dc2626');
+                setStatus(`error: ${body.error || resp.status}`, 'error');
                 launchBtn.disabled = false;
                 return;
             }
@@ -1471,7 +1446,7 @@ function filterSuite(suite, btn) {
             if (!opened) {
                 setStatus('Your browser blocked the recording tab. '
                           + 'Open this link yourself to start recording:',
-                          '#dc2626');
+                          'error');
                 // The token is still live in worker memory, so this link
                 // is a working session and not a consolation prize. Built
                 // as a node rather than innerHTML: the page runs under a
@@ -1483,7 +1458,7 @@ function filterSuite(suite, btn) {
                     a.target = '_blank';
                     a.rel = 'noopener';
                     a.textContent = handoffUrl;
-                    a.style.color = '#0369a1';
+                    a.className = 'tc-link-info';
                     manualEl.appendChild(a);
                     manualEl.hidden = false;
                 }
@@ -1492,14 +1467,14 @@ function filterSuite(suite, btn) {
                 launchBtn.disabled = false;
                 return;
             }
-            setStatus('✓ Opening recording tab…', '#16a34a');
+            setStatus('✓ Opening recording tab…', 'ok');
             setTimeout(() => {
                 modal.hidden = true;
                 launchBtn.disabled = false;
                 setStatus('');
             }, 1000);
         } catch (e) {
-            setStatus(`network error: ${e}`, '#dc2626');
+            setStatus(`network error: ${e}`, 'error');
             launchBtn.disabled = false;
         }
     });
@@ -1526,7 +1501,7 @@ function filterSuite(suite, btn) {
         if (!/^https?:\/\//i.test(sut)) return;
         urlInput.value = sut;
         modal.hidden = false;
-        setStatus('Launching recorder from extension…', '#2563eb');
+        setStatus('Launching recorder from extension…', 'info');
         launchBtn.click();
     })();
 })();
