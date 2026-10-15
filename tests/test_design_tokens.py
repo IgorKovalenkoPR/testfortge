@@ -645,3 +645,12 @@ def test_the_hidden_attribute_always_hides(css):
     # are scoped rules and do not count.
     assert re.search(r"(?:^|\})\s*\[hidden\]\s*\{\s*display\s*:\s*none\s*!important",
                      _strip_comments(css)), "global [hidden] rule missing"
+
+
+def test_link_styled_buttons_keep_the_smallest_button_height(css):
+    """.btn-link (add step, delete case) looked like a link and was sized
+    like one — 19 and 22 px on every test-case card, under the 24 px
+    floor of the button scale (live audit, 2026-10-15)."""
+    body = _body(css, ".btn-link")
+    assert re.search(r"min-height\s*:\s*var\(--control-xs\)", body), body
+    assert not re.search(r"min-height\s*:\s*0(?![.\d])", body), body
