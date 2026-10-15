@@ -218,8 +218,14 @@ class TestWhatTheModelIsHanded:
             allowed=[corpus["pid"]], limit=answer.MAX_ITEMS, explain=False,
             istqb=False))
         hit = next(r for r in body["results"] if r["ref"] == "en:projects")
-        items = answer.load_items([hit], [corpus["pid"]])
-        assert "Move artefacts" in items[0].body, items[0].body[:300]
+        q = "How do I move test cases to another project?"
+        item = answer.load_items([hit], [corpus["pid"]], question=q)[0]
+        assert "Move artefacts" in item.body, item.body[:300]
+        # What the model reads, not merely what was retrieved: the first
+        # 400 characters of this chunk are the end of the Export section.
+        line = item.line()
+        assert "Dashboard card" in line and "Move artefacts" in line, line
+        assert len(line) < answer.ITEM_BODY_CHARS + 120
 
     def test_the_answering_page_leads(self, corpus):
         q = "How do I move test cases to another project?"
@@ -270,3 +276,41 @@ class TestTheWholeGuideIsIndexed:
                 assert tail in chunks, (lang, section, len(text))
         # The sizes that made this a defect are still there to test.
         assert long_ones >= 4
+
+
+class TestTheExcerpt:
+    def test_the_window_holding_most_query_words_wins(self):
+        filler = "Nothing relevant is said in this sentence at all. " * 12
+        body = filler + "To move test cases, activate the project first."
+        got = answer.excerpt(body, answer.question_stems(
+            "How do I move test cases?"))
+        assert "move test cases" in got and len(got) <= answer.ITEM_BODY_CHARS
+
+    def test_a_short_body_is_whole(self):
+        assert answer.excerpt("Short body.", {"short"}) == "Short body."
+
+    def test_without_a_question_the_line_is_the_opening(self):
+        item = answer.Item(doc_id=1, ref="x", kind="guide", title="T",
+                           body="a " * 500 + "move", url=None, project_id=None,
+                           content_hash="h", score=0.0)
+        assert "move" not in item.line()
+
+
+def test_ask_hands_the_model_the_excerpt_not_the_opening(corpus, monkeypatch):
+    """Through the whole of ask_events, with the model faked: the prompt
+    for the Move question must carry the Move card, which sits past the
+    first 400 characters of its chunk."""
+    from tests.test_search_ask import FakeLLM
+    fake = FakeLLM()
+    monkeypatch.setattr(answer, "_client_factory", fake.factory)
+    monkeypatch.setenv("PLATFORM_SEARCH_AI", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-" + "x" * 30)
+    for name in ("RAG_MIN_GROUNDING", "RAG_MIN_COVERAGE", "ANTHROPIC_MODEL",
+                 "LLM_MODEL_FOR_SEARCH_ANSWER", "MODEL_SWITCHER"):
+        monkeypatch.delenv(name, raising=False)
+    answer.limiter.reset()
+    q = f"How do I move test cases to another project? {secrets.token_hex(2)}"
+    events = list(answer.ask_events(answer.AskRequest(
+        q=q, allowed=[corpus["pid"]], lang="en")))
+    assert fake.calls, [e.get("code") for e in events if e["type"] == "error"]
+    assert "Dashboard card Move artefacts" in fake.prompt, fake.prompt[:600]

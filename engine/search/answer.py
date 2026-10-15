@@ -51,7 +51,7 @@ from engine.log import get_logger
 log = get_logger(__name__)
 
 #: Bump when the prompt's meaning changes; part of every cache key.
-PROMPT_VERSION = "ask-v2"
+PROMPT_VERSION = "ask-v3"
 
 KIND = "search_answer"
 MAX_ITEMS = 8
@@ -216,19 +216,63 @@ class Item:
     project_id: str | None
     content_hash: str
     score: float
+    #: The part of *body* the model reads, when a question chose it.
+    excerpt: str | None = None
 
     def line(self) -> str:
         title = " ".join((self.title or "").split())
-        body = " ".join((self.body or "").split())[:ITEM_BODY_CHARS]
+        body = self.excerpt if self.excerpt is not None else             " ".join((self.body or "").split())[:ITEM_BODY_CHARS]
         return f"[[{self.ref}]] {title} — {body}".rstrip(" —")
 
 
-def load_items(results: Sequence[dict], allowed: Sequence[str]
-               ) -> list[Item]:
+_EXCERPT_WORD = re.compile(r"[0-9A-Za-zЀ-ӿ]+(?:['’ʼ][0-9A-Za-zЀ-ӿ]+)*")
+
+
+def excerpt(body: str, stems: set[str], size: int = ITEM_BODY_CHARS) -> str:
+    """The *size*-character window of *body* that holds the most distinct
+    query *stems* — ties to the earliest. Not the first *size* characters:
+    a Guide chunk is ~800, and the model was handed the end of the Export
+    section and answered that moving artefacts was not described, while
+    the Move steps sat in the second half of the same chunk (2026-10-15).
+    """
+    from engine.search.text import normalise, stem
+    text = " ".join((body or "").split())
+    if len(text) <= size or not stems:
+        return text[:size]
+    hits = [(m.start(), m.end(), w) for m in _EXCERPT_WORD.finditer(text)
+            for w in [stem(normalise(m.group(0)))] if w in stems]
+    if not hits:
+        return text[:size]
+    # Windows open on a matching word. Most distinct stems wins; then the
+    # tightest (its matches closest together); then the earliest.
+    best = None
+    for i, (start, _e, _w) in enumerate(hits):
+        inside = [h for h in hits[i:] if h[1] <= start + size]
+        key = (-len({h[2] for h in inside}), inside[-1][1] - start, start)
+        if best is None or key < best[0]:
+            best = (key, start, inside[-1][1])
+    _key, start, last_end = best
+    # Open on the sentence the first match is in, if it costs no match.
+    cut = text.rfind(". ", max(0, start - 160), start)
+    if cut != -1 and last_end <= cut + 2 + size:
+        start = cut + 2
+    return text[start:start + size]
+
+
+def question_stems(question: str) -> set[str]:
+    """The stems a question's words and their translations index as."""
+    from engine.search.text import analyse
+    return set(analyse(question or "").all_stems)
+
+
+def load_items(results: Sequence[dict], allowed: Sequence[str],
+               question: str | None = None) -> list[Item]:
     """The full body and content hash of each result, read through the
     tenancy clause (:func:`engine.search.retrieve._scope_clause`) — the
     result list is already scoped; reading it again through the same clause
-    means this function cannot be the leak either."""
+    means this function cannot be the leak either. With *question*, each
+    item carries the :func:`excerpt` of its body that the question is
+    about."""
     from sqlalchemy import select
 
     from engine import db as _db
@@ -245,6 +289,7 @@ def load_items(results: Sequence[dict], allowed: Sequence[str]
                          None).where(SearchDoc.id.in_(ids))
         for did, body, chash in sess.execute(stmt):
             rows[int(did)] = (body or "", chash or "")
+    focus = question_stems(question) if question else None
     out: list[Item] = []
     for r in results:
         did = r.get("doc_id")
@@ -257,7 +302,9 @@ def load_items(results: Sequence[dict], allowed: Sequence[str]
                         url=r.get("url"),
                         project_id=(r.get("project") or {}).get("id"),
                         content_hash=chash,
-                        score=float(r.get("score") or 0.0)))
+                        score=float(r.get("score") or 0.0),
+                        excerpt=(excerpt(body, focus)
+                                 if focus is not None else None)))
     return out
 
 
@@ -830,7 +877,7 @@ def ask_events(req: AskRequest) -> Iterator[dict]:
         yield from finish("not_grounded", chips=det_only, key=None)
         return
 
-    items = load_items(results, req.allowed)
+    items = load_items(results, req.allowed, question=q)
     packed = pack_prompt(q, items, lang=lang, history=history)
     scope = tenant_scope(req.org_id, req.user_id, req.sid)
     key = answer_key(scope=scope, model=model, lang=lang,

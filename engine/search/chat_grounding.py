@@ -299,7 +299,8 @@ def grounding(message: str, scope: ChatScope | None) -> Grounding | None:
     if not answer.is_grounded(results):
         return None
     try:
-        items = answer.load_items(results, scope.allowed)
+        items = answer.load_items(results, scope.allowed,
+                                  question=message)
     except Exception as exc:   # noqa: BLE001
         log.warning("chat grounding: load_items failed: %s", exc)
         return None
