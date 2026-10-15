@@ -51,11 +51,18 @@ from engine.log import get_logger
 log = get_logger(__name__)
 
 #: Bump when the prompt's meaning changes; part of every cache key.
-PROMPT_VERSION = "ask-v3"
+PROMPT_VERSION = "ask-v4"
 
 KIND = "search_answer"
 MAX_ITEMS = 8
 ITEM_BODY_CHARS = 400
+#: What the model reads of an item when the question is known: the whole
+#: chunk for a Guide page (chunks are ~800 characters), a window of a
+#: longer body. 400 was too narrow: one Guide chunk holds two paragraphs
+#: with the same question words, and a 400-character window picked the
+#: wrong one ("generate test cases from a URL" got the url_pattern
+#: paragraph, 2026-10-15). Eight items at 800 stay inside the input budget.
+EXCERPT_CHARS = 800
 INPUT_TOKEN_BUDGET = 3000
 #: A ceiling, not a length: the prompt asks for two or three sentences.
 #: Gate 3 (2026-10-15) measured 285 of 300 on a Ukrainian answer, which
@@ -228,9 +235,10 @@ class Item:
 _EXCERPT_WORD = re.compile(r"[0-9A-Za-zЀ-ӿ]+(?:['’ʼ][0-9A-Za-zЀ-ӿ]+)*")
 
 
-def excerpt(body: str, stems: set[str], size: int = ITEM_BODY_CHARS) -> str:
+def excerpt(body: str, stems: set[str], size: int = EXCERPT_CHARS) -> str:
     """The *size*-character window of *body* that holds the most distinct
-    query *stems* — ties to the earliest. Not the first *size* characters:
+    query *stems*, the tightest such window winning ties. Not the first
+    *size* characters:
     a Guide chunk is ~800, and the model was handed the end of the Export
     section and answered that moving artefacts was not described, while
     the Move steps sat in the second half of the same chunk (2026-10-15).

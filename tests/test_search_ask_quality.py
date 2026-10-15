@@ -225,7 +225,7 @@ class TestWhatTheModelIsHanded:
         # 400 characters of this chunk are the end of the Export section.
         line = item.line()
         assert "Dashboard card" in line and "Move artefacts" in line, line
-        assert len(line) < answer.ITEM_BODY_CHARS + 120
+        assert len(line) < answer.EXCERPT_CHARS + 120
 
     def test_the_answering_page_leads(self, corpus):
         q = "How do I move test cases to another project?"
@@ -280,11 +280,11 @@ class TestTheWholeGuideIsIndexed:
 
 class TestTheExcerpt:
     def test_the_window_holding_most_query_words_wins(self):
-        filler = "Nothing relevant is said in this sentence at all. " * 12
+        filler = "Nothing relevant is said in this sentence at all. " * 30
         body = filler + "To move test cases, activate the project first."
         got = answer.excerpt(body, answer.question_stems(
             "How do I move test cases?"))
-        assert "move test cases" in got and len(got) <= answer.ITEM_BODY_CHARS
+        assert "move test cases" in got and len(got) <= answer.EXCERPT_CHARS
 
     def test_a_short_body_is_whole(self):
         assert answer.excerpt("Short body.", {"short"}) == "Short body."
@@ -314,3 +314,18 @@ def test_ask_hands_the_model_the_excerpt_not_the_opening(corpus, monkeypatch):
         q=q, allowed=[corpus["pid"]], lang="en")))
     assert fake.calls, [e.get("code") for e in events if e["type"] == "error"]
     assert "Dashboard card Move artefacts" in fake.prompt, fake.prompt[:600]
+
+
+def test_the_url_question_gets_the_paragraph_that_answers_it(corpus):
+    """Two paragraphs of one Guide chunk carry the same question words; a
+    400-character window handed the model the url_pattern one and it said
+    URL generation was not described (gate 3, 2026-10-15)."""
+    q = "How do I generate test cases from a URL?"
+    body = retrieve.search(retrieve.SearchParams(
+        q=q, allowed=[corpus["pid"]], limit=answer.MAX_ITEMS, explain=False,
+        istqb=False))
+    items = answer.load_items(body["results"], [corpus["pid"]], question=q)
+    lines = " ".join(i.line() for i in items)
+    assert "Paste a URL on its own line" in lines
+    packed = answer.pack_prompt(q, items, lang="en")
+    assert packed.dropped == 0 and packed.input_tokens <=         answer.INPUT_TOKEN_BUDGET
