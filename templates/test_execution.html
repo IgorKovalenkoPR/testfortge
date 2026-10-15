@@ -24,18 +24,15 @@
    knowing that the missing piece was generation, not a server bug.
    This banner makes the next step explicit. #}
 {% if not has_tc_data and not has_cl_data %}
-<div class="card"
-     style="margin-bottom:14px;padding:18px 22px;
-            background:linear-gradient(90deg,#fffbeb 0%,#fef3c7 100%);
-            border:2px solid #fbbf24;color:#92400e;">
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
-        <div style="font-size:2em;line-height:1;">📭</div>
-        <div style="flex:1;min-width:240px;">
-            <strong style="display:block;font-size:1.05em;margin-bottom:4px;">
+<div class="card te-empty-banner">
+    <div class="te-row">
+        <div class="te-empty-icon">📭</div>
+        <div class="te-empty-body">
+            <strong class="te-empty-title">
                 {{ t.get('te_empty_title',
                    'Nothing to run yet') }}
             </strong>
-            <p style="margin:0;font-size:0.9em;color:#78350f;">
+            <p class="te-empty-text">
                 {{ t.get('te_empty_body',
                     'The active project has no test cases or checklist items in your session. Generate a pack first — or switch to a project that already has one via the picker above.') }}
             </p>
@@ -62,16 +59,13 @@
 {% endif %}
 
 {% if has_tc_data or has_cl_data %}
-<div class="card pack-status-badge"
-     style="display:flex;align-items:center;gap:14px;padding:10px 16px;
-            background:linear-gradient(90deg,#ecfdf5 0%,#f0f9ff 100%);
-            border:1px solid #bbf7d0;margin-bottom:14px;">
-    <i data-lucide="package-check" class="icon-md" style="color:var(--badge-green);"></i>
-    <div style="flex:1;">
-        <div style="font-weight:700;color:#0f172a;font-size:0.95em;">
+<div class="card pack-status-badge te-pack-badge">
+    <i data-lucide="package-check" class="icon-md te-text-green"></i>
+    <div class="te-grow">
+        <div class="te-pack-title">
             {{ t.get('te_pack_loaded', 'Pack loaded') }}
         </div>
-        <div style="color:#475569;font-size:0.85em;">
+        <div class="te-pack-meta">
             {% if has_tc_data %}<strong>{{ tc_count }}</strong>
                 {{ t.get('te_pack_tc', 'test case(s)') }}{% endif %}
             {% if has_tc_data and has_cl_data %} · {% endif %}
@@ -82,8 +76,8 @@
     {# Clear pack must go through POST because /new-session is a
        state-changing endpoint and the route only accepts POST (a GET
        on it returned 405 Method Not Allowed in the operator video). #}
-    <form method="POST" action="{{ url_for('new_session') }}"
-          style="display:inline;margin:0;"
+    <form class="te-inline-form" method="POST" action="{{ url_for('new_session') }}"
+         
           onsubmit='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-sm btn-secondary">
@@ -162,7 +156,7 @@
         {{ t.get('te_empty_hint',
                  'Generate a test pack from requirements, or upload one you already have. The uploaded pack lands in the same session so you can run it on this page right away.') }}
     </p>
-    <div class="empty-state-actions btn-group" style="margin-top:14px;">
+    <div class="empty-state-actions btn-group te-mt-14">
         <a href="{{ url_for('test_cases_page') }}" class="btn btn-primary">
             <i data-lucide="sparkles" class="icon-sm"></i>
             {{ t.get('te_empty_generate_tc', 'Generate test cases') }}
@@ -205,16 +199,16 @@
                accept=".xlsx,.csv,.md,.markdown,.json">
         <div class="file-list te-drop-summary" data-summary-for="te-tc-file"></div>
     </div>
-    <div class="form-row" style="align-items:center;gap:14px;margin-top:10px;">
-        <label class="form-group" style="margin:0;">
+    <div class="form-row te-upload-row">
+        <label class="form-group te-m0">
             <input type="radio" name="upload_mode" value="replace" checked>
             {{ t.get('te_upload_replace', 'Replace current pack') }}
         </label>
-        <label class="form-group" style="margin:0;">
+        <label class="form-group te-m0">
             <input type="radio" name="upload_mode" value="append">
             {{ t.get('te_upload_append', 'Append to current pack') }}
         </label>
-        <div class="form-group" style="margin:0;margin-left:auto;">
+        <div class="form-group te-m0-push">
             <button type="submit" class="btn btn-success">
                 <i data-lucide="upload" class="icon-sm"></i>
                 {{ t.get('te_upload_btn_pack', 'Upload pack') }}
@@ -254,16 +248,16 @@
                accept=".xlsx,.csv,.md,.markdown,.json">
         <div class="file-list te-drop-summary" data-summary-for="te-cl-file"></div>
     </div>
-    <div class="form-row" style="align-items:center;gap:14px;margin-top:10px;">
-        <label class="form-group" style="margin:0;">
+    <div class="form-row te-upload-row">
+        <label class="form-group te-m0">
             <input type="radio" name="upload_mode" value="replace" checked>
             {{ t.get('te_upload_replace', 'Replace current pack') }}
         </label>
-        <label class="form-group" style="margin:0;">
+        <label class="form-group te-m0">
             <input type="radio" name="upload_mode" value="append">
             {{ t.get('te_upload_append', 'Append to current pack') }}
         </label>
-        <div class="form-group" style="margin:0;margin-left:auto;">
+        <div class="form-group te-m0-push">
             <button type="submit" class="btn btn-secondary">
                 <i data-lucide="upload" class="icon-sm"></i>
                 {{ t.get('te_upload_btn_pack', 'Upload pack') }}
@@ -275,41 +269,41 @@
 
 {# ── Persistent upload card (also visible WITH data, lets the tester
    swap or extend the pack without going to /test-cases) ── #}
-<details class="card upload-existing" style="padding:14px 18px;">
-    <summary style="cursor:pointer;font-weight:600;color:#0f172a;">
+<details class="card upload-existing te-upload-more">
+    <summary class="te-upload-more-summary">
         <i data-lucide="upload-cloud" class="icon-sm"></i>
         {{ t.get('te_upload_more', 'Upload another pack (replace or append)') }}
     </summary>
-    <div style="margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;">
-        <form method="POST" action="{{ url_for('test_cases_upload') }}"
-              enctype="multipart/form-data" style="flex:1;min-width:280px;">
+    <div class="te-upload-more-row">
+        <form class="te-upload-more-form" method="POST" action="{{ url_for('test_cases_upload') }}"
+              enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <strong id="te-up-tc-title">{{ t.get('te_upload_tc_title', 'Test cases') }}</strong>
-            <input type="file" name="upload_file" required aria-labelledby="te-up-tc-title" style="margin-top:6px;width:100%;"
+            <input class="te-file-input" type="file" name="upload_file" required aria-labelledby="te-up-tc-title"
                    accept=".xlsx,.csv,.md,.markdown,.json">
-            <label style="display:block;margin-top:6px;font-size:0.85em;">
+            <label class="te-upload-mode">
                 <input type="radio" name="upload_mode" value="replace" checked>
                 {{ t.get('te_upload_replace', 'Replace') }}
-                <input type="radio" name="upload_mode" value="append" style="margin-left:10px;">
+                <input class="te-ml-10" type="radio" name="upload_mode" value="append">
                 {{ t.get('te_upload_append', 'Append') }}
             </label>
-            <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
+            <button type="submit" class="btn btn-secondary te-mt-8">
                 {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </form>
-        <form method="POST" action="{{ url_for('checklist_upload') }}"
-              enctype="multipart/form-data" style="flex:1;min-width:280px;">
+        <form class="te-upload-more-form" method="POST" action="{{ url_for('checklist_upload') }}"
+              enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <strong id="te-up-cl-title">{{ t.get('te_upload_cl_title', 'Checklist') }}</strong>
-            <input type="file" name="upload_file" required aria-labelledby="te-up-cl-title" style="margin-top:6px;width:100%;"
+            <input class="te-file-input" type="file" name="upload_file" required aria-labelledby="te-up-cl-title"
                    accept=".xlsx,.csv,.md,.markdown,.json">
-            <label style="display:block;margin-top:6px;font-size:0.85em;">
+            <label class="te-upload-mode">
                 <input type="radio" name="upload_mode" value="replace" checked>
                 {{ t.get('te_upload_replace', 'Replace') }}
-                <input type="radio" name="upload_mode" value="append" style="margin-left:10px;">
+                <input class="te-ml-10" type="radio" name="upload_mode" value="append">
                 {{ t.get('te_upload_append', 'Append') }}
             </label>
-            <button type="submit" class="btn btn-secondary" style="margin-top:8px;">
+            <button type="submit" class="btn btn-secondary te-mt-8">
                 {{ t.get('te_upload_btn_pack', 'Upload pack') }}
             </button>
         </form>
@@ -354,7 +348,7 @@
             <span class="run-toggle" id="toggle-run-{{ run.run_id }}"><i data-lucide="chevron-down" class="icon-sm"></i></span>
         </div>
     </div>
-    <div class="run-details" id="run-{{ run.run_id }}" style="display:none">
+    <div class="run-details" id="run-{{ run.run_id }}" hidden>
         {# PR-3: When this run is a walkthrough that produced findings,
            expose a Results | Findings sub-tab strip. TC-driven runs and
            walkthrough runs whose findings list was empty fall through
@@ -427,26 +421,23 @@
                 </tr>
                 {% if (r.screenshots and r.screenshots|length) or r.video %}
                 <tr class="evidence-row result-{{ r.status | lower | replace(' ', '-') }}">
-                    <td colspan="5" style="padding:8px 12px;background:#fafafa;border-top:0;">
-                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;">
+                    <td class="te-evidence-cell" colspan="5">
+                        <div class="te-evidence-row">
                             {% if r.video %}
-                            <div style="flex:0 0 auto;">
-                                <video src="{{ url_for('automation_asset', path=r.video) }}"
-                                       controls preload="metadata" muted
-                                       style="width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;background:#0f172a;"></video>
-                                <div style="font-size:0.72em;color:var(--text-muted);margin-top:2px;">
+                            <div class="te-evidence-item">
+                                <video class="te-evidence-video" src="{{ url_for('automation_asset', path=r.video) }}"
+                                       controls preload="metadata" muted></video>
+                                <div class="te-evidence-caption">
                                     🎥 {{ t.get('te_evidence_video', 'recorded video') }}
                                 </div>
                             </div>
                             {% endif %}
                             {% for shot in r.screenshots %}
-                            <a href="{{ url_for('automation_asset', path=shot) }}"
-                               target="_blank" rel="noopener"
-                               style="flex:0 0 auto;display:block;">
-                                <img src="{{ url_for('automation_asset', path=shot) }}"
+                            <a class="te-evidence-link" href="{{ url_for('automation_asset', path=shot) }}"
+                               target="_blank" rel="noopener">
+                                <img class="te-evidence-thumb" src="{{ url_for('automation_asset', path=shot) }}"
                                      alt="{{ t.te_alt_step }}"
-                                     style="width:140px;height:90px;object-fit:cover;
-                                            border:1px solid #cbd5e1;border-radius:4px;background:#fff;" />
+                                     />
                             </a>
                             {% endfor %}
                         </div>
@@ -467,13 +458,13 @@
         <div class="te-subtab-panel" data-subtab-id="findings-{{ run.run_id }}"
              {% if run.results %}hidden{% endif %}>
             {% if wt_bindings %}
-            <p class="hint" style="margin:6px 0 10px 0;">
+            <p class="hint te-hint-gap">
                 <i data-lucide="link" class="icon-sm"></i>
                 {{ t.get('te_wt_bindings_label',
                     'URL-pattern matched these test cases during the walkthrough:') }}
                 {% for b in wt_bindings %}
                     {% for m in (b.matches or []) %}
-                        <code style="margin-right:6px;">{{ m.external_id or m.id }}</code>
+                        <code class="te-mr-6">{{ m.external_id or m.id }}</code>
                     {% endfor %}
                 {% endfor %}
             </p>
@@ -502,40 +493,37 @@
                         <td>
                             <strong>{{ f.message or 'Walkthrough finding' }}</strong>
                             {% if f.element %}<br>
-                            <code style="font-size:0.78em;color:#475569;">{{ f.element }}</code>
+                            <code class="te-finding-code">{{ f.element }}</code>
                             {% endif %}
                             {% if f.url %}<br>
-                            <a href="{{ f.url }}" target="_blank" rel="noopener"
-                               style="font-size:0.78em;">{{ f.url }}</a>
+                            <a class="te-fs-sm" href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }}</a>
                             {% endif %}
                             {% if f.user_impact or f.fix_hint or f.dev_detail or f.console_errors %}
-                            <details style="margin-top:6px;">
-                                <summary style="font-size:0.82em;cursor:pointer;color:#475569;">
+                            <details class="te-mt-6">
+                                <summary class="te-finding-summary">
                                     {{ t.get('te_wt_more', 'Details') }}
                                 </summary>
-                                <div style="margin-top:6px;font-size:0.82em;line-height:1.4;">
+                                <div class="te-finding-body">
                                     {% if f.user_impact %}
                                     <div><strong>{{ t.get('te_wt_user_impact', 'User impact:') }}</strong>
                                          {{ f.user_impact }}</div>
                                     {% endif %}
                                     {% if f.fix_hint %}
-                                    <div style="margin-top:4px;">
+                                    <div class="te-mt-4">
                                         <strong>{{ t.get('te_wt_fix_hint', 'Fix hint:') }}</strong>
                                         {{ f.fix_hint }}
                                     </div>
                                     {% endif %}
                                     {% if f.dev_detail %}
-                                    <div style="margin-top:4px;">
+                                    <div class="te-mt-4">
                                         <strong>{{ t.get('te_wt_dev_detail', 'Dev detail:') }}</strong>
-                                        <pre style="white-space:pre-wrap;margin:2px 0;
-                                                    background:#f8fafc;padding:6px;
-                                                    border-radius:4px;font-size:0.85em;">{{ f.dev_detail }}</pre>
+                                        <pre class="te-finding-pre">{{ f.dev_detail }}</pre>
                                     </div>
                                     {% endif %}
                                     {% if f.console_errors %}
-                                    <div style="margin-top:4px;">
+                                    <div class="te-mt-4">
                                         <strong>{{ t.get('te_wt_console', 'Console errors:') }}</strong>
-                                        <ul style="margin:2px 0 0 18px;">
+                                        <ul class="te-finding-list">
                                         {% for c in f.console_errors %}
                                             <li><code>{{ c }}</code></li>
                                         {% endfor %}
@@ -564,13 +552,11 @@
                     </tr>
                     {% if f.screenshot %}
                     <tr class="evidence-row result-failed">
-                        <td colspan="4" style="padding:8px 12px;background:#fafafa;border-top:0;">
-                            <a href="{{ url_for('automation_asset', path=f.screenshot) }}"
-                               target="_blank" rel="noopener" style="display:inline-block;">
-                                <img src="{{ url_for('automation_asset', path=f.screenshot) }}"
-                                     alt="{{ t.te_alt_finding }}"
-                                     style="width:240px;max-height:160px;object-fit:cover;
-                                            border:1px solid #cbd5e1;border-radius:4px;background:#fff;">
+                        <td class="te-evidence-cell" colspan="4">
+                            <a class="te-inline-block" href="{{ url_for('automation_asset', path=f.screenshot) }}"
+                               target="_blank" rel="noopener">
+                                <img class="te-evidence-shot" src="{{ url_for('automation_asset', path=f.screenshot) }}"
+                                     alt="{{ t.te_alt_finding }}">
                             </a>
                         </td>
                     </tr>
@@ -661,7 +647,7 @@
        pack does — "what else is wrong with this site" rather than "do
        these items pass" — and 20+ unrequested findings on top of a run's
        own results is how a bug list stops being read. #}
-    <label class="radio-inline" style="margin:.4rem 0">
+    <label class="radio-inline te-radio-gap">
         <input type="checkbox" name="site_sweep" value="1">
         {{ t.get('te_site_sweep', 'Also sweep the site for Performance, Security, Accessibility and UI defects the pack does not cover') }}
     </label>
@@ -690,7 +676,7 @@
             <i data-lucide="sliders-horizontal" class="icon-sm"></i>
             {{ t.get('te_wt_options', 'Walkthrough options') }}
         </summary>
-        <div class="form-grid" style="margin-top:10px;">
+        <div class="form-grid te-mt-10">
             <div class="form-group">
                 <label for="walkthrough_max_pages">
                     {{ t.get('te_wt_max_pages', 'Max pages to visit') }}
@@ -698,7 +684,7 @@
                 <input type="number" id="walkthrough_max_pages"
                        name="walkthrough_max_pages"
                        min="1" max="50" value="6">
-                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_max_pages_hint',
+                <p class="hint te-hint-sm">{{ t.get('te_wt_max_pages_hint',
                     'Including the entry URL. Each page runs the full heuristic battery.') }}</p>
             </div>
             <div class="form-group">
@@ -708,7 +694,7 @@
                 <input type="number" id="walkthrough_max_form_fills"
                        name="walkthrough_max_form_fills"
                        min="0" max="20" value="5">
-                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_max_form_fills_hint',
+                <p class="hint te-hint-sm">{{ t.get('te_wt_max_form_fills_hint',
                     'Forms are filled with sample data; they are NOT submitted.') }}</p>
             </div>
             <div class="form-group">
@@ -718,7 +704,7 @@
                 <input type="number" id="walkthrough_device_timeout_ms"
                        name="walkthrough_device_timeout_ms"
                        min="60000" step="30000" value="480000">
-                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_device_timeout_hint',
+                <p class="hint te-hint-sm">{{ t.get('te_wt_device_timeout_hint',
                     'Hard wall-clock kill per device. Default 8 min matches TFWefloLab.') }}</p>
             </div>
             <div class="form-group">
@@ -727,7 +713,7 @@
                            value="1" checked>
                     {{ t.get('te_wt_axe', 'Run axe-core accessibility scan') }}
                 </label>
-                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_axe_hint',
+                <p class="hint te-hint-sm">{{ t.get('te_wt_axe_hint',
                     'Loads axe-core from CDN, then evaluates axe.run() per page. Disable for offline / strict egress environments.') }}</p>
             </div>
             <div class="form-group">
@@ -742,7 +728,7 @@
                         {{ t.get('te_wt_binding_ignore', 'Ignore TCs (heuristics only)') }}
                     </option>
                 </select>
-                <p class="hint" style="font-size:0.78rem;">{{ t.get('te_wt_tc_binding_hint',
+                <p class="hint te-hint-sm">{{ t.get('te_wt_tc_binding_hint',
                     'When binding is on, TCs marked trigger=walkthrough_url_match / always become candidates. Pre-PR-2 TCs default to trigger=manual and are not fired.') }}</p>
             </div>
         </div>
@@ -797,7 +783,7 @@
         'Leave Status as "Auto" to let the tester simulate / run real checks, or set Passed / Failed / Blocked manually. Attach an existing bug ID to link without creating a new one.') }}</p>
 
     {# Test Cases list #}
-    <div id="items-tc" class="item-select-list" {% if not has_tc_data %}style="display:none"{% endif %}>
+    <div id="items-tc" class="item-select-list" {% if not has_tc_data %}hidden{% endif %}>
         {% if tc_items %}
         {% set current_section = namespace(name='', idx=0) %}
         {% for tc in tc_items %}
@@ -815,7 +801,7 @@
                 <span class="item-summary">{{ tc.summary }}</span>
                 <span class="item-badge badge-{{ tc.category | lower | replace(' ', '-') }}">{{ tc.category }}</span>
                 {% if tc.suite %}
-                <span class="item-badge" style="background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe;">{{ tc.suite }}</span>
+                <span class="item-badge te-badge-violet">{{ tc.suite }}</span>
                 {% endif %}
                 <select name="status_{{ tc.id }}" class="item-status-select" aria-label="{{ t.te_aria_status|format(tc.id) }}">
                     <option value="">{{ t.get('te_status_auto', 'Auto') }}</option>
@@ -832,7 +818,7 @@
     </div>
 
     {# Checklist items list #}
-    <div id="items-cl" class="item-select-list" style="display:none">
+    <div id="items-cl" class="item-select-list" hidden>
         {% if cl_items %}
         {% set current_section = namespace(name='', idx=0) %}
         {% for cl in cl_items %}
@@ -874,9 +860,9 @@
     <h3 class="card-title">{{ t.get('te_auto_config', 'Automation Configuration') }}</h3>
     <p class="hint">{{ t.get('te_auto_hint',
         'Optional. When you supply a Base URL the Web / Mobile-Web environments drive a real headless browser, capture screenshots, optionally record video, and auto-link any failures to bug reports.') }}</p>
-    <div style="margin:0 0 14px 0;padding:10px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;">
-        <strong style="color:#075985;">🎬 {{ t.get('te_live_callout_title', 'Watch the run live') }}</strong>
-        <p style="margin:4px 0 8px 0;font-size:0.88em;color:#0c4a6e;">
+    <div class="te-live-callout">
+        <strong class="te-live-callout-title">🎬 {{ t.get('te_live_callout_title', 'Watch the run live') }}</strong>
+        <p class="te-live-callout-body">
             {{ t.get('te_live_callout_body',
                'On cloud servers you cannot see the browser window directly, but you can stream a frame-by-frame view of every screenshot Playwright takes. Open the live view in a new tab BEFORE clicking Run below.') }}
         </p>
@@ -893,28 +879,24 @@
        control to /test-execution/results/<id>. The form stays
        on /test-execution so the operator doesn't lose context. #}
     {% if active_automation_run %}
-    <div id="te-active-run" class="card"
+    <div id="te-active-run" class="card te-active-run"
          data-run-id="{{ active_automation_run.run_id }}"
-         data-case-count="{{ active_automation_run.case_count }}"
-         style="margin-bottom:14px;border:2px solid #0369a1;background:#f0f9ff;">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-            <span id="te-active-pill"
-                  style="display:inline-block;padding:4px 12px;border-radius:999px;
-                         font-weight:700;font-size:0.85em;background:#dcfce7;color:#166534;">
+         data-case-count="{{ active_automation_run.case_count }}">
+        <div class="te-row">
+            <span class="te-active-pill" id="te-active-pill">
                 ● {{ t.te_running }}
             </span>
-            <span id="te-active-progress"
-                  style="font-size:0.92em;color:#0f172a;font-weight:600;">
+            <span class="te-active-progress" id="te-active-progress">
                 {{ t.te_cases_progress|format(0, active_automation_run.case_count) }}
             </span>
-            <span style="font-size:0.85em;color:var(--text-muted);margin-left:auto;">
+            <span class="te-active-runid">
                 run_id: <code>{{ active_automation_run.run_id }}</code>
             </span>
         </div>
-        <p id="te-active-hint" style="margin:8px 0 0 0;font-size:0.85em;color:#0c4a6e;">
+        <p class="te-active-hint" id="te-active-hint">
             {{ t.te_worker_hint }}
         </p>
-        <div class="btn-group" style="margin-top:8px;">
+        <div class="btn-group te-mt-8">
             <a href="{{ url_for('test_execution_live') }}?run_id={{ active_automation_run.run_id }}"
                target="_blank" rel="noopener"
                class="btn btn-sm btn-secondary">
@@ -922,7 +904,7 @@
             </a>
             <a href="{{ url_for('test_execution_results', run_id=active_automation_run.run_id) }}"
                id="te-active-results-btn"
-               class="btn btn-sm btn-primary" style="display:none;">
+               class="btn btn-sm btn-primary" hidden>
                 {{ t.te_import }}
             </a>
         </div>
@@ -930,16 +912,15 @@
     {% endif %}
     <div class="form-grid">
         <div class="form-group">
-            <label for="f-base-url" style="display:flex;align-items:center;gap:8px;">
+            <label class="te-label-row" for="f-base-url">
                 {{ t.get('te_base_url', 'Base URL') }}
-                <span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:0.72em;font-weight:700;">
+                <span class="te-badge-amber">
                     {{ t.get('te_base_url_badge', 'required for live + screenshots + video') }}
                 </span>
             </label>
-            <input id="f-base-url" type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
-                   placeholder="https://example.com"
-                   style="border:2px solid #fbbf24;">
-            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:#92400e;">
+            <input class="te-input-warn" id="f-base-url" type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
+                   placeholder="https://example.com">
+            <p class="hint te-hint-warn">
                 {{ t.get('te_base_url_hint_v2',
                    'Without Base URL the run uses the deterministic simulator only — no live preview, no recorded video, no screenshots, no bug-report attachments. Paste a target URL to enable real Playwright execution.') }}
             </p>
@@ -950,7 +931,7 @@
                 <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
                 <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm with visible click / scroll / redirect') }}</option>
             </select>
-            <p class="hint" style="margin-top:4px;font-size:0.78rem;color:var(--text-muted);">
+            <p class="hint te-hint-muted">
                 {{ t.get('te_record_video_hint',
                    'When on, every action is slowed and elements flash a red outline before being clicked so the .webm is legible.') }}
             </p>
@@ -1044,7 +1025,7 @@
                     {% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="mw_resolution_custom" aria-label="{{ t.get('te_custom_resolution', 'Custom resolution') }}" placeholder="e.g. 414x896" style="display:none; margin-top:6px">
+                <input class="te-mt-6" type="text" name="mw_resolution_custom" aria-label="{{ t.get('te_custom_resolution', 'Custom resolution') }}" placeholder="e.g. 414x896" hidden>
             </div>
             <div class="form-group">
                 <label for="f-mw-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
@@ -1062,7 +1043,7 @@
                     {% for d in ios_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="ios_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_iphone }}" style="display:none; margin-top:6px">
+                <input class="te-mt-6" type="text" name="ios_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_iphone }}" hidden>
             </div>
             <div class="form-group">
                 <label for="f-ios-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
@@ -1084,7 +1065,7 @@
                     {% for d in android_devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
                     <option value="__custom">{{ t.get('te_custom_option', 'Custom...') }}</option>
                 </select>
-                <input type="text" name="android_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_android }}" style="display:none; margin-top:6px">
+                <input class="te-mt-6" type="text" name="android_device_custom" aria-label="{{ t.get('te_custom_device', 'Custom device model') }}" placeholder="{{ t.te_ph_android }}" hidden>
             </div>
             <div class="form-group">
                 <label for="f-android-version">{{ t.get('te_os_version', 'OS version') }} <span class="muted">({{ t.get('te_optional', 'optional') }})</span></label>
@@ -1152,9 +1133,9 @@
       </div>
     </div>
 
-    <details style="margin-top:.5rem">
+    <details class="te-mt-half">
       <summary>{{ t.get('creds_advanced', 'Advanced: registration URL / display name') }}</summary>
-      <div class="form-row" style="margin-top:.5rem">
+      <div class="form-row te-mt-half">
         <div class="form-group">
           <label for="f-cred-register-url">{{ t.get('creds_register_url', 'Registration URL (for generated accounts)') }}</label>
           <input id="f-cred-register-url" type="url" name="cred_register_url"
@@ -1170,14 +1151,14 @@
     </details>
 
     {% if cred.mode == 'generated' and cred.username %}
-    <div class="alert alert-info" style="margin-top:.5rem">
+    <div class="alert alert-info te-mt-half">
       <strong>{{ t.get('creds_generated_label', 'Generated test account:') }}</strong>
       <code>{{ cred.username }}</code> / <code>{{ cred.password }}</code>
       {% if cred.notes %}<br><small>{{ cred.notes }}</small>{% endif %}
     </div>
     {% endif %}
 
-    <p style="margin-top:.5rem">
+    <p class="te-mt-half">
       <button type="submit" formaction="{{ url_for('test_execution_generate_account') }}"
               formmethod="POST" class="btn btn-secondary">
         <i data-lucide="key-round" class="icon-sm"></i> {{ t.get('creds_generate_now', 'Generate test account now') }}
@@ -1189,24 +1170,23 @@
    / unticks selected_items checkboxes by their data-suite attribute
    before the form posts. Default "All suites" — no filtering applied,
    identical to the pre-PR-D behaviour. #}
-<div style="margin:14px 0;display:flex;align-items:center;gap:10px;">
-    <label for="suite-filter-select" style="font-size:0.92em;color:#475569;">
+<div class="te-suite-filter">
+    <label class="te-suite-filter-label" for="suite-filter-select">
         {{ t.get('te_suite_filter_label', 'Run only suite:') }}
     </label>
-    <select id="suite-filter-select"
-            style="font-size:0.92em;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;min-width:160px;">
+    <select class="te-suite-filter-select" id="suite-filter-select">
         <option value="all">{{ t.get('te_suite_filter_all', 'All suites') }}</option>
         <option value="Smoke">Smoke</option>
         <option value="Regression">Regression</option>
         <option value="E2E">E2E</option>
         <option value="">{{ t.get('te_suite_filter_untagged', 'Untagged only') }}</option>
     </select>
-    <small style="color:var(--text-subtle);">
+    <small class="te-text-subtle">
         {{ t.get('te_suite_filter_hint', '— ticks / unticks the TC checkboxes by suite tag.') }}
     </small>
 </div>
 
-<a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" class="btn btn-secondary btn-lg" id="watch-live-link" style="margin-right:10px;"><i data-lucide="monitor-play" class="icon-sm"></i> {{ t.get('te_watch_live', 'Watch live (opens in new tab)') }}</a><button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
+<a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" class="btn btn-secondary btn-lg te-mr-10" id="watch-live-link"><i data-lucide="monitor-play" class="icon-sm"></i> {{ t.get('te_watch_live', 'Watch live (opens in new tab)') }}</a><button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>
 </form>
 
 <script nonce="{{ csp_nonce }}">
@@ -1233,32 +1213,31 @@
 
 {# ── Run progress overlay (shown while POST is in flight) ── #}
 <div id="te-run-overlay" class="te-run-overlay" hidden role="alertdialog" aria-busy="true" aria-live="polite">
-  <div class="te-run-card" style="position:relative;">
+  <div class="te-run-card te-rel">
     {# Manual escape hatch — the synchronous POST occasionally outlives
        the gunicorn 300 s ceiling on cold-start runs and the browser is
        left staring at this overlay. The X dismisses the modal so the
        operator can refresh manually. #}
-    <button type="button" id="te-overlay-close" class="btn-close"
-            aria-label="{{ t.guide_close }}"
-            style="position:absolute;top:8px;right:10px;">&times;</button>
+    <button type="button" id="te-overlay-close" class="btn-close te-overlay-close"
+            aria-label="{{ t.guide_close }}">&times;</button>
     <h3>{{ t.get('te_overlay_title', 'Live automation view — run in progress') }}</h3>
-    <p style="margin-bottom:10px;">
+    <p class="te-mb-10">
       {{ t.get('te_overlay_body',
           'TestForTge is running your selected items across every chosen environment. This tab will reload automatically once the run completes — please don\'t close it.') }}
     </p>
-    <div id="te-overlay-live" style="display:none;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:10px;margin-bottom:10px;font-size:0.88em;color:#0f172a;">
-      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <div class="te-overlay-live" id="te-overlay-live" hidden>
+      <div class="te-overlay-live-row">
         <span><strong id="te-overlay-tc">—</strong></span>
-        <span id="te-overlay-progress" style="color:#475569;">{{ t.te_starting }}</span>
+        <span class="te-text-slate" id="te-overlay-progress">{{ t.te_starting }}</span>
       </div>
     </div>
-    <p style="margin:6px 0 10px 0;font-size:0.85em;color:#475569;">
+    <p class="te-overlay-note">
       <span class="te-eta" id="te-overlay-eta"></span>
-      <span id="te-overlay-elapsed" style="margin-left:6px;"></span>
+      <span class="te-ml-6" id="te-overlay-elapsed"></span>
     </p>
     <div class="te-run-bar" aria-hidden="true"></div>
-    <p style="margin-top:14px;font-size:0.88em;">
-      <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" style="font-weight:600;">
+    <p class="te-overlay-foot">
+      <a class="te-fw-600" href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener">
         🎬 {{ t.get('te_overlay_live_link', 'Open live frame-by-frame view in a new tab ↗') }}
       </a>
     </p>

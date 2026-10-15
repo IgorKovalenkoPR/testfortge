@@ -139,6 +139,18 @@ TEXT_PAIRS = [
     ("--badge-emerald", "#ECFDF5", "emerald badge"),
     ("--badge-green", "#F0FDF4", "green badge"),
     ("--badge-grey", "#F3F4F6", "grey badge"),
+    # Status families moved out of inline styles (block B).
+    ("--text-strong", WHITE, "strong text on white"),
+    ("--badge-grey", "--tf-bg", "slate secondary text on the page background"),
+    ("--amber-text", "--warning-light", "amber banner and badge text"),
+    ("--amber-text", "--amber-bg", "amber text at the light end of the banner"),
+    ("--amber-text-strong", "--warning-light", "amber banner body text"),
+    ("--info-text", "--tf-bg", "info callout title"),
+    ("--info-text-strong", "--tf-bg", "info callout body and active-run hint"),
+    ("--success-text", "--success-light", "running pill"),
+    ("--violet-text", "--violet-bg", "violet item badge"),
+    ("--indigo-text", "--indigo-bg", "done pill"),
+    ("--danger-text", "--danger-light", "failed pill"),
 ]
 
 #: 3:1 — WCAG 1.4.11 non-text contrast.
@@ -498,3 +510,120 @@ def test_the_model_switcher_is_compact_and_clear_of_its_status_line(css):
     assert re.search(r"gap\s*:\s*var\(--space-2\)", box), box
     sel = _body(css, ".sidebar-model select")
     assert re.search(r"(?<![-\w])height\s*:\s*var\(--control-sm\)", sel), sel
+
+
+# ── (i) inline styles only go down (block B, 2026-10-15) ──────────────
+#
+# 430 style="" attributes in 16 templates were moved into style.css one
+# template at a time. Each template's count may only fall: a count above
+# its ceiling fails, and so does one below it — lower the number here in
+# the same commit, so the ceiling follows the work down and never leaves
+# room to creep back. Templates not listed have a ceiling of 0.
+#
+# Dynamic values (a progress bar's width) stay inline by design; they are
+# counted like the rest and are why a ceiling can end above zero.
+
+INLINE_STYLE_CEILING = {
+    "_project_picker.html": 11,
+    "automation.html": 4,
+    "bug_reports.html": 27,
+    "checklist.html": 9,
+    "estimation.html": 34,
+    "guide.html": 8,
+    "index.html": 34,
+    "org_settings.html": 2,
+    "review_session.html": 59,
+    "test_cases.html": 68,
+    "test_execution_live.html": 51,
+    "test_execution_manual.html": 11,
+    "test_execution_runs.html": 2,
+    "guide/_sections_en.html": 2,
+    "guide/_sections_ua.html": 2,
+}
+
+#: Script-side styling the same way: el.style.display / .color /
+#: .background written from JS. Visibility goes through el.hidden (with
+#: the global [hidden] rule), colours through classes.
+JS_STYLE_CEILING = {
+    "static/js/app.js": 1,
+    "templates/checklist.html": 8,
+    "templates/estimation.html": 6,
+    "templates/guide.html": 2,
+    "templates/review_session.html": 1,
+    "templates/test_cases.html": 14,
+    "templates/test_execution_live.html": 8,
+}
+
+_INLINE_STYLE = re.compile(r"""\sstyle\s*=\s*["']""", re.I)
+_JS_STYLE = re.compile(r"\.style\.(?:display|color|background(?:Color)?)\s*=")
+
+
+def inline_styles(html: str) -> int:
+    return len(_INLINE_STYLE.findall(_JINJA_COMMENT.sub("", html)))
+
+
+def js_style_writes(src: str) -> int:
+    return len(_JS_STYLE.findall(src))
+
+
+def _rel(path: pathlib.Path, base: pathlib.Path) -> str:
+    return path.relative_to(base).as_posix()
+
+
+def test_inline_styles_never_rise_and_the_ceiling_follows_them_down():
+    over, stale = {}, {}
+    for path in _templates():
+        name = _rel(path, TEMPLATES)
+        n = inline_styles(path.read_text(encoding="utf-8"))
+        cap = INLINE_STYLE_CEILING.get(name, 0)
+        if n > cap:
+            over[name] = (n, cap)
+        elif n < cap:
+            stale[name] = (n, cap)
+    assert not over, f"inline style=\"\" above the ceiling (count, cap): {over}"
+    assert not stale, (
+        f"fewer inline styles than the ceiling — lower it to the count: {stale}")
+
+
+def test_js_style_writes_never_rise_and_the_ceiling_follows_them_down():
+    files = sorted((ROOT / "static" / "js").rglob("*.js")) + _templates()
+    over, stale = {}, {}
+    for path in files:
+        name = _rel(path, ROOT)
+        n = js_style_writes(path.read_text(encoding="utf-8"))
+        cap = JS_STYLE_CEILING.get(name, 0)
+        if n > cap:
+            over[name] = (n, cap)
+        elif n < cap:
+            stale[name] = (n, cap)
+    assert not over, f".style.display/.color/.background above the ceiling: {over}"
+    assert not stale, f"lower these JS ceilings to the count: {stale}"
+
+
+def test_the_ratchets_count_what_they_claim():
+    """The counters on a synthetic page, so a regex that stopped matching
+    would fail here instead of passing every template at zero."""
+    assert inline_styles('<p style="margin:0">a</p><b STYLE = \'x\'>') == 2
+    assert inline_styles('{# <p style="x"> #}<p data-style="x">') == 0
+    assert js_style_writes("el.style.display = 'none'; el.style.color='#000';"
+                           " el.style.backgroundColor = x; el.hidden = true;") == 3
+    # The scan reaches real files: the ceilings sum to what is on disk.
+    assert sum(inline_styles(p.read_text(encoding="utf-8"))
+               for p in _templates()) == sum(INLINE_STYLE_CEILING.values())
+
+
+def test_test_execution_has_no_inline_styles_left():
+    html = (TEMPLATES / "test_execution.html").read_text(encoding="utf-8")
+    assert inline_styles(html) == 0
+    js = (ROOT / "static" / "js" / "test-execution.js").read_text(encoding="utf-8")
+    assert ".style." not in js
+
+
+def test_the_hidden_attribute_always_hides(css):
+    """JS toggles visibility with el.hidden now; a class that sets display
+    would otherwise outrank the UA [hidden] rule and keep the element on
+    screen (bitten three times — see the bulk-bar and recorder modals)."""
+    # The selector is [hidden] alone — ".tf-hints [hidden]" and friends
+    # are scoped rules and do not count.
+    assert re.search(r"(?:^|\})\s*\[hidden\]\s*\{\s*display\s*:\s*none\s*!important",
+                     _strip_comments(css)), "global [hidden] rule missing"

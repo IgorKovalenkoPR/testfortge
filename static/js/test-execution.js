@@ -38,10 +38,9 @@
         var s = (stat && stat.status) || 'queued';
         if (s === 'done') {
             pill.textContent = '✓ done';
-            pill.style.background = '#e0e7ff';
-            pill.style.color = '#3730a3';
+            pill.className = 'te-active-pill te-active-pill--done';
             hint.textContent = 'Run finished. Importing results…';
-            if (btn) { btn.style.display = ''; }
+            if (btn) { btn.hidden = false; }
             // One-time auto-import; if it fails the user has the button.
             // 1.5s delay lets the success pill register before redirect.
             setTimeout(function () {
@@ -58,18 +57,16 @@
             pill.textContent = (s === 'failed') ? '✗ failed'
                              : (s === 'terminated') ? '✗ stopped'
                              : '⚠ stalled';
-            pill.style.background = '#fee2e2';
-            pill.style.color = '#991b1b';
+            pill.className = 'te-active-pill te-active-pill--failed';
             hint.textContent = stat.error
                 || 'Worker did not finish cleanly.';
             if (btn) {
-                btn.style.display = '';
+                btn.hidden = false;
                 btn.textContent = 'Import partial results';
             }
         } else {
             pill.textContent = '● running';
-            pill.style.background = '#dcfce7';
-            pill.style.color = '#166534';
+            pill.className = 'te-active-pill';
         }
     }
 
@@ -137,13 +134,13 @@
         var tcList = document.getElementById('items-tc');
         var clList = document.getElementById('items-cl');
         if (source.value === 'test_cases') {
-            if (tcList) tcList.style.display = 'block';
-            if (clList) clList.style.display = 'none';
+            if (tcList) tcList.hidden = false;
+            if (clList) clList.hidden = true;
             document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = false; });
             document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = true; });
         } else {
-            if (tcList) tcList.style.display = 'none';
-            if (clList) clList.style.display = 'block';
+            if (tcList) tcList.hidden = true;
+            if (clList) clList.hidden = false;
             document.querySelectorAll('.item-cb-tc').forEach(function(cb) { cb.disabled = true; });
             document.querySelectorAll('.item-cb-cl').forEach(function(cb) { cb.disabled = false; });
         }
@@ -198,14 +195,14 @@
         var el = document.getElementById(id);
         if (!el) return;
         var toggle = document.getElementById('toggle-' + id);
-        if (el.style.display === 'none') {
-            el.style.display = 'block';
+        if (el.hidden) {
+            el.hidden = false;
             if (toggle) {
                 toggle.innerHTML = '<i data-lucide="chevron-up" class="icon-sm"></i>';
                 if (window.lucide) window.lucide.createIcons();
             }
         } else {
-            el.style.display = 'none';
+            el.hidden = true;
             if (toggle) {
                 toggle.innerHTML = '<i data-lucide="chevron-down" class="icon-sm"></i>';
                 if (window.lucide) window.lucide.createIcons();
@@ -308,7 +305,7 @@
             var inp = document.querySelector(pair[1]);
             if (!sel || !inp) return;
             sel.addEventListener('change', function () {
-                inp.style.display = sel.value === '__custom' ? 'block' : 'none';
+                inp.hidden = sel.value !== '__custom';
             });
         });
     })();
@@ -318,7 +315,7 @@
         var runs = document.querySelectorAll('.run-details');
         if (runs.length > 0) {
             var last = runs[runs.length - 1];
-            last.style.display = 'block';
+            last.hidden = false;
             var toggleId = 'toggle-' + last.id;
             var toggle = document.getElementById(toggleId);
             if (toggle) {
@@ -382,7 +379,7 @@
                 .then(function(r) { return r.json(); })
                 .then(function(info) {
                     if (!info || info.status === 'idle') return;
-                    if (liveBox) liveBox.style.display = 'block';
+                    if (liveBox) liveBox.hidden = false;
                     if (liveTc) {
                         liveTc.textContent = info.current_tc
                             ? ('Test case: ' + info.current_tc)
@@ -425,10 +422,7 @@
                 var card = overlay.querySelector('.te-run-card');
                 if (!card) return;
                 var notice = document.createElement('p');
-                notice.style.cssText = 'margin-top:14px;padding:10px;'
-                                    + 'background:#fef3c7;color:#92400e;'
-                                    + 'border:1px solid #fbbf24;'
-                                    + 'border-radius:6px;font-size:0.88em;';
+                notice.className = 'te-slow-notice';
                 notice.textContent = slowMsg
                     || 'The run is taking longer than expected. The page '
                     +  'will not reload automatically — close this dialog '
@@ -484,11 +478,7 @@
             summary.innerHTML = '';
             Array.from(input.files).forEach(function (f) {
                 var row = document.createElement('div');
-                row.className = 'file-item';
-                row.style.cssText = 'display:flex;justify-content:space-between;'
-                                  + 'padding:4px 8px;background:#f1f5f9;'
-                                  + 'border-radius:4px;margin-top:4px;'
-                                  + 'font-size:0.85em;';
+                row.className = 'file-item te-file-row';
                 row.innerHTML = '<span></span><span></span>';
                 row.children[0].textContent = f.name;
                 row.children[1].textContent = humanSize(f.size);
@@ -563,7 +553,7 @@
         var isWalk = (picked === 'walkthrough');
         [sourceCard, itemsCard].forEach(function (el) {
             if (!el) return;
-            el.style.display = isWalk ? 'none' : '';
+            el.hidden = isWalk;
             // Disable inputs while hidden so the form's required-field
             // validation doesn't trip on hidden but empty checkboxes
             // (selected_items isn't required but radios on source might
