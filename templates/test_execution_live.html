@@ -1,29 +1,25 @@
 {% extends "base.html" %}
 {% block title %}TestForTge — {{ t.get('te_live_title', 'Live automation view') }}{% endblock %}
 
+{% block page_class %}{{ ' page-test-execution-live' }}{% endblock %}
 {% block content %}
-<h1 style="margin-bottom:6px;">{{ t.get('te_live_title', 'Live automation view') }}</h1>
+<h1 class="lv-mb-6">{{ t.get('te_live_title', 'Live automation view') }}</h1>
 <p class="subtitle">
     {{ t.get('te_live_subtitle',
        'Real-time filmstrip of the headless browser. Open this page BEFORE clicking Run on Test Execution — frames will start streaming once Playwright takes its first screenshot.') }}
 </p>
 
-<div class="card" id="live-status" style="margin-bottom:14px;">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span class="status-pill" id="status-pill"
-              style="display:inline-block;padding:4px 12px;border-radius:999px;
-                     font-weight:700;font-size:0.85em;background:#f1f5f9;color:#475569;">
+<div class="card lv-status-card" id="live-status">
+    <div class="lv-status-row">
+        <span class="status-pill lv-pill" id="status-pill">
             ● {{ t.tl_idle }}
         </span>
         {# Stage 5: memory pill — RSS / budget surfaced from Stage 3's
            OomGuard so operators see the early-warning band before the
            guard trips an early-exit. Hidden by JS when budget == 0
            (psutil missing on the worker side). #}
-        <span id="status-memory" hidden
-              data-te-mem-pill
-              style="display:inline-block;padding:4px 10px;border-radius:999px;
-                     font-weight:600;font-size:0.8em;background:#f1f5f9;color:#475569;
-                     font-variant-numeric:tabular-nums;">
+        <span class="lv-mem" id="status-memory" hidden
+              data-te-mem-pill>
             <span aria-hidden="true">🧠</span>
             <span id="status-memory-text">— MB / — MB</span>
         </span>
@@ -31,20 +27,17 @@
            'walkthrough' (legacy WalkthroughRunner), 'tc_driven'
            (AutomationRunner). Subtle so it doesn't compete with the
            status pill. JS toggles based on info.mode. #}
-        <span id="status-mode" hidden
-              data-te-mode-badge
-              style="display:inline-block;padding:3px 8px;border-radius:4px;
-                     font-size:0.75em;font-family:ui-monospace,SFMono-Regular,monospace;
-                     background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;">
+        <span class="lv-mode" id="status-mode" hidden
+              data-te-mode-badge>
             {{ t.tl_mode }}: —
         </span>
-        <span id="status-text" style="font-size:0.92em;color:#475569;">
+        <span class="lv-status-text" id="status-text">
             {{ t.tl_waiting }}
         </span>
-        <span id="status-progress" style="font-size:0.92em;color:#0f172a;font-weight:600;margin-left:auto;"></span>
+        <span class="lv-status-progress" id="status-progress"></span>
     </div>
-    <div id="status-pace" style="margin-top:6px;font-size:0.82em;color:#0f172a;"></div>
-    <div id="status-meta" style="margin-top:4px;font-size:0.82em;color:var(--text-muted);"></div>
+    <div class="lv-status-pace" id="status-pace"></div>
+    <div class="lv-status-meta" id="status-meta"></div>
 </div>
 
 {# Stage 5: early-exit banner — surfaces OomGuard / wall-clock exits
@@ -54,20 +47,15 @@
    empty info.early_exit_reason. Colour is set per reason class so
    OOM (severe) and wall-clock (operator-configured) read differently
    at a glance. #}
-<div id="te-live-early-exit" hidden
-     data-te-early-exit-banner
-     style="margin:0 0 14px 0;padding:14px 18px;border-radius:6px;
-            background:#fee2e2;border:2px solid #f87171;color:#7f1d1d;">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div id="te-live-early-exit-icon" style="font-size:1.7em;line-height:1;">⛔</div>
-        <div style="flex:1;min-width:240px;">
-            <strong id="te-live-early-exit-title"
-                    style="display:block;font-size:1em;margin-bottom:4px;">
+<div class="lv-ee" id="te-live-early-exit" hidden
+     data-te-early-exit-banner>
+    <div class="lv-banner-row">
+        <div class="lv-banner-icon" id="te-live-early-exit-icon">⛔</div>
+        <div class="lv-banner-body">
+            <strong class="lv-banner-title" id="te-live-early-exit-title">
                 {{ t.tl_stopped }}
             </strong>
-            <p id="te-live-early-exit-reason"
-               style="margin:0;font-size:0.88em;font-family:ui-monospace,SFMono-Regular,monospace;
-                      word-break:break-word;"></p>
+            <p class="lv-ee-reason" id="te-live-early-exit-reason"></p>
         </div>
         <a id="te-live-early-exit-import" href="#"
            class="btn btn-sm btn-secondary">
@@ -76,12 +64,11 @@
     </div>
 </div>
 
-<div class="card" style="padding:0;overflow:hidden;background:#0f172a;position:relative;">
+<div class="card lv-stage">
     {# Live filmstrip toolbar — Pause freezes the current frame so the
        operator can study it; Open in new tab gives a full-screen view
        on a second monitor. Both are pure client-side conveniences. #}
-    <div id="live-toolbar"
-         style="position:absolute;top:10px;right:10px;display:flex;gap:var(--gap-buttons);z-index:5;">
+    <div class="lv-toolbar" id="live-toolbar">
         <button type="button" id="live-pause"
                 class="btn btn-sm btn-secondary">
             <i data-lucide="pause" class="icon-sm"></i>
@@ -94,32 +81,30 @@
             {{ t.get('te_live_open_tab', 'Open frame in new tab') }}
         </a>
     </div>
-    <img id="live-frame"
+    <img class="lv-frame" id="live-frame"
          src="{{ url_for('test_execution_live_frame') }}"
          alt="{{ t.tl_alt_frame }}"
-         style="display:block;width:100%;max-height:80vh;object-fit:contain;background:#0f172a;" />
+         />
 </div>
 
 {# ── Filmstrip — last 12 frames as thumbnails ─────────────────── #}
-<div id="live-strip" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+<div class="lv-strip" id="live-strip">
     {% for i in range(12) %}
-    <img class="live-strip-thumb"
+    <img class="live-strip-thumb lv-thumb"
          data-slot="{{ '%02d' % i }}"
          src="{{ url_for('test_execution_live_strip', slot=i) }}?t=0"
          alt="{{ t.tl_alt_frame }} {{ i }}"
-         style="width:96px;height:60px;object-fit:cover;background:#0f172a;border:1px solid #334155;border-radius:3px;cursor:pointer;" />
+         />
     {% endfor %}
 </div>
 
-<div id="te-live-help" hidden
-     style="margin:14px 0;padding:12px 16px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;color:#92400e;">
+<div class="lv-help" id="te-live-help" hidden>
     <strong>{{ t.get('te_live_help_title', 'Nothing is streaming yet.') }}</strong>
-    <p style="margin:6px 0 0 0;font-size:0.88em;">
+    <p class="lv-help-text">
         {{ t.get('te_live_help_body',
            'Live view only updates while a Playwright run is in progress. Make sure you set a Base URL on the Test Execution page before clicking Run — without it the simulator runs and no frames are captured.') }}
     </p>
-    <a href="{{ url_for('test_execution_page') }}" class="btn btn-sm btn-secondary"
-       style="margin-top:8px;">
+    <a href="{{ url_for('test_execution_page') }}" class="btn btn-sm btn-secondary lv-mt-8">
         {{ t.get('te_live_help_back', 'Back to Test Execution') }}
     </a>
 </div>
@@ -131,18 +116,15 @@
    nothing was dispatched. The empty yellow #te-live-help only shows
    after 30s of idle status; this banner shows immediately. #}
 {% if not request.args.get('run_id') and not recent_runs %}
-<div class="card"
-     style="margin:14px 0;padding:16px 20px;
-            background:linear-gradient(90deg,#fffbeb 0%,#fef3c7 100%);
-            border:2px solid #fbbf24;color:#92400e;">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div style="font-size:1.7em;line-height:1;">🎬</div>
-        <div style="flex:1;min-width:240px;">
-            <strong style="display:block;font-size:1em;margin-bottom:4px;">
+<div class="card lv-empty-banner">
+    <div class="lv-banner-row">
+        <div class="lv-banner-icon">🎬</div>
+        <div class="lv-banner-body">
+            <strong class="lv-banner-title">
                 {{ t.get('te_live_idle_title',
                     'No automation run has been dispatched yet') }}
             </strong>
-            <p style="margin:0;font-size:0.88em;color:#78350f;">
+            <p class="lv-empty-text">
                 {{ t.get('te_live_idle_body',
                     'This page streams the headless browser only while a Playwright run is in progress. To start one, go to Test Execution, set a Base URL, and click Run Test Execution.') }}
             </p>
@@ -157,37 +139,37 @@
 {% endif %}
 
 {% if recent_runs %}
-<div id="te-recent-runs" class="card" style="margin-top:14px;">
+<div id="te-recent-runs" class="card lv-mt-14">
     <strong>{{ t.tl_recent }}</strong>
-    <p style="margin:4px 0 8px 0;font-size:0.85em;color:var(--text-muted);">
+    <p class="lv-runs-hint">
         {{ t.tl_recent_hint }}
     </p>
-    <table style="width:100%;border-collapse:collapse;font-size:0.88em;">
+    <table class="lv-runs-table">
         <thead>
-            <tr style="background:#f1f5f9;text-align:left;">
-                <th style="padding:6px 8px;">run_id</th>
-                <th style="padding:6px 8px;">{{ t.tl_col_status }}</th>
-                <th style="padding:6px 8px;">{{ t.tl_col_age }}</th>
-                <th style="padding:6px 8px;">{{ t.tl_col_action }}</th>
+            <tr class="lv-runs-head">
+                <th class="lv-cell">run_id</th>
+                <th class="lv-cell">{{ t.tl_col_status }}</th>
+                <th class="lv-cell">{{ t.tl_col_age }}</th>
+                <th class="lv-cell">{{ t.tl_col_action }}</th>
             </tr>
         </thead>
         <tbody>
             {% for run in recent_runs %}
-            <tr style="border-top:1px solid #e2e8f0;">
-                <td style="padding:6px 8px;font-family:monospace;">{{ run.run_id }}</td>
-                <td style="padding:6px 8px;">
+            <tr class="lv-runs-row">
+                <td class="lv-cell-mono">{{ run.run_id }}</td>
+                <td class="lv-cell">
                     {% if run.status == 'done' %}
-                    <span style="color:var(--badge-green);font-weight:600;">✓ {{ t.tl_done }}</span>
+                    <span class="lv-run-done">✓ {{ t.tl_done }}</span>
                     {% elif run.status == 'running' %}
-                    <span style="color:#0369a1;">● {{ t.te_running }}</span>
+                    <span class="lv-run-running">● {{ t.te_running }}</span>
                     {% elif run.status == 'stalled' %}
-                    <span style="color:#b91c1c;font-weight:600;">⚠ {{ t.tl_stalled }}</span>
+                    <span class="lv-run-failed">⚠ {{ t.tl_stalled }}</span>
                     {% else %}
-                    <span style="color:var(--text-subtle);">{{ t.tl_queued }}</span>
+                    <span class="lv-text-subtle">{{ t.tl_queued }}</span>
                     {% endif %}
                 </td>
-                <td style="padding:6px 8px;">{{ run.age_s }}{{ t.tl_ago }}</td>
-                <td style="padding:6px 8px;">
+                <td class="lv-cell">{{ run.age_s }}{{ t.tl_ago }}</td>
+                <td class="lv-cell">
                     {% if run.status == 'done' %}
                     <a href="{{ url_for('test_execution_results', run_id=run.run_id) }}"
                        class="btn btn-sm btn-primary">
@@ -213,12 +195,12 @@
 </div>
 {% endif %}
 
-<p class="hint" style="margin-top:10px;color:var(--text-muted);font-size:0.85em;">
+<p class="hint lv-footnote">
     {{ t.get('te_live_hint',
        'Frames refresh once per second. After the run completes you can review per-case screenshots and recorded video on the Test Execution results page.') }}
 </p>
 
-<div style="margin-top:16px;">
+<div class="lv-mt-16">
     <a href="{{ url_for('test_execution_page') }}" class="btn btn-secondary">
         ← {{ t.get('te_live_back', 'Back to Test Execution') }}
     </a>
@@ -304,14 +286,13 @@
                         // gracefully handles missing/incomplete
                         // result.json by flashing a warning.
                         var btn = '<a href="' + resultsUrl
-                            + '" class="btn btn-sm btn-secondary" '
-                            + 'style="margin-top:8px;">'
+                            + '" class="btn btn-sm btn-secondary lv-mt-8">'
                             + 'Try to import partial results</a>';
                         p.innerHTML = '<strong>' + heading + '</strong>'
-                            + '<p style="margin:6px 0 0 0;font-size:0.88em;">'
+                            + '<p class="lv-help-text">'
                             + (s.error || 'unknown error')
                             + '</p>'
-                            + '<p style="margin:6px 0 0 0;">' + btn + '</p>';
+                            + '<p class="lv-mt-6-flush">' + btn + '</p>';
                     }
                 }
             })
@@ -324,19 +305,20 @@
         // these entries, 'oom_exit' / 'early_exit' / 'running_tc' fell
         // through to the idle pill and confused operators ("why does a
         // crashed run show as idle?").
-        var colours = {
-            idle:       ['#f1f5f9', '#475569', '● {{ t.tl_idle }}'],
-            starting:   ['#fef9c3', '#854d0e', '● starting'],
-            running:    ['#dcfce7', '#166534', '● {{ t.te_running }}'],
-            running_tc: ['#dbeafe', '#1e40af', '● {{ t.te_running }} TC'],
-            done:       ['#e0e7ff', '#3730a3', '✓ {{ t.tl_done }}'],
-            oom_exit:   ['#fee2e2', '#7f1d1d', '⛔ oom exit'],
-            early_exit: ['#fef3c7', '#854d0e', '⚠ early exit']
+        // Colours live in style.css as .lv-pill--<status> (block B).
+        var labels = {
+            idle:       '● {{ t.tl_idle }}',
+            starting:   '● starting',
+            running:    '● {{ t.te_running }}',
+            running_tc: '● {{ t.te_running }} TC',
+            done:       '✓ {{ t.tl_done }}',
+            oom_exit:   '⛔ oom exit',
+            early_exit: '⚠ early exit'
         };
-        var c = colours[status] || colours.idle;
-        pill.style.background = c[0];
-        pill.style.color = c[1];
-        pill.textContent = c[2];
+        var known = Object.prototype.hasOwnProperty.call(labels, status);
+        var key = known ? status : 'idle';
+        pill.className = 'status-pill lv-pill lv-pill--' + key.replace('_', '-');
+        pill.textContent = labels[key];
 
         // Stage 5: distinguish LiveExecutor "walking the site" from a
         // TC-driven step. ``LIVE-PAGE-NNN`` is the synthetic id
@@ -422,19 +404,18 @@
         memPill.hidden = false;
         memText.textContent = rss + ' MB / ' + budget + ' MB';
         var pct = rss / budget;
-        var bg, fg;
+        var level;
         if (pct >= 0.9) {
             // Red — within 10% of the OOM cliff.
-            bg = '#fee2e2'; fg = '#7f1d1d';
+            level = 'high';
         } else if (pct >= 0.7) {
             // Amber — operator should think about lowering max_pages.
-            bg = '#fef3c7'; fg = '#854d0e';
+            level = 'warn';
         } else {
             // Green — comfortable headroom.
-            bg = '#dcfce7'; fg = '#166534';
+            level = 'ok';
         }
-        memPill.style.background = bg;
-        memPill.style.color = fg;
+        memPill.className = 'lv-mem lv-mem--' + level;
     }
 
     /* Stage 5: mode badge — labels which dispatch path the worker
@@ -476,15 +457,13 @@
                      || /^oom_budget_exceeded/.test(reason);
         // Colour the card per reason class.
         if (isOom) {
-            eeBanner.style.background = '#fee2e2';
-            eeBanner.style.borderColor = '#f87171';
-            eeBanner.style.color = '#7f1d1d';
+            eeBanner.classList.remove('lv-ee--warn');
+            eeBanner.classList.add('lv-ee--oom');
             if (eeIcon)  eeIcon.textContent = '⛔';
             if (eeTitle) eeTitle.textContent = 'Run stopped: out-of-memory';
         } else {
-            eeBanner.style.background = '#fef3c7';
-            eeBanner.style.borderColor = '#fbbf24';
-            eeBanner.style.color = '#854d0e';
+            eeBanner.classList.remove('lv-ee--oom');
+            eeBanner.classList.add('lv-ee--warn');
             if (eeIcon)  eeIcon.textContent = '⚠';
             if (eeTitle) eeTitle.textContent = '{{ t.tl_stopped }}';
         }

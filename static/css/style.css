@@ -146,6 +146,9 @@
     --amber-border-soft: #fde68a;
     --console-error:     #f87171;
     --console-muted:     #94a3b8;
+    --yellow-bg:         #fef9c3;
+    --yellow-text:       #854d0e;
+    --danger-text-strong: #7f1d1d;
     --shadow-dialog:     0 20px 60px rgba(0,0,0,0.25);
 }
 
@@ -4314,3 +4317,59 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 /* Save status. Green is --badge-green, not #16a34a (3.3:1, below AA). */
 .page-review-session .rs-status--ok { color: var(--badge-green); }
 .page-review-session .rs-status--error { color: var(--error-text); }
+
+/* ── Test Execution live (was inline style="", block B 2026-10-15) ───── */
+.page-test-execution-live .lv-mb-6 { margin-bottom: 6px; }
+.page-test-execution-live .lv-status-card { margin-bottom: 14px; }
+.page-test-execution-live .lv-status-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.page-test-execution-live .lv-pill { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 0.85em; background: var(--tf-line-2); color: var(--badge-grey); }
+.page-test-execution-live .lv-mem { display: inline-block; padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 0.8em; background: var(--tf-line-2); color: var(--badge-grey); font-variant-numeric: tabular-nums; }
+.page-test-execution-live .lv-mode { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.75em; font-family: ui-monospace,SFMono-Regular,monospace; background: var(--indigo-bg-soft); color: var(--indigo-text); border: 1px solid var(--indigo-border); }
+.page-test-execution-live .lv-status-text { font-size: 0.92em; color: var(--badge-grey); }
+.page-test-execution-live .lv-status-progress { font-size: 0.92em; color: var(--text-strong); font-weight: 600; margin-left: auto; }
+.page-test-execution-live .lv-status-pace { margin-top: 6px; font-size: 0.82em; color: var(--text-strong); }
+.page-test-execution-live .lv-status-meta { margin-top: 4px; font-size: 0.82em; color: var(--text-muted); }
+.page-test-execution-live .lv-ee { margin: 0 0 14px 0; padding: 14px 18px; border-radius: 6px; background: var(--danger-light); border: 2px solid var(--console-error); color: var(--danger-text-strong); }
+.page-test-execution-live .lv-banner-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.page-test-execution-live .lv-banner-icon { font-size: 1.7em; line-height: 1; }
+.page-test-execution-live .lv-banner-body { flex: 1; min-width: 240px; }
+.page-test-execution-live .lv-banner-title { display: block; font-size: 1em; margin-bottom: 4px; }
+.page-test-execution-live .lv-ee-reason { margin: 0; font-size: 0.88em; font-family: ui-monospace,SFMono-Regular,monospace; word-break: break-word; }
+.page-test-execution-live .lv-stage { padding: 0; overflow: hidden; background: var(--text-strong); position: relative; }
+.page-test-execution-live .lv-toolbar { position: absolute; top: 10px; right: 10px; display: flex; gap: var(--gap-buttons); z-index: 5; }
+.page-test-execution-live .lv-frame { display: block; width: 100%; max-height: 80vh; object-fit: contain; background: var(--text-strong); }
+.page-test-execution-live .lv-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.page-test-execution-live .lv-thumb { width: 96px; height: 60px; object-fit: cover; background: var(--text-strong); border: 1px solid var(--code-text); border-radius: 3px; cursor: pointer; }
+.page-test-execution-live .lv-help { margin: 14px 0; padding: 12px 16px; background: var(--warning-light); border: 1px solid var(--amber-border); border-radius: 6px; color: var(--amber-text); }
+.page-test-execution-live .lv-help-text { margin: 6px 0 0 0; font-size: 0.88em; }
+.page-test-execution-live .lv-mt-8 { margin-top: 8px; }
+.page-test-execution-live .lv-empty-banner { margin: 14px 0; padding: 16px 20px; background: linear-gradient(90deg,var(--amber-bg) 0%,var(--warning-light) 100%); border: 2px solid var(--amber-border); color: var(--amber-text); }
+.page-test-execution-live .lv-empty-text { margin: 0; font-size: 0.88em; color: var(--amber-text-strong); }
+.page-test-execution-live .lv-mt-14 { margin-top: 14px; }
+.page-test-execution-live .lv-runs-hint { margin: 4px 0 8px 0; font-size: 0.85em; color: var(--text-muted); }
+.page-test-execution-live .lv-runs-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+.page-test-execution-live .lv-runs-head { background: var(--tf-line-2); text-align: left; }
+.page-test-execution-live .lv-cell { padding: 6px 8px; }
+.page-test-execution-live .lv-runs-row { border-top: 1px solid var(--tf-line); }
+.page-test-execution-live .lv-cell-mono { padding: 6px 8px; font-family: monospace; }
+.page-test-execution-live .lv-run-done { color: var(--badge-green); font-weight: 600; }
+.page-test-execution-live .lv-run-running { color: var(--info-strong); }
+.page-test-execution-live .lv-run-failed { color: var(--badge-red); font-weight: 600; }
+.page-test-execution-live .lv-text-subtle { color: var(--text-subtle); }
+.page-test-execution-live .lv-footnote { margin-top: 10px; color: var(--text-muted); font-size: 0.85em; }
+.page-test-execution-live .lv-mt-16 { margin-top: 16px; }
+.page-test-execution-live .lv-mt-6-flush { margin: 6px 0 0 0; }
+/* Status, memory and early-exit colours set by the page script (were
+   hex pairs in JS). */
+.page-test-execution-live .lv-pill--idle { background: var(--tf-line-2); color: var(--badge-grey); }
+.page-test-execution-live .lv-pill--starting { background: var(--yellow-bg); color: var(--yellow-text); }
+.page-test-execution-live .lv-pill--running { background: var(--success-light); color: var(--success-text); }
+.page-test-execution-live .lv-pill--running-tc { background: var(--indigo-bg); color: var(--blue-text); }
+.page-test-execution-live .lv-pill--done { background: var(--indigo-bg); color: var(--indigo-text); }
+.page-test-execution-live .lv-pill--oom-exit { background: var(--danger-light); color: var(--danger-text-strong); }
+.page-test-execution-live .lv-pill--early-exit { background: var(--warning-light); color: var(--yellow-text); }
+.page-test-execution-live .lv-mem--ok { background: var(--success-light); color: var(--success-text); }
+.page-test-execution-live .lv-mem--warn { background: var(--warning-light); color: var(--yellow-text); }
+.page-test-execution-live .lv-mem--high { background: var(--danger-light); color: var(--danger-text-strong); }
+.page-test-execution-live .lv-ee--oom { background: var(--danger-light); border-color: var(--console-error); color: var(--danger-text-strong); }
+.page-test-execution-live .lv-ee--warn { background: var(--warning-light); border-color: var(--amber-border); color: var(--yellow-text); }

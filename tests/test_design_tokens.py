@@ -170,6 +170,11 @@ TEXT_PAIRS = [
     ("--console-error", "--text-strong", "console error line on its dark block"),
     ("--console-muted", "--text-strong", "console log line on its dark block"),
     ("--amber-border", "--text-strong", "console warning line on its dark block"),
+    ("--yellow-text", "--yellow-bg", "live status: starting"),
+    ("--yellow-text", "--warning-light", "live status: early exit, memory warning"),
+    ("--blue-text", "--indigo-bg", "live status: running a test case"),
+    ("--danger-text-strong", "--danger-light", "live status: out of memory"),
+    ("--badge-grey", "--tf-line-2", "live status: idle"),
 ]
 
 #: 3:1 — WCAG 1.4.11 non-text contrast.
@@ -551,7 +556,6 @@ INLINE_STYLE_CEILING = {
     "guide.html": 8,
     "index.html": 34,
     "org_settings.html": 2,
-    "test_execution_live.html": 51,
     "test_execution_manual.html": 11,
     "test_execution_runs.html": 2,
     "guide/_sections_en.html": 2,
@@ -566,7 +570,6 @@ JS_STYLE_CEILING = {
     "templates/checklist.html": 8,
     "templates/estimation.html": 6,
     "templates/guide.html": 2,
-    "templates/test_execution_live.html": 8,
 }
 
 _INLINE_STYLE = re.compile(r"""\sstyle\s*=\s*["']""", re.I)
