@@ -1079,6 +1079,25 @@ def _chips(hits: list[dict], pq: ParsedQuery, params: SearchParams,
     return chips
 
 
+#: Words that name a kind of item. "What does the registration checklist
+#: cover?" is answered by checklist items whose text never says
+#: "checklist" — the word names what they are. The Ask coverage gate counts
+#: it as covered by an item of that kind; ranking does not use it.
+_KIND_WORDS = {
+    "checklist_item": ("checklist",),
+    "test_case": ("test", "case"),
+    "bug": ("bug", "defect"),
+    "run": ("run",),
+    "guide": ("guide",),
+}
+
+
+@lru_cache(maxsize=16)
+def kind_stems(kind: str) -> frozenset[str]:
+    from engine.search.text import stem
+    return frozenset(stem(w, "en") for w in _KIND_WORDS.get(kind, ()))
+
+
 _GUIDE_TITLE_PREFIX = re.compile(r"^.*?·\s*")
 
 
@@ -1289,7 +1308,7 @@ def search(params: SearchParams) -> dict:
             # Which query words this document matches directly, and how
             # many words the query has: the Ask gate wants the results
             # together to cover enough of the question, not one stray word.
-            "covered": pq.covered_words(hit_stems),
+            "covered": pq.covered_words(hit_stems | kind_stems(d.kind)),
             "words": pq.word_count,
             "pinned": d.id in pinned,
         }

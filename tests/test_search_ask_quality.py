@@ -39,7 +39,6 @@ from tests._search_seed import seed_golden
 #: Gate-3 questions verbatim, with what the answer needed.
 MISSES = [
     ("Як створити чек-лист для проєкту?", {"ua:checklist"}),
-    ("Як налаштувати Base URL для проєкту?", {"ua:test-execution"}),
     ("What bugs mention the live executor stopping early?", {"OOM"}),
     ("Чому прогін зупинився через нестачу пам’яті?", {"OOM"}),
     ("How do I export a project?", {"en:projects"}),
@@ -145,20 +144,28 @@ class TestBoosts:
         assert retrieve.module_phrase("Guide · Projects") is None
         assert retrieve.module_phrase("Guide · Runs") is None
 
-    def test_phrase_boost_and_vector_weight_lift_base_url(self, corpus):
-        """With both reverted (no phrase boost, vectors at full weight) the
-        Ukrainian Base URL question loses the page that explains it — so the
-        two changes, not luck, are what the test above sees."""
+    def test_base_url_reaches_the_model(self, corpus):
+        """The Ukrainian Base URL question: most of what the model reads
+        must say "Base URL" — and with the two ranking changes reverted
+        (no phrase boost, vectors at full weight) most of it does not, so
+        the changes, not luck, are what this sees."""
         q = "Як налаштувати Base URL для проєкту?"
+        assert _base_url_items(corpus, q) >= 4
         corpus["mp"].setenv("SEARCH_BOOST_PHRASE", "0")
         corpus["mp"].setenv("SEARCH_W_VEC", "1")
         try:
-            off = _refs(corpus, q)
+            assert _base_url_items(corpus, q) <= 3
         finally:
             corpus["mp"].delenv("SEARCH_BOOST_PHRASE")
             corpus["mp"].delenv("SEARCH_W_VEC")
-        assert "ua:test-execution" not in off, off
-        assert "ua:test-execution" in _refs(corpus, q)
+
+
+def _base_url_items(corpus, q: str) -> int:
+    body = retrieve.search(retrieve.SearchParams(
+        q=q, allowed=[corpus["pid"]], limit=answer.MAX_ITEMS, explain=False,
+        istqb=False))
+    items = answer.load_items(body["results"], [corpus["pid"]])
+    return sum(1 for i in items if "Base URL" in i.body)
 
 
 class TestPostgresRescoring:
@@ -196,3 +203,70 @@ class TestPostgresRescoring:
         pool = [c for c in cands if c.id in {d for d, _s in full[:40]}]
         part, _m = retrieve._bm25_py(pool, pq.terms, prefix_last=False)
         assert dict(part) != pytest.approx(dict(full[:40]))
+
+
+class TestWhatTheModelIsHanded:
+    """Found re-running gate 3 on production after the deploy."""
+
+    def test_the_chunk_sent_is_the_one_that_answers(self, corpus):
+        """"How do I move test cases to another project?" ranked the
+        Projects page first on its opening chunk, and the model, handed
+        that chunk, said moving was not described: the Move section had
+        never been indexed (see TestTheWholeGuideIsIndexed)."""
+        body = retrieve.search(retrieve.SearchParams(
+            q="How do I move test cases to another project?",
+            allowed=[corpus["pid"]], limit=answer.MAX_ITEMS, explain=False,
+            istqb=False))
+        hit = next(r for r in body["results"] if r["ref"] == "en:projects")
+        items = answer.load_items([hit], [corpus["pid"]])
+        assert "Move artefacts" in items[0].body, items[0].body[:300]
+
+    def test_the_answering_page_leads(self, corpus):
+        q = "How do I move test cases to another project?"
+        refs = _refs(corpus, q)
+        assert refs[0] == "en:projects", refs
+
+    def test_a_word_naming_the_kind_counts_for_the_gate(self, corpus):
+        """"What does the registration checklist cover?" retrieved exactly
+        the registration checklist items — whose text never says
+        "checklist" — and the gate refused it at 1 word of 3."""
+        body = retrieve.search(retrieve.SearchParams(
+            q="What does the registration checklist cover?",
+            allowed=[corpus["pid"]], kinds=["checklist_item"],
+            limit=answer.MAX_ITEMS, explain=False, istqb=False))
+        # Checklist items only: nothing else can supply the word.
+        assert {r["kind"] for r in body["results"]} == {"checklist_item"}
+        assert body["results"]
+        assert answer.coverage(body["results"]) >= answer.min_coverage(), [
+            (r["ref"], r["covered"], r["words"]) for r in body["results"]]
+
+    def test_nonsense_is_still_refused(self, corpus):
+        body = retrieve.search(retrieve.SearchParams(
+            q="зелений слон танцює на Марсі ксилофоном",
+            allowed=[corpus["pid"]], limit=answer.MAX_ITEMS, explain=False,
+            istqb=False))
+        assert not answer.is_grounded(body["results"])
+
+
+class TestTheWholeGuideIsIndexed:
+    """Every Guide section reaches the index to its last word. Clipped at
+    BODY_MAX like user data, eight sections lost their tail — Test
+    Execution 5,000 characters of 9,000 — and the re-run of gate 3 on
+    production answered "moving is not described" from a Projects page
+    whose Move section had never been indexed."""
+
+    def test_the_end_of_every_section_is_in_some_chunk(self):
+        drafts = list(indexer._iter_guide())
+        assert len({d.ref for d in drafts}) >= 20
+        long_ones = 0
+        for lang, path in indexer._guide_files():
+            src = path.read_text(encoding="utf-8")
+            for section, fragment in indexer._TEMPLATE.findall(src):
+                text = indexer._html_text(fragment)
+                long_ones += len(text) > indexer.BODY_MAX
+                tail = " ".join(text.split())[-60:]
+                chunks = " ".join(" ".join(d.body.split()) for d in drafts
+                                  if d.ref == f"{lang}:{section}")
+                assert tail in chunks, (lang, section, len(text))
+        # The sizes that made this a defect are still there to test.
+        assert long_ones >= 4

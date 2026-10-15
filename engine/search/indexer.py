@@ -53,7 +53,7 @@ log = get_logger(__name__)
 #: Bump on any change to how a document is *built* from its source row
 #: (fields, labels, chunking). Feeds the content hash, so a bump rewrites
 #: every document on the next pass.
-INDEXER_VERSION = 1
+INDEXER_VERSION = 2
 
 #: Rows read per keyset page and documents written per transaction.
 BATCH = 500
@@ -165,11 +165,18 @@ def chunk_body(body: str) -> list[str]:
     return chunks or [body[:CHUNK_SIZE]]
 
 
-def _expand(draft: Draft) -> Iterator[Draft]:
+def _expand(draft: Draft, *, clip: bool = True) -> Iterator[Draft]:
     """A draft → one draft per chunk, title repeated in each (ADR §4.3).
     The body is clipped to :data:`BODY_MAX` *before* chunking, so a 50 KB
-    stack trace costs at most a handful of documents."""
-    body = (draft.body or "")[:BODY_MAX]
+    stack trace costs at most a handful of documents.
+
+    ``clip=False`` is for the Guide: our own text, finite, and every word of
+    it is an answer. Clipped, eight sections lost their tail — Test
+    Execution more than half of itself, Projects the Export and Move
+    sections — and Ask said the Guide did not cover them (2026-10-15)."""
+    body = draft.body or ""
+    if clip:
+        body = body[:BODY_MAX]
     pieces = chunk_body(body)
     for i, piece in enumerate(pieces):
         yield Draft(kind=draft.kind, ref=draft.ref, title=draft.title,
@@ -468,7 +475,7 @@ def _iter_guide() -> Iterator[Draft]:
         for section, fragment in _TEMPLATE.findall(raw):
             key = f"guide_card_{section.replace('-', '_')}_title"
             title = _clean((table or {}).get(key)) or section.replace("-", " ")
-            yield from _expand(Draft(
+            yield from _expand(clip=False, draft=Draft(
                 kind="guide", ref=f"{lang}:{section}"[:REF_MAX],
                 title=f"Guide · {title}"[:TITLE_MAX],
                 body=_html_text(fragment),
