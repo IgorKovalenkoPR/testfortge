@@ -153,9 +153,13 @@ class TestFlagOn:
         html = _page(client, path)
         assert f'data-hints-page="{page}"' in html
         assert 'data-hints-url="/api/hints"' in html
-        toggle = re.search(r"<button[^>]*data-hints-toggle[^>]*>", html, re.S)
-        assert toggle and 'aria-expanded="false"' in toggle.group(0)
-        assert f'aria-controls="tf-hints-{page}"' in toggle.group(0)
+        mount = re.search(r'<span class="tf-tip tf-tip--page"[^>]*data-hints[^>]*>'
+                          r'(<button[^>]*>)', html, re.S)
+        assert mount and 'aria-expanded="false"' in mount.group(1)
+        assert f'aria-controls="tf-hints-{page}"' in mount.group(1)
+        # Closed on arrival: the always-open card is gone (2026-10-16).
+        assert re.search(rf'id="tf-hints-{page}" hidden>', html)
+        assert "Hide tips" not in html
 
     def test_nothing_on_the_sign_in_page(self, anon_client, search_on,
                                          monkeypatch):
@@ -242,11 +246,10 @@ class TestWiring:
         assert "'X-CSRFToken'" in js
         assert "quick=1" in js
         assert "DEBOUNCE_MS = 150" in js
-        # localStorage only inside try/catch helpers.
-        uses = [m.start() for m in re.finditer(r"localStorage", js)]
-        assert len(uses) == 2
-        for pos in uses:
-            assert "try {" in js[max(0, pos - 40):pos]
+        # No browser storage at all: the only use was remembering a
+        # dismissed tips card, and the card became a toggletip that is
+        # closed on arrival (2026-10-16).
+        assert "localStorage" not in js
 
     def test_snippets_are_the_only_html_the_script_injects(self):
         js = SEARCH_JS.read_text(encoding="utf-8")

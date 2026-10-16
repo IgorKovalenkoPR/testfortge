@@ -3481,8 +3481,7 @@ h2.heading-4, h3.heading-4 {
    text pairs are the ones tests/test_design_tokens.py pins (accent on
    accent-soft, warning on warning-light, subtle on white); every control
    keeps the global :focus-visible ring. */
-.tf-search [hidden],
-.tf-hints [hidden] { display: none !important; }
+.tf-search [hidden] { display: none !important; }
 
 /* While the results view is open it replaces the page body; the page is
    still in the DOM and comes back untouched on close. */
@@ -3906,50 +3905,118 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 }
 .tf-ask-input:focus-visible { border-color: var(--focus); }
 
-/* Contextual hints */
-.tf-hints {
+/* Toggletips — templates/_toggletip.html, behaviour in static/js/app.js.
+   Owner ruling 2026-10-16: a "?" beside the control it explains, open on
+   hover, focus or tap (WCAG 2.1 SC 1.4.13). The page tips from
+   /api/hints use the same note beside the page title. */
+.tf-title-row {
     display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-    margin: 0 0 var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
 }
-.tf-hints-toggle {
+.tf-tip {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: var(--space-1);
+}
+.tf-title-row > .tf-tip { margin-left: 0; }
+.tf-title-row--card { margin-bottom: .4rem; }
+.tf-title-row--card > h2,
+.tf-title-row--card > h3 { margin-bottom: 0; }
+/* A "?" sits beside a label, never inside it: a button inside a <label>
+   or a heading joins that element's accessible name. */
+.tf-label-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-bottom: .3rem;
+}
+.tf-label-row > label { margin-bottom: 0; }
+.tf-label-row > .tf-tip,
+.tf-label-row > label + .tf-tip { margin-left: 0; }
+.te-mode-cell {
+    position: relative;
+    display: flex;
+    flex: 1 1 240px;
+}
+.te-mode-cell > .radio-card { flex: 1 1 auto; padding-right: calc(var(--control-xs) + var(--space-4)); }
+.te-mode-cell > .tf-tip {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    margin-left: 0;
+}
+.tf-tip-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: none;
-    width: var(--control-sm);
-    height: var(--control-sm);
+    width: var(--control-xs);
+    height: var(--control-xs);
+    min-width: var(--control-xs);
+    min-height: var(--control-xs);
+    padding: 0;
     border: 1px solid var(--border-control);
     border-radius: 50%;
     background: var(--tf-surface);
     color: var(--accent);
-    font: 700 15px/1 var(--tf-font-heading);
-    cursor: pointer;
+    font: 700 13px/1 var(--tf-font-heading);
+    cursor: help;
 }
-.tf-hints-toggle[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
-.tf-hints-card {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 760px;
-    padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--info-border);
+.tf-tip-btn:hover,
+.tf-tip-btn[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.tf-tip--page .tf-tip-btn {
+    width: var(--control-sm);
+    height: var(--control-sm);
+    min-width: var(--control-sm);
+    min-height: var(--control-sm);
+    font-size: 15px;
+}
+.tf-tip-bubble {
+    --tip-shift: 0px;   /* app.js slides the note into the viewport */
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    left: 50%;
+    transform: translateX(calc(-50% + var(--tip-shift, 0px)));
+    z-index: 60;
+    display: block;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--tf-line);
     border-radius: var(--tf-radius);
-    background: var(--info-bg);
+    background: var(--tf-surface);
+    color: var(--tf-ink);
+    box-shadow: var(--shadow-md);
+    font: 400 13px/1.45 var(--tf-font-body);
+    letter-spacing: normal;
+    text-align: left;
+    text-transform: none;
+    white-space: normal;
+    cursor: auto;
 }
-.tf-hints-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
+/* Bridges the gap so the pointer can travel from the "?" to the note. */
+.tf-tip-bubble::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: var(--space-2);
 }
-.tf-hints-title { font-size: 14px; font-weight: 700; color: var(--tf-ink); }
-.tf-hints-list { list-style: none; margin-top: var(--space-1); }
+.tf-tip-bubble--wide { max-width: min(440px, calc(100vw - 32px)); }
+.tf-hints-title { display: block; margin-bottom: var(--space-1); font-size: 13px; font-weight: 700; color: var(--tf-ink); }
+.tf-hints-list { display: block; }
 .tf-hint {
+    display: block;
     padding: var(--space-1) 0;
     color: var(--tf-ink-2);
-    font-size: 14px;
 }
-.tf-hint + .tf-hint { border-top: 1px solid var(--info-border); }
+.tf-hint + .tf-hint { border-top: 1px solid var(--tf-line); }
 .tf-hint-link { margin-left: var(--space-2); font-weight: 600; color: var(--accent); white-space: nowrap; }
-.tf-hints-status { color: var(--tf-mute); font-size: 13px; }
+.tf-hints-status { display: block; color: var(--tf-mute); }
 
 @media (max-width: 768px) {
     .tf-search-bar { gap: var(--space-2); margin-bottom: var(--space-4); }
@@ -3958,8 +4025,6 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
     .tf-results { padding: var(--space-4) var(--space-3); }
     .tf-how-dl { grid-template-columns: 1fr; }
     .tf-ask { width: 100vw; border-left: 0; }
-    .tf-hints { flex-wrap: wrap; gap: var(--space-2); }
-    .tf-hints-card { flex-basis: 100%; padding: var(--space-3); }
 }
 @media (max-width: 420px) {
     .tf-ask-open { width: var(--control-sm); padding: 0; }
@@ -4104,6 +4169,15 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
     display: flex; flex-direction: column; gap: var(--space-2);
 }
 .sidebar-model label { margin: 0; }
+.sidebar-model-head { position: relative; display: flex; align-items: center; gap: var(--space-1); }
+/* The sidebar scrolls, so a note below or beside the "?" would be clipped:
+   it opens upward across the full width of the sidebar block instead. */
+.sidebar-model .tf-tip { position: static; margin-left: 0; }
+.sidebar-model .tf-tip-bubble {
+    top: auto; bottom: calc(100% + var(--space-2));
+    left: 0; right: 0; width: auto; max-width: none; transform: none;
+}
+.sidebar-model .tf-tip-bubble::before { bottom: auto; top: 100%; }
 .sidebar-model select {
     height: var(--control-sm); min-height: 0;
     padding: 0 var(--space-2); font-size: 13px;
@@ -4402,7 +4476,6 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .project-picker .pp-create-form { display: flex; gap: 6px; align-items: center; }
 .project-picker .pp-name { flex: 1; min-width: 160px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 4px; }
 .project-picker .pp-nowrap { white-space: nowrap; }
-.project-picker .pp-hint { margin: 8px 0 0 0; font-size: 0.82em; color: var(--text-muted); }
 
 /* ── Dashboard (was inline style="", block B 2026-10-15) ─────────────── */
 .page-dashboard .dash-recent { margin-bottom: 14px; }

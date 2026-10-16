@@ -16,7 +16,7 @@ leans on, one test each, so a failure names the behaviour that broke:
   carries the history, Stop aborting a stream mid-answer, Reset clearing;
 * the three refusal codes a person can actually hit (budget, rate_limited,
   no_key) rendered as words rather than codes;
-* the contextual hints, and "Hide tips" surviving a reload;
+* the contextual hints, opened from the "?" beside the page title;
 * nothing scrolling sideways at 375 px.
 
 **The stubs.** ``/api/ask`` is answered by ``page.route`` — the browser
@@ -484,39 +484,35 @@ class TestTheAskPanel:
 # ── 4. Hints ────────────────────────────────────────────────────────
 
 class TestHints:
+    """The page tips sit in a toggletip beside the title (owner ruling
+    2026-10-16; the always-open card is gone). Closed on arrival, fetched
+    on the first open, closed by Escape."""
+
     @pytest.mark.parametrize("path,page_key", [
         ("/test-cases?lang=en", "test_cases"),
         ("/bug-reports?lang=en", "bug_reports"),
     ])
-    def test_hints_show_and_hide_tips_survives_a_reload(self, shop, path,
-                                                        page_key):
+    def test_hints_open_from_the_title_and_close_on_escape(self, shop, path,
+                                                           page_key):
         page = shop.page
         shop.go(path)
         mount = page.locator(f'[data-hints][data-hints-page="{page_key}"]')
         assert mount.count() == 1, f"no hints mount on {path}"
-        card = mount.locator(".tf-hints-card")
-        card.wait_for(state="visible", timeout=WAIT)
-        mount.locator(".tf-hint").first.wait_for(timeout=WAIT)
-        toggle = mount.locator("[data-hints-toggle]")
-        assert toggle.get_attribute("aria-expanded") == "true"
-
-        mount.locator("[data-hints-dismiss] >> text=Hide tips").click()
-        assert card.is_hidden()
+        assert mount.locator("xpath=..").get_attribute("class") == "tf-title-row"
+        toggle = mount.locator(".tf-tip-btn")
+        note = mount.locator(".tf-tip-bubble")
+        page.wait_for_load_state("load", timeout=WAIT)
+        assert note.is_hidden(), "the tips opened on arrival"
         assert toggle.get_attribute("aria-expanded") == "false"
 
-        page.reload()
-        mount = page.locator(f'[data-hints][data-hints-page="{page_key}"]')
-        mount.locator("[data-hints-toggle]").wait_for(timeout=WAIT)
-        # Give the script its chance to (wrongly) reopen the card.
-        page.wait_for_load_state("load", timeout=WAIT)
-        assert mount.locator(".tf-hints-card").is_hidden(), \
-            "'Hide tips' did not survive a reload"
-        assert mount.locator("[data-hints-toggle]").get_attribute(
-            "aria-expanded") == "false"
+        toggle.click()
+        mount.locator(".tf-hint").first.wait_for(timeout=WAIT)
+        assert toggle.get_attribute("aria-expanded") == "true"
+        assert mount.locator(".tf-hint-link").count() >= 1
 
-        # The "?" still opens them on demand.
-        mount.locator("[data-hints-toggle]").click()
-        assert mount.locator(".tf-hints-card").is_visible()
+        page.keyboard.press("Escape")
+        assert note.is_hidden()
+        assert toggle.get_attribute("aria-expanded") == "false"
 
 
 # ── 5. A phone ──────────────────────────────────────────────────────

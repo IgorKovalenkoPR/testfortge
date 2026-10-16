@@ -12,7 +12,10 @@
 {% else %}
 
 <div class="page-head">
+  <div class="tf-title-row">
   <h1>{{ t.os_heading }}</h1>
+  {% with hints_page='settings' %}{% include '_search_hints.html' %}{% endwith %}
+  </div>
   <p class="text-muted">
     {% if is_admin %}
       {{ t.os_config_for|format(org.name) }}
@@ -21,7 +24,6 @@
     {% endif %}
   </p>
 </div>
-{% with hints_page='settings' %}{% include '_search_hints.html' %}{% endwith %}
 
 {# ── Team name ────────────────────────────────────────────────── #}
 <div class="card">

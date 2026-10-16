@@ -1616,10 +1616,6 @@ TRANSLATIONS = {
     "te_wt_binding_url": "URL pattern (fire TCs whose url_pattern matches "
                          "the visited page)",
     "te_wt_binding_ignore": "Ignore TCs (heuristics only)",
-    "te_wt_tc_binding_hint": "When binding is on, TCs marked "
-                             "trigger=walkthrough_url_match / always become "
-                             "candidates. Pre-PR-2 TCs default to "
-                             "trigger=manual and are not fired.",
     "te_new_run": "New Test Run",
     "te_select_items": "Select Items to Test",
     "te_select_items_hint": "Select specific items or leave all checked to "
@@ -1681,8 +1677,6 @@ TRANSLATIONS = {
     "te_suite_filter_label": "Run only suite:",
     "te_suite_filter_all": "All suites",
     "te_suite_filter_untagged": "Untagged only",
-    "te_suite_filter_hint": "— ticks / unticks the TC checkboxes by suite "
-                            "tag.",
     "te_start_run": "Run Test Execution",
     "te_overlay_title": "Live automation view — run in progress",
     "te_overlay_body": "TestForTge is running your selected items across "
@@ -2250,9 +2244,17 @@ TRANSLATIONS = {
     "ask_err_upstream": "The AI service did not answer. Try again in a moment.",
     "ask_err_generic": "Something went wrong. Try again.",
     "hints_title": "Tips for this page",
-    "hints_dismiss": "Hide tips",
     "hints_learn_more": "Learn more",
     "hints_loading": "Loading tips…",
     "hints_error": "Tips are unavailable right now.",
     "hints_similar": "Similar",
+    "tip_label": "Help",
+    "tip_project_create": "Creates an empty project and makes it the active one.",
+    "tip_ask": "AI answers from this team's data and the Guide only, and shows where each answer comes from. Up to 6 questions a minute.",
+    "tip_model": "The model that writes generated content for you. Your team admin decides which models this list offers.",
+    "tip_te_clear_pack": "Clears the pack from this session and unselects the active project. Work saved in the project is not deleted.",
+    "tip_te_binding": "With binding on, the walkthrough also runs test cases whose trigger is \"walkthrough URL match\" or \"always\". Cases with a manual trigger are not run.",
+    "tip_te_suite": "Ticks only the test cases tagged with the chosen suite. Choosing a suite does not start a run.",
+    "tip_te_base_url": "The address of the site under test, for example https://staging.example.com.",
+    "tip_te_account": "Sign-in details for the site under test, when the cases need a signed-in user. The password stays in your session for the run and is never written to logs. Use a test account, not a personal one.",
 }

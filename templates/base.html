@@ -164,6 +164,7 @@
             value means "no choice of my own", i.e. the team default.
             Saved by static/js/app.js with a PUT; the server re-checks
             every rule shown here. -#}
+        {% from '_toggletip.html' import tip with context %}
         {% if model_switcher %}
         {% set ms_tier_label = {'haiku': t.ms_tier_haiku, 'sonnet': t.ms_tier_sonnet, 'opus': t.ms_tier_opus} %}
         {% set ms_reason_label = {'org': t.ms_reason_org, 'pinned': t.ms_reason_pinned, 'premium_key': t.ms_reason_premium_key} %}
@@ -172,7 +173,8 @@
              data-url="{{ url_for('api_me_model_preference') }}"
              data-msg-saved="{{ t.ms_saved }}"
              data-msg-failed="{{ t.ms_save_failed }}">
-            <label for="model-switcher">{{ t.ms_label }}</label>
+            <span class="sidebar-model-head"><label for="model-switcher">{{ t.ms_label }}</label>
+            {{ tip(t.tip_model, t.ms_label, 'model') }}</span>
             <select id="model-switcher" name="model_tier" class="form-select"
                     {% if not model_switcher.enabled %}disabled{% endif %}>
                 <option value="">{{ t.ms_team_default }}</option>

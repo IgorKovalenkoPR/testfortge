@@ -140,13 +140,15 @@ class TestNoSeriousViolations:
 
     def test_test_cases(self, admin, axe_source):
         admin.go("/test-cases?lang=en")
-        # With the hints card open, as a first visit renders it.
-        admin.page.wait_for_selector(".tf-hints-card .tf-hint", timeout=WAIT)
+        # With the page-tips note open, so its contents are audited too.
+        admin.page.click(".tf-tip--page .tf-tip-btn")
+        admin.page.wait_for_selector(".tf-tip--page .tf-hint", timeout=WAIT)
         _assert_clean(admin.page, axe_source, "test cases")
 
     def test_bug_reports(self, admin, axe_source):
         admin.go("/bug-reports?lang=en")
-        admin.page.wait_for_selector(".tf-hints-card .tf-hint", timeout=WAIT)
+        admin.page.click(".tf-tip--page .tf-tip-btn")
+        admin.page.wait_for_selector(".tf-tip--page .tf-hint", timeout=WAIT)
         _assert_clean(admin.page, axe_source, "bug reports")
 
     def test_search_results_with_the_ai_block(self, admin, axe_source):
@@ -173,6 +175,14 @@ class TestNoSeriousViolations:
         page.keyboard.press("Enter")
         page.wait_for_selector("#tf-ask .tf-ask-meta", timeout=WAIT)
         _assert_clean(page, axe_source, "Ask panel")
+
+    def test_a_toggletip_open(self, admin, axe_source):
+        """A note open beside the active-project picker: the "?" and its
+        note are audited, not just the closed button."""
+        admin.go("/test-execution?lang=en")
+        admin.page.click('[data-tip]:has(#tip-pp-active) .tf-tip-btn')
+        admin.page.wait_for_selector("#tip-pp-active", state="visible", timeout=WAIT)
+        _assert_clean(admin.page, axe_source, "test execution, note open")
 
     def test_org_settings_as_admin(self, admin, axe_source):
         admin.go("/org/settings?lang=en")

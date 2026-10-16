@@ -92,28 +92,23 @@
 
     /* ── 4. Contextual hints (independent of the header field) ───── */
 
-    function storageGet(key) {
-        try { return window.localStorage.getItem(key); } catch (e) { return null; }
-    }
-    function storageSet(key, value) {
-        try { window.localStorage.setItem(key, value); } catch (e) { /* private mode */ }
-    }
-
+    // The tips sit in a toggletip beside the page title (owner ruling
+    // 2026-10-16); app.js opens it and fires tf-tip-open, and the first
+    // open fetches. A failed fetch is retried on the next open.
     function initHints(mount) {
         var page = mount.getAttribute('data-hints-page') || '';
-        var user = mount.getAttribute('data-hints-user') || 'anon';
-        var key = 'tf-hints-dismissed:' + user + ':' + page;
-        var toggle = mount.querySelector('[data-hints-toggle]');
-        var card = mount.querySelector('.tf-hints-card');
         var list = mount.querySelector('[data-hints-list]');
-        var dismiss = mount.querySelector('[data-hints-dismiss]');
         var loaded = false;
+
+        function status(text) {
+            list.textContent = '';
+            list.appendChild(el('span', { class: 'tf-hints-status', role: 'listitem', text: text }));
+        }
 
         function load() {
             if (loaded) return;
             loaded = true;
-            list.textContent = '';
-            list.appendChild(el('li', { class: 'tf-hints-status', text: mount.getAttribute('data-msg-loading') }));
+            status(mount.getAttribute('data-msg-loading'));
             var url = mount.getAttribute('data-hints-url') + '?page=' +
                 encodeURIComponent(page) + '&lang=' +
                 encodeURIComponent(mount.getAttribute('data-lang') || 'en');
@@ -122,8 +117,7 @@
                 .then(function (body) { renderHints(body.hints || []); })
                 .catch(function () {
                     loaded = false;
-                    list.textContent = '';
-                    list.appendChild(el('li', { class: 'tf-hints-status', text: mount.getAttribute('data-msg-error') }));
+                    status(mount.getAttribute('data-msg-error'));
                 });
         }
 
@@ -133,7 +127,7 @@
             hints.forEach(function (h) {
                 var li;
                 if (h.type === 'tip') {
-                    li = el('li', { class: 'tf-hint tf-hint-tip' }, [
+                    li = el('span', { class: 'tf-hint tf-hint-tip', role: 'listitem' }, [
                         el('span', { text: h.text }),
                         h.learn_more && h.learn_more.url ? el('a', {
                             class: 'tf-hint-link', href: h.learn_more.url,
@@ -141,14 +135,14 @@
                         }, [learn]) : null
                     ]);
                 } else if (h.type === 'guide') {
-                    li = el('li', { class: 'tf-hint tf-hint-guide' }, [
+                    li = el('span', { class: 'tf-hint tf-hint-guide', role: 'listitem' }, [
                         el('strong', { text: h.topic }),
                         el('span', { text: ' ' + (h.excerpt || '') + ' ' }),
                         el('a', { class: 'tf-hint-link', href: h.url,
                                   'aria-label': learn + ': ' + h.topic }, [learn])
                     ]);
                 } else if (h.ref) {
-                    li = el('li', { class: 'tf-hint tf-hint-similar' }, [
+                    li = el('span', { class: 'tf-hint tf-hint-similar', role: 'listitem' }, [
                         el('span', { class: 'tf-chip tf-chip-reason', text: h.label || mount.getAttribute('data-msg-similar') }),
                         ' ',
                         el('a', { href: h.url || '#' }, [h.ref + ' · ' + cleanTitle(h.ref, h.title)])
@@ -158,29 +152,7 @@
             });
         }
 
-        function setOpen(open) {
-            card.hidden = !open;
-            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-            if (open) load();
-        }
-
-        toggle.addEventListener('click', function () {
-            setOpen(card.hidden);
-            if (!card.hidden) {
-                var first = card.querySelector('a, button');
-                if (first) first.focus();
-            }
-        });
-        dismiss.addEventListener('click', function () {
-            storageSet(key, '1');
-            setOpen(false);
-            toggle.focus();
-        });
-        card.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') { setOpen(false); toggle.focus(); }
-        });
-        // First visit: open. Once dismissed: only the "?" remains.
-        if (storageGet(key) !== '1') setOpen(true);
+        mount.addEventListener('tf-tip-open', load);
     }
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-hints]'), initHints);

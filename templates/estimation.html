@@ -12,9 +12,11 @@
 {% block page_class %}{{ ' page-estimation' }}{% endblock %}
 {% block content %}
 <div class="page-header">
+  <div class="tf-title-row">
   <h1>{{ t.est_title }}</h1>
+  {% with hints_page='estimation' %}{% include '_search_hints.html' %}{% endwith %}
+  </div>
 </div>
-{% with hints_page='estimation' %}{% include '_search_hints.html' %}{% endwith %}
 
 {% include '_project_picker.html' %}
 

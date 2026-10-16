@@ -3,14 +3,17 @@
 {% block page_class %}{{ ' page-test-execution' }}{% endblock %}
 
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 {# Jinja → JS shuttle. Values that used to be interpolated inside inline
    script blocks land here so static/js/test-execution.js can stay
    nonce-friendly. #}
 <meta name="te-live-info-url" content="{{ url_for('test_execution_live_info') }}">
 <meta name="te-i18n-overlay-slow" content="{{ t.get('te_overlay_slow', 'The run is taking longer than expected. The page will not reload automatically — close this dialog and refresh manually to see whatever results have landed in the session.') | e }}">
+<div class="tf-title-row">
 <h1>{{ t.get('te_title', 'Test Execution') }}</h1>
-<p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
 {% with hints_page='executions' %}{% include '_search_hints.html' %}{% endwith %}
+</div>
+<p class="subtitle">{{ t.get('te_subtitle', 'Run test cases and checklists with status tracking') }}</p>
 
 {% include '_project_picker.html' %}
 
@@ -84,6 +87,7 @@
             {{ t.get('te_pack_clear', 'Clear pack') }}
         </button>
     </form>
+    {{ tip(t.tip_te_clear_pack, t.get('te_pack_clear', 'Clear pack'), 'te-clear-pack') }}
 </div>
 {% endif %}
 
@@ -103,12 +107,13 @@
    was added to end, reached by a button. #}
 {% if open_manual_runs %}
 <div class="card te-open-runs">
+    <div class="tf-title-row tf-title-row--card">
     <h2 class="heading-3 card-title">
         <i data-lucide="play-circle" class="icon-sm"></i>
         {{ t.get('te_open_runs_title', 'Unfinished manual runs') }}
     </h2>
-    <p class="hint">{{ t.get('te_open_runs_hint',
-        'Started and not closed. Resuming lands on the first item without a verdict.') }}</p>
+    {{ tip(t.te_open_runs_hint, t.get('te_open_runs_title', 'Unfinished manual runs'), 'te-open-runs') }}
+    </div>
     <table class="data-table">
         <thead><tr>
             <th width="70">{{ t.get('run', 'Run') }}</th>
@@ -583,34 +588,39 @@
    debug endpoint already exposes (max_pages, max_form_fills,
    device_timeout_ms, axe_enabled, tc_binding). #}
 <div class="card te-runmode-card">
+    <div class="tf-title-row tf-title-row--card">
     <h3 class="card-title">
         <i data-lucide="route" class="icon-sm"></i>
         {{ t.get('te_run_mode_title', 'Run Mode') }}
     </h3>
-    <p class="hint">{{ t.get('te_run_mode_hint',
-        'TC/Checklist-driven runs the items you selected below. QA walkthrough ignores selection and explores the URL autonomously, raising findings for broken images, accessibility issues, dead navigation, and more.') }}</p>
+    {{ tip(t.te_run_mode_hint, t.get('te_run_mode_title', 'Run Mode'), 'te-run-mode') }}
+    </div>
     <div class="form-row" data-te-run-mode>
+        <div class="te-mode-cell">
         <label class="radio-card">
             <input type="radio" name="run_mode" value="tc_driven" checked
                    data-te-run-mode-input>
             <span>
                 <i data-lucide="list-checks" class="icon-sm"></i>
                 <strong>{{ t.get('te_mode_tc', 'Automated — built-in engine') }}</strong>
-                <small>{{ t.get('te_mode_tc_help', 'Playwright drives the items you select below. Watch it live or leave it in the background.') }}</small>
             </span>
         </label>
+        {{ tip(t.te_mode_tc_help, t.get('te_mode_tc', 'Automated — built-in engine'), 'te-mode-tc') }}
+        </div>
         {# The manual walk. Not a lesser mode — most of a low-level
            checklist cannot be automated at all, which is why the pack
            carries 57 rows a person has to look at. #}
+        <div class="te-mode-cell">
         <label class="radio-card">
             <input type="radio" name="run_mode" value="manual"
                    data-te-run-mode-input>
             <span>
                 <i data-lucide="user-check" class="icon-sm"></i>
                 <strong>{{ t.get('te_mode_manual', 'Manual — walk it yourself') }}</strong>
-                <small>{{ t.get('te_mode_manual_help', 'One item at a time with its steps and expected result on screen, one click per verdict. Resumable.') }}</small>
             </span>
         </label>
+        {{ tip(t.te_mode_manual_help, t.get('te_mode_manual', 'Manual — walk it yourself'), 'te-mode-manual') }}
+        </div>
         {# Who the walk is for. Only rendered when there is somebody to pick
            from — with authentication off there is no identity to assign to,
            and a disabled select that explains nothing is worse than no
@@ -618,7 +628,8 @@
            only exists so an admin can hand a walk to someone else. #}
         {% if assignee_options %}
         <div class="form-group te-assignee">
-            <label for="manual-assignee">{{ t.get('te_assignee', 'Assign the manual walk to') }}</label>
+            <span class="tf-label-row"><label for="manual-assignee">{{ t.get('te_assignee', 'Assign the manual walk to') }}</label>
+                {{ tip(t.te_assignee_hint, t.get('te_assignee', 'Assign the manual walk to'), 'te-assignee') }}</span>
             <select id="manual-assignee" name="assignee_id">
                 <option value="">{{ t.get('te_assignee_me', 'Me') }}</option>
                 {% for opt in assignee_options %}
@@ -627,19 +638,19 @@
                 </option>
                 {% endfor %}
             </select>
-            <p class="hint">{{ t.get('te_assignee_hint',
-                'The assignee is who can record verdicts in the run. Admins can always open any run in the project.') }}</p>
         </div>
         {% endif %}
+        <div class="te-mode-cell">
         <label class="radio-card">
             <input type="radio" name="run_mode" value="walkthrough"
                    data-te-run-mode-input>
             <span>
                 <i data-lucide="compass" class="icon-sm"></i>
                 <strong>{{ t.get('te_mode_walkthrough', 'QA walkthrough') }}</strong>
-                <small>{{ t.get('te_mode_walkthrough_help', 'Autonomous exploration + opportunistic TC matching by URL.') }}</small>
             </span>
         </label>
+        {{ tip(t.te_mode_walkthrough_help, t.get('te_mode_walkthrough', 'QA walkthrough'), 'te-mode-wt') }}
+        </div>
     </div>
 
     {# Site-wide sweep. Opt-in: it answers a different question than the
@@ -650,8 +661,7 @@
         <input type="checkbox" name="site_sweep" value="1">
         {{ t.get('te_site_sweep', 'Also sweep the site for Performance, Security, Accessibility and UI defects the pack does not cover') }}
     </label>
-    <p class="hint">{{ t.get('te_site_sweep_hint',
-        'Runs 53 checks against the live URL and files every failure as a bug in its own quality-attribute category. Independent of the items selected below.') }}</p>
+    {{ tip(t.te_site_sweep_hint, t.te_site_sweep, 'te-sweep') }}
 
     {# The fourth mode is not a radio because it does not run here. The
        TypeScript suite runs where the browsers are and reports back — an
@@ -677,48 +687,45 @@
         </summary>
         <div class="form-grid te-mt-10">
             <div class="form-group">
-                <label for="walkthrough_max_pages">
+                <span class="tf-label-row"><label for="walkthrough_max_pages">
                     {{ t.get('te_wt_max_pages', 'Max pages to visit') }}
                 </label>
+                {{ tip(t.te_wt_max_pages_hint, t.get('te_wt_max_pages', 'Max pages to visit'), 'te-wt-pages') }}</span>
                 <input type="number" id="walkthrough_max_pages"
                        name="walkthrough_max_pages"
                        min="1" max="50" value="6">
-                <p class="hint te-hint-sm">{{ t.get('te_wt_max_pages_hint',
-                    'Including the entry URL. Each page runs the full heuristic battery.') }}</p>
             </div>
             <div class="form-group">
-                <label for="walkthrough_max_form_fills">
+                <span class="tf-label-row"><label for="walkthrough_max_form_fills">
                     {{ t.get('te_wt_max_form_fills', 'Max forms to fill') }}
                 </label>
+                {{ tip(t.te_wt_max_form_fills_hint, t.get('te_wt_max_form_fills', 'Max forms to fill'), 'te-wt-forms') }}</span>
                 <input type="number" id="walkthrough_max_form_fills"
                        name="walkthrough_max_form_fills"
                        min="0" max="20" value="5">
-                <p class="hint te-hint-sm">{{ t.get('te_wt_max_form_fills_hint',
-                    'Forms are filled with sample data; they are NOT submitted.') }}</p>
             </div>
             <div class="form-group">
-                <label for="walkthrough_device_timeout_ms">
+                <span class="tf-label-row"><label for="walkthrough_device_timeout_ms">
                     {{ t.get('te_wt_device_timeout', 'Device timeout (ms)') }}
                 </label>
+                {{ tip(t.te_wt_device_timeout_hint, t.get('te_wt_device_timeout', 'Device timeout (ms)'), 'te-wt-timeout') }}</span>
                 <input type="number" id="walkthrough_device_timeout_ms"
                        name="walkthrough_device_timeout_ms"
                        min="60000" step="30000" value="480000">
-                <p class="hint te-hint-sm">{{ t.get('te_wt_device_timeout_hint',
-                    'Hard wall-clock kill per device. Default 8 min matches TFWefloLab.') }}</p>
             </div>
             <div class="form-group">
-                <label>
+                <span class="tf-label-row"><label>
                     <input type="checkbox" name="walkthrough_axe_enabled"
                            value="1" checked>
                     {{ t.get('te_wt_axe', 'Run axe-core accessibility scan') }}
                 </label>
-                <p class="hint te-hint-sm">{{ t.get('te_wt_axe_hint',
-                    'Loads axe-core from CDN, then evaluates axe.run() per page. Disable for offline / strict egress environments.') }}</p>
+                {{ tip(t.te_wt_axe_hint, t.get('te_wt_axe', 'Run axe-core accessibility scan'), 'te-wt-axe') }}</span>
             </div>
             <div class="form-group">
-                <label for="walkthrough_tc_binding">
+                <span class="tf-label-row"><label for="walkthrough_tc_binding">
                     {{ t.get('te_wt_tc_binding', 'Test Case binding') }}
                 </label>
+                {{ tip(t.tip_te_binding, t.get('te_wt_tc_binding', 'Test Case binding'), 'te-wt-binding') }}</span>
                 <select id="walkthrough_tc_binding" name="walkthrough_tc_binding">
                     <option value="url_pattern" selected>
                         {{ t.get('te_wt_binding_url', 'URL pattern (fire TCs whose url_pattern matches the visited page)') }}
@@ -727,8 +734,6 @@
                         {{ t.get('te_wt_binding_ignore', 'Ignore TCs (heuristics only)') }}
                     </option>
                 </select>
-                <p class="hint te-hint-sm">{{ t.get('te_wt_tc_binding_hint',
-                    'When binding is on, TCs marked trigger=walkthrough_url_match / always become candidates. Pre-PR-2 TCs default to trigger=manual and are not fired.') }}</p>
             </div>
         </div>
     </details>
@@ -759,8 +764,11 @@
 
 {# ── Item Selection ── #}
 <div class="card" data-te-items-card>
-    <h3 class="card-title">{{ t.get('te_select_items', 'Select Items to Test') }}</h3>
-    <p class="hint">{{ t.get('te_select_items_hint', 'Select specific items or leave all checked to test everything') }}</p>
+    <div class="tf-title-row tf-title-row--card">
+    <h3 class="card-title">{{ t.get('te_select_items', 'Select Items to Test') }}
+    </h3>
+    {{ tip(t.te_select_items_hint ~ '. ' ~ t.te_manual_status_hint, t.get('te_select_items', 'Select Items to Test'), 'te-items') }}
+    </div>
     <div class="select-actions">
         <a href="#" data-action="select-all" class="btn btn-sm">{{ t.get('all', 'All') }}</a>
         <a href="#" data-action="select-none" class="btn btn-sm">{{ t.get('te_none', 'None') }}</a>
@@ -778,8 +786,6 @@
     </datalist>
     {% endif %}
 
-    <p class="hint">{{ t.get('te_manual_status_hint',
-        'Leave Status as "Auto" to let the tester simulate / run real checks, or set Passed / Failed / Blocked manually. Attach an existing bug ID to link without creating a new one.') }}</p>
 
     {# Test Cases list #}
     <div id="items-tc" class="item-select-list" {% if not has_tc_data %}hidden{% endif %}>
@@ -856,9 +862,11 @@
    video. Native iOS / Android runs fall back to the simulator-based
    engine since Playwright doesn't drive native apps. #}
 <div class="card te-auto-card">
-    <h3 class="card-title">{{ t.get('te_auto_config', 'Automation Configuration') }}</h3>
-    <p class="hint">{{ t.get('te_auto_hint',
-        'Optional. When you supply a Base URL the Web / Mobile-Web environments drive a real headless browser, capture screenshots, optionally record video, and auto-link any failures to bug reports.') }}</p>
+    <div class="tf-title-row tf-title-row--card">
+    <h3 class="card-title">{{ t.get('te_auto_config', 'Automation Configuration') }}
+    </h3>
+    {{ tip(t.te_auto_hint, t.get('te_auto_config', 'Automation Configuration'), 'te-auto') }}
+    </div>
     <div class="te-live-callout">
         <strong class="te-live-callout-title">🎬 {{ t.get('te_live_callout_title', 'Watch the run live') }}</strong>
         <p class="te-live-callout-body">
@@ -911,12 +919,13 @@
     {% endif %}
     <div class="form-grid">
         <div class="form-group">
-            <label class="te-label-row" for="f-base-url">
+            <span class="tf-label-row"><label class="te-label-row" for="f-base-url">
                 {{ t.get('te_base_url', 'Base URL') }}
                 <span class="te-badge-amber">
                     {{ t.get('te_base_url_badge', 'required for live + screenshots + video') }}
                 </span>
             </label>
+            {{ tip(t.tip_te_base_url, t.get('te_base_url', 'Base URL'), 'te-base-url') }}</span>
             <input class="te-input-warn" id="f-base-url" type="url" name="base_url" value="{{ last_base_url or (resource_urls[0] if resource_urls else '') }}"
                    placeholder="https://example.com">
             <p class="hint te-hint-warn">
@@ -925,24 +934,23 @@
             </p>
         </div>
         <div class="form-group">
-            <label for="f-record-video">{{ t.get('te_record_video', 'Record video') }}</label>
+            <span class="tf-label-row"><label for="f-record-video">{{ t.get('te_record_video', 'Record video') }}</label>
+                {{ tip(t.te_record_video_hint, t.get('te_record_video', 'Record video'), 'te-video') }}</span>
             <select id="f-record-video" name="record_video">
                 <option value="0" selected>{{ t.get('te_record_no', 'No (faster)') }}</option>
                 <option value="1">{{ t.get('te_record_yes', 'Yes — save .webm with visible click / scroll / redirect') }}</option>
             </select>
-            <p class="hint te-hint-muted">
-                {{ t.get('te_record_video_hint',
-                   'When on, every action is slowed and elements flash a red outline before being clicked so the .webm is legible.') }}
-            </p>
         </div>
     </div>
 </div>
 
 {# ── Environment (one or more — a separate run record per env) ──── #}
 <div class="card te-env-card">
-    <h3 class="card-title">{{ t.get('te_environment', 'Test Environment') }}</h3>
-    <p class="hint">{{ t.get('te_env_hint',
-        'Pick one or more environments. Each selected environment produces its own run record with status tracking, bug links, screenshots and (when enabled) video.') }}</p>
+    <div class="tf-title-row tf-title-row--card">
+    <h3 class="card-title">{{ t.get('te_environment', 'Test Environment') }}
+    </h3>
+    {{ tip(t.te_env_hint, t.get('te_environment', 'Test Environment'), 'te-env') }}
+    </div>
 
     <div class="te-env-tabs" role="group" aria-label="{{ t.get('te_environment', 'Test Environment') }}" data-te-env-tabs>
         <label class="te-env-tab">
@@ -1084,9 +1092,11 @@
    credentials here OR generates a throw-away test account that
    the engine will create against the Base URL configured above. #}
 <div class="card">
-    <h3 class="card-title">{{ t.get('creds_title', 'Test Account') }}</h3>
-    <p class="hint">{{ t.get('creds_help_te',
-       'Optional. Provide credentials if the test cases or checklist require authenticated access, or generate a throw-away test account.') }}</p>
+    <div class="tf-title-row tf-title-row--card">
+    <h3 class="card-title">{{ t.get('creds_title', 'Test Account') }}
+    </h3>
+    {{ tip(t.creds_help_te ~ ' ' ~ t.tip_te_account, t.get('creds_title', 'Test Account'), 'te-account') }}
+    </div>
 
     <div class="form-row">
       <div class="form-group">
@@ -1173,6 +1183,7 @@
     <label class="te-suite-filter-label" for="suite-filter-select">
         {{ t.get('te_suite_filter_label', 'Run only suite:') }}
     </label>
+    {{ tip(t.tip_te_suite, t.get('te_suite_filter_label', 'Run only suite:'), 'te-suite') }}
     <select class="te-suite-filter-select" id="suite-filter-select">
         <option value="all">{{ t.get('te_suite_filter_all', 'All suites') }}</option>
         <option value="Smoke">Smoke</option>
@@ -1180,9 +1191,6 @@
         <option value="E2E">E2E</option>
         <option value="">{{ t.get('te_suite_filter_untagged', 'Untagged only') }}</option>
     </select>
-    <small class="te-text-subtle">
-        {{ t.get('te_suite_filter_hint', '— ticks / unticks the TC checkboxes by suite tag.') }}
-    </small>
 </div>
 
 <a href="{{ url_for('test_execution_live') }}" target="_blank" rel="noopener" class="btn btn-secondary btn-lg te-mr-10" id="watch-live-link"><i data-lucide="monitor-play" class="icon-sm"></i> {{ t.get('te_watch_live', 'Watch live (opens in new tab)') }}</a><button type="submit" id="te-run-button" class="btn btn-primary btn-lg"><i data-lucide="play-circle" class="icon-sm"></i> {{ t.get('te_start_run', 'Run Test Execution') }}</button>

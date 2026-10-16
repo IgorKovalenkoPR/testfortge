@@ -29,12 +29,14 @@
    project from any module — Estimation no longer requires a side
    trip to /dashboard. #}
 
+{% from '_toggletip.html' import tip with context %}
 <div class="card project-picker pp-card">
   <div class="pp-row">
     <div class="pp-switch">
       <label class="pp-label" for="pp-select">
         🗂 {{ t.get('pp_active_project', 'Active project:') }}
       </label>
+      {{ tip(t.pp_hint, t.get('pp_active_project', 'Active project:'), 'pp-active') }}
       <form class="pp-switch-form" method="POST" id="pp-select-form"
            
             data-base-action="{{ url_for('db_select_project', project_id='__ID__') }}">
@@ -98,15 +100,12 @@
         <button type="submit" class="btn btn-sm btn-primary pp-nowrap">
           + {{ t.get('pp_create', 'Create') }}
         </button>
+        {{ tip(t.tip_project_create, t.get('pp_create', 'Create'), 'pp-create') }}
       </form>
     </div>
     {% endif %}
   </div>
 
-  <p class="pp-hint">
-    {{ t.get('pp_hint',
-       'All activities (estimations, test cases, checklist items, runs and bugs) attach to the active project automatically. Switch any time — your work persists in the database.') }}
-  </p>
 </div>
 
 <script nonce="{{ csp_nonce }}">

@@ -1,34 +1,19 @@
-{#- ── Contextual hints (ADR 0003 §4.8 GET /api/hints; T7, owner item 6) ─
-    Usage, in a page template:
+{#- ── Page tips (ADR 0003 §4.8 GET /api/hints; T7, owner item 6) ──────
+    Usage, beside a page's <h1> inside .tf-title-row:
         {% with hints_page='test_cases' %}{% include '_search_hints.html' %}{% endwith %}
 
-    Renders nothing while PLATFORM_SEARCH is off. The tips themselves are
-    fetched by static/js/search.js: shown open on a first visit, folded to
-    the "?" button once dismissed — and the dismissal is remembered per
-    user and page in localStorage (best effort; a browser that refuses
-    storage just shows the tips again). -#}
+    A toggletip (see _toggletip.html) — owner ruling 2026-10-16 replaced
+    the always-open "Tips for this page" card, which pushed every page
+    down until it was dismissed. The tips are fetched by static/js/search.js
+    the first time the note opens (the tf-tip-open event from app.js).
+    Renders nothing while PLATFORM_SEARCH is off. -#}
 {% if search_ui %}
-<div class="tf-hints" data-hints
-     data-hints-url="{{ url_for('api_hints') }}"
-     data-hints-page="{{ hints_page }}"
-     data-hints-user="{{ (current_user.id if current_user else '') or 'anon' }}"
-     data-lang="{{ lang }}"
-     data-msg-learn-more="{{ t.hints_learn_more }}"
-     data-msg-similar="{{ t.hints_similar }}"
-     data-msg-loading="{{ t.hints_loading }}"
-     data-msg-error="{{ t.hints_error }}">
-  <button type="button" class="tf-hints-toggle" data-hints-toggle
-          aria-expanded="false" aria-controls="tf-hints-{{ hints_page }}"
-          title="{{ t.hints_title }}">
-    <span aria-hidden="true">?</span><span class="sr-only">{{ t.hints_title }}</span>
-  </button>
-  <section class="tf-hints-card" id="tf-hints-{{ hints_page }}"
-           aria-labelledby="tf-hints-title-{{ hints_page }}" hidden>
-    <div class="tf-hints-head">
-      <h2 class="tf-hints-title" id="tf-hints-title-{{ hints_page }}">{{ t.hints_title }}</h2>
-      <button type="button" class="btn btn-ghost btn-xs" data-hints-dismiss>{{ t.hints_dismiss }}</button>
-    </div>
-    <ul class="tf-hints-list" data-hints-list></ul>
-  </section>
-</div>
+<span class="tf-tip tf-tip--page" data-tip data-hints
+      data-hints-url="{{ url_for('api_hints') }}"
+      data-hints-page="{{ hints_page }}"
+      data-lang="{{ lang }}"
+      data-msg-learn-more="{{ t.hints_learn_more }}"
+      data-msg-similar="{{ t.hints_similar }}"
+      data-msg-loading="{{ t.hints_loading }}"
+      data-msg-error="{{ t.hints_error }}"><button type="button" class="tf-tip-btn" aria-expanded="false" aria-controls="tf-hints-{{ hints_page }}" aria-label="{{ t.hints_title }}"><span aria-hidden="true">?</span></button><span class="tf-tip-bubble tf-tip-bubble--wide" id="tf-hints-{{ hints_page }}" hidden><strong class="tf-hints-title">{{ t.hints_title }}</strong><span class="tf-hints-list" role="list" data-hints-list></span></span></span>
 {% endif %}

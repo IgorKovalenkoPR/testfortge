@@ -23,9 +23,11 @@
 {% block page_class %}{{ ' page-bug-reports' }}{% endblock %}
 
 {% block content %}
+<div class="tf-title-row">
 <h1>{{ t.get('bug_title', 'Bug Reports') }}</h1>
-<p class="subtitle">{{ t.get('bug_subtitle', 'Jira-style ISTQB-aligned defect reports') }}</p>
 {% with hints_page='bug_reports' %}{% include '_search_hints.html' %}{% endwith %}
+</div>
+<p class="subtitle">{{ t.get('bug_subtitle', 'Jira-style ISTQB-aligned defect reports') }}</p>
 
 {% include '_project_picker.html' %}
 

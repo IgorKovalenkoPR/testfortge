@@ -1,0 +1,19 @@
+{#- ── Toggletip (owner ruling 2026-10-16) ─────────────────────────────
+    A "?" button beside the control it explains. The note opens on mouse
+    hover, on keyboard focus and on a tap; Escape closes it; the pointer
+    can move onto the note without it closing; it never times out —
+    WCAG 2.1 SC 1.4.13 (content on hover or focus). Behaviour lives in
+    static/js/app.js (CSP: no inline handlers).
+
+    A disclosure, not role="tooltip": the note follows its button in the
+    DOM, so a screen reader reaches it next, and it may hold a link.
+
+    Usage (import with context — the macro reads `t`):
+        {% from '_toggletip.html' import tip with context %}
+        {{ tip(t.te_record_video_hint, t.te_record_video, 'te-video') }}
+
+    `label` names what the note explains: the button reads
+    "Help: Record video". `id` must be unique on the page. -#}
+{% macro tip(text, label, id) -%}
+<span class="tf-tip" data-tip><button type="button" class="tf-tip-btn" aria-expanded="false" aria-controls="tip-{{ id }}" aria-label="{{ t.tip_label }}: {{ label|striptags|trim }}"><span aria-hidden="true">?</span></button><span class="tf-tip-bubble" id="tip-{{ id }}" hidden>{{ text }}</span></span>
+{%- endmacro %}

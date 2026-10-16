@@ -891,3 +891,123 @@ function applyStatusColor(select) {
         }
     });
 })();
+
+/* â”€â”€ Toggletips (templates/_toggletip.html) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   WCAG 2.1 SC 1.4.13: a note shown on hover or focus must be
+   dismissible (Escape), hoverable (the pointer may move onto it) and
+   persistent (no timeout). Mouse hover and keyboard focus open it for a
+   look; a click or tap pins it open until the next click, a click
+   outside, or Escape. Touch has no hover, so a tap is the way in there.
+   One note is open at a time. The opener fires `tf-tip-open` on the
+   wrapper so a note with remote content (the page tips) loads lazily.
+*/
+(function () {
+    var open = null;        // the open [data-tip] wrapper
+    var pinned = false;     // opened by click/tap rather than hover/focus
+    var quiet = null;       // closed by Escape: no re-open until left
+    var timer = null;
+
+    function parts(w) {
+        return { btn: w.querySelector('.tf-tip-btn'), note: w.querySelector('.tf-tip-bubble') };
+    }
+
+    // Keep the note inside the viewport: centred under its "?" where it
+    // fits, slid sideways by just enough where it does not. A position
+    // offset, not a display/colour write (block B rules); CSSOM writes
+    // are not inline style attributes, so the CSP allows them.
+    function place(note) {
+        note.style.setProperty('--tip-shift', '0px');
+        var r = note.getBoundingClientRect();
+        var vw = document.documentElement.clientWidth;
+        var shift = 0;
+        if (r.right > vw - 8) shift = (vw - 8) - r.right;
+        if (r.left + shift < 8) shift = 8 - r.left;
+        note.style.setProperty('--tip-shift', Math.round(shift) + 'px');
+    }
+
+    function show(w, pin) {
+        clearTimeout(timer);
+        if (open && open !== w) hide(open);
+        var p = parts(w);
+        var was = open === w;
+        open = w;
+        pinned = pin || (was && pinned);
+        if (!was) {
+            p.note.hidden = false;
+            p.btn.setAttribute('aria-expanded', 'true');
+            place(p.note);
+            w.dispatchEvent(new CustomEvent('tf-tip-open', { bubbles: true }));
+        }
+    }
+
+    function hide(w) {
+        clearTimeout(timer);
+        var p = parts(w);
+        p.note.hidden = true;
+        p.btn.setAttribute('aria-expanded', 'false');
+        if (open === w) { open = null; pinned = false; }
+    }
+
+    function later(w) {
+        clearTimeout(timer);
+        timer = setTimeout(function () { if (open === w && !pinned) hide(w); }, 300);
+    }
+
+    function tipOf(node) {
+        return node && node.closest ? node.closest('[data-tip]') : null;
+    }
+
+    document.addEventListener('pointerover', function (e) {
+        if (e.pointerType !== 'mouse') return;
+        var w = tipOf(e.target);
+        if (!w || w === quiet) return;
+        show(w, false);
+    });
+    document.addEventListener('pointerout', function (e) {
+        if (e.pointerType !== 'mouse') return;
+        var w = tipOf(e.target);
+        if (!w || w.contains(e.relatedTarget)) return;
+        if (w === quiet) { quiet = null; return; }
+        if (w === open && !pinned) later(w);
+    });
+
+    document.addEventListener('focusin', function (e) {
+        var w = tipOf(e.target);
+        if (w && w !== quiet && e.target.classList.contains('tf-tip-btn')) show(w, false);
+    });
+    document.addEventListener('focusout', function (e) {
+        var w = tipOf(e.target);
+        if (!w || w.contains(e.relatedTarget)) return;
+        if (w === quiet) quiet = null;
+        if (w === open && !pinned) hide(w);
+    });
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.tf-tip-btn') : null;
+        if (btn) {
+            var w = tipOf(btn);
+            // Inside a <label> the click must not also tick the input.
+            e.preventDefault();
+            quiet = null;
+            // Closing by click: hover over the button must not reopen it.
+            if (open === w && pinned) { hide(w); quiet = w; }
+            else show(w, true);
+            return;
+        }
+        if (open && !open.contains(e.target)) hide(open);
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || !open) return;
+        var w = open;
+        var inside = w.contains(document.activeElement);
+        hide(w);
+        quiet = w;
+        if (inside) parts(w).btn.focus();
+        e.stopPropagation();
+    });
+
+    window.addEventListener('resize', function () {
+        if (open) place(parts(open).note);
+    });
+})();
