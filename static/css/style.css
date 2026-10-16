@@ -2513,6 +2513,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
 .pill-muted { background: var(--border); color: var(--text-muted); }
 /* Wide tables scroll inside their own box rather than the page body. */
 .table-wrap { overflow-x: auto; }
+.table-wrap[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Visually hidden but reachable by a screen reader — used for the labels
    on the invite row, where the placeholder carries the visual cue. */
 .sr-only {
@@ -4123,6 +4124,11 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
     #pp-select-form { min-width: 0; flex-wrap: wrap; }
     #pp-select { min-width: 0 !important; width: 100%; max-width: 100%; }
     .main-content .data-table { display: block; max-width: 100%; overflow-x: auto; }
+    /* A test case's label/value table: the labels narrow and long values
+       (URLs, selectors) wrap, so the card fits a 375 px screen. */
+    .tc-detail-table { table-layout: fixed; }
+    .tc-detail-table th { width: 96px; padding: .4rem .5rem; }
+    .tc-detail-table td { padding: .4rem .5rem; overflow-wrap: anywhere; }
     .qa-chat-toggle.qa-chat-mascot {
         width: 56px;
         height: 66px;
@@ -4134,7 +4140,7 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 
 /* Estimation source tabs (were inline styles plus a script that rewrote them) */
 .te-tabs {
-    display: flex; gap: var(--gap-buttons);
+    display: flex; flex-wrap: wrap; gap: var(--gap-buttons);
     border-bottom: 2px solid var(--border); margin-bottom: 14px;
 }
 .te-tab {

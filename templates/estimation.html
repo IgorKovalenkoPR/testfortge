@@ -677,121 +677,127 @@
 
 <div class="card">
   <h2>{{ t.est_tasks_title }}</h2>
-  <table class="est-table">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>{{ t.est_task }}</th>
-        <th>{{ t.est_min }}</th>
-        <th>{{ t.est_max }}</th>
-        <th>{{ t.est_expected }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for task in tasks %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td><strong>{{ task.title }}</strong><br><small>{{ task.description }}</small></td>
-        <td>{{ (task.min_h if result else 0) | round(2) }}</td>
-        <td>{{ (task.max_h if result else 0) | round(2) }}</td>
-        <td>{{ (task.expected_h if result else 0) | round(2) }}</td>
-      </tr>
-      {% endfor %}
-      <tr class="est-row-subtotal">
-        <td colspan="2"><strong>{{ t.est_one_plat_subtotal }}</strong></td>
-        <td>{{ (result.one_plat_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_expected if result else 0) | round(1) }}</td>
-      </tr>
-      <tr>
-        <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
-        <td>{{ (result.one_plat_pm_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_pm_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_pm_expected if result else 0) | round(1) }}</td>
-      </tr>
-      <tr class="est-row-total">
-        <td colspan="2"><strong>{{ t.est_one_plat_total }}</strong></td>
-        <td>{{ (result.one_plat_total_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_total_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.one_plat_total_expected if result else 0) | round(1) }}</td>
-      </tr>
-      <tr class="est-row-subtotal">
-        <td colspan="2"><strong>{{ t.est_full_subtotal }} (+{{ extra_platforms }})</strong></td>
-        <td>{{ (result.full_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_expected if result else 0) | round(1) }}</td>
-      </tr>
-      <tr>
-        <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
-        <td>{{ (result.full_pm_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_pm_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_pm_expected if result else 0) | round(1) }}</td>
-      </tr>
-      <tr class="est-row-total">
-        <td colspan="2"><strong>{{ t.est_full_total }}</strong></td>
-        <td>{{ (result.full_total_min if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_total_max if result else 0) | round(1) }}</td>
-        <td>{{ (result.full_total_expected if result else 0) | round(1) }}</td>
-      </tr>
-    </tbody>
-  </table>
+  {#- A phone scrolls the table inside its own box, not the page (2026-10-16). -#}
+  <div class="table-wrap" role="region" tabindex="0" aria-label="{{ t.est_tasks_title }}">
+    <table class="est-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>{{ t.est_task }}</th>
+          <th>{{ t.est_min }}</th>
+          <th>{{ t.est_max }}</th>
+          <th>{{ t.est_expected }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in tasks %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><strong>{{ task.title }}</strong><br><small>{{ task.description }}</small></td>
+          <td>{{ (task.min_h if result else 0) | round(2) }}</td>
+          <td>{{ (task.max_h if result else 0) | round(2) }}</td>
+          <td>{{ (task.expected_h if result else 0) | round(2) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="est-row-subtotal">
+          <td colspan="2"><strong>{{ t.est_one_plat_subtotal }}</strong></td>
+          <td>{{ (result.one_plat_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_expected if result else 0) | round(1) }}</td>
+        </tr>
+        <tr>
+          <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
+          <td>{{ (result.one_plat_pm_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_pm_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_pm_expected if result else 0) | round(1) }}</td>
+        </tr>
+        <tr class="est-row-total">
+          <td colspan="2"><strong>{{ t.est_one_plat_total }}</strong></td>
+          <td>{{ (result.one_plat_total_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_total_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.one_plat_total_expected if result else 0) | round(1) }}</td>
+        </tr>
+        <tr class="est-row-subtotal">
+          <td colspan="2"><strong>{{ t.est_full_subtotal }} (+{{ extra_platforms }})</strong></td>
+          <td>{{ (result.full_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_expected if result else 0) | round(1) }}</td>
+        </tr>
+        <tr>
+          <td colspan="2">{{ t.est_pm }} ({{ ((result.pm_overhead if result else 0.08)*100)|round(1) }}%)</td>
+          <td>{{ (result.full_pm_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_pm_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_pm_expected if result else 0) | round(1) }}</td>
+        </tr>
+        <tr class="est-row-total">
+          <td colspan="2"><strong>{{ t.est_full_total }}</strong></td>
+          <td>{{ (result.full_total_min if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_total_max if result else 0) | round(1) }}</td>
+          <td>{{ (result.full_total_expected if result else 0) | round(1) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <div class="card">
   <h2>{{ t.est_features_title }}{% if result %} ({{ result.features | selectattr('is_section', 'equalto', false) | list | length }}){% endif %}</h2>
-  <table class="est-table">
-    <thead>
-      <tr>
-        <th>{{ t.est_feature }}</th>
-        <th>{{ t.est_tc }}</th>
-        <th>{{ t.est_comment }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% if result %}
-        {% for f in result.features %}
-        <tr class="{% if f.is_section %}est-section-row{% endif %}"
-            {% if est_edit %}data-est-feature="{{ loop.index0 }}"
-            data-est-section="{{ 1 if f.is_section else 0 }}"{% endif %}>
-          {%- if est_edit %}
-          <td><input type="text" class="est-input est-input-name"
-                     data-est-field="name" value="{{ f.name }}"
-                     aria-label="{{ t.est_feature }} {{ loop.index }}"></td>
-          <td>{% if not f.is_section %}<input type="number" min="0" step="1"
-                     class="est-input est-input-tc" data-est-field="test_cases"
-                     value="{{ f.test_cases }}"
-                     aria-label="{{ t.est_tc }} — {{ f.name }}">{% endif %}</td>
-          <td><input type="text" class="est-input"
-                     data-est-field="comment" value="{{ f.comment }}"
-                     aria-label="{{ t.est_comment }} — {{ f.name }}"></td>
-          {%- else %}
-          <td>{{ f.name }}</td>
-          <td>{% if not f.is_section %}{{ f.test_cases }}{% endif %}</td>
-          <td>{{ f.comment }}</td>
-          {%- endif %}
-        </tr>
-        {% endfor %}
-      {% else %}
-        {% for i in range(5) %}
+  {#- A phone scrolls the table inside its own box, not the page (2026-10-16). -#}
+  <div class="table-wrap" role="region" tabindex="0" aria-label="{{ t.est_features_title }}">
+    <table class="est-table">
+      <thead>
         <tr>
-          <td>&nbsp;</td>
-          <td>0</td>
-          <td>&nbsp;</td>
+          <th>{{ t.est_feature }}</th>
+          <th>{{ t.est_tc }}</th>
+          <th>{{ t.est_comment }}</th>
         </tr>
-        {% endfor %}
-      {% endif %}
-      <tr class="est-row-total">
-        <td><strong>{{ t.est_total }}</strong></td>
-        <td><strong>{{ result.total_tc if result else 0 }}</strong></td>
-        <td></td>
-      </tr>
-      <tr class="est-row-total">
-        <td><strong>{{ t.get('est_total_hours', 'Total (hours)') }}</strong></td>
-        <td><strong>{{ result.features_hours if result else 0 }}</strong></td>
-        <td>{% if result %}<small>= {{ result.buffer }} &times; {{ result.total_tc }} &times; {{ result.minutes_per_tc }} / 60 + 1</small>{% else %}<small>= buffer &times; total_tc &times; minutes_per_tc / 60 + 1</small>{% endif %}</td>
-      </tr>
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% if result %}
+          {% for f in result.features %}
+          <tr class="{% if f.is_section %}est-section-row{% endif %}"
+              {% if est_edit %}data-est-feature="{{ loop.index0 }}"
+              data-est-section="{{ 1 if f.is_section else 0 }}"{% endif %}>
+            {%- if est_edit %}
+            <td><input type="text" class="est-input est-input-name"
+                       data-est-field="name" value="{{ f.name }}"
+                       aria-label="{{ t.est_feature }} {{ loop.index }}"></td>
+            <td>{% if not f.is_section %}<input type="number" min="0" step="1"
+                       class="est-input est-input-tc" data-est-field="test_cases"
+                       value="{{ f.test_cases }}"
+                       aria-label="{{ t.est_tc }} — {{ f.name }}">{% endif %}</td>
+            <td><input type="text" class="est-input"
+                       data-est-field="comment" value="{{ f.comment }}"
+                       aria-label="{{ t.est_comment }} — {{ f.name }}"></td>
+            {%- else %}
+            <td>{{ f.name }}</td>
+            <td>{% if not f.is_section %}{{ f.test_cases }}{% endif %}</td>
+            <td>{{ f.comment }}</td>
+            {%- endif %}
+          </tr>
+          {% endfor %}
+        {% else %}
+          {% for i in range(5) %}
+          <tr>
+            <td>&nbsp;</td>
+            <td>0</td>
+            <td>&nbsp;</td>
+          </tr>
+          {% endfor %}
+        {% endif %}
+        <tr class="est-row-total">
+          <td><strong>{{ t.est_total }}</strong></td>
+          <td><strong>{{ result.total_tc if result else 0 }}</strong></td>
+          <td></td>
+        </tr>
+        <tr class="est-row-total">
+          <td><strong>{{ t.get('est_total_hours', 'Total (hours)') }}</strong></td>
+          <td><strong>{{ result.features_hours if result else 0 }}</strong></td>
+          <td>{% if result %}<small>= {{ result.buffer }} &times; {{ result.total_tc }} &times; {{ result.minutes_per_tc }} / 60 + 1</small>{% else %}<small>= buffer &times; total_tc &times; minutes_per_tc / 60 + 1</small>{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {%- if est_edit %}
@@ -848,28 +854,31 @@
      computed fields, just the headline numbers that moved. #}
   <div class="est-diff">
     <h3>{{ t.get('est_diff_title', 'Edited — the model computed this') }}</h3>
-    <table class="est-table est-diff-table">
-      <thead>
-        <tr>
-          <th>{{ t.get('est_diff_what', 'Number') }}</th>
-          <th>{{ t.get('est_diff_model', 'Model') }}</th>
-          <th>{{ t.get('est_diff_now', 'Now') }}</th>
-          <th>{{ t.get('est_diff_delta', 'Change') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {%- for row in est_edit.diff %}
-        <tr>
-          <td>{{ row.label }}</td>
-          <td>{{ row.before | round(2) if row.before is number else row.before }}</td>
-          <td>{{ row.after | round(2) if row.after is number else row.after }}</td>
-          <td class="{{ 'est-delta-up' if (row.delta or 0) > 0 else 'est-delta-down' }}">
-            {%- if row.delta is not none %}{{ '%+.2f' % row.delta }}{% endif %}
-          </td>
-        </tr>
-        {%- endfor %}
-      </tbody>
-    </table>
+    {#- A phone scrolls the table inside its own box, not the page (2026-10-16). -#}
+    <div class="table-wrap" role="region" tabindex="0" aria-label="{{ t.get('est_diff_title', 'Edited — the model computed this') }}">
+      <table class="est-table est-diff-table">
+        <thead>
+          <tr>
+            <th>{{ t.get('est_diff_what', 'Number') }}</th>
+            <th>{{ t.get('est_diff_model', 'Model') }}</th>
+            <th>{{ t.get('est_diff_now', 'Now') }}</th>
+            <th>{{ t.get('est_diff_delta', 'Change') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {%- for row in est_edit.diff %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.before | round(2) if row.before is number else row.before }}</td>
+            <td>{{ row.after | round(2) if row.after is number else row.after }}</td>
+            <td class="{{ 'est-delta-up' if (row.delta or 0) > 0 else 'est-delta-down' }}">
+              {%- if row.delta is not none %}{{ '%+.2f' % row.delta }}{% endif %}
+            </td>
+          </tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
   {%- endif %}
 </div>

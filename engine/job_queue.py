@@ -23,6 +23,16 @@ Scope & trade-offs
 * **Automatic cleanup.** Jobs older than ``JOB_RETENTION_SECONDS`` (30
   minutes by default) are pruned lazily on each ``get`` / ``submit`` so
   the dict can't grow unbounded.
+* **Abandoned jobs stop counting.** A PENDING or RUNNING job with no
+  update for ``JOB_STALE_SECONDS`` (30 minutes by default) is marked
+  FAILED. A thread cannot be killed, so the work itself may still be
+  hanging — but it no longer holds one of the session's
+  ``count_active_by_meta`` slots. Before this a hung job (a browser or a
+  model that never answered, while the proxy gave the poller 502/503)
+  held its slot for the life of the process, and every later generation
+  from that session was refused with 429 (found 2026-09-16, fixed
+  2026-10-16). A job that finishes after being abandoned still records
+  its result.
 """
 
 from __future__ import annotations
@@ -88,6 +98,10 @@ class Job:
 # ── Queue ───────────────────────────────────────────────────────
 _MAX_WORKERS = int(os.environ.get("JOB_QUEUE_WORKERS", "2"))
 _RETENTION = int(os.environ.get("JOB_RETENTION_SECONDS", "1800"))  # 30 min
+#: No update for this long and a PENDING/RUNNING job is given up on. The
+#: longest legitimate job (a crawl plus several model calls at a 60 s
+#: timeout with retries) is minutes; 30 min leaves a wide margin.
+_STALE = int(os.environ.get("JOB_STALE_SECONDS", "1800"))
 
 
 class JobQueue:
@@ -98,13 +112,15 @@ class JobQueue:
     """
 
     def __init__(self, max_workers: int = _MAX_WORKERS,
-                 retention_seconds: int = _RETENTION) -> None:
+                 retention_seconds: int = _RETENTION,
+                 stale_seconds: float = _STALE) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="tf-job"
         )
         self._retention = retention_seconds
+        self._stale = stale_seconds
         self._shutting_down = False
 
     # ── Public API ──────────────────────────────────────────────
@@ -257,9 +273,20 @@ class JobQueue:
                 job.updated_at = time.time()
 
     def _prune_locked(self) -> None:
-        """Drop finished jobs older than the retention window.
-        Caller must hold ``self._lock``."""
-        cutoff = time.time() - self._retention
+        """Give up on abandoned jobs, then drop finished jobs older than
+        the retention window. Caller must hold ``self._lock``."""
+        now = time.time()
+        stale_cutoff = now - self._stale
+        for job in self._jobs.values():
+            if job.status in (PENDING, RUNNING) and job.updated_at < stale_cutoff:
+                minutes = max(1, int(self._stale // 60))
+                log.warning("job %s (%s) abandoned: %s with no update for %s s",
+                            job.id, job.kind, job.status, int(now - job.updated_at))
+                job.status = FAILED
+                job.error = (f"Abandoned: no word from this job for {minutes} "
+                             f"min. Start it again.")
+                job.updated_at = now
+        cutoff = now - self._retention
         stale = [
             jid for jid, j in self._jobs.items()
             if j.status in (DONE, FAILED) and j.updated_at < cutoff
