@@ -122,6 +122,9 @@ TEXT_PAIRS = [
     (WHITE, "--tf-dark", "white text on the brand dark (table headers, chat head)"),
     (WHITE, "--tf-dark-2", "white text on the dark pill (.btn-export, section rows)"),
     ("--warning", "--tf-bg", "warning text on the brand page background"),
+    ("--text-muted", "--tf-surface-2", "muted text on inset panels inside cards"),
+    ("--text-subtle", "--tf-surface-2", "subtle text on inset panels inside cards"),
+    ("--accent", "--tf-surface-2", "links on inset panels inside cards"),
     ("--success", "--tf-bg", "success text on the brand page background"),
     (WHITE, "--accent", "white text on anything still filled with --accent"),
     (WHITE, "--accent-hover", "white text on --accent-hover fills"),
@@ -241,6 +244,17 @@ def test_the_primary_button_is_brand_coral_with_dark_text(css, tokens):
 def test_the_page_background_is_the_brand_light(tokens):
     assert _hex(colour("--tf-bg", tokens)) == "E6EEF3"
     assert _hex(colour("--tf-dark", tokens)) == "202020"
+
+
+def test_only_the_page_paints_itself_with_the_page_colour(css):
+    """2026-10-16: block B had snapped the inset-panel tint (#F7F8FA) to
+    --tf-bg because they were one colour. When the brand moved the page to
+    #E6EEF3, fifteen panels and the project-picker card turned blue-grey
+    with it. Components use --tf-surface / --tf-surface-2; --tf-bg is the
+    canvas only (body, and the legacy --bg alias)."""
+    users = [m.group(0) for m in re.finditer(r"[^{}]*\{[^}]*var\(--tf-bg\)[^}]*\}", _strip_comments(css))]
+    allowed = [u for u in users if re.search(r"(^|\})\s*(body|:root)\s*\{", u)]
+    assert users and len(users) == len(allowed), [u.strip()[:60] for u in users if u not in allowed]
 
 
 def test_the_contrast_maths_is_right():
