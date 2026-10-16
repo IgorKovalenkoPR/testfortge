@@ -13,17 +13,20 @@
     --tf-coral-hover:    #FF6A36;
     --tf-coral-soft:     #FFE9DE;
     --tf-coral-grad:     linear-gradient(135deg, #FF865C 0%, #FF8A59 100%);
-    --tf-blue:           #18AAFD;
+    --tf-blue:           #557FF1;   /* brand blue; decoration only (3.69:1 on white) */
     --tf-blue-hover:     #0A92DF;
     --tf-blue-soft:      #E0F4FE;
     --tf-ink:            #111111;
     --tf-ink-2:          #2A2A2A;
     --tf-mute:           #5E6472;
-    --tf-mute-2:         #6B7280;   /* was #828282 — 3.84:1 on white */
+    --tf-mute-2:         #636A78;   /* 4.63:1 on the brand page background */
     --tf-line:           #E5E7EB;
     --tf-line-2:         #F2F3F5;
-    --tf-bg:             #F7F8FA;
+    --tf-bg:             #E6EEF3;   /* brand light background (owner ruling 2026-10-16) */
     --tf-surface:        #FFFFFF;
+    --tf-dark:           #202020;   /* brand dark: sidebar, dark headers */
+    --tf-dark-2:         #464646;   /* brand dark 2: dark pill buttons; white on it 9.44:1 */
+    --tf-grad-blue:      linear-gradient(135deg, #557FF1 0%, #66C8F2 100%); /* decoration only */
 
     /* Typographic scale */
     --tf-font-heading:   'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -52,15 +55,21 @@
     --accent:            #B93C12;   /* 5.65:1 white-on-accent */
     --accent-hover:      #A8360F;   /* 6.56:1 */
     --accent-soft:       #FFE9DE;   /* accent text on it: 4.83:1 */
-    --success:           #0F7B5A;   /* 5.25:1 */
+    --success:           #0E7352;   /* 5.85:1 on white, 4.98:1 on the page background */
     --success-hover:     #0B6449;
     --danger:            #C62828;   /* 5.62:1 */
     --danger-hover:      #A51F1F;
-    --warning:           #B45309;   /* text on white 5.02:1 */
-    --text-subtle:       #6B7280;   /* 4.83:1 — replaces #828282/#94a3b8/#999 */
-    --border-control:    #8A909C;   /* 3.21:1 — inputs, outline buttons */
-    --focus:             #1D4ED8;   /* 6.70:1 */
-    --focus-on-dark:     #FF865C;   /* sidebar: 7.08:1 on #1A1D24 */
+    --warning:           #A04A0A;   /* 6.04:1 on white, 5.14:1 on the page background */
+    --text-subtle:       #636A78;   /* 5.44:1 on white, 4.63:1 on the page background */
+    --border-control:    #767C88;   /* 4.19:1 on white, 3.57:1 on the page background */
+    --focus:             #2F5BD8;   /* brand-blue hue; 5.82:1 white, 4.96:1 page background */
+    --focus-on-dark:     #FF865C;   /* sidebar: 6.84:1 on --tf-dark */
+    /* Filled accent (owner ruling 2026-10-16): the brand coral with dark
+       text — 6.84:1, hover 5.72:1. White on coral is 2.38:1 and never
+       allowed. --accent stays the colour of links and accent text. */
+    --accent-fill:       var(--tf-coral);
+    --accent-fill-hover: var(--tf-coral-hover);
+    --on-accent-fill:    #202020;
 
     /* Badge text on their existing tints (all ≥ 4.5:1). */
     --badge-amber:       #B45309;
@@ -1387,6 +1396,8 @@ input[type="number"]:focus {
 /* ── Base ─────────────────────────────────────────────────────── */
 body {
     font-family: var(--tf-font-body);
+    font-size: 14px;      /* brand P2 — app body (owner ruling 2026-10-16) */
+    line-height: 24px;
     font-feature-settings: "ss01","cv11";
     letter-spacing: -0.005em;
     color: var(--tf-ink);
@@ -1399,11 +1410,12 @@ h1, h2, h3, h4, h5, h6,
     font-family: var(--tf-font-heading);
     color: var(--tf-ink);
     letter-spacing: -0.015em;
-    font-weight: 700;
+    font-weight: 600;   /* brand: Regular, Medium, Semibold only */
 }
-.page-header h1 { font-size: 2rem; line-height: 1.15; }
-.card h2       { color: var(--tf-ink);   font-weight: 700; }
-.card h3       { color: var(--tf-ink-2); font-weight: 600; }
+/* Brand type scale mapped to a dense app (brand-alignment-2025.md §3). */
+.page-header h1, .tf-title-row > h1 { font-size: 28px; line-height: 42px; }
+.card h2       { color: var(--tf-ink);   font-weight: 600; font-size: 22px; line-height: 30px; }
+.card h3       { color: var(--tf-ink-2); font-weight: 500; font-size: 20px; line-height: 28px; }
 a              { color: var(--accent); }
 a:hover        { color: var(--accent-hover); }
 
@@ -1437,7 +1449,7 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
 
 /* ── Sidebar (Testfort dark) ──────────────────────────────────── */
 .sidebar {
-    background: linear-gradient(180deg, #0F1115 0%, #1A1D24 100%);
+    background: var(--tf-dark);
     color: #D6D8DE;
     border-right: 1px solid rgba(255,255,255,.04);
 }
@@ -2554,7 +2566,7 @@ input[type="search"]:focus, textarea:focus, select:focus {
        through this block wherever they overlap. */
     position: sticky;
     bottom: 0;
-    background: #1A1D24;
+    background: var(--tf-dark);
 }
 .sidebar-project + .sidebar-user { margin-top: 0; }
 .sidebar-user small {
@@ -4072,7 +4084,7 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
         z-index: 200;
         min-height: var(--control-lg);
         padding: var(--space-1) var(--space-4);
-        background: #0F1115;
+        background: var(--tf-dark);
         border-bottom: 1px solid rgba(255,255,255,.06);
     }
     .mobile-bar-brand,
@@ -4615,3 +4627,38 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 /* ── Runs (was inline style="", block B 2026-10-15) ── */
 .page-runs .rn-nowrap { white-space: nowrap; }
 .page-runs .rn-inline-form { display: inline; }
+
+/* ── Brand alignment 2025 (owner ruling 2026-10-16) ───────────────────
+   docs/design/brand-alignment-2025.md: every filled accent is the brand
+   coral with dark text (one style everywhere); dark surfaces are the
+   brand dark; links keep --accent #B93C12. Later rules of equal
+   specificity win, so the older white-on-accent rules above are dead and
+   stay only as history; tests/test_design_tokens.py checks every rule
+   that sets both a text colour and a fill. */
+.btn-primary,
+.btn-primary:hover,
+.btn-primary:focus-visible { color: var(--on-accent-fill); border-color: transparent; }
+.btn-primary       { background: var(--accent-fill); }
+.btn-primary:hover { background: var(--accent-fill-hover); }
+.btn-export        { background: var(--tf-dark-2); color: #FFFFFF; border-color: transparent; border-radius: var(--tf-radius-pill); }
+.btn-export:hover  { background: var(--tf-dark); color: #FFFFFF; }
+
+.lang-btn.active,
+.skip-link,
+.step-badge,
+.nav-steps li.active .step-num,
+.guide-step-num,
+.metric-btn.active,
+.filter-btn.active, .filter-btn-suite.active,
+.back-to-top,
+.qa-chat-msg.user,
+.qa-chat-foot button { background: var(--accent-fill); color: var(--on-accent-fill); }
+.metric-btn.active,
+.filter-btn.active, .filter-btn-suite.active { border-color: var(--accent-fill); }
+.back-to-top:hover { background: var(--accent-fill-hover); color: var(--on-accent-fill); }
+:where(.page-test-execution) .url-chip:hover { background: var(--accent-fill); color: var(--on-accent-fill); }
+
+/* Dark brand surfaces carry white text. */
+.data-table th     { background: var(--tf-dark); color: #FFFFFF; }
+.section-row td    { background: var(--tf-dark-2) !important; color: #FFFFFF !important; }
+.qa-chat-head      { background: var(--tf-dark); color: #FFFFFF; }

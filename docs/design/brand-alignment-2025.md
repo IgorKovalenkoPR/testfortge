@@ -1,6 +1,22 @@
 # Brand alignment — TestFort Brand Guidelines 2025
 
-Status: proposal, 2026-10-15. Scope: `static/css/style.css` tokens and component rules; no behaviour changes.
+Status: **phases 1–2 implemented 2026-10-16** (owner decisions below); phase 3 and the logo wait on the designer. Scope: `static/css/style.css` tokens and component rules; no behaviour changes.
+
+## Decisions (owner, 2026-10-16)
+
+| Q | Decision | Implemented as |
+|---|---|---|
+| Q1 Background | #E6EEF3 around the content, cards stay white | `--tf-bg: #E6EEF3`; `--tf-surface` unchanged; the four token darkenings of §2.4 shipped with it |
+| Q2 Sidebar | Flat #202020 | `--tf-dark`; sidebar, its sticky footer and the mobile bar |
+| Q3 Filled accents | Coral with #202020 text, one style everywhere | `--accent-fill` / `--accent-fill-hover` / `--on-accent-fill`: primary button, language toggle, skip link, step badges, active filter/metric chips, back-to-top, chat send and user bubble |
+| Q6 Links | #B93C12 | `--accent` unchanged |
+| Q4 Gradient | Decorative only (recommendation taken; the owner did not object) | `--tf-grad-blue` defined, used by nothing yet; `--tf-blue` → #557FF1, used only as a card edge |
+| Q7 Body size | 14px body (recommendation taken) | `body` 14/24; h1 28/42, card h2 22/30, card h3 20/28 Medium; headings 600 |
+| Q5 Logo | Waits on the designer's SVG | CSS wordmark unchanged |
+
+Also: table headers and the chat header on `--tf-dark`, section rows and `.btn-export` (pill) on `--tf-dark-2`, focus ring `#2F5BD8`.
+Deviation: the Google Fonts link still loads 700/800 — 42 rules use those weights and dropping the files would make the browser synthesise bold. Moving them to 600 is part of phase 3.
+Guards: `tests/test_design_tokens.py` — coral/#202020 pairs, white on `--tf-dark`/`--tf-dark-2`, warning/success on the page background, the focus ring on `--tf-dark`, a pin that `.btn-primary` renders the coral fill with dark text (mutation-checked); the per-rule AA scan resolves the new token chains (mutation: white on coral fails it). axe gate green on every screen.
 Hard constraint: WCAG 2.1 AA (task 8). Every ratio below was computed with the WCAG relative-luminance formula, the same `contrast()` used by `tests/test_design_tokens.py`. Nothing here is estimated.
 
 Short version: we can adopt the brand palette, the coral pill button, the dark sidebar and the Poppins weights without weakening AA. Three things cannot be used as the guide shows them. Coral (#FF865C) cannot be text on light backgrounds. The blue gradient cannot carry text. Four grey and status tokens have to get darker when the page background moves to #E6EEF3.

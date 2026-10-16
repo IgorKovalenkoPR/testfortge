@@ -115,8 +115,16 @@ WHITE = "#FFFFFF"
 
 #: (foreground, background, what it is). 4.5:1 — text.
 TEXT_PAIRS = [
-    (WHITE, "--accent", "white text on .btn-primary / active chip / lang toggle"),
-    (WHITE, "--accent-hover", "white text on .btn-primary:hover"),
+    # Brand 2025 (owner ruling 2026-10-16): filled accents are coral with
+    # dark text; white on coral is 2.38:1 and never used.
+    ("--on-accent-fill", "--accent-fill", ".btn-primary, active chips, lang toggle, step badges"),
+    ("--on-accent-fill", "--accent-fill-hover", ".btn-primary:hover, back-to-top:hover"),
+    (WHITE, "--tf-dark", "white text on the brand dark (table headers, chat head)"),
+    (WHITE, "--tf-dark-2", "white text on the dark pill (.btn-export, section rows)"),
+    ("--warning", "--tf-bg", "warning text on the brand page background"),
+    ("--success", "--tf-bg", "success text on the brand page background"),
+    (WHITE, "--accent", "white text on anything still filled with --accent"),
+    (WHITE, "--accent-hover", "white text on --accent-hover fills"),
     (WHITE, "--primary", "white text on anything still using --primary"),
     (WHITE, "--success", "white text on .btn-success"),
     (WHITE, "--success-hover", "white text on .btn-success:hover"),
@@ -188,7 +196,7 @@ NON_TEXT_PAIRS = [
     ("--border-control", "--tf-bg", "input border on the page background"),
     ("--focus", WHITE, "focus ring on white"),
     ("--focus", "--tf-bg", "focus ring on the page background"),
-    ("--focus-on-dark", "#1A1D24", "focus ring in the dark sidebar"),
+    ("--focus-on-dark", "--tf-dark", "focus ring in the dark sidebar"),
 ]
 
 
@@ -214,6 +222,25 @@ def test_there_is_exactly_one_root_block(css):
 def test_primary_is_the_accessible_accent_not_coral(tokens):
     assert _hex(colour("--primary", tokens)) == _hex(colour("--accent", tokens))
     assert _hex(colour("--accent", tokens)) != "FF865C"
+
+
+def test_the_primary_button_is_brand_coral_with_dark_text(css, tokens):
+    """Brand 2025: the fill is the coral, the label #202020 (6.84:1).
+    The colour and the fill live in two rules, so the per-rule scan
+    cannot pair them; this pins the pair the button actually renders."""
+    assert _hex(colour("--accent-fill", tokens)) == "FF865C"
+    assert _hex(colour("--on-accent-fill", tokens)) == "202020"
+    body = _strip_comments(css)
+    last = lambda prop: re.findall(
+        r"(?:^|\})\s*\.btn-primary\s*\{[^}]*?" + prop + r"\s*:\s*([^;}]+)", body)[-1].strip()
+    assert last("background") == "var(--accent-fill)"
+    assert re.search(r"\.btn-primary,\s*\.btn-primary:hover,\s*\.btn-primary:focus-visible\s*"
+                     r"\{\s*color:\s*var\(--on-accent-fill\)", body)
+
+
+def test_the_page_background_is_the_brand_light(tokens):
+    assert _hex(colour("--tf-bg", tokens)) == "E6EEF3"
+    assert _hex(colour("--tf-dark", tokens)) == "202020"
 
 
 def test_the_contrast_maths_is_right():
@@ -494,7 +521,7 @@ def test_the_inline_colour_check_catches_a_violation():
     # Fine on white, not on the grey page background.
     assert not low_contrast_inline_colours('<p style="color:#64748b">x</p>')
     assert low_contrast_inline_colours('<p style="color:#64748b">x</p>',
-                                       (WHITE, "#F7F8FA"))
+                                       (WHITE, "#E6EEF3"))
     assert not low_contrast_inline_colours('<p style="color:#475569">x</p>')
     assert not low_contrast_inline_colours(
         '<pre style="background:#0f172a;color:#e2e8f0">x</pre>')
