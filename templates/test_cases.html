@@ -742,29 +742,29 @@
 
 <!-- Tabs -->
 <div class="tabs">
-    <button class="tab active" onclick="showTab('testcases')">{{ t.nav_test_cases }}</button>
-    <button class="tab" onclick="showTab('traceability')">{{ t.traceability_matrix }}</button>
+    <button class="tab active" data-call="showTab" data-arg="testcases">{{ t.nav_test_cases }}</button>
+    <button class="tab" data-call="showTab" data-arg="traceability">{{ t.traceability_matrix }}</button>
 </div>
 
 <!-- Test Cases Tab -->
 <div id="testcases" class="tab-content active">
     <div class="filter-bar">
         <label>{{ t.filter }}:</label>
-        <button class="filter-btn active" onclick="filterTC('all', this)">{{ t.all }}</button>
-        <button class="filter-btn" onclick="filterTC('Positive', this)">{{ t.positive }}</button>
-        <button class="filter-btn" onclick="filterTC('Negative', this)">{{ t.negative }}</button>
-        <button class="filter-btn" onclick="filterTC('Edge Case', this)">{{ t.edge_case }}</button>
-        <button class="filter-btn" onclick="filterTC('Security', this)">{{ t.security }}</button>
+        <button class="filter-btn active" data-call="filterTC" data-arg="all">{{ t.all }}</button>
+        <button class="filter-btn" data-call="filterTC" data-arg="Positive">{{ t.positive }}</button>
+        <button class="filter-btn" data-call="filterTC" data-arg="Negative">{{ t.negative }}</button>
+        <button class="filter-btn" data-call="filterTC" data-arg="Edge Case">{{ t.edge_case }}</button>
+        <button class="filter-btn" data-call="filterTC" data-arg="Security">{{ t.security }}</button>
     </div>
     {# PR-D suite filter — sits separately from the category chips
        above so the two axes compose (e.g. Positive ∩ Smoke). The
        "All suites" reset is the default. #}
     <div class="filter-bar tc-mt-8">
         <label>{{ t.get('filter_suite_label', 'Suite') }}:</label>
-        <button class="filter-btn-suite active" onclick="filterSuite('all', this)">{{ t.get('filter_suite_all', 'All suites') }}</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Smoke', this)">Smoke</button>
-        <button class="filter-btn-suite" onclick="filterSuite('Regression', this)">Regression</button>
-        <button class="filter-btn-suite" onclick="filterSuite('E2E', this)">E2E</button>
+        <button class="filter-btn-suite active" data-call="filterSuite" data-arg="all">{{ t.get('filter_suite_all', 'All suites') }}</button>
+        <button class="filter-btn-suite" data-call="filterSuite" data-arg="Smoke">Smoke</button>
+        <button class="filter-btn-suite" data-call="filterSuite" data-arg="Regression">Regression</button>
+        <button class="filter-btn-suite" data-call="filterSuite" data-arg="E2E">E2E</button>
     </div>
 
     {# PR-E browser-extension trigger. Visible only when RECORDER_ENABLED
@@ -955,7 +955,7 @@
 
         <div class="tc-status-row">
             <label>{{ t.status }}:</label>
-            <select aria-label="{{ t.status }}" class="status-select" onchange="this.className='status-select status-'+this.value.toLowerCase().replace(' ','-')">
+            <select aria-label="{{ t.status }}" class="status-select" data-status-class>
                 <option value="Unchecked">{{ t.unchecked }}</option>
                 <option value="Passed">{{ t.passed }}</option>
                 <option value="Failed">{{ t.failed }}</option>
@@ -1206,11 +1206,11 @@ function tcStatusTone(el, tone) {
     el.classList.remove('tc-status--ok', 'tc-status--error', 'tc-status--info');
     if (tone) el.classList.add('tc-status--' + tone);
 }
-function showTab(tabId) {
+function showTab(tabId, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
     document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
+    (btn || event.target).classList.add('active');
 }
 // PR-D — category filter and suite filter compose multiplicatively
 // (a card is visible iff it passes both). Both filters keep their

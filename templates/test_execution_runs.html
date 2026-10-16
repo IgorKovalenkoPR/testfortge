@@ -109,7 +109,7 @@
                and the confirm text says so. #}
             <form class="rn-inline-form" method="POST"
                   action="{{ url_for('execution_run_cancel', run_id=r.id) }}"
-                  onsubmit="return confirm('{{ (t.get('runs_cancel_confirm', 'Mark this run cancelled? This frees the one-browser-run slot so you can start another. It does not kill a browser that is still running in the background.')) | e }}');">
+                  data-confirm="{{ t.get('runs_cancel_confirm', 'Mark this run cancelled? This frees the one-browser-run slot so you can start another. It does not kill a browser that is still running in the background.') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-sm btn-danger">
                     {{ t.get('runs_cancel', 'Cancel') }}

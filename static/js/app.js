@@ -129,11 +129,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ── Tab switching (global) ──────────────────────────────────── */
-function showTab(tabId) {
+function showTab(tabId, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
     document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
+    (btn || event.target).classList.add('active');
 }
 
 /* ── Collapsible sections ────────────────────────────────────── */
@@ -831,5 +831,63 @@ function applyStatusColor(select) {
             .catch(fail)
             .then(function () { select.disabled = false; });
         });
+    });
+})();
+
+/* ── Declarative handlers ───────────────────────────────────────
+   script-src carries a per-request nonce and no 'unsafe-inline' (commit
+   466226e), so the browser never runs an on*="" attribute. Twenty-one of
+   them were left in the templates and silently did nothing: the test-case
+   tabs and filters, the checklist filters — and every confirm() before a
+   destructive POST, so deleting a project asked nothing (found in the live
+   audit, 2026-10-16). Templates declare behaviour with data attributes;
+   these listeners carry it out. tests/test_csp_headers.py forbids on*=.
+
+   data-call="fn" data-arg="x"   click calls fn(x, element); fn must be in
+                                 CALLS and defined on the page
+   data-confirm="message"        on a form: asked before it submits; on a
+                                 button or link: asked before the click acts
+   data-autosubmit               on a select: submits its form on change
+   data-status-class             on a select: class follows the chosen status
+*/
+(function () {
+    var CALLS = { showTab: 1, filterTC: 1, filterSuite: 1, filterCL: 1 };
+
+    document.addEventListener('click', function (e) {
+        var ask = e.target.closest('button[data-confirm], a[data-confirm], input[data-confirm]');
+        if (ask && !window.confirm(ask.getAttribute('data-confirm'))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+        }
+        var el = e.target.closest('[data-call]');
+        if (!el) return;
+        var fn = el.getAttribute('data-call');
+        if (CALLS[fn] && typeof window[fn] === 'function') {
+            window[fn](el.getAttribute('data-arg'), el);
+        }
+    });
+
+    // Capture phase: refuse before any other submit listener (spinners,
+    // fetch handlers) reacts to a submission the user called off.
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (form.matches && form.matches('form[data-confirm]')
+                && !window.confirm(form.getAttribute('data-confirm'))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true);
+
+    document.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t.matches) return;
+        if (t.matches('select[data-autosubmit]') && t.form) {
+            t.form.submit();
+        }
+        if (t.matches('select[data-status-class]')) {
+            t.className = 'status-select status-'
+                + t.value.toLowerCase().replace(' ', '-');
+        }
     });
 })();

@@ -191,7 +191,8 @@
 
     input.addEventListener('change', render);
 
-    // Exposed for any legacy inline onchange="showUploadedFiles(this)".
+    // Exposed for callers that hold the input; inline on*= handlers
+    // never run under the CSP nonce, so nothing should rely on one.
     window.showUploadedFiles = function (el) {
         if (el && el.files) {
             input.files = el.files;

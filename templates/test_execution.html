@@ -77,8 +77,7 @@
        state-changing endpoint and the route only accepts POST (a GET
        on it returned 405 Method Not Allowed in the operator video). #}
     <form class="te-inline-form" method="POST" action="{{ url_for('new_session') }}"
-         
-          onsubmit='return confirm("{{ t.get("te_pack_clear_confirm", "Discard the current pack and start over?") }}");'>
+          data-confirm="{{ t.get('te_pack_clear_confirm', 'Discard the current pack and start over?') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-sm btn-secondary">
             <i data-lucide="trash-2" class="icon-sm"></i>
