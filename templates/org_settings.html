@@ -2,6 +2,7 @@
 {% block title %}{{ t.os_page_title }} — TestForTge{% endblock %}
 
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 {% if not org %}
   <div class="card">
     <h1>{{ t.os_no_team_title }}</h1>
@@ -149,15 +150,13 @@
   <form method="post" action="{{ url_for('org_settings_budget') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-row">
-      <label for="budget">{{ t.os_ai_budget_label }}</label>
+      <span class="tf-label-row"><label for="budget">{{ t.os_ai_budget_label }}</label>
+      {{ tip(t.os_ai_budget_note, t.os_ai_budget_label, 'os-budget') }}</span>
       <input type="number" id="budget" name="budget_usd" step="0.50"
              min="0" max="{{ max_budget_usd }}"
              value="{{ '%.2f'|format(budget_limit_usd) }}">
       <button type="submit" class="btn btn-secondary">{{ t.os_save }}</button>
     </div>
-    <p class="text-muted settings-note">
-      {{ t.os_ai_budget_note }}
-    </p>
   </form>
   {% endif %}
 
@@ -197,10 +196,10 @@
      management surface, not information a member needs. ─────────── #}
 {% if is_admin %}
 <div class="card">
+  <div class="tf-title-row tf-title-row--card">
   <h2>{{ t.os_byok_heading }}</h2>
-  <p class="text-muted">
-    {{ t.os_byok_intro }}
-  </p>
+  {{ tip(t.os_byok_intro ~ ' ' ~ t.tip_os_byok_caveat, t.os_byok_heading, 'os-byok') }}
+  </div>
 
   {% if not byok_available %}
     <p class="settings-status settings-status-warn">
@@ -263,8 +262,10 @@
 {% set ms_tier_label = {'haiku': t.ms_tier_haiku, 'sonnet': t.ms_tier_sonnet, 'opus': t.ms_tier_opus} %}
 {% set ms_kind_label = {'consult': t.ms_kind_consult, 'authoring': t.ms_kind_authoring, 'analysis': t.ms_kind_analysis, 'vision': t.ms_kind_vision, 'search_answer': t.ms_kind_search_answer} %}
 <div class="card">
+  <div class="tf-title-row tf-title-row--card">
   <h2>{{ t.ms_policy_heading }}</h2>
-  <p class="text-muted">{{ t.ms_policy_intro }}</p>
+  {{ tip(t.ms_policy_intro, t.ms_policy_heading, 'os-models') }}
+  </div>
 
   {% if model_legacy_pin %}
   <p class="settings-status settings-status-warn">{{ t.ms_policy_legacy_pin }}</p>
@@ -331,8 +332,10 @@
 {% if is_admin and ai_modes %}
 {% set aim_label = {'off': t.aim_mode_off, 'assist': t.aim_mode_assist, 'full': t.aim_mode_full} %}
 <div class="card">
+  <div class="tf-title-row tf-title-row--card">
   <h2>{{ t.aim_heading }}</h2>
-  <p class="text-muted">{{ t.aim_intro }}</p>
+  {{ tip(t.aim_intro, t.aim_heading, 'os-aim') }}
+  </div>
   <p class="settings-status">{{ t.aim_now|format(aim_label[ai_mode_effective]) }}</p>
   <form method="post" action="{{ url_for('org_settings_ai_mode') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -551,10 +554,10 @@
      and got a bare 403 on submit. Typing a secret into a form that was
      never going to take it is the worst version of offering an action
      the server will refuse. #}
+  <div class="tf-title-row tf-title-row--card">
   <h3>{{ t.os_storage_own_heading }}</h3>
-  <p class="text-muted">
-    {{ t.os_storage_own_intro }}
-  </p>
+  {{ tip(t.os_storage_own_intro ~ ' ' ~ t.tip_os_storage_test, t.os_storage_own_heading, 'os-storage') }}
+  </div>
 
   {% if storage_own %}
   <p class="settings-status">

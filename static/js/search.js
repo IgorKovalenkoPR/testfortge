@@ -103,6 +103,11 @@
         function status(text) {
             list.textContent = '';
             list.appendChild(el('span', { class: 'tf-hints-status', role: 'listitem', text: text }));
+            resized();
+        }
+
+        function resized() {
+            mount.dispatchEvent(new CustomEvent('tf-tip-resized', { bubbles: true }));
         }
 
         function load() {
@@ -150,6 +155,7 @@
                 }
                 if (li) list.appendChild(li);
             });
+            resized();
         }
 
         mount.addEventListener('tf-tip-open', load);

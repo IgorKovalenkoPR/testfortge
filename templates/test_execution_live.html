@@ -3,6 +3,7 @@
 
 {% block page_class %}{{ ' page-test-execution-live' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <h1 class="lv-mb-6">{{ t.get('te_live_title', 'Live automation view') }}</h1>
 <p class="subtitle">
     {{ t.get('te_live_subtitle',
@@ -74,12 +75,14 @@
             <i data-lucide="pause" class="icon-sm"></i>
             <span id="live-pause-label">{{ t.get('te_live_pause', 'Pause') }}</span>
         </button>
+        {{ tip(t.tip_live_pause, t.get('te_live_pause', 'Pause'), 'live-pause') }}
         <a href="{{ url_for('test_execution_live_frame') }}"
            target="_blank" rel="noopener"
            class="btn btn-sm btn-secondary">
             <i data-lucide="external-link" class="icon-sm"></i>
             {{ t.get('te_live_open_tab', 'Open frame in new tab') }}
         </a>
+        {{ tip(t.tip_live_open, t.get('te_live_open_tab', 'Open frame in new tab'), 'live-open') }}
     </div>
     <img class="lv-frame" id="live-frame"
          src="{{ url_for('test_execution_live_frame') }}"

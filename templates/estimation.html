@@ -11,6 +11,7 @@
 
 {% block page_class %}{{ ' page-estimation' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-header">
   <div class="tf-title-row">
   <h1>{{ t.est_title }}</h1>
@@ -53,17 +54,20 @@
     </div>
     <div class="form-row form-row-4">
       <div class="form-group">
-        <label for="f-additional-platforms">{{ t.est_additional_platforms }}</label>
+        <span class="tf-label-row"><label for="f-additional-platforms">{{ t.est_additional_platforms }}</label>
+        {{ tip(t.tip_est_platforms, t.est_additional_platforms, 'est-platforms') }}</span>
         <input id="f-additional-platforms" type="number" name="additional_platforms" min="0" max="{{ limits.additional_platforms }}" step="1"
                value="{{ last.additional_platforms or 9 }}">
       </div>
       <div class="form-group">
-        <label for="f-minutes-per-tc">{{ t.est_minutes_per_tc }}</label>
+        <span class="tf-label-row"><label for="f-minutes-per-tc">{{ t.est_minutes_per_tc }}</label>
+        {{ tip(t.tip_est_minutes, t.est_minutes_per_tc, 'est-minutes') }}</span>
         <input id="f-minutes-per-tc" type="number" name="minutes_per_tc" min="1" max="{{ limits.minutes_per_tc }}" step="1"
                value="{{ last.minutes_per_tc or 5 }}">
       </div>
       <div class="form-group">
-        <label for="f-buffer-percent">{{ t.est_buffer }}</label>
+        <span class="tf-label-row"><label for="f-buffer-percent">{{ t.est_buffer }}</label>
+        {{ tip(t.tip_est_buffer, t.est_buffer, 'est-buffer') }}</span>
         <input id="f-buffer-percent" type="number" name="buffer_percent" min="0" max="{{ limits.buffer_percent }}" step="1"
                value="{{ last.buffer_percent or 12 }}">
       </div>
@@ -73,38 +77,38 @@
       </div>
     </div>
 
+    <div class="tf-title-row">
     <h3 class="est-section-title">{{ t.get('est_coefficients', 'Coefficients (editable)') }}</h3>
-    <p class="muted est-section-sub">
-      <small>{{ t.get('est_coefficients_hint',
-        'Defaults match the QA Team Lead reference template. Adjust to fit your project risk profile.') }}</small>
-    </p>
+    {{ tip(t.est_coefficients_hint, t.get('est_coefficients', 'Coefficients (editable)'), 'est-coef') }}
+    </div>
     <div class="form-row">
       <div class="form-group">
-        <label for="f-compatibility-rate">{{ t.get('est_compat_rate', 'Compatibility rate, %') }}</label>
+        <span class="tf-label-row"><label for="f-compatibility-rate">{{ t.get('est_compat_rate', 'Compatibility rate, %') }}</label>
+        {{ tip(t.est_compat_rate_hint, t.get('est_compat_rate', 'Compatibility rate, %'), 'est-compat') }}</span>
         <input id="f-compatibility-rate" type="number" name="compatibility_rate" min="0" max="10" step="0.05"
                value="{{ last.compatibility_rate if last.compatibility_rate is defined else 0.3 }}">
-        <small>{{ t.get('est_compat_rate_hint', 'Per extra platform (default 0.3%).') }}</small>
       </div>
       <div class="form-group">
-        <label for="f-bug-report-rate">{{ t.get('est_bug_rate', 'Bug reporting rate, %') }}</label>
+        <span class="tf-label-row"><label for="f-bug-report-rate">{{ t.get('est_bug_rate', 'Bug reporting rate, %') }}</label>
+        {{ tip(t.est_bug_rate_hint, t.get('est_bug_rate', 'Bug reporting rate, %'), 'est-bugs') }}</span>
         <input id="f-bug-report-rate" type="number" name="bug_report_rate" min="0" max="100" step="1"
                value="{{ last.bug_report_rate if last.bug_report_rate is defined else 15 }}">
-        <small>{{ t.get('est_bug_rate_hint', 'Share of Functional+Regression (default 15%).') }}</small>
       </div>
       <div class="form-group">
-        <label for="f-pm-overhead">{{ t.get('est_pm_overhead', 'PM overhead, %') }}</label>
+        <span class="tf-label-row"><label for="f-pm-overhead">{{ t.get('est_pm_overhead', 'PM overhead, %') }}</label>
+        {{ tip(t.est_pm_overhead_hint, t.get('est_pm_overhead', 'PM overhead, %'), 'est-pm') }}</span>
         <input id="f-pm-overhead" type="number" name="pm_overhead" min="0" max="50" step="1"
                value="{{ last.pm_overhead if last.pm_overhead is defined else 8 }}">
-        <small>{{ t.get('est_pm_overhead_hint', 'Project management share (default 8%).') }}</small>
       </div>
       <div class="form-group">
-        <label for="f-max-testing-stretch">{{ t.get('est_max_stretch', 'MAX stretch (× MIN)') }}</label>
+        <span class="tf-label-row"><label for="f-max-testing-stretch">{{ t.get('est_max_stretch', 'MAX stretch (× MIN)') }}</label>
+        {{ tip(t.est_max_stretch_hint, t.get('est_max_stretch', 'MAX stretch (× MIN)'), 'est-stretch') }}</span>
         <input id="f-max-testing-stretch" type="number" name="max_testing_stretch" min="1" max="3" step="0.05"
                value="{{ last.max_testing_stretch if last.max_testing_stretch is defined else 1.5 }}">
-        <small>{{ t.get('est_max_stretch_hint', 'How much MAX exceeds MIN (default 1.5×).') }}</small>
       </div>
       <div class="form-group" id="team-size-group">
-        <label>{{ t.get('est_team_size', 'Team size') }}</label>
+        <span class="tf-label-row"><label>{{ t.get('est_team_size', 'Team size') }}</label>
+        {{ tip(t.est_team_size_hint, t.get('est_team_size', 'Team size'), 'est-team') }}</span>
         {# Show the system suggestion as a read-only badge by default.
            When the user clicks "Override" we swap to the editable input
            so a manual team_size still flows through the form POST. The
@@ -124,8 +128,6 @@
                aria-label="{{ t.est_team_size }}"
                min="1" max="50" step="1"
                value="{{ last.team_size or last.suggested_team_size or 1 }}" hidden>
-        <small>{{ t.get('est_team_size_hint',
-          'TestForTge suggests a headcount from the estimate. Override only if you have a fixed team — it feeds Brooks\'s-law communication overhead.') }}</small>
       </div>
       <script nonce="{{ csp_nonce }}">
         // Toggle from "Suggested" badge to a manual input. The hidden
@@ -150,7 +152,10 @@
       </script>
     </div>
 
+    <div class="tf-title-row">
     <h3 class="est-section-title">{{ t.est_source }}</h3>
+    {{ tip(t.tip_est_sources, t.est_source, 'est-sources') }}
+    </div>
 
     {# ── Three-tab source selector ─────────────────────────────────
        2026-05-04 redesign: a single Estimation page now exposes the
@@ -554,6 +559,7 @@
 
   <div class="form-actions">
     <button type="submit" class="btn btn-primary btn-lg">{{ t.est_run }} &rarr;</button>
+    {{ tip(t.tip_est_run, t.est_run, 'est-run') }}
   </div>
 </form>
 

@@ -3,8 +3,12 @@
 
 {% block page_class %}{{ ' page-runs' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-head">
+    <div class="tf-title-row">
     <h1>{{ t.get('runs_title', 'Runs') }}</h1>
+    {{ tip(t.te_open_runs_hint ~ ' ' ~ t.tip_runs_results, t.get('runs_title', 'Runs'), 'runs') }}
+    </div>
     <p class="hint">
         {% if not auth_on %}
         {# Say why every run is listed. An empty "mine" with no explanation

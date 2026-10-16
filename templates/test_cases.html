@@ -30,6 +30,7 @@
 
 {% block page_class %}{{ ' page-test-cases' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-header">
     <div class="tf-title-row">
     <h1>{{ t.tc_title }}</h1>
@@ -70,16 +71,21 @@
        they leave. ``off`` refuses it and ``full`` already does it. The
        hidden field carries the choice through the async submit, which
        builds FormData from the form and so never sees the clicked button. #}
+    {#- One note, two branches: an id may appear on the page once. -#}
+    {% set tc_gen_tip = tip(t.tip_tc_generate, t.generate_btn, 'tc-generate') %}
     {% set tc_ai_assist = automation_ai_mode is defined and automation_ai_mode() == 'assist' %}
     <div class="form-actions">
         {% if tc_ai_assist %}
         <input type="hidden" name="enhance" value="0" id="tc-enhance-flag">
         <div class="btn-group">
             <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
-            <button type="submit" id="tc-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg" title="{{ t.ai_enhance_hint }}">{{ t.ai_enhance_btn }}</button>
+            {{ tc_gen_tip }}
+            <button type="submit" id="tc-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg">{{ t.ai_enhance_btn }}</button>
+            {{ tip(t.ai_enhance_hint, t.ai_enhance_btn, 'tc-enhance') }}
         </div>
         {% else %}
         <button type="submit" id="tc-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.tc_title }} &rarr;</button>
+        {{ tc_gen_tip }}
         {% endif %}
     </div>
 </form>
@@ -532,14 +538,13 @@
 <form method="POST" action="{{ url_for('test_cases_upload') }}"
       enctype="multipart/form-data" class="card upload-existing">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="tf-title-row tf-title-row--card">
     <h3 class="card-title">
         <i data-lucide="upload-cloud" class="icon-sm"></i>
         {{ t.get('tc_upload_title', 'Upload existing test cases') }}
     </h3>
-    <p class="hint">
-        {{ t.get('tc_upload_hint',
-            'Drop an existing pack (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the cases in the session for manual or automated execution. Supported headers include any case-insensitive variant of TC ID, Section, Summary, Preconditions, Steps to Reproduce, Test Data, Expected Result, Category, Priority, Status, Testing Type.') }}
-    </p>
+    {{ tip(t.tc_upload_hint ~ ' ' ~ t.tip_upload_mode, t.get('tc_upload_title', 'Upload existing test cases'), 'tc-upload') }}
+    </div>
     <div class="form-row tc-gen-row">
         <div class="form-group tc-grow">
             <label for="f-upload-file">{{ t.get('tc_upload_file', 'File') }}</label>
@@ -649,10 +654,7 @@
                 🎬 {{ t.get('ext_recorder_start',
                             'Start session recording') }}
             </button>
-            <span class="tc-recorder-note">
-                {{ t.get('ext_recorder_hint',
-                    'Walk through your scenario in any tab — Stop and the captured TCs land in a review screen.') }}
-            </span>
+            {{ tip(t.ext_recorder_hint, t.get('ext_recorder_start', 'Start session recording'), 'tc-record') }}
             {# A real download, not a link to instructions about finding a
                folder the reader does not have. The href is the route, so
                it works with JavaScript off and can be copied; the JS
@@ -757,6 +759,7 @@
         <button class="filter-btn" data-call="filterTC" data-arg="Negative">{{ t.negative }}</button>
         <button class="filter-btn" data-call="filterTC" data-arg="Edge Case">{{ t.edge_case }}</button>
         <button class="filter-btn" data-call="filterTC" data-arg="Security">{{ t.security }}</button>
+        {{ tip(t.tip_tc_filters, t.filter, 'tc-filters') }}
     </div>
     {# PR-D suite filter — sits separately from the category chips
        above so the two axes compose (e.g. Positive ∩ Smoke). The
@@ -1124,7 +1127,10 @@
 <!-- Traceability Tab -->
 <div id="traceability" class="tab-content">
     <div class="card">
+        <div class="tf-title-row tf-title-row--card">
         <h2>{{ t.traceability_matrix }}</h2>
+        {{ tip(t.tip_tc_trace, t.traceability_matrix, 'tc-trace') }}
+        </div>
         <table class="data-table">
             <thead>
                 <tr>
@@ -1152,7 +1158,10 @@
 
 <!-- Export -->
 <div class="card card-export">
+    <div class="tf-title-row tf-title-row--card">
     <h2>{{ t.nav_export }}</h2>
+    {{ tip(t.tip_tc_export, t.nav_export, 'tc-export') }}
+    </div>
     <div class="export-buttons">
         <a href="{{ url_for('export', fmt='markdown') }}" class="btn btn-export"><i data-lucide="file-text" class="icon-sm"></i> {{ t.export_markdown }}</a>
         <a href="{{ url_for('export', fmt='html') }}" class="btn btn-export"><i data-lucide="globe" class="icon-sm"></i> {{ t.export_html }}</a>

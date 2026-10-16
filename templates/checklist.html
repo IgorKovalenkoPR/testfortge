@@ -22,6 +22,7 @@
 
 {% block page_class %}{{ ' page-checklist' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-header">
     <div class="tf-title-row">
     <h1>{{ t.cl_title }}</h1>
@@ -60,16 +61,21 @@
        they leave. ``off`` refuses it and ``full`` already does it. The
        hidden field carries the choice through the async submit, which
        builds FormData from the form and so never sees the clicked button. #}
+    {#- One note, two branches: an id may appear on the page once. -#}
+    {% set cl_gen_tip = tip(t.tip_cl_generate, t.generate_btn, 'cl-generate') %}
     {% set cl_ai_assist = automation_ai_mode is defined and automation_ai_mode() == 'assist' %}
     <div class="form-actions">
         {% if cl_ai_assist %}
         <input type="hidden" name="enhance" value="0" id="cl-enhance-flag">
         <div class="btn-group">
             <button type="submit" id="cl-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
-            <button type="submit" id="cl-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg" title="{{ t.ai_enhance_hint }}">{{ t.ai_enhance_btn }}</button>
+            {{ cl_gen_tip }}
+            <button type="submit" id="cl-enhance-button" name="enhance" value="1" class="btn btn-secondary btn-lg">{{ t.ai_enhance_btn }}</button>
+            {{ tip(t.ai_enhance_hint, t.ai_enhance_btn, 'cl-enhance') }}
         </div>
         {% else %}
         <button type="submit" id="cl-gen-button" class="btn btn-primary btn-lg">{{ t.generate_btn }}: {{ t.cl_title }} &rarr;</button>
+        {{ cl_gen_tip }}
         {% endif %}
     </div>
 </form>
@@ -391,14 +397,13 @@
 <form method="POST" action="{{ url_for('checklist_upload') }}"
       enctype="multipart/form-data" class="card upload-existing">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="tf-title-row tf-title-row--card">
     <h3 class="card-title">
         <i data-lucide="upload-cloud" class="icon-sm"></i>
         {{ t.get('cl_upload_title', 'Upload existing checklist') }}
     </h3>
-    <p class="hint">
-        {{ t.get('cl_upload_hint',
-            'Drop an existing checklist (XLSX / CSV / MD / JSON) — TestForTge maps the columns and stores the items in the session for manual or automated execution. Recognised headers include any variant of ID, Section, Objective, Category, Priority, Status, Testing Type.') }}
-    </p>
+    {{ tip(t.cl_upload_hint ~ ' ' ~ t.tip_upload_mode, t.get('cl_upload_title', 'Upload existing checklist'), 'cl-upload') }}
+    </div>
     <div class="form-row cl-gen-row">
         <div class="form-group cl-grow">
             <label for="f-upload-file">{{ t.get('cl_upload_file', 'File') }}</label>
@@ -442,10 +447,7 @@
             data-cl-add="{{ (checklist | map(attribute='section') | first) or 'Manual' }}">
         + {{ t.get('cl_add_item', 'New checklist item') }}
     </button>
-    <span class="cl-editor-hint">
-        {{ t.get('cl_editor_hint',
-                 'Click any field to edit it. Changes are saved for the whole team.') }}
-    </span>
+    {{ tip(t.tip_cl_rows ~ ' ' ~ t.cl_editor_hint, t.get('cl_add_item', 'New checklist item'), 'cl-rows') }}
     {{ bulk_select_all() }}
     <span class="cl-editor-status" data-cl-editor-status
           data-status-class="cl-editor-status"

@@ -1010,4 +1010,10 @@ function applyStatusColor(select) {
     window.addEventListener('resize', function () {
         if (open) place(parts(open).note);
     });
+    // A note whose content arrives after it opened (the page tips) asks to
+    // be placed again once it has grown.
+    document.addEventListener('tf-tip-resized', function (e) {
+        var w = tipOf(e.target);
+        if (w && w === open) place(parts(w).note);
+    });
 })();

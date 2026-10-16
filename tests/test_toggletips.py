@@ -43,7 +43,12 @@ def _users() -> dict[str, str]:
 class TestWhereATipMayGo:
     def test_some_templates_use_it(self):
         assert {"test_execution.html", "_project_picker.html",
-                "_search_panel.html", "base.html"} <= set(_users())
+                "_search_panel.html", "base.html",
+                # stage 2
+                "index.html", "estimation.html", "_input_block.html",
+                "test_cases.html", "checklist.html", "test_execution_runs.html",
+                "test_execution_live.html", "automation.html",
+                "bug_reports.html", "org_settings.html"} <= set(_users())
 
     @pytest.mark.parametrize("tag", ["label", "h1|h2|h3|h4|h5|h6"])
     def test_never_inside_a_label_or_a_heading(self, tag):
@@ -85,6 +90,19 @@ class TestWhereATipMayGo:
                     "te_env_hint", "te_wt_max_pages_hint", "te_suite_filter_hint"):
             assert f"t.get('{key}'" not in src, key
         assert "te_base_url_hint_v2" in src
+
+    @pytest.mark.parametrize("name,gone", [
+        ("estimation.html", ("<small>{{ t.get('est_compat_rate_hint'",
+                             "<small>{{ t.get('est_team_size_hint'")),
+        ("_input_block.html", ("<p class=\"hint\">{{ t.get('tc_format_hint'",)),
+        ("index.html", ("<p class=\"hint\">{{ t.get('move_artefacts_hint'",)),
+        ("org_settings.html", ("<p class=\"text-muted\">{{ t.aim_intro }}</p>",
+                               "<p class=\"text-muted\">{{ t.ms_policy_intro }}</p>")),
+    ])
+    def test_stage_two_moved_the_secondary_copy_into_notes(self, name, gone):
+        src = (TEMPLATES / name).read_text(encoding="utf-8")
+        for needle in gone:
+            assert needle not in src, (name, needle)
 
 
 class TestWhatTheMacroRenders:

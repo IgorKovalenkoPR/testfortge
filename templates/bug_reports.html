@@ -23,6 +23,7 @@
 {% block page_class %}{{ ' page-bug-reports' }}{% endblock %}
 
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="tf-title-row">
 <h1>{{ t.get('bug_title', 'Bug Reports') }}</h1>
 {% with hints_page='bug_reports' %}{% include '_search_hints.html' %}{% endwith %}
@@ -65,6 +66,7 @@
            the filtered ``stats.total``. #}
         {% if project_bug_total|default(0) %}({{ project_bug_total }}){% endif %}
     </button>
+    {{ tip(t.bug_reset_body, t.get('bug_reset_button', 'Reset Project bugs'), 'bug-reset') }}
 </div>
 
 {# PR-J: Confirm modal — moved alongside the button (above the
@@ -217,6 +219,7 @@
             </option>
             {% endfor %}
         </select>
+        {{ tip(t.tip_bug_run, t.get('bug_run_filter_label', 'Run:'), 'bug-run') }}
         <noscript>
             <button type="submit" class="btn btn-sm btn-secondary">
                 {{ t.get('bug_run_apply', 'Apply') }}
@@ -251,6 +254,7 @@
     <button type="button" class="btn btn-secondary" id="bug-create">
         + {{ t.get('bug_create', 'New bug report') }}
     </button>
+    {{ tip(t.tip_bug_create, t.get('bug_create', 'New bug report'), 'bug-create') }}
     <span class="bug-editor-status" data-bug-editor-status
           data-status-class="bug-editor-status"
           role="status" aria-live="polite"></span>
@@ -475,6 +479,7 @@
         <option value="delete">{{ t.get('bug_bulk_delete', 'Delete') }}</option>
         {%- endif %}
     </select>
+    {{ tip(t.tip_bug_bulk, t.get('bug_bulk_action_label', 'Bulk action'), 'bug-bulk') }}
 
     {# Per-action value field; JS toggles which is visible based on the
        selected action so each one keeps its own ``<action>_value`` name

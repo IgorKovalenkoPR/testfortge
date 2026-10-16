@@ -1,11 +1,13 @@
 {# Reusable input block for generation pages #}
+{% from '_toggletip.html' import tip with context %}
 {# Usage: {% include '_input_block.html' %} inside a <form enctype="multipart/form-data"> #}
 
 <div class="card">
     <h2>{{ input_title | default(t.input_title_default) }}</h2>
 
     <div class="form-group">
-        <label for="f-input-text">{{ t.text_input }}</label>
+        <span class="tf-label-row"><label for="f-input-text">{{ t.text_input }}</label>
+        {{ tip(t.tip_in_text, t.text_input, 'in-text') }}</span>
         {# `prefill_input_text` is set by upstream routes that hand the
            user content from another module (e.g. /estimation's
            "Generate test cases from this estimate" CTA prefills the
@@ -34,7 +36,8 @@
     </div>
 
     <div class="form-group">
-        <label for="f-custom-prompt">{{ t.custom_prompt }}</label>
+        <span class="tf-label-row"><label for="f-custom-prompt">{{ t.custom_prompt }}</label>
+        {{ tip(t.tip_in_custom, t.custom_prompt, 'in-custom') }}</span>
         <textarea id="f-custom-prompt" name="custom_prompt" rows="3"
                   placeholder="{{ t.custom_prompt_hint }}">{{ request.form.get('custom_prompt', '') }}</textarea>
     </div>
@@ -45,7 +48,8 @@
     {% if show_tc_format|default(false) %}
     {% set current_format = request.form.get('tc_format', 'manual') %}
     <div class="form-group">
-        <label>{{ t.get('tc_format_label', 'Test case format') }}</label>
+        <span class="tf-label-row"><label>{{ t.get('tc_format_label', 'Test case format') }}</label>
+        {{ tip(t.tc_format_hint, t.get('tc_format_label', 'Test case format'), 'in-format') }}</span>
         <div class="radio-row">
             <label class="radio-inline">
                 <input type="radio" name="tc_format" value="manual"
@@ -58,8 +62,6 @@
                 {{ t.get('tc_format_gherkin', 'Manual + BDD — also carries Given/When/Then for the automation module') }}
             </label>
         </div>
-        <p class="hint">{{ t.get('tc_format_hint',
-            'The TestFort columns are written either way — BDD adds a Given/When/Then view derived from them, and marks the cases for the Automation module to pick up. Export the .feature files from the Export menu.') }}</p>
     </div>
     {% endif %}
 </div>

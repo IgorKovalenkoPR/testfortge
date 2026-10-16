@@ -180,3 +180,54 @@ class TestPhone:
         width = page.evaluate(
             "() => [document.documentElement.scrollWidth, window.innerWidth]")
         assert width[0] <= width[1], width
+
+
+#: Stage 2 (2026-10-16): every other page that carries notes.
+OTHER_PAGES = ["/", "/estimation", "/test-cases", "/checklist",
+               "/test-execution/runs", "/test-execution/live", "/automation",
+               "/bug-reports", "/org/settings"]
+
+OPEN_ALL = """async () => {
+  const res = {opened: 0, off: [], broken: []};
+  const vw = document.documentElement.clientWidth;
+  for (const note of document.querySelectorAll('.tf-tip-bubble')) {
+    const btn = note.closest('[data-tip]').querySelector('.tf-tip-btn');
+    if (!btn.getClientRects().length) continue;      // an inactive tab
+    btn.scrollIntoView({block: 'center'});
+    btn.click();
+    // The page tips arrive after the note opens and it is placed again.
+    await new Promise(r => setTimeout(r, note.closest('.tf-tip--page') ? 800 : 30));
+    if (note.hidden || btn.getAttribute('aria-expanded') !== 'true') {
+      res.broken.push(note.id); continue;
+    }
+    res.opened++;
+    const r = note.getBoundingClientRect();
+    if (r.left < 0 || r.right > vw) res.off.push([note.id, r.left, r.right]);
+    btn.click();
+  }
+  return res;
+}"""
+
+
+class TestEveryOtherPage:
+    @pytest.mark.parametrize("width", [1366, 375])
+    @pytest.mark.parametrize("path", OTHER_PAGES)
+    def test_every_note_opens_and_fits(self, browser, live_server, admin, path, width):
+        person = Actor(browser, live_server, admin.email)
+        person.context.close()
+        person.context = browser.new_context(
+            viewport={"width": width, "height": 900},
+            storage_state=admin.context.storage_state())
+        person.page = person.context.new_page()
+        errors = []
+        person.page.on("pageerror", lambda e: errors.append(str(e)))
+        try:
+            person.go(path + "?lang=en")
+            person.page.wait_for_load_state("networkidle", timeout=WAIT)
+            res = person.page.evaluate(OPEN_ALL)
+        finally:
+            person.close()
+        assert res["opened"] >= 1, f"no notes on {path}"
+        assert not res["broken"], res
+        assert not res["off"], res
+        assert not errors, errors

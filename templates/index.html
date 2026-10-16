@@ -3,6 +3,7 @@
 
 {% block page_class %}{{ ' page-dashboard' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-header">
     <h1>{{ t.dashboard_title }}</h1>
     <p class="subtitle">{{ t.dashboard_subtitle }}</p>
@@ -95,9 +96,10 @@
 
 {# ── Active-project picker (DB-backed) ─────────────────────────── #}
 <div class="card project-picker">
+    <div class="tf-title-row tf-title-row--card">
     <h2>{{ t.get('active_project_title', 'Active Project') }}</h2>
-    <p class="hint">{{ t.get('active_project_hint',
-        'All generated artefacts (estimation, test cases, checklists, bug reports, run results, metrics) are saved against the project you select here.') }}</p>
+    {{ tip(t.active_project_hint, t.get('active_project_title', 'Active Project'), 'dash-active') }}
+    </div>
 
     <div class="picker-status">
         {% if active_project_id %}
@@ -143,7 +145,8 @@
                        placeholder="{{ t.get('project_name_placeholder', 'e.g. Acme Checkout v3') }}">
             </div>
             <div class="form-group">
-                <label for="picker-url">{{ t.get('base_url_label', 'Base URL') }}</label>
+                <span class="tf-label-row"><label for="picker-url">{{ t.get('base_url_label', 'Base URL') }}</label>
+                {{ tip(t.tip_dash_base_url, t.get('base_url_label', 'Base URL'), 'dash-base-url') }}</span>
                 <input type="url" id="picker-url" name="base_url"
                        placeholder="https://example.com">
             </div>
@@ -158,6 +161,7 @@
                 <i data-lucide="plus" class="icon-sm"></i>
                 {{ t.get('create_and_activate', 'Create & activate') }}
             </button>
+            {{ tip(t.tip_dash_create, t.get('create_and_activate', 'Create & activate'), 'dash-create') }}
         </div>
     </form>
 {% endif %}
@@ -166,9 +170,10 @@
 {% if active_project_id %}
 {# ── Move artefacts to another project ─────────────────────── #}
 <div class="card project-picker">
+  <div class="tf-title-row tf-title-row--card">
   <h2>{{ t.get('move_artefacts_title', 'Move artefacts to another project') }}</h2>
-  <p class="hint">{{ t.get('move_artefacts_hint',
-      'Reassign every artefact (test cases, checklists, bug reports, runs, estimations) currently in the active project to a different one. Useful when you generated work in the wrong project (or in an auto-created Untitled one).') }}</p>
+  {{ tip(t.tip_dash_move, t.get('move_artefacts_title', 'Move artefacts to another project'), 'dash-move') }}
+  </div>
   {# Admin-only per requirement 2, enforced in
    engine/route_policy.POLICY. `is_admin` is true whenever ORG_MODE
    is off, so the legacy single-tenant dashboard is unchanged. #}
@@ -669,7 +674,10 @@
 
 {% if projects and (not dash_v2 or 'projects' in dash_widgets) %}
 <div class="card">
+    <div class="tf-title-row tf-title-row--card">
     <h2>{{ t.saved_projects }}</h2>
+    {% if is_admin %}{{ tip(t.tip_dash_projects, t.saved_projects, 'dash-projects') }}{% endif %}
+    </div>
     <table class="data-table">
         <thead>
             <tr>

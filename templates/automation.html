@@ -3,6 +3,7 @@
 
 {% block page_class %}{{ ' page-automation' }}{% endblock %}
 {% block content %}
+{% from '_toggletip.html' import tip with context %}
 <div class="page-header">
   <div class="tf-title-row">
   <h1>{{ t.get('automation_title', 'Automation') }}</h1>
@@ -160,7 +161,10 @@
 
 {# ── Ingest configuration ────────────────────────────────────────── #}
 <div class="card">
+    <div class="tf-title-row tf-title-row--card">
     <h2>{{ t.get('automation_ingest', 'Result ingestion') }}</h2>
+    {{ tip(t.tip_au_ingest, t.get('automation_ingest', 'Result ingestion'), 'au-ingest') }}
+    </div>
     {% if ingest_enabled %}
     <p class="hint">
         <i data-lucide="check-circle" class="icon-sm"></i>
