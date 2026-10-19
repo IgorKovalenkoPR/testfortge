@@ -38,6 +38,16 @@ def _sanitize_cell(val):
     return val
 
 
+def _folder_of(folders, item) -> str:
+    """The item's folder path ("Header / Why Us / Careers page"), or ''.
+
+    ``folders`` is :func:`engine.db.folder_paths` for the item's kind. The
+    Folder column is always present and always last, so a consumer that
+    reads columns by position keeps working; unfiled items leave it empty.
+    """
+    return (folders or {}).get(str(item.id), "")
+
+
 def _md_field(label: str, value) -> str:
     """One bullet for a field that may carry a numbered list.
 
@@ -54,7 +64,9 @@ def _md_field(label: str, value) -> str:
 
 def export_markdown(project_name: str, stories: list[UserStory],
                     test_cases: list[TestCase], checklist: list[ChecklistItem],
-                    traceability: list[dict], recommendations: dict) -> str:
+                    traceability: list[dict], recommendations: dict,
+                    tc_folders: dict | None = None,
+                    cl_folders: dict | None = None) -> str:
     lines: list[str] = []
     a = lines.append
 
@@ -91,13 +103,15 @@ def export_markdown(project_name: str, stories: list[UserStory],
             a(f"- **Issues:** {tc.issues}")
         if tc.comment:
             a(f"- **Comment:** {tc.comment}")
+        if _folder_of(tc_folders, tc):
+            a(f"- **Folder:** {_folder_of(tc_folders, tc)}")
         a("")
 
     # Checklist
     if checklist:
         a("---\n## 3. Checklist\n")
-        a("| № | ID | Section | Objective | Category | Priority | Status | Comments |")
-        a("|----|----|---------|-----------|----------|----------|--------|----------|")
+        a("| № | ID | Section | Objective | Category | Priority | Status | Comments | Folder |")
+        a("|----|----|---------|-----------|----------|----------|--------|----------|--------|")
         for cl in checklist:
             # A sub-check is indented so the hierarchy survives in plain
             # text, exactly as it reads in the reference sheet.
@@ -105,7 +119,7 @@ def export_markdown(project_name: str, stories: list[UserStory],
                    if getattr(cl, "depth", 2) > 2 else cl.objective)
             a(f"| {getattr(cl, 'item_num', '')} | {cl.id} | {cl.section} "
               f"| {obj} | {cl.category} | {cl.priority} | {cl.status} "
-              f"| {cl.comments} |")
+              f"| {cl.comments} | {_folder_of(cl_folders, cl)} |")
         a("")
 
     # Traceability
@@ -170,7 +184,9 @@ def _escape(value) -> str:
 
 def export_html(project_name: str, stories: list[UserStory],
                 test_cases: list[TestCase], checklist: list[ChecklistItem],
-                traceability: list[dict], recommendations: dict) -> str:
+                traceability: list[dict], recommendations: dict,
+                tc_folders: dict | None = None,
+                cl_folders: dict | None = None) -> str:
     h = _escape
     # Preconditions, steps and expected results are numbered lists now
     # (engine/tc_house_style.py), and HTML collapses the newlines that
@@ -234,7 +250,9 @@ ul{margin:.5rem 0;padding-left:1.5rem}
         a(f"<div class='card tc-card'><h3>{h(tc.id)}: {h(tc.summary)} "
           f"<span class='badge {ccls}'>{h(tc.category)}</span> "
           f"<span class='badge {pcls}'>{h(tc.priority)}</span></h3>")
-        a(f"<p class='meta'>Story: {h(tc.user_story_id)}</p>")
+        folder = _folder_of(tc_folders, tc)
+        a(f"<p class='meta'>Story: {h(tc.user_story_id)}"
+          + (f" &middot; Folder: {h(folder)}" if folder else "") + "</p>")
         a("<table>")
         a(f"<tr><th>Preconditions</th><td>{br(tc.preconditions)}</td></tr>")
         a(f"<tr><th>Steps to Reproduce</th><td>{br(tc.test_steps)}</td></tr>")
@@ -247,7 +265,7 @@ ul{margin:.5rem 0;padding-left:1.5rem}
     # Checklist
     if checklist:
         a("<h2>3. Checklist</h2><table>")
-        a("<tr><th>&#8470;</th><th>ID</th><th>Section</th><th>Objective</th><th>Category</th><th>Priority</th><th>Status</th><th>Comments</th></tr>")
+        a("<tr><th>&#8470;</th><th>ID</th><th>Section</th><th>Objective</th><th>Category</th><th>Priority</th><th>Status</th><th>Comments</th><th>Folder</th></tr>")
         for cl in checklist:
             pad = ("padding-left:2em" if getattr(cl, "depth", 2) > 2
                    else "")
@@ -255,7 +273,8 @@ ul{margin:.5rem 0;padding-left:1.5rem}
               f"<td>{h(cl.id)}</td><td>{h(cl.section)}</td>"
               f"<td style=\"{pad}\">{h(cl.objective)}</td>"
               f"<td>{h(cl.category)}</td><td>{h(cl.priority)}</td>"
-              f"<td>{h(cl.status)}</td><td>{h(cl.comments)}</td></tr>")
+              f"<td>{h(cl.status)}</td><td>{h(cl.comments)}</td>"
+              f"<td>{h(_folder_of(cl_folders, cl))}</td></tr>")
         a("</table>")
 
     # Traceability
@@ -273,30 +292,33 @@ ul{margin:.5rem 0;padding-left:1.5rem}
     return "\n".join(p)
 
 
-def export_csv_testcases(test_cases: list[TestCase]) -> str:
+def export_csv_testcases(test_cases: list[TestCase],
+                         folders: dict | None = None) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["TC ID", "Section", "Summary", "User Story", "Category", "Priority",
                 "Preconditions", "Steps to Reproduce", "Test Data", "Expected Result",
-                "Issues", "Comment", "Status"])
+                "Issues", "Comment", "Status", "Folder"])
     for tc in test_cases:
         w.writerow([_sanitize_cell(v) for v in (
             tc.id, tc.section, tc.summary, tc.user_story_id, tc.category, tc.priority,
             tc.preconditions, tc.test_steps, tc.test_data, tc.expected_result,
-            tc.issues, tc.comment, tc.status,
+            tc.issues, tc.comment, tc.status, _folder_of(folders, tc),
         )])
     return buf.getvalue()
 
 
-def export_csv_checklist(checklist: list[ChecklistItem]) -> str:
+def export_csv_checklist(checklist: list[ChecklistItem],
+                         folders: dict | None = None) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["No", "ID", "Section", "Objective", "Category", "Priority",
-                "Status", "Comments"])
+                "Status", "Comments", "Folder"])
     for cl in checklist:
         w.writerow([_sanitize_cell(v) for v in (
             getattr(cl, "item_num", ""), cl.id, cl.section, cl.objective,
             cl.category, cl.priority, cl.status, cl.comments,
+            _folder_of(folders, cl),
         )])
     return buf.getvalue()
 
@@ -376,7 +398,8 @@ def _save_workbook_to_bytes(wb: Workbook) -> bytes:
 
 # ── XLSX export — test cases ─────────────────────────────────────
 
-def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
+def export_xlsx_testcases(test_cases: list[TestCase],
+                          folders: dict | None = None) -> bytes:
     """Create a formatted XLSX workbook for test cases and return as bytes."""
     wb = Workbook()
     ws = wb.active
@@ -385,7 +408,7 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
     headers = [
         "TC ID", "Section", "Summary", "User Story", "Category", "Priority",
         "Preconditions", "Steps to Reproduce", "Test Data", "Expected Result",
-        "Issues", "Comment", "Status",
+        "Issues", "Comment", "Status", "Folder",
     ]
 
     # Column indices (1-based) for special formatting
@@ -403,7 +426,7 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
             tc.id, tc.section, tc.summary, tc.user_story_id,
             tc.category, tc.priority, tc.preconditions, tc.test_steps,
             tc.test_data, tc.expected_result, tc.issues, tc.comment,
-            tc.status,
+            tc.status, _folder_of(folders, tc),
         ]
         is_alt = (row_idx % 2 == 0)
 
@@ -448,14 +471,15 @@ def export_xlsx_testcases(test_cases: list[TestCase]) -> bytes:
 
 # ── XLSX export — checklist ──────────────────────────────────────
 
-def export_xlsx_checklist(checklist: list[ChecklistItem]) -> bytes:
+def export_xlsx_checklist(checklist: list[ChecklistItem],
+                          folders: dict | None = None) -> bytes:
     """Create a formatted XLSX workbook for checklist items and return as bytes."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Checklist"
 
     headers = ["№", "ID", "Section", "Objective", "Category", "Priority",
-               "Status", "Comments"]
+               "Status", "Comments", "Folder"]
 
     # Shifted by one now that "№" is column 1.
     col_category = 5
@@ -468,6 +492,7 @@ def export_xlsx_checklist(checklist: list[ChecklistItem]) -> bytes:
         values = [
             getattr(cl, "item_num", ""), cl.id, cl.section, cl.objective,
             cl.category, cl.priority, cl.status, cl.comments,
+            _folder_of(folders, cl),
         ]
         is_alt = (row_idx % 2 == 0)
 

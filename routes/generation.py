@@ -1831,34 +1831,46 @@ def register(app: Flask) -> None:
         name = ((session.get("project_setup") or {}).get(
             "project_name", "project") or "project").replace(" ", "_")
 
+        # Folder paths per item, for the Folder column. Folders live only in
+        # the project's database, so a session-only pack has none.
+        tc_folders, cl_folders = {}, {}
+        if _pid:
+            try:
+                tc_folders = _db.folder_paths(_pid, "test_case")
+                cl_folders = _db.folder_paths(_pid, "checklist_item")
+            except Exception as exc:  # pragma: no cover — best-effort
+                _log.warning("export: folder lookup failed: %s", exc)
+
         if fmt == "markdown":
-            content = export_markdown(name, stories, tc_list, cl_list, trace, {})
+            content = export_markdown(name, stories, tc_list, cl_list, trace,
+                                      {}, tc_folders, cl_folders)
             return Response(content, mimetype="text/markdown",
                             headers={"Content-Disposition":
                                      attachment_header(
                                          f"testfortge_{name}", ".md")})
         if fmt == "html":
-            content = export_html(name, stories, tc_list, cl_list, trace, {})
+            content = export_html(name, stories, tc_list, cl_list, trace, {},
+                                  tc_folders, cl_folders)
             return Response(content, mimetype="text/html",
                             headers={"Content-Disposition":
                                      attachment_header(
                                          f"testfortge_{name}", ".html")})
         if fmt == "csv-testcases":
-            content = export_csv_testcases(tc_list)
+            content = export_csv_testcases(tc_list, tc_folders)
             return Response(content, mimetype="text/csv",
                             headers={"Content-Disposition": "attachment; filename=test_cases.csv"})
         if fmt == "csv-checklist":
-            content = export_csv_checklist(cl_list)
+            content = export_csv_checklist(cl_list, cl_folders)
             return Response(content, mimetype="text/csv",
                             headers={"Content-Disposition": "attachment; filename=checklist.csv"})
         if fmt == "xlsx-testcases":
-            content = export_xlsx_testcases(tc_list)
+            content = export_xlsx_testcases(tc_list, tc_folders)
             return Response(
                 content,
                 mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 headers={"Content-Disposition": "attachment; filename=test_cases.xlsx"})
         if fmt == "xlsx-checklist":
-            content = export_xlsx_checklist(cl_list)
+            content = export_xlsx_checklist(cl_list, cl_folders)
             return Response(
                 content,
                 mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
