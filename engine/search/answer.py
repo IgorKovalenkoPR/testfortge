@@ -13,7 +13,7 @@ Pipeline (:func:`ask_events`)::
                                               RAG_MIN_GROUNDING: NO call, a
                                               deterministic "not enough" event
     pack_prompt()                           → static system prompt + top-8 items
-                                              ``[[ref]] title — body[:400]``,
+                                              ``[[ref]] title — excerpt(≤800)``,
                                               ≤ 3,000 input tokens (items dropped
                                               from the end), ≤ 2 previous turns
     answer_key() → rag_answer_cache         → a hit replays as a stream, 0 tokens
