@@ -297,11 +297,24 @@ def register(app: Flask) -> None:
         index = max(0, min(index, max(0, len(queue) - 1)))
 
         current = queue[index] if queue and index < len(queue) else None
+        # The bug modal pre-fills from this. Both verdict framings are sent
+        # because "Passed but" is deliberately not a negation — see
+        # defect_title_from_objective — and the tester picks the verdict
+        # inside the modal, after the page has rendered.
+        bug_draft, bug_title_passed_but = {}, ""
+        if current and not current.missing and not current.empty:
+            bug_draft = _bug_draft(run, current, "Failed")
+            bug_title_passed_but = _bug_draft(
+                run, current, "Passed but")["title"]
         return render_template(
             "test_execution_manual.html",
             run=run, run_id=run_id, queue=queue, current=current,
             index=index, progress=progress, verdicts=verdicts,
             current_verdict=verdicts.get(current.key, {}) if current else {},
+            bug_labels=_bug_labels(run.get("project_id"), verdicts),
+            bug_draft=bug_draft, bug_title_passed_but=bug_title_passed_but,
+            bug_severities=_bug_report.BUG_SEVERITIES,
+            bug_priorities=_bug_report.BUG_PRIORITIES,
             all_verdicts=mr.VERDICTS,
             defect_verdicts=mr.DEFECT_VERDICTS,
             finished=progress.finished,
@@ -515,20 +528,46 @@ def register(app: Flask) -> None:
                 "page."), "warning")
             return redirect(url_for("manual_run_page", run_id=run_id))
 
+        # The modal's own "Actual result" box is the notes field by
+        # another name; whichever the tester typed into is what happened.
+        notes = notes or (request.form.get("bug_actual") or "").strip()
+
         bug_id = None
+        filed = False
         if verdict in mr.DEFECT_VERDICTS and \
                 request.form.get("file_bug") == "1":
-            bug_id = _file_bug(run, item, verdict, notes)
+            bug_id = _file_bug(run, item, verdict, notes,
+                               _bug_overrides(request.form))
+            filed = bool(bug_id)
+
+        # The Bug ID box links an existing bug. Absent from the form (an
+        # older page, the API) means "leave the link alone"; present and
+        # empty means the tester cleared it, which unlinks — the same
+        # "submitting again overwrites it" the page promises for notes.
+        unlink = False
+        bug_ref = request.form.get("bug_ref")
+        if not filed and bug_ref is not None:
+            if bug_ref.strip():
+                bug_id = _resolve_bug_ref(run.get("project_id"), bug_ref)
+                if bug_id is None:
+                    flash(g.t.get(
+                        "manual_run_bug_ref_unknown",
+                        "No bug %(ref)s in this project — the verdict was "
+                        "recorded without a bug link.")
+                        % {"ref": bug_ref.strip()}, "warning")
+            else:
+                unlink = True
 
         already = mr.verdicts_by_item(results).get(item.key)
         try:
             if already:
                 # Overwrite rather than append: a tester correcting a
                 # mis-click must not leave the run counting the item twice.
+                link = {"bug_report_id": bug_id} if bug_id else (
+                    {"bug_report_id": None} if unlink else {})
                 _db.update_case_result(
                     run_id, external_id, case_kind=item.kind,
-                    status=verdict, notes=notes,
-                    **({"bug_report_id": bug_id} if bug_id else {}))
+                    status=verdict, notes=notes, **link)
             else:
                 _db.save_case_result(
                     run_id, case_external_id=external_id,
@@ -541,8 +580,13 @@ def register(app: Flask) -> None:
             flash(f"Could not record the verdict: {exc}", "danger")
             return redirect(url_for("manual_run_page", run_id=run_id))
 
-        if bug_id:
-            flash(f"Verdict recorded and bug #{bug_id} filed.", "success")
+        if filed:
+            # The public id, as the Bug ID box and Bug Reports show it —
+            # the row number is not something anyone can look up.
+            label = _bug_labels(run.get("project_id"),
+                                {item.key: {"bug_report_id": bug_id}}
+                                ).get(bug_id, f"#{bug_id}")
+            flash(f"Verdict recorded and bug {label} filed.", "success")
 
         # Advance to the next item without a verdict, so correcting an
         # earlier one returns the tester to where they were rather than
@@ -601,12 +645,13 @@ def register(app: Flask) -> None:
         return redirect(url_for("test_execution_page"))
 
 
-def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
-    """Create a bug from a failed manual check. Returns its id, or None.
+def _bug_draft(run: dict, item, verdict: str = "Failed") -> dict:
+    """The fields a bug filed from this item starts with.
 
-    Deliberately best-effort: a bug that could not be filed must not lose
-    the verdict the tester just recorded, which is the more expensive
-    thing to re-do.
+    One derivation for both consumers: the page pre-fills the bug modal
+    with it, and the filer falls back to it for anything the modal did not
+    send. Two copies would drift, and the tester would review one draft and
+    get the other.
     """
     try:
         from engine.bug_template import severity_priority
@@ -614,9 +659,116 @@ def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
             "unknown", item.section or "", item.summary or "")
     except Exception:  # pragma: no cover — defensive
         severity, priority = "Major", "Medium"
-
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(item.steps, 1)) \
         or "1. Perform the check described in the summary"
+    return {
+        # NOT the test case's own title. Every objective opens "Verify
+        # that …", and a defect store where each headline is an
+        # instruction to check something tells the reader nothing about
+        # what broke. bug_report negates the clause instead.
+        "title": _bug_report.defect_title_from_objective(
+            item.summary, section=item.section, verdict=verdict),
+        "severity": severity,
+        "priority": priority,
+        "environment": (run.get("env_payload") or {}).get("environment", ""),
+        # The state the tester started from is what makes the report
+        # reproducible; dropping it puts the burden back on the reader.
+        "preconditions": item.preconditions or "",
+        "steps_to_reproduce": steps,
+        "expected_result": item.expected_result or item.summary,
+    }
+
+
+# Form field → bug field, for what the bug modal lets the tester edit.
+_BUG_FORM_FIELDS = {
+    "bug_title": "title",
+    "bug_severity": "severity",
+    "bug_priority": "priority",
+    "bug_environment": "environment",
+    "bug_preconditions": "preconditions",
+    "bug_steps": "steps_to_reproduce",
+    "bug_expected": "expected_result",
+}
+
+
+def _bug_overrides(form) -> dict:
+    """The modal's edits, minus anything blank or outside the vocabulary.
+
+    A blank field falls back to the draft rather than overwriting it with
+    nothing — a tester who cleared the box by accident should not file a
+    bug with no steps. Severity and priority must be members of the bug
+    vocabularies: the Bug Reports filters and badges compare against them,
+    so a free-text value would make the bug invisible to both.
+    """
+    out = {}
+    for name, field in _BUG_FORM_FIELDS.items():
+        value = (form.get(name) or "").strip()
+        if not value:
+            continue
+        if field == "severity" and value not in _bug_report.BUG_SEVERITIES:
+            continue
+        if field == "priority" and value not in _bug_report.BUG_PRIORITIES:
+            continue
+        out[field] = value
+    return out
+
+
+def _resolve_bug_ref(project_id: str | None, ref: str) -> int | None:
+    """A typed bug reference → the bug's row id in this project, or None.
+
+    Accepts the public id the Bug Reports page shows (``BUG-007``, any
+    case) or the row number (``7`` / ``#7``). Looked up in the run's own
+    project only: a result linked to another project's bug would point the
+    reader at something they may not be allowed to open.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    try:
+        bugs = _db.list_bugs(project_id) or []
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("manual run: bug lookup failed: %s", exc)
+        return None
+    wanted = ref.upper()
+    for bug in bugs:
+        if str(bug.get("external_id") or "").upper() == wanted:
+            return int(bug["id"])
+    digits = ref.lstrip("#")
+    if digits.isdigit():
+        for bug in bugs:
+            if int(bug.get("id") or 0) == int(digits):
+                return int(digits)
+    return None
+
+
+def _bug_labels(project_id: str | None, verdicts: dict) -> dict[int, str]:
+    """``{bug row id: public id}`` for the bugs this run's results link to.
+
+    The result row stores the integer FK; the page shows the ``BUG-007``
+    the Bug Reports page uses, because that is the id people quote. Only
+    queried when some verdict has a bug, so a walk with none costs nothing.
+    """
+    if not any(v.get("bug_report_id") for v in verdicts.values()):
+        return {}
+    try:
+        return {int(b["id"]): str(b.get("external_id") or f"#{b['id']}")
+                for b in (_db.list_bugs(project_id) or [])}
+    except Exception as exc:  # pragma: no cover — best-effort
+        log.warning("manual run: bug labels failed: %s", exc)
+        return {}
+
+
+def _file_bug(run: dict, item, verdict: str, notes: str,
+              overrides: dict | None = None) -> int | None:
+    """Create a bug from a failed manual check. Returns its id, or None.
+
+    ``overrides`` carries what the tester edited in the bug modal; any
+    field it leaves out comes from :func:`_bug_draft`.
+
+    Deliberately best-effort: a bug that could not be filed must not lose
+    the verdict the tester just recorded, which is the more expensive
+    thing to re-do.
+    """
     # A public id, like every other execution-sourced bug gets. Without it
     # ``save_bug`` stores ``external_id=NULL`` — the card renders a blank
     # ID cell and no export, filter or conversation can cite the bug. The
@@ -638,28 +790,16 @@ def _file_bug(run: dict, item, verdict: str, notes: str) -> int | None:
         # groups on ``run_id``, listed this bug under "no run" and offered
         # no way to reach it.
         "run_id": run.get("id"),
-        # NOT the test case's own title. Every objective opens "Verify
-        # that …", and a defect store where each headline is an
-        # instruction to check something tells the reader nothing about
-        # what broke. bug_report negates the clause instead.
-        "title": _bug_report.defect_title_from_objective(
-            item.summary, section=item.section, verdict=verdict),
-        "severity": severity,
-        "priority": priority,
+        **_bug_draft(run, item, verdict),
+        **(overrides or {}),
         # Must be a member of bug_report.BUG_STATUSES — the Bug Reports
         # "Open" tile and every status filter compare against it, so a
         # value outside the vocabulary makes the bug invisible to both.
         "status": "Open",
-        "environment": (run.get("env_payload") or {}).get("environment", ""),
-        # The state the tester started from is what makes the report
-        # reproducible; dropping it puts the burden back on the reader.
-        "preconditions": item.preconditions or "",
-        "steps_to_reproduce": steps,
         # The tester's own words are the actual result. Inventing one from
         # the expected result would put words in their mouth.
         "actual_result": notes or f"The check was marked {verdict} during a "
                                   f"manual run; no detail was recorded.",
-        "expected_result": item.expected_result or item.summary,
         "comment": f"Filed from manual run #{run.get('id')} "
                    f"({item.external_id}).",
         "reporter": (run.get("env_payload") or {}).get("tester", "") or "",

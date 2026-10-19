@@ -421,6 +421,125 @@ class TestBugFiling:
         assert rows and rows[0]["status"] == "Failed"
 
 
+class TestBugModal:
+    """The bug form the "File a bug" checkbox opens, and the Bug ID link."""
+
+    def _post(self, client, walk, **data):
+        base = {"external_id": "SC1_001", "kind": "test_case",
+                "verdict": "Failed"}
+        base.update(data)
+        return client.post(f"/test-execution/manual/{walk['run_id']}/verdict",
+                           data=base)
+
+    def test_the_page_prefills_the_modal_from_the_item(self, client, walk):
+        body = client.get(
+            f"/test-execution/manual/{walk['run_id']}?i=0").get_data(as_text=True)
+        assert '<dialog id="mr-bug-modal"' in body
+        assert 'name="bug_title"' in body
+        # The draft is the item's own content, not a blank form.
+        assert "The form is opened" in body
+        assert "A success message is displayed" in body
+        # The modal's fields post with the verdict: it sits inside the form.
+        form = body[body.index('class="manual-verdict-form"'):]
+        assert form.index("mr-bug-modal") < form.index("</form>")
+
+    def test_a_checklist_item_gets_the_modal_too(self, client, walk):
+        body = client.get(
+            f"/test-execution/manual/{walk['run_id']}?i=1").get_data(as_text=True)
+        assert 'name="bug_title"' in body
+
+    def test_the_testers_edits_reach_the_bug(self, client, walk):
+        self._post(client, walk, file_bug="1",
+                   bug_title="Send button does nothing",
+                   bug_severity="Critical", bug_priority="Highest",
+                   bug_steps="1. Click Send", bug_actual="Nothing happens")
+        bug = _db.list_bugs(walk["pid"])[0]
+        assert bug["title"] == "Send button does nothing"
+        assert bug["severity"] == "Critical"
+        assert bug["priority"] == "Highest"
+        assert bug["steps_to_reproduce"] == "1. Click Send"
+        # The modal's actual result is the verdict's notes, too.
+        assert bug["actual_result"] == "Nothing happens"
+        row = _db.list_case_results(walk["run_id"])[0]
+        assert row["notes"] == "Nothing happens"
+        assert row["bug_report_id"] == bug["id"]
+
+    def test_blank_and_off_vocabulary_fields_fall_back_to_the_draft(
+            self, client, walk):
+        self._post(client, walk, file_bug="1", notes="broken",
+                   bug_title="  ", bug_severity="Catastrophic",
+                   bug_preconditions="")
+        bug = _db.list_bugs(walk["pid"])[0]
+        assert bug["title"] and "verify" not in bug["title"].lower()
+        assert bug["severity"] in bug_report.BUG_SEVERITIES
+        assert bug["preconditions"] == "The form is opened"
+
+    def test_bug_id_links_an_existing_bug(self, client, walk):
+        self._post(client, walk, file_bug="1", notes="broken")
+        bug = _db.list_bugs(walk["pid"])[0]
+        # A second item, linked to the same bug by its public id, any case.
+        self._post(client, walk, external_id="HDR_001", kind="checklist",
+                   bug_ref=bug["external_id"].lower())
+        rows = {r["case_external_id"]: r
+                for r in _db.list_case_results(walk["run_id"])}
+        assert rows["HDR_001"]["bug_report_id"] == bug["id"]
+        assert len(_db.list_bugs(walk["pid"])) == 1
+        body = client.get(
+            f"/test-execution/manual/{walk['run_id']}?i=1").get_data(as_text=True)
+        assert f'value="{bug["external_id"]}"' in body
+        assert f'#{bug["external_id"]}"' in body
+
+    def test_an_unknown_bug_id_records_the_verdict_and_says_so(
+            self, client, walk):
+        self._post(client, walk, bug_ref="BUG-999")
+        rows = _db.list_case_results(walk["run_id"])
+        assert rows[0]["status"] == "Failed"
+        assert rows[0]["bug_report_id"] is None
+        with client.session_transaction() as sess:
+            flashes = [m for _c, m in sess.get("_flashes", [])]
+        assert any("BUG-999" in m for m in flashes), flashes
+
+    def test_clearing_the_bug_id_unlinks(self, client, walk):
+        self._post(client, walk, file_bug="1", notes="broken")
+        assert _db.list_case_results(walk["run_id"])[0]["bug_report_id"]
+        self._post(client, walk, bug_ref="")
+        assert _db.list_case_results(walk["run_id"])[0]["bug_report_id"] is None
+
+    def test_a_form_without_the_field_leaves_the_link_alone(
+            self, client, walk):
+        self._post(client, walk, file_bug="1", notes="broken")
+        self._post(client, walk, verdict="Blocked")
+        assert _db.list_case_results(walk["run_id"])[0]["bug_report_id"]
+
+
+class TestLongSummaries:
+    def test_a_long_summary_ends_in_an_ellipsis_that_opens_the_rest(
+            self, client, walk):
+        long = ("Verify that Product-Focused QA & Software Testing Services "
+                "is not submitted with the required controls left empty "
+                "and the error is shown")
+        _db.save_test_cases(walk["pid"], [
+            __import__("routes._shared", fromlist=["tc_to_dict"]).tc_to_dict(
+                _tc(summary=long))])
+        body = client.get(
+            f"/test-execution/manual/{walk['run_id']}?i=1").get_data(as_text=True)
+        table = body[body.index("data-table"):body.index("</table>",
+                                                          body.index("data-table"))]
+        short = __import__("html").unescape(
+            re.search(r'class="mr-sum-short">([^<]*)<', table).group(1))
+        # Cut on a word boundary — never "left em".
+        assert long.startswith(short) and long[len(short)] == " ", short
+        assert 'class="mr-sum-more"' in table and "…</button>" in table
+        assert re.search(r'class="mr-sum-full" hidden>' + re.escape(
+            long.replace("&", "&amp;")), table)
+
+    def test_a_short_summary_has_no_ellipsis(self, client, walk):
+        body = client.get(
+            f"/test-execution/manual/{walk['run_id']}").get_data(as_text=True)
+        start = body.index("data-table")
+        assert "mr-sum-more" not in body[start:body.index("</table>", start)]
+
+
 class TestFinish:
     def test_finishing_a_complete_walk_records_completed(self, client, walk):
         for ext, verdict in (("SC1_001", "Passed"), ("HDR_001", "Failed")):

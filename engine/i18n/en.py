@@ -1756,6 +1756,22 @@ TRANSLATIONS = {
                                    "full coverage.",
     "manual_run_all": "All items",
     "manual_run_item": "Item",
+    "manual_run_bug_id": "Bug ID",
+    "manual_run_bug_id_hint": "An existing bug in this project. Clear it "
+                              "to unlink.",
+    "manual_run_bug_ref_unknown": "No bug %(ref)s in this project — the "
+                                  "verdict was recorded without a bug link.",
+    "manual_run_bug_edit": "Edit the bug",
+    "manual_run_bug_modal_title": "New bug report",
+    "manual_run_bug_modal_hint": "Pre-filled from the item. Edit anything, "
+                                 "then record the verdict — the bug is "
+                                 "filed with it and linked to this result.",
+    "manual_run_bug_field_title": "Title",
+    "manual_run_bug_need": "A bug needs a title.",
+    "manual_run_bug_cancel": "Cancel — no bug",
+    "manual_run_bug_file": "file the bug",
+    "manual_run_sum_more": "Show the full summary",
+    "manual_run_sum_less": "Show less",
 
     # test_execution_runs.html
     "runs_title": "Runs",

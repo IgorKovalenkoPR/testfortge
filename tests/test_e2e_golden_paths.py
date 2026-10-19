@@ -444,8 +444,14 @@ def _start_manual_walk(actor: Actor) -> None:
 
 def _record(actor: Actor, verdict: str, *, file_bug: bool = False) -> None:
     if file_bug:
+        # Ticking the box opens the bug modal; the verdict is recorded from
+        # inside it, together with the bug.
         actor.page.check('input[name="file_bug"]')
-    actor.page.click(f'button[name="verdict"][value="{verdict}"]')
+        actor.page.click(
+            f'#mr-bug-modal button[name="verdict"][value="{verdict}"]')
+    else:
+        actor.page.click(
+            f'.verdict-row button[name="verdict"][value="{verdict}"]')
     actor.page.wait_for_load_state("domcontentloaded", timeout=WAIT)
 
 

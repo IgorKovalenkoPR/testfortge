@@ -125,7 +125,9 @@
         {{ t.get('manual_run_already', 'Already judged') }}:
         <strong>{{ current_verdict.status }}</strong>
         {% if current_verdict.bug_report_id %}
-            · {{ t.get('manual_run_bug', 'bug') }} #{{ current_verdict.bug_report_id }}
+            {% set bug_label = bug_labels.get(current_verdict.bug_report_id, '#' ~ current_verdict.bug_report_id) %}
+            · {{ t.get('manual_run_bug', 'bug') }}
+            <a href="{{ url_for('bug_reports_page') }}#{{ bug_label }}">{{ bug_label }}</a>
         {% endif %}
         — {{ t.get('manual_run_overwrite', 'submitting again overwrites it.') }}
     </p>
@@ -141,18 +143,118 @@
            whichever of the two came first in the walk. #}
         <input type="hidden" name="kind" value="{{ current.kind }}">
 
-        <div class="form-group">
-            <label for="manual-notes">{{ t.get('manual_run_notes', 'What did you see?') }}</label>
-            <textarea id="manual-notes" name="notes" rows="3"
-                      placeholder="{{ t.get('manual_run_notes_hint',
-                          'The actual result, in your words. Required reading if this becomes a bug — it is what the report will say happened.') }}">{{ current_verdict.notes or '' }}</textarea>
+        <div class="mr-notes-row">
+            <div class="form-group mr-notes-group">
+                <label for="manual-notes">{{ t.get('manual_run_notes', 'What did you see?') }}</label>
+                <textarea id="manual-notes" name="notes" rows="3"
+                          placeholder="{{ t.get('manual_run_notes_hint',
+                              'The actual result, in your words. Required reading if this becomes a bug — it is what the report will say happened.') }}">{{ current_verdict.notes or '' }}</textarea>
+            </div>
+            {# Links a bug that already exists — one filed earlier in the
+               walk, or by hand on Bug Reports. Filing a new one through the
+               modal below fills the link in by itself. #}
+            <div class="form-group mr-bugref-group">
+                <label for="manual-bug-ref">{{ t.get('manual_run_bug_id', 'Bug ID') }}</label>
+                <input type="text" id="manual-bug-ref" name="bug_ref" class="form-input"
+                       autocomplete="off" placeholder="BUG-001"
+                       value="{{ bug_labels.get(current_verdict.bug_report_id, '') if current_verdict.bug_report_id else '' }}">
+                <span class="hint">{{ t.get('manual_run_bug_id_hint',
+                    'An existing bug in this project. Clear it to unlink.') }}</span>
+            </div>
         </div>
 
+        {% set can_file = bug_draft and (current.allowed_verdicts|select('in', defect_verdicts)|list) %}
+        {% if can_file %}
         <label class="radio-inline mr-radio-gap">
-            <input type="checkbox" name="file_bug" value="1">
+            <input type="checkbox" name="file_bug" value="1" id="manual-file-bug"
+                   aria-controls="mr-bug-modal">
             {{ t.get('manual_run_file_bug',
                'File a bug from this item (Failed / Passed but only)') }}
         </label>
+        <button type="button" class="btn btn-sm mr-bug-edit" id="mr-bug-edit" hidden>
+            {{ t.get('manual_run_bug_edit', 'Edit the bug') }}
+        </button>
+
+        {# The bug form. Inside the verdict form on purpose: its fields post
+           with the verdict, so filing the bug and recording the verdict are
+           one submission and cannot come apart. Without JavaScript it is
+           never opened and the checkbox files the pre-filled draft, which is
+           what the page did before the modal existed. #}
+        <dialog id="mr-bug-modal" class="mr-bug-modal"
+                aria-labelledby="mr-bug-modal-title">
+            <h2 class="heading-3" id="mr-bug-modal-title">
+                {{ t.get('manual_run_bug_modal_title', 'New bug report') }}
+                <span class="badge">{{ current.external_id }}</span>
+            </h2>
+            <p class="hint">{{ t.get('manual_run_bug_modal_hint',
+                'Pre-filled from the item. Edit anything, then record the verdict — the bug is filed with it and linked to this result.') }}</p>
+
+            <div class="form-group">
+                <label for="mr-bug-title">{{ t.get('manual_run_bug_field_title', 'Title') }}</label>
+                <input type="text" id="mr-bug-title" name="bug_title" class="form-input"
+                       value="{{ bug_draft.title }}"
+                       data-title-failed="{{ bug_draft.title }}"
+                       data-title-passed-but="{{ bug_title_passed_but }}">
+            </div>
+            <div class="mr-bug-grid">
+                <div class="form-group">
+                    <label for="mr-bug-severity">{{ t.get('bug_severity', 'Severity') }}</label>
+                    <select id="mr-bug-severity" name="bug_severity" class="form-select">
+                        {% for s in bug_severities %}
+                        <option value="{{ s }}" {% if s == bug_draft.severity %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="mr-bug-priority">{{ t.get('bug_priority', 'Priority') }}</label>
+                    <select id="mr-bug-priority" name="bug_priority" class="form-select">
+                        {% for p in bug_priorities %}
+                        <option value="{{ p }}" {% if p == bug_draft.priority %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="mr-bug-env">{{ t.get('bug_environment', 'Environment') }}</label>
+                    <input type="text" id="mr-bug-env" name="bug_environment" class="form-input"
+                           value="{{ bug_draft.environment }}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="mr-bug-pre">{{ t.get('bug_preconditions', 'Preconditions') }}</label>
+                <textarea id="mr-bug-pre" name="bug_preconditions" rows="2">{{ bug_draft.preconditions }}</textarea>
+            </div>
+            <div class="form-group">
+                <label for="mr-bug-steps">{{ t.get('bug_steps', 'Steps to Reproduce') }}</label>
+                <textarea id="mr-bug-steps" name="bug_steps" rows="4">{{ bug_draft.steps_to_reproduce }}</textarea>
+            </div>
+            <div class="form-group">
+                <label for="mr-bug-actual">{{ t.get('bug_actual', 'Actual Result') }}</label>
+                <textarea id="mr-bug-actual" name="bug_actual" rows="3"
+                          placeholder="{{ t.get('manual_run_notes_hint',
+                              'The actual result, in your words. Required reading if this becomes a bug — it is what the report will say happened.') }}"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="mr-bug-expected">{{ t.get('bug_expected', 'Expected Result') }}</label>
+                <textarea id="mr-bug-expected" name="bug_expected" rows="2">{{ bug_draft.expected_result }}</textarea>
+            </div>
+            <p class="mr-bug-error" id="mr-bug-error" role="alert" hidden>
+                {{ t.get('manual_run_bug_need', 'A bug needs a title.') }}
+            </p>
+
+            <div class="mr-bug-actions">
+                <button type="button" class="btn btn-secondary" id="mr-bug-cancel">
+                    {{ t.get('manual_run_bug_cancel', 'Cancel — no bug') }}
+                </button>
+                {% for verdict in current.allowed_verdicts if verdict in defect_verdicts %}
+                <button type="submit" name="verdict" value="{{ verdict }}"
+                        class="btn verdict-btn verdict-{{ verdict|lower|replace(' ', '-') }}"
+                        data-bug-submit>
+                    {{ verdict }} · {{ t.get('manual_run_bug_file', 'file the bug') }}
+                </button>
+                {% endfor %}
+            </div>
+        </dialog>
+        {% endif %}
 
         {# The item's own list, not the run's. An unjudgeable card — deleted
            from the pack, or created by the editors' "add" button and never
@@ -215,15 +317,139 @@
         <tr {% if loop.index0 == index %}class="section-row"{% endif %}>
             <td><a href="{{ url_for('manual_run_page', run_id=run_id, i=loop.index0) }}">{{ loop.index }}</a></td>
             <td>{{ item.external_id }}</td>
-            <td>{{ item.summary[:110] }}</td>
+            {# Cut at a word boundary with a visible "…" that opens the
+               rest. The old [:110] slice cut mid-word with no mark at all,
+               so "left empty" read as "left em" and looked like the case
+               itself was broken. #}
+            {% set s = item.summary or '' %}
+            <td>
+                {% if s|length > 110 %}
+                <span class="mr-sum" data-mr-sum>
+                    <span class="mr-sum-short">{{ s|truncate(110, false, '', 0) }}</span><button
+                        type="button" class="mr-sum-more" aria-expanded="false"
+                        title="{{ t.get('manual_run_sum_more', 'Show the full summary') }}"
+                        aria-label="{{ t.get('manual_run_sum_more', 'Show the full summary') }}">…</button><span
+                        class="mr-sum-full" hidden>{{ s }}</span>
+                </span>
+                {% else %}{{ s }}{% endif %}
+            </td>
             <td>
                 {% if v.status %}
                 <span class="badge badge-{{ v.status|lower|replace(' ', '-') }}">{{ v.status }}</span>
                 {% else %}—{% endif %}
+                {% if v.bug_report_id %}
+                {% set bl = bug_labels.get(v.bug_report_id, '#' ~ v.bug_report_id) %}
+                <a class="mr-bug-link" href="{{ url_for('bug_reports_page') }}#{{ bl }}">{{ bl }}</a>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+// "…" on a long summary opens the rest in place; pressing it again folds
+// it back. A button, not a click on the text, so it is reachable by
+// keyboard and announces what it does.
+(function () {
+    var more = {{ t.get("manual_run_sum_more", "Show the full summary")|tojson }};
+    var less = {{ t.get("manual_run_sum_less", "Show less")|tojson }};
+    document.querySelectorAll('[data-mr-sum]').forEach(function (wrap) {
+        var btn = wrap.querySelector('.mr-sum-more');
+        var shortEl = wrap.querySelector('.mr-sum-short');
+        var fullEl = wrap.querySelector('.mr-sum-full');
+        btn.addEventListener('click', function () {
+            var open = btn.getAttribute('aria-expanded') !== 'true';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            shortEl.hidden = open;
+            fullEl.hidden = !open;
+            btn.textContent = open ? ' ‹' : '…';
+            btn.title = open ? less : more;
+            btn.setAttribute('aria-label', open ? less : more);
+            // The full text comes before the button when open, so the
+            // control stays at the end of what is being read.
+            if (open) wrap.insertBefore(fullEl, btn);
+        });
+    });
+})();
+
+// The bug modal. Ticking "File a bug" opens it; Cancel unticks the box, so
+// what the checkbox shows is always what the submit will do.
+(function () {
+    var box = document.getElementById('manual-file-bug');
+    var modal = document.getElementById('mr-bug-modal');
+    if (!box || !modal || typeof modal.showModal !== 'function') return;
+    var notes = document.getElementById('manual-notes');
+    var actual = document.getElementById('mr-bug-actual');
+    var title = document.getElementById('mr-bug-title');
+    var bugRef = document.getElementById('manual-bug-ref');
+    var editBtn = document.getElementById('mr-bug-edit');
+    var err = document.getElementById('mr-bug-error');
+    var fields = modal.querySelectorAll('input, select, textarea');
+    var titleEdited = false;
+
+    // Disabled fields do not post: an abandoned draft must not travel
+    // with a verdict the tester recorded without a bug.
+    function setEnabled(on) {
+        fields.forEach(function (f) { f.disabled = !on; });
+    }
+    setEnabled(false);
+
+    function open() {
+        setEnabled(true);
+        if (!actual.value.trim() && notes) actual.value = notes.value;
+        err.hidden = true;
+        modal.showModal();
+        title.focus();
+    }
+    function cancel() {
+        box.checked = false;
+        editBtn.hidden = true;
+        if (bugRef) bugRef.disabled = false;
+        setEnabled(false);
+        if (modal.open) modal.close();
+        box.focus();
+    }
+
+    box.addEventListener('change', function () {
+        editBtn.hidden = !box.checked;
+        // A new bug replaces whatever the Bug ID box would have linked.
+        if (bugRef) bugRef.disabled = box.checked;
+        if (box.checked) open(); else cancel();
+    });
+    editBtn.addEventListener('click', open);
+    document.getElementById('mr-bug-cancel').addEventListener('click', cancel);
+    // Esc closes a <dialog> natively; route it through cancel so the box
+    // is unticked too.
+    modal.addEventListener('cancel', function (e) { e.preventDefault(); cancel(); });
+    title.addEventListener('input', function () { titleEdited = true; });
+
+    // On the form, not the modal's buttons: a main verdict button pressed
+    // while the box is ticked files the bug too, and needs the same title
+    // framing and the same check.
+    box.form.addEventListener('submit', function (e) {
+        var verdict = e.submitter ? e.submitter.value : '';
+        if (!box.checked || (verdict !== 'Failed' && verdict !== 'Passed but')) return;
+        if (!titleEdited) {
+            title.value = verdict === 'Passed but'
+                ? title.dataset.titlePassedBut : title.dataset.titleFailed;
+        }
+        if (modal.open) {
+            // The modal's actual result is the verdict's notes.
+            if (notes) notes.value = actual.value;
+        } else if (notes && notes.value.trim()) {
+            actual.value = notes.value;
+        }
+        if (!title.value.trim()) {
+            e.preventDefault();
+            if (!modal.open) open();
+            err.hidden = false;
+            title.focus();
+        }
+    });
+})();
+</script>
 {% endblock %}
