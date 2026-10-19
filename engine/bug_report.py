@@ -490,14 +490,47 @@ _NOT_A_VERB_TAIL = {
     "have", "had",
 }
 
-_OBJECTIVE_NEGATIONS: list[tuple[re.Pattern[str], str]] = [
-    # "users cannot access X" → "users access X". The objective already
-    # asserts a negative, so its failure is the positive; dropping the
-    # modal states it in plain active voice, which the 2026-08-01 ruling
-    # requires of a bug title. Must run before the copular rule so
-    # "cannot" is not left intact.
-    (re.compile(r"^(?P<head>.*?)\bcan\s?not\b\s+(?P<tail>\S.*)$", re.I),
+#: Objectives that already assert a negative. Their failure is the
+#: positive, so the negator is removed rather than a second one added —
+#: "X is not submitted" must become "X is submitted", never "X is not
+#: not submitted". Tried before :data:`_OBJECTIVE_NEGATIONS`.
+_OBJECTIVE_POSITIVES: list[tuple[re.Pattern[str], str]] = [
+    # "users cannot access X" → "users access X". Dropping the modal
+    # states it in plain active voice, which the 2026-08-01 ruling
+    # requires of a bug title.
+    (re.compile(r"^(?P<head>.*?)\bcan(?:\s?not\b|['’]t\b)\s+(?P<tail>\S.*)$",
+                re.I),
      "{head} {tail}"),
+    # "won't" is the one contraction whose auxiliary is not its stem.
+    (re.compile(r"^(?P<head>.*?)\bwon['’]t\s+(?P<tail>\S.*)$", re.I),
+     "{head} will {tail}"),
+    # "X is not submitted" → "X is submitted"; "isn't" / "aren't" /
+    # "does not" / "don't" / "has not" … the same: keep the auxiliary,
+    # drop the negator. "does" stays emphatic ("… does restore …")
+    # rather than re-inflecting the verb, which cannot be done reliably
+    # without a lexicon. Modals ("must not", "should not") are left out
+    # on purpose: "the password must be stored" is not the defect —
+    # "the password is stored" is — so they fall through.
+    (re.compile(r"^(?P<head>.*?\b(?:is|are|was|were|do|does|did|has|have|"
+                r"had|will))(?:\s+not\b|n['’]t\b)\s*(?P<tail>\S.*)$", re.I),
+     "{head} {tail}"),
+    # "the password is never logged" → "the password is logged";
+    # "the app never crashes" → "the app crashes". The verb keeps its
+    # inflection, so dropping the adverb is all it takes.
+    (re.compile(r"^(?P<head>.*?)\bnever\s+(?P<tail>\S.*)$", re.I),
+     "{head} {tail}"),
+]
+
+#: Any negator still in the clause after the rules above had their
+#: chance. Adding a "not" next to one yields a double negative ("no
+#: error is not shown", "is not never logged"), and inverting a leading
+#: "no X" needs an article chosen by guesswork — so such a clause takes
+#: the labelled fallback instead.
+_NEGATOR_RE = re.compile(
+    r"\b(?:not|never|no(?!-)|none|nothing|nobody|neither|nor|cannot)\b"
+    r"|n['’]t\b", re.I)
+
+_OBJECTIVE_NEGATIONS: list[tuple[re.Pattern[str], str]] = [
     # "login is completed successfully …" → "login is not completed …"
     # "the fields are displayed"          → "the fields are not displayed"
     # Covers the dominant corpus shape: copular "is/are" + participle.
@@ -510,12 +543,6 @@ _OBJECTIVE_NEGATIONS: list[tuple[re.Pattern[str], str]] = [
     # fallback instead — the title stays honest and no modal is invented.
     # The generators no longer emit "can" in a summary either
     # (tc_rules._third_person), so this is a hand-written edge case.
-    # "the Back button does not restore the session" → "… does restore
-    # …". Another objective that asserts a negative; its failure is
-    # the positive. Emphatic "does" rather than re-inflecting the
-    # verb, which cannot be done reliably without a lexicon.
-    (re.compile(r"^(?P<head>.*?)\bdoes\s+not\s+(?P<tail>\S.*)$", re.I),
-     "{head} does {tail}"),
     # "the system enforces 'X'" → "the system does not enforce 'X'".
     # Third-person -s only, and only on a verb we can de-inflect
     # safely: "-ies" → "-y", "-es" after a sibilant, plain "-s".
@@ -585,14 +612,21 @@ def defect_title_from_objective(objective: str, *,
         quoted.append(m.group(0))
         return f"\x00{len(quoted) - 1}\x00"
 
-    masked = re.sub(r"\"[^\"]*\"|'[^']*'", _mask, clause)
+    # A single quote opens a span only at a word start, so the
+    # apostrophe in "isn't" or "user's" is not taken for one.
+    masked = re.sub(r"\"[^\"]*\"|(?<!\w)'[^']*'(?!\w)", _mask, clause)
 
     def _unmask(text: str) -> str:
         return re.sub(r"\x00(\d+)\x00",
                       lambda m: quoted[int(m.group(1))], text)
 
+    rules = _OBJECTIVE_POSITIVES
+    if not any(p.match(masked) for p, _ in _OBJECTIVE_POSITIVES):
+        # Only a clause free of negators may have one added.
+        rules = [] if _NEGATOR_RE.search(masked) else _OBJECTIVE_NEGATIONS
+
     negated = ""
-    for pattern, template in _OBJECTIVE_NEGATIONS:
+    for pattern, template in rules:
         m = pattern.match(masked)
         if not m:
             continue
