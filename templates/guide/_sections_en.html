@@ -835,6 +835,138 @@ python -m playwright install chromium</pre>
     </ul>
   </template>
 
+  <template data-content="search">
+    <h3>What it is</h3>
+    <p>One search field at the top of every page, and an
+       <strong>Ask</strong> button beside it. Search finds your own
+       items — test cases, checklist items, bugs, runs, failed and
+       blocked results, the latest estimation — plus this Guide, the
+       knowledge base and the ISTQB syllabus. Ask writes a short answer
+       from what search found and cites every item it used. Press
+       <kbd>/</kbd> anywhere to jump to the field.</p>
+
+    <h3>What it searches</h3>
+    <ul>
+      <li><strong>With an active project</strong> — that project's items,
+          plus the Guide, the knowledge base and the ISTQB syllabus.</li>
+      <li><strong>With no active project</strong> — every project you can
+          see, plus the same shared material. Search never shows an item
+          from a project you have no access to.</li>
+      <li>An exact ID such as <code>TC-012</code>, <code>LGN_010</code> or
+          <code>BUG-4</code> always comes first.</li>
+      <li>Edits are picked up automatically. If the index is still
+          catching up, the results say so.</li>
+    </ul>
+
+    <h3>How a result is found</h3>
+    <p>No AI is involved in search itself: it costs nothing and gives
+       the same answer every time. Each query goes through these
+       steps:</p>
+    <ol>
+      <li><strong>Words.</strong> The query is split into words and each
+          word is cut down to its stem. Ukrainian and Russian words are
+          also translated to English, and a likely typo is corrected.
+          The page shows both as <em>Corrected:</em> and
+          <em>Translated:</em>.</li>
+      <li><strong>Keyword ranking</strong> — BM25, the standard
+          search-engine formula. A rare word in your query counts for
+          more than a common one.</li>
+      <li><strong>Similarity ranking ("by meaning")</strong> — every item
+          is also stored as a numeric vector of 288 values: 32 QA
+          concepts (login, payment, cart…) and 256 slots for
+          three-letter fragments, which catch word forms and typos. The
+          query gets the same vector, and the closest items rank
+          highest. These vectors are built from a fixed dictionary
+          rather than by a neural model (see below).</li>
+      <li><strong>Fusion.</strong> The two rankings are merged by rank
+          (reciprocal rank fusion). Keyword ranking counts 1.0 and
+          similarity counts 0.4, because keywords proved the stronger
+          signal on real questions.</li>
+      <li><strong>Grouping and filters.</strong> Chunks of the same item
+          are merged into one result. Conditions found in the query
+          (status, priority, severity) appear as <em>Understood as:</em>
+          chips you can remove, and <em>Refine:</em> suggests more.</li>
+    </ol>
+    <p><strong>How this was found</strong> under the results shows all
+       of it for your query: the terms, which engines ran, and each
+       result's keyword rank, similarity rank and fused score.</p>
+
+    <h3>Ask — the AI answer</h3>
+    <p>Click <strong>Get an AI answer</strong> above the results, or ask
+       in the <strong>Ask</strong> panel. Every answer goes through the
+       same steps:</p>
+    <ol>
+      <li><strong>Search runs first</strong>, exactly as above, in the
+          same scope.</li>
+      <li><strong>A grounding check, before any AI is called.</strong>
+          The check needs at least two results, a strong enough top
+          result, and at least half of your question's words found
+          directly in the results. A word that only matched after a typo
+          fix does not count. If the results fail the check, you get
+          <em>"Not enough related items were found"</em>, no AI call is
+          made and nothing is charged.</li>
+      <li><strong>The top 8 items go to the model</strong>, each as its
+          reference, its title and up to 800 characters of the most
+          relevant part. The model also gets your last two questions and
+          answers, so a follow-up such as "and on mobile?" keeps its
+          context. The input is capped at about 3,000 tokens.</li>
+      <li><strong>The model answers</strong> in two or three sentences,
+          in the language of your question, using only those items.
+          Every fact ends with a reference such as
+          <code>[[TC-012]]</code>. A reference to an item that was not
+          retrieved is removed before you see it. The answer ends with
+          up to three follow-up searches, shown as chips.</li>
+      <li><strong>Cache.</strong> The same question in the same scope,
+          on the same model, is replayed from the cache for 14 days, as
+          long as the items it used have not changed. It is marked
+          <em>cached</em> and costs nothing.</li>
+    </ol>
+    <p>The model is the team's choice for "search answers" (Haiku by
+       default, see Settings). The answer is billed like any other AI
+       call: to your own API key if the team has one, otherwise against
+       the team's monthly allowance.</p>
+
+    <h3>Limits</h3>
+    <ul>
+      <li>6 questions a minute and 60 a day per person, and 300 a day per
+          team. Search itself has no limit.</li>
+      <li>If the allowance is used up, no key is configured or the AI
+          service does not respond, Ask says so in one line. The search
+          results stay on the page.</li>
+      <li>Ask may be switched off on an instance. The search field then
+          works as before, with no AI button.</li>
+    </ul>
+
+    <h3>Is this a vector database?</h3>
+    <p>Partly. Every indexed item is stored in the database with its
+       vector, and similarity is computed against those vectors. On
+       PostgreSQL the keyword search runs in the database. The vector
+       comparison runs in the database only when the
+       <code>pgvector</code> extension is installed. Without it, the
+       server compares the vectors itself, which works up to about
+       20,000 items in a scope. The vectors come from a fixed QA
+       dictionary and letter fragments, not from a neural embedding
+       model. So search matches words, their forms, typos, translations
+       and QA concepts. It does not match a paraphrase that shares
+       none of these — "sign-in breaks" will not find "authentication
+       fails" unless both map to the same concept. The administrator
+       can check the current state at <code>/readyz</code>
+       (<code>pgvector</code>, <code>provider</code>).</p>
+
+    <h3>Common mistakes</h3>
+    <ul>
+      <li>Asking a question that is not about your workspace ("what is
+          the weather"). The grounding check stops it. Use Tedgie for
+          general QA questions.</li>
+      <li>Trusting an answer without opening a cited item. The answer
+          is only as current as the items, and a sentence with no
+          reference states nothing the items support.</li>
+      <li>Searching with an active project and expecting another
+          project's items. Clear the active project to search everything
+          you can see.</li>
+    </ul>
+  </template>
+
   <template data-content="tedgie">
     <h3>What it is</h3>
     <p>The TestForTge AI assistant. Tedgie is trained on the
@@ -863,6 +995,15 @@ python -m playwright install chromium</pre>
           checkout error?"</em> → ISTQB-aligned answer with the
           Critical-vs-Major-vs-Minor reasoning.</li>
     </ul>
+    <h3>Questions about your own items</h3>
+    <p>Tedgie uses the same search as the search field, in the same
+       scope. A lookup such as <em>"which tests cover login?"</em> or
+       <em>"покажи відкриті баги по оплаті"</em> is answered with a list
+       of matching items, with no AI call. An open question about
+       the project (<em>"why does checkout keep failing in our
+       tests?"</em>) goes to the model together with the top items
+       found, and the reply cites them as links. A reference to an item
+       that was not found is removed.</p>
     <h3>What Tedgie is NOT</h3>
     <ul>
       <li>A test runner — use Test Execution.</li>
@@ -1118,6 +1259,18 @@ python -m playwright install chromium</pre>
        configured will refuse to store one at all rather than keep it in
        the clear.</p>
 
+    <h3>Model choice</h3>
+    <p>Every kind of work — writing test cases and checklists, site
+       analysis, reading mockups, Tedgie, search answers — runs on
+       <strong>Haiku</strong> unless an admin chooses otherwise here.
+       An admin picks the tiers the team may use, sets a model per kind
+       of work, and decides whether members may choose their own. The
+       <strong>Model</strong> switcher in the sidebar shows the choice.
+       Members can change it only if the admin allows it. Sonnet and Opus cost more. On the platform key they need
+       the operator's permission, otherwise they fall back to Haiku. On
+       the team's own key they bill to that Anthropic account. A kind the
+       operator has pinned on the server ignores the choice.</p>
+
     <h3>Capacity</h3>
     <p>How many rows the team holds against the guideline for this
        server, what the largest part of that is, and roughly how much
@@ -1189,6 +1342,12 @@ python -m playwright install chromium</pre>
       <li><strong>Use the Bug Reports tabs to triage.</strong>
           The auto-bugs land Open; move them through the
           workflow as they're worked.</li>
+      <li><strong>Press <kbd>/</kbd> to search.</strong> An ID like
+          <code>TC-012</code> jumps straight to the item. For a question,
+          use Ask and open the cited items. See the Search &amp; Ask
+          card.</li>
+      <li><strong>Hover over or tap the <kbd>?</kbd> next to a control</strong>
+          to see what it does without leaving the page.</li>
       <li><strong>Ask Tedgie when you're stuck.</strong> The
           ISTQB-trained assistant knows the test-design
           techniques and the app's diag flow.</li>

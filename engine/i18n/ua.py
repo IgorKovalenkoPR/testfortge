@@ -1806,6 +1806,8 @@ TRANSLATIONS = {
                                  "результати Allure всередину",
     "guide_card_bug_reports_title": "Баг-репорти",
     "guide_card_bug_reports_sub": "Сховище дефектів за ISTQB, дружнє до Jira",
+    "guide_card_search_title": "Пошук і Запитати",
+    "guide_card_search_sub": "Знайти будь-що · відповіді з джерелами",
     "guide_card_tedgie_title": "Чат Tedgie",
     "guide_card_tedgie_sub": "QA-асистент · навчений на ISTQB",
     "guide_card_projects_title": "Проєкти",

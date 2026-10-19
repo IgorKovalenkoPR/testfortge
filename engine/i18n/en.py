@@ -1849,6 +1849,8 @@ TRANSLATIONS = {
                                  "results in",
     "guide_card_bug_reports_title": "Bug Reports",
     "guide_card_bug_reports_sub": "ISTQB-aligned defect store, Jira-friendly",
+    "guide_card_search_title": "Search & Ask",
+    "guide_card_search_sub": "Find anything · answers with sources",
     "guide_card_tedgie_title": "Tedgie chat",
     "guide_card_tedgie_sub": "QA assistant · ISTQB-trained",
     "guide_card_projects_title": "Projects",
