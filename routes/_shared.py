@@ -97,6 +97,8 @@ def tc_to_dict(tc: TestCase) -> dict:
         "suite":        getattr(tc, "suite", "") or "",
         "tc_format":    getattr(tc, "tc_format", "manual") or "manual",
         "gherkin":      getattr(tc, "gherkin", "") or "",
+        # Set only by a generator that filed the case; None otherwise.
+        "folder_id":    getattr(tc, "folder_id", None),
     }
 
 
@@ -114,6 +116,7 @@ def cl_to_dict(cl: ChecklistItem) -> dict:
         # chain runs. Same class of bug as tc_to_dict dropping `suite`.
         "item_num": getattr(cl, "item_num", "") or "",
         "depth": int(getattr(cl, "depth", 2) or 2),
+        "folder_id": getattr(cl, "folder_id", None),
     }
 
 

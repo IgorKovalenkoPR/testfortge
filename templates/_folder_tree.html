@@ -1,0 +1,84 @@
+{#
+  Folders — the side panel on /test-cases and /checklist.
+
+  One tree per project, shared by both pages (a "Pricing page" folder holds
+  that page's cases and its checks), so the panel is the same macro on both;
+  ``kind`` only says which items this page lists and therefore counts.
+
+  The tree is drawn by static/js/folders.js from the JSON below rather than
+  in Jinja: the same data has to be redrawn after every create / rename /
+  move without a reload, and two renderers of one tree would drift.
+
+  Every item the page lists carries ``data-folder-item="<public id>"``; the
+  script reads the folder of each from ``assignments``, filters by the
+  selected folder (sub-folders included) and hides section headers left
+  with nothing under them.
+#}
+{% macro folder_panel(kind) %}
+{%- set data = folder_data() %}
+{%- set can_edit = editors_enabled() %}
+<aside class="folder-panel" data-folder-panel data-folder-kind="{{ kind }}"
+       data-folder-editable="{{ '1' if can_edit else '0' }}"
+       aria-label="{{ t.get('folders_title', 'Folders') }}">
+  <div class="folder-panel-head">
+    <h2 class="folder-panel-title">
+      <i data-lucide="folder-tree" class="icon-sm" aria-hidden="true"></i>
+      {{ t.get('folders_title', 'Folders') }}
+    </h2>
+    {%- if can_edit %}
+    <button type="button" class="btn btn-sm btn-secondary folder-new"
+            data-folder-new
+            title="{{ t.get('folders_new_hint', 'New folder inside the selected one') }}">
+      + {{ t.get('folders_new', 'Folder') }}
+    </button>
+    {%- endif %}
+  </div>
+
+  <ul class="folder-tree" role="tree" data-folder-tree
+      aria-label="{{ t.get('folders_title', 'Folders') }}"></ul>
+
+  {%- if can_edit %}
+  <div class="folder-move" data-folder-move hidden>
+    <label class="folder-move-label" for="folder-move-target-{{ kind }}">
+      {{ t.get('folders_move_selected', 'Move selected to') }}
+    </label>
+    <div class="folder-move-row">
+      <select id="folder-move-target-{{ kind }}" data-folder-move-target></select>
+      <button type="button" class="btn btn-sm btn-primary" data-folder-move-apply>
+        {{ t.get('folders_move_apply', 'Move') }}
+      </button>
+    </div>
+  </div>
+  <p class="folder-hint">
+    {{ t.get('folders_hint', 'Drag an item or a folder onto a folder to move it. Deleting a folder keeps its contents: they move up one level.') }}
+  </p>
+  {%- endif %}
+  <p class="folder-status" data-folder-status data-status-class="folder-status"
+     role="status" aria-live="polite"></p>
+
+  <script type="application/json" data-folder-json>{{ data | tojson }}</script>
+  <script type="application/json" data-folder-i18n>{{ {
+      "all": t.get('folders_all', 'All items'),
+      "unfiled": t.get('folders_unfiled', 'Unfiled'),
+      "rename": t.get('folders_rename', 'Rename'),
+      "delete": t.get('folders_delete', 'Delete'),
+      "add_sub": t.get('folders_add_sub', 'New sub-folder'),
+      "prompt_new": t.get('folders_prompt_new', 'Folder name'),
+      "prompt_rename": t.get('folders_prompt_rename', 'New name for the folder'),
+      "confirm_delete": t.get('folders_confirm_delete', 'Delete the folder “{name}”? Its {count} item(s) and sub-folders move up one level; nothing is deleted.'),
+      "moved": t.get('folders_moved', 'Moved {n} item(s).'),
+      "saved": t.get('folders_saved', 'Saved.'),
+      "error": t.get('folders_error', 'Could not save — reload and try again.'),
+      "drag": t.get('folders_drag', 'Drag to a folder'),
+      "in_folder": t.get('folders_in_folder', 'Folder'),
+  } | tojson }}</script>
+</aside>
+{%- endmacro %}
+
+{% macro folder_drag_handle(item_id) %}
+  {%- if editors_enabled() -%}
+  <span class="folder-drag" draggable="true" data-folder-drag="{{ item_id }}"
+        title="{{ t.get('folders_drag', 'Drag to a folder') }}"
+        aria-hidden="true">⠿</span>
+  {%- endif -%}
+{% endmacro %}

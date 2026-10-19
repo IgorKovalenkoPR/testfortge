@@ -11,7 +11,7 @@ from __future__ import annotations
 from flask import Flask
 
 from . import (auth, members, settings, dashboard, projects, generation,
-               edit, execution,
+               edit, folders, execution,
                execution_live, execution_results, execution_manual,
                bugs, automation, recorder,
                estimation, chat, ops, guide, debug, search)
@@ -31,6 +31,8 @@ def register_all(app: Flask) -> None:
     # routes so a future /api/edit prefix collision is a startup
     # error rather than a silently shadowed rule.
     edit.register(app)
+    # Folders for test cases and checklist items — same edit gate.
+    folders.register(app)
     dashboard.register(app)
     projects.register(app)
     generation.register(app)

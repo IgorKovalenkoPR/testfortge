@@ -4663,3 +4663,136 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .data-table th     { background: var(--tf-dark); color: #FFFFFF; }
 .section-row td    { background: var(--tf-dark-2) !important; color: #FFFFFF !important; }
 .qa-chat-head      { background: var(--tf-dark); color: #FFFFFF; }
+
+/* ── Folders (test cases + checklist) ─────────────────────────────
+   A side tree on wide screens, stacked above the list on narrow ones.
+   .folder-out is the folder filter's own hide, separate from the
+   [hidden] the category / suite chips use, so the two compose. */
+.folder-layout {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    align-items: start;
+}
+.folder-main { min-width: 0; }
+.folder-out { display: none !important; }
+
+.folder-panel {
+    background: var(--tf-surface);
+    border: 1px solid var(--tf-line);
+    border-radius: var(--tf-radius);
+    box-shadow: var(--tf-shadow-sm);
+    padding: 12px;
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+}
+.folder-panel-head {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.folder-panel-title {
+    align-items: center;
+    display: flex;
+    font-size: 1rem;
+    gap: 6px;
+    margin: 0;
+}
+.folder-tree, .folder-tree ul { list-style: none; margin: 0; padding: 0; }
+
+.folder-row {
+    --folder-depth: 0;          /* set per row by folders.js */
+    align-items: center;
+    border-radius: var(--tf-radius-sm);
+    display: flex;
+    gap: 2px;
+    padding-left: calc(var(--folder-depth, 0) * 14px);
+}
+.folder-row:hover { background: var(--tf-surface-2); }
+.folder-row.is-selected { background: var(--accent-soft); }
+.folder-row.is-selected .folder-name { color: var(--accent); font-weight: 600; }
+.folder-row.is-drop { outline: 2px dashed var(--focus); outline-offset: -2px; }
+
+.folder-caret {
+    background: none;
+    border: 0;
+    color: var(--text-subtle);
+    cursor: pointer;
+    flex: 0 0 18px;
+    font-size: 0.8em;
+    padding: 0;
+    width: 18px;
+}
+.folder-caret:disabled { cursor: default; visibility: hidden; }
+.folder-name {
+    align-items: center;
+    background: none;
+    border: 0;
+    color: var(--tf-ink);
+    cursor: pointer;
+    display: flex;
+    flex: 1 1 auto;
+    font: inherit;
+    font-size: 0.88em;
+    gap: 6px;
+    min-width: 0;
+    padding: 5px 4px;
+    text-align: left;
+}
+.folder-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+.folder-count {
+    background: var(--tf-line-2);
+    border-radius: var(--tf-radius-pill);
+    color: var(--text-subtle);
+    font-size: 0.8em;
+    padding: 0 7px;
+}
+.folder-actions { display: flex; opacity: 0; transition: opacity .12s; }
+.folder-row:hover .folder-actions,
+.folder-row:focus-within .folder-actions { opacity: 1; }
+.folder-action {
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    color: var(--text-subtle);
+    cursor: pointer;
+    font-size: 0.85em;
+    padding: 2px 5px;
+}
+.folder-action:hover { background: var(--tf-line); color: var(--tf-ink); }
+.folder-action-delete:hover { color: var(--danger); }
+
+.folder-move { border-top: 1px solid var(--tf-line); margin-top: 10px; padding-top: 10px; }
+.folder-move-label { display: block; font-size: 0.82em; font-weight: 600; margin-bottom: 4px; }
+.folder-move-row { display: flex; gap: 6px; }
+.folder-move-row select { flex: 1 1 auto; min-width: 0; }
+.folder-hint { color: var(--text-subtle); font-size: 0.78em; margin: 10px 0 0; }
+.folder-status { font-size: 0.82em; margin: 6px 0 0; min-height: 1em; }
+.folder-status-ok { color: var(--success); }
+.folder-status-error { color: var(--danger); }
+
+.folder-drag {
+    color: var(--text-subtle);
+    cursor: grab;
+    font-size: 0.95em;
+    margin-right: 4px;
+    user-select: none;
+}
+.folder-badge { font-weight: 500; }
+.folder-badge-row {
+    color: var(--text-subtle);
+    display: block;
+    font-size: 0.75em;
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+    .folder-layout { grid-template-columns: minmax(0, 1fr); }
+    .folder-panel { max-height: 50vh; position: static; }
+    .folder-actions { opacity: 1; }
+}

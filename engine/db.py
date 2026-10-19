@@ -594,6 +594,16 @@ _EDITABLE_COLUMN_MIGRATIONS = (
     ("app_user", "sessions_valid_from",
      "ALTER TABLE app_user ADD COLUMN sessions_valid_from "
      "TIMESTAMP WITH TIME ZONE"),
+    # ── Folders ───────────────────────────────────────────────────
+    #
+    # Nullable with no default: "in no folder" (the Unfiled bucket) is the
+    # state every existing row is honestly in. No foreign key in the ALTER —
+    # SQLite cannot add one to an existing table — so the folder helpers
+    # below validate the id against the project's folders themselves.
+    ("test_case", "folder_id",
+     "ALTER TABLE test_case ADD COLUMN folder_id INTEGER"),
+    ("checklist_item", "folder_id",
+     "ALTER TABLE checklist_item ADD COLUMN folder_id INTEGER"),
 )
 
 
@@ -1251,6 +1261,12 @@ class TestCase(Base):
                                             server_default="manual")
     gherkin: Mapped[str] = mapped_column(Text, nullable=False,
                                           default="", server_default="")
+    # The folder this case is filed in (``Folder.id``), or None for
+    # Unfiled. Shared with ChecklistItem: one tree per project holds both.
+    # Not part of the in-session dataclass — a wipe-and-replace save carries
+    # it across by public id (see ``_capture_folders``), so a pack written
+    # from a stale session copy cannot undo a move.
+    folder_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ── Editing metadata (E4.1) ───────────────────────────────────
     #
     # ``row_version`` is the per-row half of the optimistic locking E3.5
@@ -1298,6 +1314,8 @@ class ChecklistItem(Base):
                                            default="", server_default="")
     depth: Mapped[int] = mapped_column(Integer, nullable=False,
                                         default=2, server_default="2")
+    # See TestCase.folder_id.
+    folder_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     objective: Mapped[str | None] = mapped_column(Text, nullable=True)
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_story_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -1332,6 +1350,35 @@ class ChecklistItem(Base):
                                                   default=_utcnow, onupdate=_utcnow)
 
     project = relationship("Project", back_populates="checklist_items")
+
+
+class Folder(Base):
+    """A folder of test cases and checklist items — module, sub-module, page.
+
+    One tree per project, shared by both kinds: the "Pricing page" folder
+    holds that page's cases *and* its checks, which is how the high-level
+    checklist a tester starts from is organised.
+
+    ``source`` is ``user`` for a folder somebody made and ``auto`` for one
+    the generator made from the site's navigation. A regeneration reuses a
+    folder by name under the same parent whatever its source, so it never
+    creates a second "Pricing page" next to the first.
+    """
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("folder.id", ondelete="SET NULL"),
+        nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False,
+                                           default=0, server_default="0")
+    source: Mapped[str] = mapped_column(String(10), nullable=False,
+                                         default="user", server_default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=_utcnow, onupdate=_utcnow)
 
 
 class BugReport(Base):
@@ -4467,6 +4514,43 @@ def _capture_edit_metadata(sess, model, project_id: str) -> dict[str, dict]:
     return out
 
 
+def _capture_folders(sess, model, project_id: str) -> dict:
+    """What a pack write needs to keep rows in their folders.
+
+    ``{"valid": {folder ids of this project}, "previous": {public id:
+    folder id}}``. The pack dicts do not carry ``folder_id`` (it is not a
+    dataclass field), so without this every reorder, upload or inline edit
+    that goes through a wipe-and-replace would empty every folder.
+    """
+    valid = {fid for (fid,) in sess.query(Folder.id)
+             .filter(Folder.project_id == project_id).all()}
+    previous = {}
+    for external_id, folder_id in (
+            sess.query(model.external_id, model.folder_id)
+            .filter(model.project_id == project_id).all()):
+        if external_id and folder_id in valid:
+            previous[external_id] = folder_id
+    return {"valid": valid, "previous": previous}
+
+
+def _place_in_folder(row, d: dict, folders: dict) -> None:
+    """Put a re-inserted row back in a folder.
+
+    An explicit ``folder_id`` in the incoming dict wins — that is how the
+    generator files what it produced — but only if the folder belongs to
+    this project; anything else falls back to where the row was before.
+    """
+    wanted = d.get("folder_id")
+    try:
+        wanted = int(wanted) if wanted not in (None, "") else None
+    except (TypeError, ValueError):
+        wanted = None
+    if wanted is not None and wanted in folders["valid"]:
+        row.folder_id = wanted
+        return
+    row.folder_id = folders["previous"].get(row.external_id or "")
+
+
 def _restore_edit_metadata(row, snapshot: dict[str, dict]) -> None:
     """Put a row's previous edit metadata back, if it had any.
 
@@ -4525,6 +4609,7 @@ def save_test_cases(project_id: str, test_cases: list, *,
         # metadata is carried across explicitly, because a delete would
         # otherwise revert it to the column defaults.
         edits = _capture_edit_metadata(sess, TestCase, project_id)
+        folders = _capture_folders(sess, TestCase, project_id)
         sess.query(TestCase).filter(TestCase.project_id == project_id).delete()
         for tc in test_cases or []:
             d = tc if isinstance(tc, dict) else getattr(tc, "__dict__", {})
@@ -4569,6 +4654,7 @@ def save_test_cases(project_id: str, test_cases: list, *,
                 gherkin=d.get("gherkin") or "",
             )
             _restore_edit_metadata(row, edits)
+            _place_in_folder(row, d, folders)
             sess.add(row)
             written += 1
     return written
@@ -4959,6 +5045,7 @@ def save_checklist(project_id: str, items: list, *,
         if proj is not None:
             proj.updated_at = _utcnow()
         edits = _capture_edit_metadata(sess, ChecklistItem, project_id)
+        folders = _capture_folders(sess, ChecklistItem, project_id)
         sess.query(ChecklistItem).filter(
             ChecklistItem.project_id == project_id).delete()
         for cl in items or []:
@@ -4978,6 +5065,7 @@ def save_checklist(project_id: str, items: list, *,
                 depth=int(d.get("depth") or 2),
             )
             _restore_edit_metadata(row, edits)
+            _place_in_folder(row, d, folders)
             sess.add(row)
             written += 1
     return written
@@ -5005,6 +5093,310 @@ def load_checklist(project_id: str) -> list[dict]:
             d["id"] = d.pop("external_id") or f"CL-{cl.id:03d}"
             out.append({k: d.get(k, "") for k in _CL_DATACLASS_FIELDS})
         return out
+
+
+# ── Folders ────────────────────────────────────────────────────────
+#
+# One tree per project, shared by test cases and checklist items. Items
+# point at a folder through ``folder_id``; ``None`` is the Unfiled bucket.
+# Deleting a folder never deletes what is in it: sub-folders and items move
+# up to the parent (owner decision, 2026-10-19).
+
+FOLDER_NAME_MAX = 200
+#: Deep enough for module → sub-module → page → section, shallow enough that
+#: the tree still fits a sidebar.
+FOLDER_MAX_DEPTH = 6
+_FOLDER_KINDS = {"test_case": TestCase, "checklist_item": ChecklistItem}
+
+
+class FolderError(ValueError):
+    """A folder operation the caller has to be told about (400, not 500)."""
+
+
+def _folder_dict(row: "Folder") -> dict:
+    return {"id": row.id, "parent_id": row.parent_id, "name": row.name,
+            "position": int(row.position or 0), "source": row.source}
+
+
+def _clean_folder_name(name) -> str:
+    cleaned = re.sub(r"\s+", " ", str(name or "")).strip()
+    if not cleaned:
+        raise FolderError("A folder needs a name.")
+    if len(cleaned) > FOLDER_NAME_MAX:
+        raise FolderError(
+            f"A folder name can be at most {FOLDER_NAME_MAX} characters.")
+    return cleaned
+
+
+def _project_folders(sess, project_id: str) -> dict:
+    return {f.id: f for f in sess.query(Folder)
+            .filter(Folder.project_id == project_id).all()}
+
+
+def _folder_depth(folders: dict, folder_id) -> int:
+    depth, seen = 0, set()
+    while folder_id is not None and folder_id in folders \
+            and folder_id not in seen:
+        seen.add(folder_id)
+        depth += 1
+        folder_id = folders[folder_id].parent_id
+    return depth
+
+
+def _subtree_height(folders: dict, folder_id: int, _seen=None) -> int:
+    seen = (_seen or set()) | {folder_id}
+    children = [f.id for f in folders.values()
+                if f.parent_id == folder_id and f.id not in seen]
+    return 1 + max((_subtree_height(folders, c, seen) for c in children),
+                   default=0)
+
+
+def _sibling_named(folders: dict, parent_id, name: str, *, exclude=None):
+    key = name.casefold()
+    for f in folders.values():
+        if f.parent_id == parent_id and f.id != exclude \
+                and (f.name or "").casefold() == key:
+            return f
+    return None
+
+
+def _next_position(folders: dict, parent_id) -> int:
+    return 1 + max((f.position or 0 for f in folders.values()
+                    if f.parent_id == parent_id), default=-1)
+
+
+def list_folders(project_id: str) -> list[dict]:
+    """The project's folders, parents before children, siblings in order."""
+    if not project_id:
+        return []
+    with session_scope() as sess:
+        by_parent: dict = {}
+        for row in _project_folders(sess, project_id).values():
+            by_parent.setdefault(row.parent_id, []).append(row)
+        for siblings in by_parent.values():
+            siblings.sort(key=lambda f: (f.position or 0, f.id))
+        out: list[dict] = []
+
+        def walk(parent_id, seen):
+            for row in by_parent.get(parent_id, []):
+                if row.id in seen:      # a cycle written by hand in the DB
+                    continue
+                out.append(_folder_dict(row))
+                walk(row.id, seen | {row.id})
+
+        walk(None, frozenset())
+        return out
+
+
+def load_folder_assignments(project_id: str, kind: str) -> dict:
+    """``{public id: folder id}`` for the rows of ``kind`` that are filed."""
+    model = _FOLDER_KINDS.get(kind)
+    if not project_id or model is None:
+        return {}
+    with session_scope() as sess:
+        return {str(ext): fid for ext, fid in sess.query(
+            model.external_id, model.folder_id).filter(
+                model.project_id == project_id,
+                model.folder_id.isnot(None)).all() if ext}
+
+
+def create_folder(project_id: str, name: str, parent_id: int | None = None,
+                  *, source: str = "user") -> dict:
+    """Make a folder, or raise :class:`FolderError`.
+
+    A sibling with the same name (ignoring case) is refused: two "Pricing
+    page" folders side by side is always a mistake, and the generator relies
+    on names being unique under a parent to find its folders again.
+    """
+    if not project_id:
+        raise FolderError("No active project.")
+    name = _clean_folder_name(name)
+    with session_scope() as sess:
+        if sess.get(Project, project_id) is None:
+            raise FolderError("No such project.")
+        folders = _project_folders(sess, project_id)
+        if parent_id is not None and parent_id not in folders:
+            raise FolderError("The parent folder does not exist.")
+        if _folder_depth(folders, parent_id) + 1 > FOLDER_MAX_DEPTH:
+            raise FolderError(
+                f"Folders can be nested at most {FOLDER_MAX_DEPTH} deep.")
+        if _sibling_named(folders, parent_id, name) is not None:
+            raise FolderError(f"There is already a folder called “{name}” here.")
+        row = Folder(project_id=project_id, parent_id=parent_id, name=name,
+                     position=_next_position(folders, parent_id),
+                     source="auto" if source == "auto" else "user")
+        sess.add(row)
+        sess.flush()
+        return _folder_dict(row)
+
+
+def rename_folder(project_id: str, folder_id: int, name: str) -> dict:
+    name = _clean_folder_name(name)
+    with session_scope() as sess:
+        folders = _project_folders(sess, project_id or "")
+        row = folders.get(folder_id)
+        if row is None:
+            raise FolderError("No such folder.")
+        if _sibling_named(folders, row.parent_id, name,
+                          exclude=row.id) is not None:
+            raise FolderError(f"There is already a folder called “{name}” here.")
+        row.name = name
+        # Somebody's folder now, even if the generator made it.
+        row.source = "user"
+        return _folder_dict(row)
+
+
+def move_folder(project_id: str, folder_id: int, parent_id: int | None,
+                position: int | None = None) -> dict:
+    """Re-parent a folder (and its whole subtree), optionally to an index."""
+    with session_scope() as sess:
+        folders = _project_folders(sess, project_id or "")
+        row = folders.get(folder_id)
+        if row is None:
+            raise FolderError("No such folder.")
+        if parent_id is not None and parent_id not in folders:
+            raise FolderError("The target folder does not exist.")
+        # Walk up from the target: reaching the moved folder means the move
+        # would put it inside itself.
+        cursor, seen = parent_id, set()
+        while cursor is not None and cursor not in seen:
+            if cursor == folder_id:
+                raise FolderError("A folder cannot be moved into itself.")
+            seen.add(cursor)
+            cursor = folders[cursor].parent_id if cursor in folders else None
+        if (_folder_depth(folders, parent_id)
+                + _subtree_height(folders, folder_id)) > FOLDER_MAX_DEPTH:
+            raise FolderError(
+                f"Folders can be nested at most {FOLDER_MAX_DEPTH} deep.")
+        if _sibling_named(folders, parent_id, row.name,
+                          exclude=row.id) is not None:
+            raise FolderError(
+                f"There is already a folder called “{row.name}” there.")
+        siblings = sorted((f for f in folders.values()
+                           if f.parent_id == parent_id and f.id != row.id),
+                          key=lambda f: (f.position or 0, f.id))
+        index = len(siblings) if position is None \
+            else max(0, min(int(position), len(siblings)))
+        siblings.insert(index, row)
+        row.parent_id = parent_id
+        for i, f in enumerate(siblings):
+            f.position = i
+        return _folder_dict(row)
+
+
+def delete_folder(project_id: str, folder_id: int) -> dict:
+    """Delete a folder; its sub-folders and items move up to its parent.
+
+    Returns ``{"moved_items": n, "moved_folders": m, "parent_id": …}``.
+    """
+    with session_scope() as sess:
+        folders = _project_folders(sess, project_id or "")
+        row = folders.get(folder_id)
+        if row is None:
+            raise FolderError("No such folder.")
+        parent_id = row.parent_id
+        moved_items = 0
+        for model in _FOLDER_KINDS.values():
+            moved_items += sess.query(model).filter(
+                model.project_id == project_id,
+                model.folder_id == folder_id,
+            ).update({model.folder_id: parent_id},
+                     synchronize_session=False)
+        children = sorted((f for f in folders.values()
+                           if f.parent_id == folder_id),
+                          key=lambda f: (f.position or 0, f.id))
+        taken = {f.name.casefold() for f in folders.values()
+                 if f.parent_id == parent_id and f.id != folder_id}
+        base = _next_position(folders, parent_id)
+        for i, child in enumerate(children):
+            # A child named like one of its new siblings would break the
+            # unique-under-a-parent rule; suffix it rather than refuse.
+            name, n = child.name, 2
+            while name.casefold() in taken:
+                suffix = f" ({n})"
+                name = child.name[:FOLDER_NAME_MAX - len(suffix)] + suffix
+                n += 1
+            taken.add(name.casefold())
+            child.name = name
+            child.parent_id = parent_id
+            child.position = base + i
+        sess.flush()
+        sess.delete(row)
+        return {"moved_items": moved_items, "moved_folders": len(children),
+                "parent_id": parent_id}
+
+
+def assign_to_folder(project_id: str, kind: str, external_ids,
+                     folder_id: int | None, *,
+                     actor: str | None = None) -> dict:
+    """File items of ``kind`` into ``folder_id`` (``None`` = Unfiled).
+
+    A move counts as a human edit: ``ai_generated`` turns False, so the
+    regeneration merge (E4.7) keeps the row — and the folder somebody put it
+    in — rather than re-filing it where the generator would. ``row_version``
+    is left alone on purpose: the folder is not a field the inline editor
+    holds a version for, and bumping it would turn the next field edit on an
+    open page into a spurious conflict.
+    """
+    model = _FOLDER_KINDS.get(kind)
+    if model is None:
+        raise FolderError(f"Unknown item kind: {kind}.")
+    ids = [str(i).strip() for i in (external_ids or []) if str(i or "").strip()]
+    if not ids:
+        raise FolderError("Select at least one item.")
+    with session_scope() as sess:
+        if folder_id is not None and folder_id not in _project_folders(
+                sess, project_id or ""):
+            raise FolderError("No such folder.")
+        rows = sess.query(model).filter(
+            model.project_id == project_id,
+            model.external_id.in_(ids)).all()
+        found = {r.external_id for r in rows}
+        changed: list[str] = []
+        now = _utcnow()
+        for row in rows:
+            if row.folder_id == folder_id:
+                continue
+            row.folder_id = folder_id
+            row.ai_generated = False
+            row.edited_by = actor or row.edited_by
+            row.edited_at = now
+            changed.append(row.external_id)
+        return {"changed": changed,
+                "missing": [i for i in ids if i not in found]}
+
+
+def ensure_folder_path(project_id: str, path, *,
+                       source: str = "auto") -> int | None:
+    """The id of the folder at ``path`` (a list of names), creating whatever
+    part is missing.
+
+    Existing folders are matched by name under the same parent, ignoring
+    case and whoever made them, so regenerating never makes a second copy of
+    a folder — including one a person made by hand with the same name.
+    """
+    names = [n for n in (re.sub(r"\s+", " ", str(p or "")).strip()
+                         [:FOLDER_NAME_MAX] for p in (path or []))
+             if n][:FOLDER_MAX_DEPTH]
+    if not project_id or not names:
+        return None
+    with session_scope() as sess:
+        if sess.get(Project, project_id) is None:
+            return None
+        folders = _project_folders(sess, project_id)
+        parent_id = None
+        for name in names:
+            found = _sibling_named(folders, parent_id, name)
+            if found is None:
+                found = Folder(project_id=project_id, parent_id=parent_id,
+                               name=name,
+                               position=_next_position(folders, parent_id),
+                               source="auto" if source == "auto" else "user")
+                sess.add(found)
+                sess.flush()
+                folders[found.id] = found
+            parent_id = found.id
+        return parent_id
 
 
 # ── Bug reports ────────────────────────────────────────────────────
