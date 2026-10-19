@@ -5200,6 +5200,34 @@ def load_folder_assignments(project_id: str, kind: str) -> dict:
                 model.folder_id.isnot(None)).all() if ext}
 
 
+def folder_paths(project_id: str, kind: str) -> dict:
+    """``{public id: "Header / Why Us / Careers page"}`` for filed rows.
+
+    What the exports print in their Folder column. Unfiled rows are absent,
+    so a caller's ``.get(id, "")`` gives them an empty cell.
+    """
+    folders = {f["id"]: f for f in list_folders(project_id)}
+    paths: dict = {}
+
+    def path_of(fid):
+        if fid in paths:
+            return paths[fid]
+        names, seen = [], set()
+        while fid in folders and fid not in seen:
+            seen.add(fid)
+            names.append(folders[fid]["name"])
+            fid = folders[fid]["parent_id"]
+        return " / ".join(reversed(names))
+
+    out = {}
+    for ext, fid in load_folder_assignments(project_id, kind).items():
+        if fid not in paths:
+            paths[fid] = path_of(fid)
+        if paths[fid]:
+            out[ext] = paths[fid]
+    return out
+
+
 def create_folder(project_id: str, name: str, parent_id: int | None = None,
                   *, source: str = "user") -> dict:
     """Make a folder, or raise :class:`FolderError`.
