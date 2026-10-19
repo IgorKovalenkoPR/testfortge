@@ -102,6 +102,78 @@ class TestObjectivesThatAlreadyAssertANegative:
         ) == ("[Manual run] The browser Back button does restore the "
               "authenticated session")
 
+    # Found building the manual-run bug modal: the copular rule fired on
+    # an objective that was already negative and added a second "not".
+    @pytest.mark.parametrize("objective,expected", [
+        ("Verify that Product-Focused QA & Software Testing Services is not "
+         "submitted with the required controls left empty",
+         "Product-Focused QA & Software Testing Services is submitted with "
+         "the required controls left empty"),
+        ("Verify that error messages are not displayed for valid input",
+         "Error messages are displayed for valid input"),
+        ("Verify that the Save button isn't enabled before any edit",
+         "The Save button is enabled before any edit"),
+        ("Verify that the fields aren’t cleared on reload",
+         "The fields are cleared on reload"),
+        ("Verify that guests can't post comments",
+         "Guests post comments"),
+        ("Verify that the users do not see the admin panel",
+         "The users do see the admin panel"),
+        ("Verify that the page doesn't reload on submit",
+         "The page does reload on submit"),
+        ("Verify that the order has not shipped",
+         "The order has shipped"),
+        ("Verify that the job won't retry after a fatal error",
+         "The job will retry after a fatal error"),
+        ("Verify that the password is never logged",
+         "The password is logged"),
+        ("Verify that the app never crashes on rotation",
+         "The app crashes on rotation"),
+    ])
+    def test_a_negative_objective_becomes_the_positive(self, objective,
+                                                       expected):
+        assert defect_title_from_objective(objective) == f"[Manual run] {expected}"
+
+    @pytest.mark.parametrize("objective", [
+        # A leading "no X" has no safe positive: "an error" vs "errors"
+        # is a guess at number, and "no error is not shown" is wrong.
+        "Verify that no error is shown after saving",
+        "Verify that nothing is saved when the form is cancelled",
+        # A modal's positive is not the defect ("must be stored").
+        "Verify that the password must not be stored in plain text",
+    ])
+    def test_a_negative_without_a_safe_positive_falls_through(self,
+                                                              objective):
+        out = defect_title_from_objective(objective)
+        assert out.startswith("[Manual run] Failed: ")
+        assert " not not " not in out
+
+    @pytest.mark.parametrize("verdict", ["Failed", "Blocked"])
+    @pytest.mark.parametrize("negator", [
+        "is not", "isn't", "are not", "aren't", "was not", "were not",
+        "does not", "doesn't", "do not", "don't", "cannot", "can't",
+        "is never", "has not", "won't",
+    ])
+    def test_no_title_ever_carries_a_double_negative(self, negator, verdict):
+        out = defect_title_from_objective(
+            f"Verify that the form {negator} submitted with empty fields",
+            verdict=verdict).lower()
+        assert "not not" not in out
+        assert "not never" not in out
+        assert "n't not" not in out
+
+    def test_an_apostrophe_does_not_open_a_quoted_span(self):
+        """"isn't" / "user's" must not be masked as a citation."""
+        out = defect_title_from_objective(
+            "Verify that the user's 'Delete' button isn't shown to guests")
+        assert out == ("[Manual run] The user's 'Delete' button is shown "
+                       "to guests")
+
+    def test_a_negator_inside_a_quote_is_still_a_citation(self):
+        out = defect_title_from_objective(
+            "Verify that the 'Not now' link is displayed")
+        assert out == "[Manual run] The 'Not now' link is not displayed"
+
 
 class TestQuotedTextIsNeverNegated:
     """A quote is a citation, not a claim the headline is making."""
@@ -136,6 +208,13 @@ class TestVerdictsOtherThanFailed:
             "credentials", verdict="Passed but")
         assert "not" not in out.replace("[Manual run] ", "").split()
         assert out.startswith("[Manual run] Deviation while checking that")
+
+    def test_passed_but_keeps_a_negative_objective_as_written(self):
+        out = defect_title_from_objective(
+            "Verify that the form is not submitted with empty fields",
+            verdict="Passed but")
+        assert out == ("[Manual run] Deviation while checking that the form "
+                       "is not submitted with empty fields")
 
 
 class TestTheFallback:
