@@ -1146,6 +1146,23 @@ TRANSLATIONS = {
                                    "ніколи не рапортує повне покриття.",
     "manual_run_all": "Усі пункти",
     "manual_run_item": "Пункт",
+    "manual_run_bug_id": "ID бага",
+    "manual_run_bug_id_hint": "Наявний баг у цьому проєкті. Очистьте поле, "
+                              "щоб відв'язати.",
+    "manual_run_bug_ref_unknown": "Бага %(ref)s у цьому проєкті немає — "
+                                  "вердикт записано без посилання на баг.",
+    "manual_run_bug_edit": "Редагувати баг",
+    "manual_run_bug_modal_title": "Новий баг-репорт",
+    "manual_run_bug_modal_hint": "Заповнено з пункту. Відредагуйте що "
+                                 "потрібно й запишіть вердикт — баг "
+                                 "заведеться разом із ним і буде прив'язаний "
+                                 "до цього результату.",
+    "manual_run_bug_field_title": "Назва",
+    "manual_run_bug_need": "Багу потрібна назва.",
+    "manual_run_bug_cancel": "Скасувати — без бага",
+    "manual_run_bug_file": "завести баг",
+    "manual_run_sum_more": "Показати повний опис",
+    "manual_run_sum_less": "Згорнути",
     # checklist.html
     "cl_gen_title": "Генеруємо чек-ліст…",
     "cl_gen_stage_init": "Аналізуємо вхідні дані…",

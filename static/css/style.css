@@ -4592,6 +4592,26 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .page-manual-run .mr-mt-3q { margin-top: .75rem; }
 .page-manual-run .mr-radio-gap { margin-bottom: .6rem; }
 .page-manual-run .mr-inline-form { display: inline; }
+/* JS-toggled; .btn sets a display that would otherwise beat [hidden]. */
+.page-manual-run [hidden] { display: none !important; }
+.page-manual-run .mr-notes-row { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.page-manual-run .mr-notes-group { flex: 1 1 420px; margin-bottom: .6rem; }
+.page-manual-run .mr-bugref-group { flex: 0 1 220px; margin-bottom: .6rem; }
+.page-manual-run .mr-bugref-group .hint { display: block; margin-top: .25rem; font-size: .8em; }
+.page-manual-run .mr-bug-edit { margin: 0 0 .6rem .5rem; }
+.page-manual-run .mr-bug-link { margin-left: .4rem; font-size: .85em; white-space: nowrap; }
+/* Long summaries in "All items": a real ellipsis that opens the rest. */
+.page-manual-run .mr-sum-more { border: 0; background: none; padding: 0 .2rem; margin: 0; font: inherit; font-weight: 700; color: var(--primary); cursor: pointer; }
+.page-manual-run .mr-sum-more:hover, .page-manual-run .mr-sum-more:focus-visible { text-decoration: underline; }
+/* Bug modal — a native <dialog>, so focus trap, Esc and the backdrop come
+   from the browser rather than from code that can drift. */
+.page-manual-run .mr-bug-modal { margin: auto; width: min(720px, calc(100vw - 32px)); max-height: 90vh; overflow-y: auto; border: 0; border-radius: 12px; padding: 24px; background: var(--tf-surface); color: inherit; box-shadow: var(--shadow-dialog); }
+.page-manual-run .mr-bug-modal::backdrop { background: var(--overlay, rgba(15, 23, 42, .55)); }
+.page-manual-run .mr-bug-modal textarea, .page-manual-run .mr-bug-modal .form-input, .page-manual-run .mr-bug-modal .form-select { width: 100%; box-sizing: border-box; }
+.page-manual-run .mr-bug-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0 1rem; }
+.page-manual-run .mr-bug-error { color: var(--error-text); font-weight: 600; margin: .25rem 0 .5rem; }
+.page-manual-run .mr-bug-actions { display: flex; gap: .6rem; justify-content: flex-end; flex-wrap: wrap; margin-top: .75rem; }
+.page-manual-run .mr-bug-actions .verdict-btn { flex: 0 1 auto; padding-left: 1.2rem; padding-right: 1.2rem; }
 
 /* ── Checklist (was inline style="", block B 2026-10-15) ── */
 .page-checklist .cl-gen-stage { margin-bottom: 10px; color: var(--text-strong); font-weight: 600; }
