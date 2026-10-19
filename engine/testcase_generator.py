@@ -66,6 +66,10 @@ class TestCase:
     # edit to `gherkin` wins over a re-derive — see gherkin.ensure_gherkin.
     tc_format: str = "manual"
     gherkin: str = ""
+    # The folder a generator filed this case into (``db.Folder.id``), or
+    # None to leave it where it was / Unfiled. Never read back from the
+    # database into this field — see ``db._place_in_folder``.
+    folder_id: int | None = None
 
 
 @dataclass
@@ -87,6 +91,7 @@ class ChecklistItem:
     priority: str = "Medium"
     status: str = "Unchecked"
     testing_type: str = "Functional"  # see TestCase.testing_type
+    folder_id: int | None = None      # see TestCase.folder_id
 
 
 # ── Section prefix mapping ──────────────────────────────────────

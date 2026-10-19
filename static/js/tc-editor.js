@@ -284,7 +284,9 @@
                     // is 200 lines of template with badges, a status row and
                     // two collapsible editors, and a second implementation of
                     // it in JavaScript would drift from the first.
-                    window.location.reload();
+                    const folders = window.TestFortgeFolders;
+                    (folders ? folders.fileNew(payload.item.id) : Promise.resolve())
+                        .then(() => window.location.reload());
                     return;
                 }
                 status((payload && payload.message)

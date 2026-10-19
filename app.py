@@ -340,6 +340,27 @@ def _template_edit_metadata(kind: str = "test_cases") -> dict:
 app.jinja_env.globals["edit_metadata"] = _template_edit_metadata
 
 
+def _template_folder_data() -> dict:
+    """The folder tree and both kinds' assignments for the active project.
+
+    Same reasoning as :func:`_template_edit_metadata` for being a global.
+    An empty tree on any failure — the page then simply does not group.
+    """
+    empty = {"folders": [], "assignments": {"test_case": {},
+                                            "checklist_item": {}}}
+    try:
+        from routes._shared import resolve_active_project
+        from routes.folders import snapshot
+        project_id = resolve_active_project(pin=False)
+        return snapshot(project_id) if project_id else empty
+    except Exception as exc:  # pragma: no cover — never break a render
+        log.debug("folder data unavailable: %s", exc)
+        return empty
+
+
+app.jinja_env.globals["folder_data"] = _template_folder_data
+
+
 def _template_bug_status_options(current: str) -> list:
     """The statuses this person may move this bug to, from where it is (E4.5).
 

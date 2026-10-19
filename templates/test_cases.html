@@ -5,6 +5,7 @@
     trap E4.2 hit with `editors_enabled`. -#}
 {% from "_import_mapping.html" import import_mapping with context %}
 {% from "_bulk_bar.html" import bulk_bar, bulk_check, bulk_select_all with context %}
+{% from "_folder_tree.html" import folder_panel, folder_drag_handle with context %}
 {% block title %}TestForTge — {{ t.tc_title }}{% endblock %}
 
 {#- E4.3: every field below is editable in place when EDITORS_ENABLED is on.
@@ -752,6 +753,9 @@
 
 <!-- Test Cases Tab -->
 <div id="testcases" class="tab-content active">
+<div class="folder-layout">
+{{ folder_panel("test_case") }}
+<div class="folder-main">
     <div class="filter-bar">
         <label>{{ t.filter }}:</label>
         <button class="filter-btn active" data-call="filterTC" data-arg="all">{{ t.all }}</button>
@@ -809,7 +813,7 @@
     {% for tc in test_cases %}
     {% if tc.section != ns.current_section %}
     {% set ns.current_section = tc.section %}
-    <h2 class="section-header">{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
+    <h2 class="section-header" data-folder-section>{{ t.tc_section }} {{ tc.section_num }}: {{ tc.section }}</h2>
     {% endif %}
 
     {#- data-ie-row is what makes the "edited" pill work without a reload:
@@ -818,10 +822,12 @@
         already edited before this page load. -#}
     <div class="card tc-card" data-category="{{ tc.category }}"
          data-suite="{{ tc.suite or '' }}" id="{{ tc.id }}" data-ie-row
+         data-folder-item="{{ tc.id }}"
          {% if tc_edit.get(tc.id) and not tc_edit[tc.id].ai_generated %}data-ie-edited{% endif %}>
         <div class="card-header-row">
             <h3>
                 {%- if editors_enabled() and tc_edit.get(tc.id) %}
+                {{ folder_drag_handle(tc.id) }}
                 {{ bulk_check("test_case", tc.id) }}
                 {%- endif %}
                 <span class="tc-id">{{ tc.id }}</span>:
@@ -836,6 +842,7 @@
                     {{ tc_field(tc, "suite", tc.suite, label="suite") }}
                 </span>
                 {% endif %}
+                <span class="badge badge-outline folder-badge" data-folder-badge="{{ tc.id }}" hidden></span>
                 <span class="badge badge-outline">{{ tc.user_story_id }}</span>
                 {% if tc.trigger and tc.trigger != 'manual' %}
                 <span class="badge badge-outline tc-badge-indigo"
@@ -1122,6 +1129,8 @@
         {% endif %}
     </div>
     {% endfor %}
+</div>{# .folder-main #}
+</div>{# .folder-layout #}
 </div>
 
 <!-- Traceability Tab -->
@@ -1210,6 +1219,8 @@
 <script src="{{ url_for('static', filename='js/bulk-editor.js') }}"
         nonce="{{ csp_nonce }}" defer></script>
 {%- endif %}
+<script src="{{ url_for('static', filename='js/folders.js') }}"
+        nonce="{{ csp_nonce }}" defer></script>
 <script nonce="{{ csp_nonce }}">
 // Status lines take their colour from a class (block B): ok / error /
 // info, or none for the default subtle grey.

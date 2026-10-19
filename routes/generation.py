@@ -229,6 +229,10 @@ def _run_site_aware(url: str, pid: str | None,
                                   strategy.to_dict())
         except Exception as exc:  # pragma: no cover — best-effort
             _log.warning("site-aware: save_site_profile failed: %s", exc)
+        _file_into_folders(
+            pid, [_page_to_dict(pg)
+                  for pg in (getattr(site_analysis, "pages", None) or [])],
+            tc_dicts, cl_dicts)
 
     return {
         "tc_dicts": tc_dicts,
@@ -241,6 +245,42 @@ def _run_site_aware(url: str, pid: str | None,
         # reads as a known limitation rather than as the whole product.
         "checklist_gaps": ll_gaps,
     }
+
+
+def _file_into_folders(pid: str, pages: list[dict], tc_dicts: list[dict],
+                       cl_dicts: list[dict]) -> None:
+    """Create the navigation folder tree and stamp ``folder_id`` on the
+    generated items (owner request, 2026-10-19).
+
+    Header → its menus → their pages, then Homepage and Footer — the
+    high-level checklist a tester starts from, as folders. Every folder is
+    created even when nothing lands in it yet, because the point is a place
+    to put the cases and checks people add later. Folders are reused by name,
+    so regenerating does not duplicate the tree.
+
+    Best-effort: a failure here leaves the pack Unfiled, never unsaved.
+    """
+    try:
+        from engine import folder_plan as _fp
+        plan = _fp.build_plan(pages)
+        page_urls = [p.get("url") for p in pages if p.get("url")]
+        tc_paths, cl_paths = _fp.file_items(plan, tc_dicts, cl_dicts,
+                                            page_urls)
+        wanted = list(plan.paths)
+        for path in list(tc_paths.values()) + list(cl_paths.values()):
+            if path not in wanted:
+                wanted.append(path)
+        ids = {}
+        for path in wanted:
+            ids[path] = _db.ensure_folder_path(pid, list(path))
+        for index, path in tc_paths.items():
+            tc_dicts[index]["folder_id"] = ids.get(path)
+        for index, path in cl_paths.items():
+            cl_dicts[index]["folder_id"] = ids.get(path)
+        _log.info("folders: %d in the tree, %d case(s) and %d check(s) filed",
+                  len(wanted), len(tc_paths), len(cl_paths))
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("filing generated items into folders failed: %s", exc)
 
 
 def _page_to_dict(page) -> dict:

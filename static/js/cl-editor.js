@@ -122,7 +122,11 @@
                 body: JSON.stringify({ values: { section: section } }),
             }).then(({ resp, payload }) => {
                 if (resp.ok) {
-                    window.location.reload();
+                    // Into the folder being viewed, before the reload.
+                    const folders = window.TestFortgeFolders;
+                    (folders && payload && payload.item
+                        ? folders.fileNew(payload.item.id) : Promise.resolve())
+                        .then(() => window.location.reload());
                     return;
                 }
                 say((payload && payload.message) || 'Could not add an item.',
