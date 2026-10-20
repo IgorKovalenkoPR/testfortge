@@ -302,6 +302,13 @@ def _dedent_lines(text: str) -> list[str]:
     return [ln[pad:] if ln.strip() else "" for ln in lines]
 
 
+def _scenario_title(tc: Any) -> str:
+    """The summary as a scenario name — without its ``[Folder]`` prefix,
+    which files the case and is not part of what the scenario says."""
+    from engine import folder_prefix as _fpx
+    return _fpx.strip_prefix(str(getattr(tc, "summary", "") or "")).strip()
+
+
 def scenario_from_test_case(tc: Any) -> Scenario:
     """Derive one :class:`Scenario` from a manual test case.
 
@@ -315,12 +322,11 @@ def scenario_from_test_case(tc: Any) -> Scenario:
     stored = str(getattr(tc, "gherkin", "") or "")
     if stored.strip():
         return Scenario(
-            name=re.sub(r"\s+", " ",
-                        str(getattr(tc, "summary", "") or "").strip())
+            name=re.sub(r"\s+", " ", _scenario_title(tc))
                  or "Unnamed scenario",
             raw=stored,
         )
-    name = re.sub(r"\s+", " ", str(getattr(tc, "summary", "") or "").strip())
+    name = re.sub(r"\s+", " ", _scenario_title(tc))
     scenario = Scenario(name=name or "Unnamed scenario", tags=tags_for(tc))
 
     given: list[str] = _clauses(getattr(tc, "preconditions", "") or "")

@@ -2318,4 +2318,8 @@ TRANSLATIONS = {
     "folders_error": "Could not save — reload and try again.",
     "folders_drag": "Drag to a folder",
     "folders_in_folder": "Folder",
+    "folders_refile": "Re-file from [Folder] prefixes",
+    "folders_refile_hint": "File every item whose summary opens with [Folder -> Subfolder] into that folder, creating missing folders",
+    "folders_refile_confirm": "File every item whose summary opens with [Folder -> Subfolder] into that folder? Items moved by hand follow their prefix too; items without a prefix stay where they are.",
+    "folders_refiled": "Re-filed {n} item(s); {skipped} without a prefix left as they are.",
 }

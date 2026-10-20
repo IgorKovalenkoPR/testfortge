@@ -49,6 +49,11 @@
       </button>
     </div>
   </div>
+  <button type="button" class="btn btn-sm btn-secondary folder-refile"
+          data-folder-refile
+          title="{{ t.get('folders_refile_hint', 'File every item whose summary opens with [Folder -> Subfolder] into that folder, creating missing folders') }}">
+    {{ t.get('folders_refile', 'Re-file from [Folder] prefixes') }}
+  </button>
   <p class="folder-hint">
     {{ t.get('folders_hint', 'Drag an item or a folder onto a folder to move it. Deleting a folder keeps its contents: they move up one level.') }}
   </p>
@@ -71,6 +76,8 @@
       "error": t.get('folders_error', 'Could not save — reload and try again.'),
       "drag": t.get('folders_drag', 'Drag to a folder'),
       "in_folder": t.get('folders_in_folder', 'Folder'),
+      "refile_confirm": t.get('folders_refile_confirm', 'File every item whose summary opens with [Folder -> Subfolder] into that folder? Items moved by hand follow their prefix too; items without a prefix stay where they are.'),
+      "refiled": t.get('folders_refiled', 'Re-filed {n} item(s); {skipped} without a prefix left as they are.'),
   } | tojson }}</script>
 </aside>
 {%- endmacro %}

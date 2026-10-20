@@ -1017,6 +1017,10 @@ def house_style_findings(field: str, value: str) -> list[str]:
 
     check_opener = None
     if kind == "title":
+        from engine import folder_prefix as _fpx
+        text = _fpx.strip_prefix(text).strip()
+        if not text:
+            return []
         # The corpus sanctions "<Surface>: <attempted action>" for
         # error-message cases, which legitimately does not open with a verb.
         check_opener = not _is_error_message_title(text)
@@ -1030,8 +1034,11 @@ def house_style_findings(field: str, value: str) -> list[str]:
 
 def lint_case(case: AuthoredCase) -> list[str]:
     """House-style findings for one case. Empty list == compliant."""
+    from engine import folder_prefix as _fpx
     out: list[str] = []
-    summary = case.summary or ""
+    # The "[Folder -> Sub]" prefix files the case; the house style applies
+    # to the title after it.
+    summary = _fpx.strip_prefix(case.summary or "")
 
     if not summary.startswith("Verify that") \
             and not _is_error_message_title(summary):
@@ -1109,9 +1116,11 @@ def normalise_case(case: AuthoredCase) -> tuple[AuthoredCase, list[str]]:
     """
     fixed: list[str] = []
 
-    if case.summary and not case.summary.startswith("Verify that") \
-            and not _is_error_message_title(case.summary):
-        case.summary = _ensure_verify_that(case.summary)
+    from engine import folder_prefix as _fpx
+    title = _fpx.strip_prefix(case.summary or "")
+    if title and not title.startswith("Verify that") \
+            and not _is_error_message_title(title):
+        case.summary = _fpx.map_body(case.summary, _ensure_verify_that)
         fixed.append("summary opener")
 
     if has_weak_modal(case.summary):

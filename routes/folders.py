@@ -6,6 +6,8 @@
                                           or move  {parent_id, position?}
   * DELETE /api/folders/<id>            — contents move up to the parent
   * POST   /api/folders/assign          — file items {kind, ids, folder_id}
+  * POST   /api/folders/refile          — file every item of {kind} by its
+                                          "[Folder -> Sub]" summary prefix
 
 One tree per project, shared by both kinds of item, so "Pricing page" holds
 that page's cases and its checks (owner decision, 2026-10-19).
@@ -199,3 +201,28 @@ def register(app: Flask) -> None:
                    {"kind": [None, kind], "ids": [None, result["changed"]]})
         _invalidate(project_id)
         return jsonify(result)
+
+    @app.route("/api/folders/refile", methods=["POST"])
+    @_perm.require_role("user")
+    def api_folders_refile():
+        """Apply the ``[Folder -> Sub]`` prefix rule to stored items.
+
+        An explicit action, so it files every prefixed item — including one
+        moved by hand — where its prefix says. Unprefixed items stay put.
+        """
+        payload, project_id, error = _write_shell()
+        if error is not None:
+            return error
+        kind = payload.get("kind")
+        if kind not in _KINDS:
+            return _bad(f"kind must be one of: {', '.join(_KINDS)}.")
+        try:
+            result = _db.refile_from_prefixes(project_id, kind)
+        except _db.FolderError as exc:
+            return _bad(str(exc))
+        if result["changed"]:
+            _audit("refile", project_id, None,
+                   {"kind": [None, kind],
+                    "ids": [None, result["changed"][:50]]})
+        _invalidate(project_id)
+        return jsonify({**result, **snapshot(project_id)})
