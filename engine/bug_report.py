@@ -592,8 +592,11 @@ def defect_title_from_objective(objective: str, *,
     stripped and prefixed with the verdict, which reads as a defect
     line without asserting anything the run did not establish.
     """
+    from engine import folder_prefix as _fpx
     label = (section or "").strip() or "Manual run"
-    clause = _VERIFY_OPENER_RE.sub("", (objective or "").strip()).strip()
+    # A "[Folder -> Sub]" prefix files the case; it is not part of the claim.
+    clause = _VERIFY_OPENER_RE.sub(
+        "", _fpx.strip_prefix(objective or "").strip()).strip()
     if not clause:
         return f"[{label}] Manual check failed"
 

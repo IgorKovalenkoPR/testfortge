@@ -288,6 +288,13 @@
             if (item.ai_generated === false) markEdited(host);
             close(host, saved);
             flashSaved(host);
+            // A changed "[Folder -> Sub]" prefix re-filed the item on the
+            // server (routes/edit.py); redraw the tree so the filter agrees.
+            if (payload && payload.folder_id !== undefined
+                    && window.TestFortgeFolders
+                    && window.TestFortgeFolders.refresh) {
+                window.TestFortgeFolders.refresh();
+            }
             return;
         }
 

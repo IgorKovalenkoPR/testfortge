@@ -519,10 +519,29 @@
         }
     });
 
+    // Re-file every item of this page's kind by its "[Folder -> Sub]"
+    // summary prefix (routes/folders.py api_folders_refile).
+    const refileBtn = panel.querySelector('[data-folder-refile]');
+    if (refileBtn) {
+        refileBtn.addEventListener('click', () => {
+            if (!window.confirm(t('refile_confirm'))) return;
+            act(async () => {
+                const result = await call('POST', '/api/folders/refile', { kind: kind });
+                return t('refiled', {
+                    n: (result && result.changed || []).length,
+                    skipped: (result && result.no_prefix) || 0,
+                });
+            });
+        });
+    }
+
     // An item created by hand is filed into the folder being viewed, so it
     // does not vanish from a filtered page on the reload that follows. The
     // editors call this before they reload.
     window.TestFortgeFolders = {
+        refresh: function () {
+            return refresh().catch(() => undefined);
+        },
         fileNew: function (itemId) {
             if (!editable || typeof selected !== 'number' || !itemId) {
                 return Promise.resolve();

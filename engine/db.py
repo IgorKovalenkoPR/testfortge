@@ -5427,6 +5427,149 @@ def ensure_folder_path(project_id: str, path, *,
         return parent_id
 
 
+# ── Filing by the ``[Folder -> Subfolder]`` prefix ─────────────────
+#
+# See engine/folder_prefix.py for the rule and its edge cases. These helpers
+# only turn a parsed path into a folder id and stamp it; they never touch
+# ``ai_generated`` or ``row_version`` — filing from text the item already
+# carries is not a person moving it.
+
+#: The field holding the prefix, per kind.
+FOLDER_PREFIX_FIELD = {"test_case": "summary", "checklist_item": "objective"}
+
+
+class _PathIds:
+    """``ensure_folder_path`` with a per-call cache keyed on the folded path."""
+
+    def __init__(self, project_id: str):
+        self.project_id = project_id
+        self._ids: dict = {}
+
+    def __call__(self, path) -> int | None:
+        from engine import folder_prefix as _fpx
+        key = _fpx.path_key(path)
+        if not key:
+            return None
+        if key not in self._ids:
+            self._ids[key] = ensure_folder_path(self.project_id, list(path))
+        return self._ids[key]
+
+
+def file_by_prefix(project_id: str, dicts: list, kind: str, *,
+                   previous: dict | None = None) -> int:
+    """Stamp ``folder_id`` on pack dicts whose text opens with a prefix.
+
+    ``previous`` is ``{public id: text as stored}``. When given, an item is
+    filed only if its prefix is new or differs from the stored one — the
+    manual-move rule, so re-importing a file does not undo a move somebody
+    made after the last import. Without it every prefixed item is filed
+    (generation, where the text is all new).
+
+    Items with no prefix are left alone: ``_place_in_folder`` then keeps
+    them where they were. Returns how many dicts were stamped.
+    """
+    from engine import folder_prefix as _fpx
+    field_name = FOLDER_PREFIX_FIELD.get(kind)
+    if not project_id or not field_name:
+        return 0
+    ids = _PathIds(project_id)
+    stamped = 0
+    for d in dicts or []:
+        if not isinstance(d, dict):
+            continue
+        text = d.get(field_name) or ""
+        path = _fpx.parse(text)
+        if not path:
+            continue
+        if previous is not None:
+            before = previous.get(str(d.get("id") or ""))
+            if before is not None and not _fpx.prefix_changed(before, text):
+                continue
+        folder_id = ids(path)
+        if folder_id is not None:
+            d["folder_id"] = folder_id
+            stamped += 1
+    return stamped
+
+
+def stored_prefix_texts(project_id: str, kind: str) -> dict:
+    """``{public id: summary/objective}`` — the ``previous`` for an import."""
+    model = _FOLDER_KINDS.get(kind)
+    field_name = FOLDER_PREFIX_FIELD.get(kind)
+    if not project_id or model is None:
+        return {}
+    column = getattr(model, field_name)
+    with session_scope() as sess:
+        return {str(ext): (text or "") for ext, text in sess.query(
+            model.external_id, column).filter(
+                model.project_id == project_id).all() if ext}
+
+
+def file_item_by_prefix(project_id: str, kind: str, external_id: str,
+                        old_text, new_text) -> int | None:
+    """Re-file one item after its text was edited, if the prefix changed.
+
+    Returns the folder id it was filed into, or ``None`` when the edit did
+    not change the prefix (the item stays where it is, including where a
+    person moved it by hand).
+    """
+    from engine import folder_prefix as _fpx
+    model = _FOLDER_KINDS.get(kind)
+    if model is None or not _fpx.prefix_changed(old_text, new_text):
+        return None
+    folder_id = ensure_folder_path(project_id, list(_fpx.parse(new_text)))
+    if folder_id is None:
+        return None
+    with session_scope() as sess:
+        sess.query(model).filter(
+            model.project_id == project_id,
+            model.external_id == str(external_id),
+        ).update({model.folder_id: folder_id}, synchronize_session=False)
+    return folder_id
+
+
+def refile_from_prefixes(project_id: str, kind: str) -> dict:
+    """Apply the prefix rule to every stored item of ``kind``.
+
+    The explicit "Re-file from prefixes" action: a person asked for it, so it
+    files every prefixed item where its prefix says, including one moved by
+    hand. Items without a prefix are not touched.
+
+    Returns ``{"changed": [ids], "unchanged": n, "no_prefix": n}``.
+    """
+    from engine import folder_prefix as _fpx
+    model = _FOLDER_KINDS.get(kind)
+    if model is None:
+        raise FolderError(f"Unknown item kind: {kind}.")
+    texts = stored_prefix_texts(project_id, kind)
+    ids = _PathIds(project_id)
+    wanted: dict = {}
+    no_prefix = 0
+    for ext, text in texts.items():
+        path = _fpx.parse(text)
+        if not path:
+            no_prefix += 1
+            continue
+        folder_id = ids(path)
+        if folder_id is not None:
+            wanted[ext] = folder_id
+    changed: list[str] = []
+    unchanged = 0
+    if wanted:
+        with session_scope() as sess:
+            for row in sess.query(model).filter(
+                    model.project_id == project_id,
+                    model.external_id.in_(list(wanted))).all():
+                target = wanted.get(row.external_id)
+                if row.folder_id == target:
+                    unchanged += 1
+                    continue
+                row.folder_id = target
+                changed.append(row.external_id)
+    return {"changed": changed, "unchanged": unchanged,
+            "no_prefix": no_prefix}
+
+
 # ── Bug reports ────────────────────────────────────────────────────
 
 # PR-H: ``walkthrough`` + ``live_executor`` previously coerced to

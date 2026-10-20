@@ -914,7 +914,8 @@ def _make_bug_summary(tc_summary: str) -> str:
     :func:`_negative_clause_bug_summary` rather than stacking another
     "not" on top of it.
     """
-    s = tc_summary.strip().rstrip(".")
+    from engine import folder_prefix as _fpx
+    s = _fpx.strip_prefix(tc_summary).strip().rstrip(".")
     # Strip "Verify that" prefix (case-insensitive). The trailing
     # ``\s*`` accepts zero whitespace so a bare ``"Verify that"``
     # input collapses to the empty-input sentinel below rather than
@@ -955,7 +956,8 @@ def _make_bug_expected(tc_summary: str, tc_expected: str) -> str:
             exp = f"The feature should behave as specified: {exp}"
         return exp
     # Fallback from summary
-    s = tc_summary.strip()
+    from engine import folder_prefix as _fpx
+    s = _fpx.strip_prefix(tc_summary).strip()
     if s.startswith("Verify that "):
         s = s[len("Verify that "):]
     return f"The {s.rstrip('.')} should work as expected"

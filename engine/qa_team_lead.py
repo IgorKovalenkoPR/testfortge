@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from engine import folder_prefix as _fpx
+
 
 @dataclass
 class ReviewFinding:
@@ -296,7 +298,9 @@ def review_test_cases(test_cases: list, report: ReviewReport | None = None) -> t
 
         # Rule 1: Summary must start with "Verify that"
         summary = getattr(tc, "summary", "")
-        if summary and not summary.startswith("Verify that"):
+        # A "[Folder -> Sub]" prefix is not the opening words; the opener
+        # rule reads what follows it (engine/folder_prefix.py).
+        if summary and not _fpx.strip_prefix(summary).startswith("Verify that"):
             report.findings.append(ReviewFinding(
                 severity="Major", category="Passive Voice",
                 message=f"Summary does not start with 'Verify that'",
@@ -514,7 +518,8 @@ def review_checklist(checklist_items: list, report: ReviewReport | None = None) 
 
         # Rule 1: Objective must start with "Verify that"
         objective = getattr(item, "objective", "")
-        if objective and not objective.startswith("Verify that"):
+        if objective and not _fpx.strip_prefix(objective).startswith(
+                "Verify that"):
             report.findings.append(ReviewFinding(
                 severity="Major", category="Passive Voice",
                 message=f"Objective does not start with 'Verify that'",
@@ -591,7 +596,10 @@ def review_checklist(checklist_items: list, report: ReviewReport | None = None) 
 # ═══════════════════════════════════════════════════════════════════
 
 def _ensure_verify_that(text: str) -> str:
-    """Ensure text starts with 'Verify that'."""
+    """Ensure text starts with 'Verify that' (after any folder prefix)."""
+    path, body = _fpx.split(text)
+    if path:
+        return _fpx.with_prefix(_ensure_verify_that(body), path)
     t = text.strip()
 
     # Already correct

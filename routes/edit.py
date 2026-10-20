@@ -186,6 +186,25 @@ def _house_style(entity: str, changes: dict) -> dict:
     return out
 
 
+def _refile_after_edit(entity: str, project_id: str, entity_id: str,
+                       old_text, new_text) -> int | None:
+    """File an edited item by its ``[Folder -> Sub]`` prefix, if it changed.
+
+    Only a changed prefix moves the item: re-saving the same prefix leaves a
+    hand-made folder move alone (see ``engine.folder_prefix``). Best-effort —
+    the text edit has already landed and must not be reported as failed.
+    """
+    if _db.FOLDER_PREFIX_FIELD.get(entity) is None:
+        return None
+    try:
+        return _db.file_item_by_prefix(project_id, entity, entity_id,
+                                       old_text, new_text)
+    except Exception as exc:          # pragma: no cover — filing only
+        log.warning("filing %s %s by its prefix failed: %s",
+                    entity, entity_id, exc)
+        return None
+
+
 def register(app: Flask) -> None:
 
     @app.route("/api/edit/<entity>/<entity_id>", methods=["GET"])
@@ -256,6 +275,16 @@ def register(app: Flask) -> None:
         project_id = resolve_active_project(pin=False)
         actor = _perm.current_user_id()
 
+        # The text before the edit, to tell whether its folder prefix changed.
+        prefix_field = _db.FOLDER_PREFIX_FIELD.get(entity)
+        old_text = None
+        if prefix_field and prefix_field in changes:
+            try:
+                before = _editable.get(entity, project_id, entity_id)
+                old_text = (before or {}).get(prefix_field) or ""
+            except Exception:         # the patch below reports the real error
+                old_text = None
+
         try:
             item = _editable.patch(entity, project_id, entity_id, changes,
                                    expected_version=expected_version,
@@ -305,8 +334,15 @@ def register(app: Flask) -> None:
         _invalidate(project_id)
         if entity == "checklist_item" and "section" in changes:
             _regroup_after_section_change(project_id, entity_id)
-        return jsonify({"entity": entity, "item": item,
-                        "warnings": _house_style(entity, changes)})
+        body = {"entity": entity, "item": item,
+                "warnings": _house_style(entity, changes)}
+        if old_text is not None:
+            folder_id = _refile_after_edit(entity, project_id, entity_id,
+                                           old_text, changes.get(prefix_field))
+            if folder_id is not None:
+                _invalidate(project_id)
+                body["folder_id"] = folder_id
+        return jsonify(body)
 
     # ── Whole items: create and delete (E4.3) ─────────────────────
     #
@@ -362,7 +398,15 @@ def register(app: Flask) -> None:
         _invalidate(project_id)
         if entity == "checklist_item":
             item = _number_new_checklist_item(project_id, item, actor)
-        return jsonify({"entity": entity, "item": item}), 201
+        body = {"entity": entity, "item": item}
+        prefix_field = _db.FOLDER_PREFIX_FIELD.get(entity)
+        if prefix_field and item.get("id"):
+            folder_id = _refile_after_edit(entity, project_id, item["id"], "",
+                                           values.get(prefix_field))
+            if folder_id is not None:
+                _invalidate(project_id)
+                body["folder_id"] = folder_id
+        return jsonify(body), 201
 
     @app.route("/api/edit/<entity>/<entity_id>", methods=["DELETE"])
     @_perm.require_role("user")

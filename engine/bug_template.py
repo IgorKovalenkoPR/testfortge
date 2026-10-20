@@ -329,7 +329,8 @@ def extract_component(*, tc_section: str = "",
         except Exception:
             pass
     if tc_summary:
-        words = re.sub(r"^Verify that\s+", "", tc_summary,
+        from engine import folder_prefix as _fpx
+        words = re.sub(r"^Verify that\s+", "", _fpx.strip_prefix(tc_summary),
                        flags=re.I).split()
         if words:
             return " ".join(words[:3]).rstrip(",.:;").title()
@@ -474,7 +475,9 @@ def build_summary(*, component: str, defect_class: str,
     # Strip "Verify that " — TC summaries usually embed it but it reads
     # awkward in narrative description ("While exercising the Verify
     # that the homepage...").
-    scenario = re.sub(r"^Verify that\s+", "", tc_summary or "",
+    from engine import folder_prefix as _fpx
+    scenario = re.sub(r"^Verify that\s+", "",
+                      _fpx.strip_prefix(tc_summary or ""),
                       flags=re.I).strip().rstrip(".")
     if not scenario:
         scenario = "scenario"

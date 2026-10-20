@@ -247,38 +247,66 @@ def _run_site_aware(url: str, pid: str | None,
     }
 
 
+def _file_imported(incoming: list[dict], kind: str) -> None:
+    """File uploaded items by their ``[Folder -> Sub]`` prefix.
+
+    Only where the prefix is new or differs from what that id already
+    carries, so re-uploading a file does not undo a move somebody made since.
+    Unprefixed items keep the current behaviour (their old folder, or
+    Unfiled). Best-effort: a failure leaves the import unfiled, not unsaved.
+    """
+    pid = ensure_active_project()
+    if not pid or not incoming:
+        return
+    try:
+        stamped = _db.file_by_prefix(
+            pid, incoming, kind,
+            previous=_db.stored_prefix_texts(pid, kind))
+        if stamped:
+            _log.info("import: %d %s(s) filed by prefix", stamped, kind)
+    except Exception as exc:  # pragma: no cover — never block an import
+        _log.warning("filing imported %s items by prefix failed: %s",
+                     kind, exc)
+
+
 def _file_into_folders(pid: str, pages: list[dict], tc_dicts: list[dict],
                        cl_dicts: list[dict]) -> None:
-    """Create the navigation folder tree and stamp ``folder_id`` on the
-    generated items (owner request, 2026-10-19).
+    """Write each generated item's ``[Folder -> Sub]`` prefix and file it
+    by that prefix (owner rules, 2026-10-19 and 2026-10-20).
 
     Header → its menus → their pages, then Homepage and Footer — the
-    high-level checklist a tester starts from, as folders. Every folder is
-    created even when nothing lands in it yet, because the point is a place
-    to put the cases and checks people add later. Folders are reused by name,
-    so regenerating does not duplicate the tree.
+    high-level checklist a tester starts from, as folders. The navigation
+    plan decides each item's path; the path is written into the summary /
+    objective as a prefix, and ``db.file_by_prefix`` files from the prefix —
+    the one mechanism import, inline edits and re-filing use too.
+
+    Every folder of the plan is created even when nothing lands in it yet,
+    because the point is a place to put the cases and checks people add
+    later. Folders are reused by name, so regenerating does not duplicate the
+    tree. An item that already opens with a prefix (an author wrote one)
+    keeps it.
 
     Best-effort: a failure here leaves the pack Unfiled, never unsaved.
     """
     try:
         from engine import folder_plan as _fp
+        from engine import folder_prefix as _fpx
         plan = _fp.build_plan(pages)
         page_urls = [p.get("url") for p in pages if p.get("url")]
         tc_paths, cl_paths = _fp.file_items(plan, tc_dicts, cl_dicts,
                                             page_urls)
-        wanted = list(plan.paths)
-        for path in list(tc_paths.values()) + list(cl_paths.values()):
-            if path not in wanted:
-                wanted.append(path)
-        ids = {}
-        for path in wanted:
-            ids[path] = _db.ensure_folder_path(pid, list(path))
-        for index, path in tc_paths.items():
-            tc_dicts[index]["folder_id"] = ids.get(path)
-        for index, path in cl_paths.items():
-            cl_dicts[index]["folder_id"] = ids.get(path)
-        _log.info("folders: %d in the tree, %d case(s) and %d check(s) filed",
-                  len(wanted), len(tc_paths), len(cl_paths))
+        for path in plan.paths:
+            _db.ensure_folder_path(pid, list(path))
+        for dicts, paths, field in ((tc_dicts, tc_paths, "summary"),
+                                    (cl_dicts, cl_paths, "objective")):
+            for index, path in paths.items():
+                d = dicts[index]
+                if not _fpx.parse(d.get(field)):
+                    d[field] = _fpx.with_prefix(d.get(field), path)
+        filed = (_db.file_by_prefix(pid, tc_dicts, "test_case")
+                 + _db.file_by_prefix(pid, cl_dicts, "checklist_item"))
+        _log.info("folders: %d in the plan, %d item(s) filed by prefix",
+                  len(plan.paths), filed)
     except Exception as exc:  # pragma: no cover — never block generation
         _log.warning("filing generated items into folders failed: %s", exc)
 
@@ -1262,6 +1290,7 @@ def register(app: Flask) -> None:
             # duplicates looked like new work.
             from engine import import_preview
             incoming, skipped = import_preview.dedup(existing, incoming)
+        _file_imported(incoming, "test_case")
         merged = existing + incoming
         try:
             _store_test_cases(merged, expected_version=pack_v)
@@ -1773,6 +1802,7 @@ def register(app: Flask) -> None:
         if mode == "append":
             from engine import import_preview
             incoming, skipped = import_preview.dedup(existing, incoming)
+        _file_imported(incoming, "checklist_item")
         merged = existing + incoming
         try:
             _store_checklist(merged, expected_version=pack_v)
