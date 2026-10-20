@@ -8,6 +8,9 @@
   * POST   /api/folders/assign          — file items {kind, ids, folder_id}
   * POST   /api/folders/refile          — file every item of {kind} by its
                                           "[Folder -> Sub]" summary prefix
+  * POST   /api/folders/attribute       — put the project into its WBS
+                                          {apply?, include_edited?}; a
+                                          preview unless apply is true
 
 One tree per project, shared by both kinds of item, so "Pricing page" holds
 that page's cases and its checks (owner decision, 2026-10-19).
@@ -226,3 +229,31 @@ def register(app: Flask) -> None:
                     "ids": [None, result["changed"][:50]]})
         _invalidate(project_id)
         return jsonify({**result, **snapshot(project_id)})
+
+    @app.route("/api/folders/attribute", methods=["POST"])
+    @_perm.require_role("user")
+    def api_folders_attribute():
+        """"Attribute to WBS" (engine/wbs_attribution.py).
+
+        Without ``apply`` it is a preview: counts per node, nothing written.
+        With it, every item is filed under its WBS node and its prefix
+        rewritten to match; rows a person edited are skipped unless
+        ``include_edited`` is set.
+        """
+        payload, project_id, error = _write_shell()
+        if error is not None:
+            return error
+        from engine import wbs_attribution as _attr
+        include_edited = bool(payload.get("include_edited"))
+        planned = _attr.plan(project_id, include_edited=include_edited)
+        if not planned.get("ok"):
+            return _bad("This project has no site structure yet. Generate "
+                        "from the site's URL once, then attribute.")
+        summary = _attr.summarise(project_id, planned)
+        if not payload.get("apply"):
+            return jsonify({"preview": True, **summary})
+        result = _attr.apply(project_id, planned,
+                             actor=_perm.current_user_id())
+        _invalidate(project_id)
+        return jsonify({"preview": False, **summary, **result,
+                        **snapshot(project_id)})

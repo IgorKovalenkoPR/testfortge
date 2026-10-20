@@ -70,6 +70,10 @@ class TestCase:
     # None to leave it where it was / Unfiled. Never read back from the
     # database into this field — see ``db._place_in_folder``.
     folder_id: int | None = None
+    # Where the generator made it — ``{"page_url", "node", "region",
+    # "url_pattern"}`` — for its place in the product WBS (engine/wbs.py).
+    # Consumed by ``wbs.stamp`` before the pack is saved; never stored.
+    wbs_hint: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -92,6 +96,7 @@ class ChecklistItem:
     status: str = "Unchecked"
     testing_type: str = "Functional"  # see TestCase.testing_type
     folder_id: int | None = None      # see TestCase.folder_id
+    wbs_hint: dict = field(default_factory=dict)  # see TestCase.wbs_hint
 
 
 # ── Section prefix mapping ──────────────────────────────────────
@@ -1204,7 +1209,15 @@ def _check_to_testcase(check, *, category: str, section_num: int,
         testing_type=_testing_type_label(category),
         url_pattern=check.url_pattern,
         trigger="walkthrough_url_match" if check.url_pattern else "manual",
+        wbs_hint=_check_hint(check),
     )
+
+
+def _check_hint(check) -> dict:
+    """A strategy check's WBS hint: the node the model chose, its URL."""
+    hint = {"node": str(getattr(check, "wbs_node", "") or ""),
+            "url_pattern": str(getattr(check, "url_pattern", "") or "")}
+    return {k: v for k, v in hint.items() if v}
 
 
 def _check_to_checklist(check, *, category: str, idx: int) -> ChecklistItem:
@@ -1219,6 +1232,7 @@ def _check_to_checklist(check, *, category: str, idx: int) -> ChecklistItem:
         category=_category_label(category),
         priority=check.priority,
         status="Unchecked",
+        wbs_hint=_check_hint(check),
     )
     try:
         item.testing_type = _testing_type_label(category)
@@ -1304,6 +1318,9 @@ def _authored_to_testcase(case, *, section_num: int, idx: int) -> TestCase:
         testing_type=case.testing_type or "Functional",
         url_pattern=case.url_pattern,
         trigger="walkthrough_url_match" if case.url_pattern else "manual",
+        wbs_hint={k: v for k, v in (
+            ("page_url", getattr(case, "page_url", "")),
+            ("node", getattr(case, "wbs_node", ""))) if v},
     )
 
 

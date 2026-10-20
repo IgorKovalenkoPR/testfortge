@@ -270,6 +270,32 @@
        SSRF-blocked host) flash a yellow banner; generation
        continues on whatever pages succeeded plus generic
        ISTQB-knowledge fallback.</p>
+    <h3>Folders — the product structure (WBS)</h3>
+    <p>Before generating, TestForTge breaks the site down the way a test
+       plan does — a <em>work breakdown structure</em>: the
+       <strong>Header</strong> and <strong>Footer</strong>, the
+       <strong>Homepage</strong>, one module per header menu
+       (<em>Services</em>), its pages (<em>Web Development</em>), and a
+       submodule where the menu groups pages (<em>Solutions → Healthcare
+       Solutions → Pharma App</em>). It is read from the site's own
+       navigation; nothing is invented. Every generated case and check opens
+       with its place in that tree and sits in the matching folder:</p>
+    <p><code>[Services -&gt; Web Development] Verify that …</code></p>
+    <ul>
+      <li>Each item goes to the page it was written from — the page whose
+          form or section it covers. Checks that apply to the whole site
+          (SEO, security, performance, responsiveness) go to
+          <strong>Cross-cutting</strong>, which is kept small.</li>
+      <li>Rename or move a folder and the next generation still files into
+          it; the prefix follows the folder's new path.</li>
+      <li><strong>Attribute to WBS</strong> (in the Folders panel) puts a
+          project generated earlier into the structure: it shows a preview
+          of where everything goes, then rewrites only the prefixes and
+          folders — never the wording. Items a person edited are skipped
+          unless you include them.</li>
+      <li>Typing a prefix yourself still works: a changed
+          <code>[Folder -&gt; Subfolder]</code> moves the item.</li>
+    </ul>
     <h3>TC editor — walkthrough binding</h3>
     <p>Each card on /test-cases has an inline editor for two
        fields that drive the walkthrough mode in Test Execution:</p>

@@ -535,6 +535,57 @@
         });
     }
 
+    // "Attribute to WBS" (routes/folders.py api_folders_attribute): a
+    // preview of where everything would go, then an explicit Apply.
+    const attrBtn = panel.querySelector('[data-folder-attribute]');
+    const attrBox = panel.querySelector('[data-folder-attr]');
+    if (attrBtn && attrBox) {
+        const head = attrBox.querySelector('[data-folder-attr-head]');
+        const list = attrBox.querySelector('[data-folder-attr-list]');
+        const edited = attrBox.querySelector('[data-folder-attr-edited]');
+        const body = apply => ({ apply: apply, include_edited: !!(edited && edited.checked) });
+
+        async function preview() {
+            try {
+                const result = await call('POST', '/api/folders/attribute', body(false));
+                const mine = (result.kinds || {})[kind] || {};
+                head.textContent = t('attr_head', {
+                    changed: mine.changed || 0, total: mine.total || 0,
+                    skipped: mine.skipped_edited || 0,
+                }) + (mine.by_model ? ' ' + t('attr_model', { n: mine.by_model }) : '');
+                list.textContent = '';
+                (mine.by_node || []).slice(0, 12).forEach(([path, n]) => {
+                    const li = document.createElement('li');
+                    li.textContent = path + ' — ' + n;
+                    list.appendChild(li);
+                });
+                attrBox.hidden = false;
+            } catch (err) {
+                status(err.message || t('error'), 'error');
+            }
+        }
+
+        attrBtn.addEventListener('click', preview);
+        if (edited) edited.addEventListener('change', preview);
+        attrBox.querySelector('[data-folder-attr-cancel]').addEventListener('click', () => {
+            attrBox.hidden = true;
+        });
+        attrBox.querySelector('[data-folder-attr-apply]').addEventListener('click', async () => {
+            try {
+                const result = await call('POST', '/api/folders/attribute', body(true));
+                const written = result.written || {};
+                status(t('attr_done', {
+                    n: (written.test_case || 0) + (written.checklist_item || 0),
+                    pruned: result.pruned_folders || 0,
+                }), 'ok');
+                // The summaries' prefixes changed too; the cards show text.
+                window.setTimeout(() => window.location.reload(), 900);
+            } catch (err) {
+                status(err.message || t('error'), 'error');
+            }
+        });
+    }
+
     // An item created by hand is filed into the folder being viewed, so it
     // does not vanish from a filtered page on the reload that follows. The
     // editors call this before they reload.

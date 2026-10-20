@@ -37,6 +37,12 @@ _logger = get_logger(__name__)
 # engine/qa_estimator.features_from_site_analysis was bumped in
 # parallel so the richer crawl actually surfaces as features.
 MAX_PAGES = 50          # max pages to fetch
+#: Region-link and drop-down caps. The WBS (engine/wbs.py) is built from
+#: these, so they have to hold a real mega-menu: qarea.com's header has
+#: ~95 links and its Solutions menu ~40 entries (measured 2026-10-20); the
+#: old caps of 60 and 20 cut the AI submenu and the whole Resources menu.
+MAX_REGION_LINKS = 200
+MAX_MENU_CHILDREN = 80
 FETCH_TIMEOUT = 8       # seconds per request
 MAX_BODY_KB = 512       # truncate the DECODED document
 # Wire-bytes cap, applied before decompression. Deliberately smaller than
@@ -829,19 +835,19 @@ class _PageParser(HTMLParser):
                 elif len(self._li_stack) > 1 or top["label"]:
                     in_menu = True
                     if text != top["label"] and text not in top["children"] \
-                            and len(top["children"]) < 20:
+                            and len(top["children"]) < MAX_MENU_CHILDREN:
                         top["children"].append(text)
 
         sink = (self.header_links if self._region == "header"
                 else self.footer_links)
-        if len(sink) >= 60:
+        if len(sink) >= MAX_REGION_LINKS:
             return
         if not any(l["text"] == text and l["href"] == href for l in sink):
             # ``in_menu`` says this link is reachable only by opening a
             # drop-down. The checklist covers those with one row per menu,
             # so it must be able to tell them from the top-level links it
             # gives a row each. Deriving it downstream from the children
-            # lists does not work: those are capped at 20 per menu, and a
+            # lists does not work: those are capped (MAX_MENU_CHILDREN), and a
             # mega-menu overflows the cap.
             sink.append({"text": text, "href": href, "in_menu": in_menu})
 
@@ -865,7 +871,7 @@ class _PageParser(HTMLParser):
                     self.nav_groups.append({
                         "region": self._region,
                         "label": frame["label"],
-                        "children": frame["children"][:20],
+                        "children": frame["children"][:MAX_MENU_CHILDREN],
                     })
         if self._region_nest and tag_lower == self._region_tag:
             self._region_nest -= 1

@@ -54,6 +54,28 @@
           title="{{ t.get('folders_refile_hint', 'File every item whose summary opens with [Folder -> Subfolder] into that folder, creating missing folders') }}">
     {{ t.get('folders_refile', 'Re-file from [Folder] prefixes') }}
   </button>
+  <button type="button" class="btn btn-sm btn-primary folder-attribute"
+          data-folder-attribute
+          title="{{ t.get('folders_attribute_hint', 'File every item under the page or module of the site it tests, and rewrite its [Module -> Page] prefix to match. Shows a preview first.') }}">
+    {{ t.get('folders_attribute', 'Attribute to WBS') }}
+  </button>
+  <div class="folder-attr" data-folder-attr hidden role="region"
+       aria-label="{{ t.get('folders_attribute', 'Attribute to WBS') }}">
+    <p class="folder-attr-head" data-folder-attr-head></p>
+    <ul class="folder-attr-list" data-folder-attr-list></ul>
+    <label class="folder-attr-edited">
+      <input type="checkbox" data-folder-attr-edited>
+      {{ t.get('folders_attr_include_edited', 'Include items a person edited') }}
+    </label>
+    <div class="folder-attr-actions">
+      <button type="button" class="btn btn-sm btn-primary" data-folder-attr-apply>
+        {{ t.get('folders_attr_apply', 'Apply') }}
+      </button>
+      <button type="button" class="btn btn-sm btn-secondary" data-folder-attr-cancel>
+        {{ t.get('folders_attr_cancel', 'Cancel') }}
+      </button>
+    </div>
+  </div>
   <p class="folder-hint">
     {{ t.get('folders_hint', 'Drag an item or a folder onto a folder to move it. Deleting a folder keeps its contents: they move up one level.') }}
   </p>
@@ -78,6 +100,9 @@
       "in_folder": t.get('folders_in_folder', 'Folder'),
       "refile_confirm": t.get('folders_refile_confirm', 'File every item whose summary opens with [Folder -> Subfolder] into that folder? Items moved by hand follow their prefix too; items without a prefix stay where they are.'),
       "refiled": t.get('folders_refiled', 'Re-filed {n} item(s); {skipped} without a prefix left as they are.'),
+      "attr_head": t.get('folders_attr_head', 'Preview: {changed} of {total} item(s) move into the site structure. {skipped} edited item(s) skipped.'),
+      "attr_model": t.get('folders_attr_model', '{n} placed by the model.'),
+      "attr_done": t.get('folders_attr_done', 'Attributed {n} item(s); removed {pruned} empty old folder(s).'),
   } | tojson }}</script>
 </aside>
 {%- endmacro %}

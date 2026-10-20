@@ -10,25 +10,19 @@ navigation. Covered here:
   * the HTTP surface in routes/folders.py — including CSRF actually on, and
     a folder of another project being unreachable;
   * the page markup the script relies on;
-  * engine/folder_plan.py on the real testfort.com header (fetched
-    2026-10-19, trimmed to the <header>): synthetic menus have hidden
-    live-page defects in this codebase before, and this one did too — the
-    mega-menu used the whole folder budget before the top-level links, and a
-    review quote came through as a "page".
+  * the generated tree is the product WBS now — see tests/test_wbs.py,
+    which runs on the same real testfort.com header and on a real
+    qarea.com crawl.
 """
 from __future__ import annotations
 
 import secrets
-from dataclasses import asdict
-from pathlib import Path
 
 import pytest
 
 from engine import db
-from engine import folder_plan as fp
 
 _RUN = secrets.token_hex(4)
-_FIXTURE = Path(__file__).parent / "fixtures" / "testfort_header_2026-10-19.html"
 
 
 def _case(external_id, **overrides):
@@ -409,116 +403,3 @@ class TestPages:
         assert "js/folders.js" in body
         assert f'"name": "Header"' in body or '"name":"Header"' in body
         assert f'"id": {folder["id"]}' in body or f'"id":{folder["id"]}' in body
-
-
-# ── The generated tree ────────────────────────────────────────────────
-
-@pytest.fixture(scope="module")
-def testfort_page() -> dict:
-    from engine.site_crawler import _parse_page
-    html = _FIXTURE.read_text(encoding="utf-8")
-    return asdict(_parse_page(html, "https://testfort.com/", "testfort.com"))
-
-
-class TestFolderPlanOnRealMarkup:
-
-    def test_header_menus_pages_then_homepage_and_footer(self,
-                                                         testfort_page):
-        plan = fp.build_plan([testfort_page])
-        assert plan.paths[0] == fp.HEADER
-        assert plan.paths[-2:] == [fp.HOMEPAGE, fp.FOOTER]
-        assert ("Header", "Why Us") in plan.paths
-        assert ("Header", "Why Us", "Pricing & Business Models page") \
-            in plan.paths
-        assert ("Header", "Services", "Manual Testing page") in plan.paths
-        assert ("Header", "Resources", "Blog page") in plan.paths
-
-    def test_promotions_in_the_mega_menu_are_not_pages(self, testfort_page):
-        names = [p[-1] for p in fp.build_plan([testfort_page]).paths]
-        assert not any("impressed" in n or "\n" in n for n in names), names
-        assert not any("LuxiEdge" in n for n in names), names
-        assert all(len(n) <= fp._PAGE_LABEL_MAX + len(" page")
-                   for n in names), names
-
-    def test_links_map_to_their_page_folders(self, testfort_page):
-        plan = fp.build_plan([testfort_page])
-        assert plan.for_page("https://testfort.com/") == fp.HOMEPAGE
-        assert plan.for_page("https://testfort.com/careers/") == (
-            "Header", "Why Us", "Careers page")
-        assert plan.primary == fp.HOMEPAGE
-
-    def test_a_plain_top_level_link_is_not_starved_by_a_mega_menu(self):
-        page = {"url": "https://ex.com/", "header_links":
-                [{"text": f"Item {i}", "href": f"/i{i}", "in_menu": True}
-                 for i in range(200)]
-                + [{"text": "Contact us", "href": "/contact",
-                    "in_menu": False}],
-                "nav_groups": [{"region": "header", "label": "Big",
-                                "children": [f"Item {i}"
-                                             for i in range(200)]}]}
-        plan = fp.build_plan([page])
-        assert ("Header", "Contact us page") in plan.paths
-        pages = [p for p in plan.paths if p[-1].endswith(" page")]
-        assert len(pages) == fp.MAX_PAGE_FOLDERS
-
-    def test_no_header_still_gives_homepage_and_footer(self):
-        plan = fp.build_plan([{"url": "https://ex.com/"}])
-        assert plan.paths == [fp.HEADER, fp.HOMEPAGE, fp.FOOTER]
-
-
-class TestFiling:
-
-    @pytest.fixture
-    def plan(self, testfort_page):
-        careers = {"url": "https://testfort.com/careers", "title": "Careers"}
-        return fp.build_plan([testfort_page, careers])
-
-    def test_checklist_sections(self, plan):
-        assert plan.for_checklist({"section": "Header"}) == fp.HEADER
-        assert plan.for_checklist({"section": "Footer"}) == fp.FOOTER
-        assert plan.for_checklist({"section": "Page Content"}) == fp.HOMEPAGE
-        assert plan.for_checklist(
-            {"section": "Page Content — Careers"}) == (
-                "Header", "Why Us", "Careers page")
-        assert plan.for_checklist(
-            {"section": "Page Content — Nowhere"}) == fp.GENERAL
-        # An authored section name belongs to the primary surface.
-        assert plan.for_checklist({"section": "Hero banner"}) == fp.HOMEPAGE
-
-    def test_test_cases_by_url_pattern_then_by_name(self, plan):
-        urls = ["https://testfort.com/", "https://testfort.com/careers"]
-        assert plan.for_test_case({"url_pattern": "*/careers*"}, urls) == (
-            "Header", "Why Us", "Careers page")
-        # Matching every page says nothing about which one.
-        assert plan.for_test_case({"url_pattern": "*",
-                                   "section": "Security"}, urls) == fp.GENERAL
-        assert plan.for_test_case({"section": "Footer links"}, urls) \
-            == fp.FOOTER
-        assert plan.for_test_case({"section": "Blog grid"}, urls) == (
-            "Header", "Resources", "Blog page")
-
-    def test_generation_creates_the_tree_once_and_stamps_items(
-            self, project, testfort_page):
-        from routes.generation import _file_into_folders
-        tcs = [_case("SA1_001", url_pattern="*/careers*"),
-               _case("SA1_002", section="Security")]
-        cls = [_item("HDR_001"), _item("CNT_001", "Page Content")]
-        pages = [testfort_page,
-                 {"url": "https://testfort.com/careers", "title": "Careers"}]
-
-        _file_into_folders(project, pages, tcs, cls)
-        count = len(db.list_folders(project))
-        _file_into_folders(project, pages, [dict(t) for t in tcs],
-                           [dict(c) for c in cls])
-
-        assert len(db.list_folders(project)) == count
-        by_id = {f["id"]: f for f in db.list_folders(project)}
-        assert by_id[tcs[0]["folder_id"]]["name"] == "Careers page"
-        assert by_id[tcs[1]["folder_id"]]["name"] == "General"
-        assert by_id[cls[0]["folder_id"]]["name"] == "Header"
-        assert by_id[cls[1]["folder_id"]]["name"] == "Homepage"
-        assert all(f["source"] == "auto" for f in by_id.values())
-
-        db.save_test_cases(project, tcs)
-        assert db.load_folder_assignments(project, "test_case")[
-            "SA1_001"] == tcs[0]["folder_id"]
