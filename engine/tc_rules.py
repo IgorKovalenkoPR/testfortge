@@ -928,7 +928,7 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                     section, len(grid_cases), MAX_CASES_PER_GRID,
                     MAX_CASES_PER_GRID)
                 grid_cases = grid_cases[:MAX_CASES_PER_GRID]
-            _from_page(grid_cases, page)
+            _from_page(grid_cases, page, "grid")
             out.extend(grid_cases)
 
         for index, form in enumerate(page.get("forms") or [], start=1):
@@ -983,8 +983,8 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                     section, len(field_cases), max(budget, 0),
                     MAX_CASES_PER_FORM)
                 field_cases = field_cases[:max(budget, 0)]
-            _from_page(form_cases, page)
-            _from_page(field_cases, page)
+            _from_page(form_cases, page, "form")
+            _from_page(field_cases, page, "form")
             out.extend(form_cases)
             out.extend(field_cases)
 
@@ -1144,8 +1144,11 @@ def enumerate_page_surfaces(pages: list[dict]) -> list[AuthoredCase]:
     return out
 
 
-def _from_page(cases: list, page: dict) -> None:
-    """Record the page a case was enumerated on — its place in the WBS.
+def _from_page(cases: list, page: dict, surface: str = "page") -> None:
+    """Record the page a case was enumerated on — its place in the WBS —
+    and what kind of surface it covers (``form``, ``grid``, ``page``): a
+    page carrying a real form may hold more cases than the coverage band
+    allows the rest (engine.wbs_baseline.balance).
 
     Not ``url_pattern``: that one opts the case into the walkthrough runner,
     which is a separate decision from where the case is filed.
@@ -1154,6 +1157,8 @@ def _from_page(cases: list, page: dict) -> None:
     for case in cases:
         if not getattr(case, "page_url", ""):
             case.page_url = url
+        if not getattr(case, "surface", ""):
+            case.surface = surface
 
 
 def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:

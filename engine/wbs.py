@@ -87,6 +87,30 @@ _STRUCTURE_HEADER = re.compile(r"\b(header|navigation|nav bar|menu)\b", re.I)
 _STRUCTURE_FOOTER = re.compile(r"\bfooter\b", re.I)
 _LAYOUT_SECTION = re.compile(r"\b(content\s*&\s*layout|layout)\b", re.I)
 _FORM_SECTION = re.compile(r"\bforms?\b", re.I)
+_SEARCH_SECTION = re.compile(r"\bsearch\b", re.I)
+_SEARCH_FIELD = re.compile(r"^(q|s|search|query|keywords?|term)$", re.I)
+#: A form on at least this share of crawled pages is chrome (as in tc_rules).
+_CHROME_SHARE = 0.4
+
+
+def _is_search_form(form: dict) -> bool:
+    fields = [f for f in (form or {}).get("fields") or [] if isinstance(f, dict)]
+    return any(str(f.get("type") or "").lower() == "search"
+               or _SEARCH_FIELD.match(str(f.get("name") or "")) for f in fields)
+
+
+def _search_home(wbs: "Wbs", pages: list[dict], base: str) -> str:
+    """The node the site's search control belongs to (see ``search_node``)."""
+    holders = [p for p in pages
+               if any(_is_search_form(f) for f in p.get("forms") or [])]
+    if not holders:
+        return ""
+    if len(pages) >= 3 and len(holders) >= _CHROME_SHARE * len(pages):
+        return HEADER
+    first = str(holders[0].get("url") or "")
+    if norm_path(first, base) == "/":
+        return HOME
+    return wbs.node_for_url(first) or ""
 _PAGE_SECTION = re.compile(r"^\s*(?:page(?: content)?)\s*[:—–-]\s*(.+)$", re.I)
 
 
@@ -206,6 +230,10 @@ class Wbs:
     #: The node of the first crawled page carrying a form — where generic
     #: form checks ("Forms & Input") are exercised. "" when there is none.
     primary_form: str = ""
+    #: Where the site's search control lives: the Header when one search
+    #: form repeats across the site (chrome), the page that carries it
+    #: otherwise, "" when the crawl found none.
+    search_node: str = ""
     #: ``site`` — read from a crawl; ``text`` — read from a description.
     mode: str = "site"
     #: Text mode: a requirement line (folded) → the heading it sits under.
@@ -335,6 +363,7 @@ class Wbs:
                 "by_title": dict(self.by_title),
                 "by_label": dict(self.by_label),
                 "primary_form": self.primary_form,
+                "search_node": self.search_node,
                 "mode": self.mode,
                 "by_line": dict(self.by_line)}
 
@@ -358,6 +387,8 @@ class Wbs:
                              if v in wbs.nodes})
         form = str(data.get("primary_form") or "")
         wbs.primary_form = form if form in wbs.nodes else ""
+        search = str(data.get("search_node") or "")
+        wbs.search_node = search if search in wbs.nodes else ""
         wbs.by_line.update({str(k): str(v) for k, v in
                             (data.get("by_line") or {}).items()
                             if v in wbs.nodes})
@@ -604,6 +635,7 @@ def build_wbs(pages: list[dict]) -> Wbs:
             wbs.primary_form = HOME if key == "/" else (
                 wbs.node_for_url(str(page.get("url") or "")) or "")
             break
+    wbs.search_node = _search_home(wbs, pages, base)
 
     # 5. Crawled pages: map to the nearest node; only orphans are listed.
     other_budget = [MAX_OTHER_PAGES]
@@ -736,6 +768,10 @@ def _attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
         return HOME
     if _FORM_SECTION.search(section) and wbs.primary_form:
         return wbs.primary_form
+    # Search templates belong where the search control is: the Header for
+    # a site-wide search box (dou.ua: one form on 47 of 49 pages).
+    if _SEARCH_SECTION.search(section) and wbs.search_node:
+        return wbs.search_node
 
     if wbs.mode == "text":
         # A description has no pages to point at; what an item says about
@@ -757,7 +793,9 @@ def _attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
     area = _clean_heading(section.split("—")[0])
     if wbs.mode == "text" and area and not _GENERIC_AREA.match(area):
         # No node names this area: the area is a module of its own.
-        node = wbs.add(WbsNode(f"text:{_slug(area)}", area, "module"))
+        # Kind "area": made on demand from a generator's own section name,
+        # not declared by the document — not a leaf the baseline owes.
+        node = wbs.add(WbsNode(f"text:{_slug(area)}", area, "area"))
         _alias_labels(wbs, node)
         return node.id
     return wbs.cross_cutting("General")
@@ -799,6 +837,11 @@ def stamp(wbs: Wbs, folder_for, dicts: list, kind: str, *,
         d[field_name] = _fpx.with_prefix(d.get(field_name), path)
         if folder_id is not None:
             d["folder_id"] = folder_id
+        # For engine.wbs_baseline.balance, which removes both before save.
+        d["_wbs_node"] = node
+        surface = (d.get("wbs_hint") or {}).get("surface")
+        if surface:
+            d["_wbs_surface"] = surface
         d.pop("wbs_hint", None)
         counts[node] = counts.get(node, 0) + 1
     return counts

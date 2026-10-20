@@ -208,6 +208,8 @@ class AuthoredCase:
     #: summary prefix and the folder.
     page_url: str = ""
     wbs_node: str = ""
+    #: ``form`` / ``grid`` / ``page`` — the surface a rule enumerated it on.
+    surface: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

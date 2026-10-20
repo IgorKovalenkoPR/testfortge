@@ -211,8 +211,10 @@ class TestAttribute:
             "page_url": "https://qarea.com/careers"}}
         counts = W.stamp(qarea_tree, lambda n: (7, ("Company", "Careers")),
                          [d], "test_case")
+        # ``_wbs_node`` is for engine.wbs_baseline.balance, which removes it
+        # before the pack is saved.
         assert d == {"summary": "[Company -> Careers] Verify that x",
-                     "folder_id": 7}
+                     "folder_id": 7, "_wbs_node": "page:/careers"}
         assert sum(counts.values()) == 1
 
 

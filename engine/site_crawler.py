@@ -1434,6 +1434,39 @@ _CRAWL_CACHE: dict[str, tuple[float, "SiteAnalysis"]] = {}
 _CRAWL_CACHE_TTL = 300.0
 
 
+def _round_robin_seeds(page: "PageInfo", base_url: str) -> list[str]:
+    """The entry page's WBS pages, interleaved across its top-level nodes.
+
+    Breadth-first over the tree: the first page of every module, then the
+    second of every module, … Best-effort — a page the WBS cannot read
+    seeds nothing and the crawl keeps plain link order.
+    """
+    try:
+        from dataclasses import asdict
+        from urllib.parse import urljoin
+        from engine import wbs as _wbs
+        tree = _wbs.build_wbs([asdict(page)])
+    except Exception as exc:  # pragma: no cover — never block a crawl
+        _logger.debug("round-robin seeding skipped: %s", exc)
+        return []
+    lanes: list[list[str]] = []
+    for top in (n for n in tree.ordered() if n.parent is None):
+        lane, stack = [], [top.id]
+        while stack:                       # breadth-first inside a module
+            node = tree.nodes[stack.pop(0)]
+            if node.url and node.url != "/" and "#" not in node.url:
+                lane.append(node.url)
+            stack += [n.id for n in tree.ordered() if n.parent == node.id]
+        if lane:
+            lanes.append(lane)
+    seeds: list[str] = []
+    for depth in range(max((len(l) for l in lanes), default=0)):
+        for lane in lanes:
+            if depth < len(lane):
+                seeds.append(urljoin(base_url, lane[depth]))
+    return seeds
+
+
 def crawl_site(url: str) -> SiteAnalysis:
     """Crawl a website starting from *url* and return a SiteAnalysis.
 
@@ -1488,6 +1521,15 @@ def crawl_site(url: str) -> SiteAnalysis:
         page = _parse_page(html, current_url, base_domain)
         analysis.pages.append(page)
         analysis.all_page_urls.append(current_url)
+
+        # The entry page's navigation decides the order the budget is
+        # spent in: one page per module of its WBS, then the second of
+        # each, and so on — so no module's pages all fall past MAX_PAGES.
+        # Plain link order spent testfort.com's 50 pages on the first two
+        # mega-menus and never reached Resources, Contact or the footer
+        # pages (owner report, 2026-10-21).
+        if len(analysis.pages) == 1:
+            queue[:0] = _round_robin_seeds(page, current_url)
 
         # Enqueue internal links
         for link in page.links_internal:
