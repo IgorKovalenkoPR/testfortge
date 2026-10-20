@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
@@ -91,10 +92,56 @@ _PAGE_SECTION = re.compile(r"^\s*(?:page(?: content)?)\s*[:—–-]\s*(.+)$", re
 
 # ── text and URL helpers ─────────────────────────────────────────────
 
+#: Unicode categories that are decoration, not words: emoji and other
+#: pictographs (So), modifier symbols such as skin tones (Sk), private-use
+#: and unassigned code points. Letters of any script, digits, punctuation
+#: and math/currency signs stay.
+_DECORATION = {"So", "Sk", "Co", "Cs", "Cn"}
+#: Emoji glue: variation selectors, the zero-width joiner, the keycap mark.
+_EMOJI_GLUE = {"\ufe0e", "\ufe0f", "\u200d", "\u20e3"}
+
+
+#: "Show everything in this group" phrasing on a group's own landing link,
+#: in the languages the product is used in. Matched as a whole leading or
+#: trailing phrase only, so "Alliance" or "Allegro" are left alone.
+_SHOW_ALL_WORDS = (
+    r"(?:view|see|show|browse|explore)\s+all|all|"
+    r"(?:переглянути|дивитися|показати)\s+(?:усі|всі|все)|усі|всі|все|"
+    r"alle|tous|toutes|todos|todas|tutti|tutte|wszystkie")
+_SHOW_ALL_LEAD = re.compile(rf"^(?:{_SHOW_ALL_WORDS})\b[\s:–—-]*", re.I)
+_SHOW_ALL_TAIL = re.compile(rf"[\s:–—-]*\b(?:{_SHOW_ALL_WORDS})\s*[→»>]?$",
+                            re.I)
+
+
+def group_name(label: str, url: str = "") -> str:
+    """A submodule's name from its group's landing link.
+
+    The link reads "All Healthcare Solutions" / "Усі послуги" / "Healthcare
+    — view all"; the group is "Healthcare Solutions". The phrase goes; if
+    nothing is left, the group is named after its URL's last segment.
+    """
+    text = _SHOW_ALL_TAIL.sub("", _SHOW_ALL_LEAD.sub("", label or "")).strip()
+    if text and text.casefold() != (label or "").casefold():
+        return text[:1].upper() + text[1:]
+    if text:
+        return text
+    slug = (url or "").rstrip("/").rsplit("/", 1)[-1]
+    return re.sub(r"[-_]+", " ", slug).strip().capitalize()
+
+
+def strip_decoration(text) -> str:
+    """``"👍👎 Оцініть свою компанію"`` → ``"Оцініть свою компанію"``."""
+    kept = "".join(ch for ch in str(text or "")
+                   if ch not in _EMOJI_GLUE
+                   and unicodedata.category(ch) not in _DECORATION)
+    return re.sub(r"\s+", " ", kept).strip(" ·•|–—-")
+
+
 def label_of(text) -> str:
-    """The visible label: first non-empty line, collapsed, capped."""
+    """The visible label: first non-empty line, collapsed, capped, and
+    without the emoji or pictographs a menu decorates it with."""
     for line in str(text or "").splitlines():
-        line = re.sub(r"\s+", " ", line).strip()
+        line = strip_decoration(line)
         if line:
             return line
     return ""
@@ -169,7 +216,7 @@ class Wbs:
         if node.id in self.nodes:
             return self.nodes[node.id]
         # Prefix-safe: the folder name and the prefix must be one string.
-        node.name = _fpx.safe_name(node.name) or node.name
+        node.name = _fpx.safe_name(strip_decoration(node.name)) or node.name
         taken = {n.name.casefold() for n in self.nodes.values()
                  if n.parent == node.parent}
         name, n = node.name, 2
@@ -487,7 +534,9 @@ def build_wbs(pages: list[dict]) -> Wbs:
                 and wbs.nodes[node_id].kind == "page" \
                 and wbs.depth(node_id) < MAX_DEPTH \
                 and any(u.startswith(url + "/") for u in following):
-            wbs.nodes[node_id].kind = "submodule"
+            node = wbs.nodes[node_id]
+            node.kind = "submodule"
+            node.name = group_name(node.name, node.url) or node.name
             open_parent[module_id] = node_id
 
     # 2. Plain top-level links → a module each.

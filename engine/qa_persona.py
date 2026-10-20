@@ -227,6 +227,11 @@ def analyze_input(requirements: list[dict],
                     "has_video": bool(p.has_video),
                     "images_count": int(p.images_count or 0),
                     "links_internal_count": len(p.links_internal or []),
+                    # The header's own links: what "the primary
+                    # navigation" means. ``nav_links`` is every <nav> on
+                    # the page, a calendar widget's month switcher included.
+                    "header_links": list(getattr(p, "header_links", None)
+                                         or []),
                 })
 
             _CRAWLER_AUTHORITATIVE = {"auth", "search", "forms", "payment"}
@@ -654,6 +659,38 @@ def _localization_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
     return list(LOADER.get_test_cases("localization"))
 
 
+def _primary_nav_labels(pages: list[dict], limit: int = 8) -> list[str]:
+    """The labels of the site's primary navigation, in the order shown.
+
+    The entry page's top-level header links first — the bar a visitor
+    sees. Measured on dou.ua (2026-10-20): the entry page has no <nav>
+    element at all, and taking ``nav_links`` from whichever crawled page
+    had some produced "the documented sections: Місяць" — a calendar
+    widget. ``nav_links`` stays the fallback for a page with no header
+    region.
+    """
+    from engine.wbs import label_of
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def take(text) -> None:
+        label = label_of(text)
+        key = label.casefold()
+        if label and len(label) <= 40 and key not in seen:
+            seen.add(key)
+            out.append(label)
+
+    entry = pages[0] if pages else {}
+    for link in entry.get("header_links") or []:
+        if isinstance(link, dict) and not link.get("in_menu"):
+            take(link.get("text"))
+    if len(out) < 3:
+        for page in pages[:1] or []:
+            for text in page.get("nav_links") or []:
+                take(text)
+    return out[:limit]
+
+
 def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
     """Test cases anchored in real crawler data (titles, H1s, buttons, forms)."""
     cases: list[TCTemplate] = []
@@ -661,18 +698,7 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
     if not pages:
         return cases
 
-    top_nav = []
-    seen = set()
-    for p in pages:
-        for n in (p.get("nav_links") or [])[:6]:
-            n_norm = n.strip().lower()
-            if n_norm and n_norm not in seen and len(n) <= 40:
-                seen.add(n_norm)
-                top_nav.append(n.strip())
-            if len(top_nav) >= 8:
-                break
-        if len(top_nav) >= 8:
-            break
+    top_nav = _primary_nav_labels(pages)
     if top_nav:
         nav_str = " · ".join(top_nav)
         cases.append(TCTemplate(
