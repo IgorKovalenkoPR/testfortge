@@ -99,6 +99,9 @@ def tc_to_dict(tc: TestCase) -> dict:
         "gherkin":      getattr(tc, "gherkin", "") or "",
         # Set only by a generator that filed the case; None otherwise.
         "folder_id":    getattr(tc, "folder_id", None),
+        # Where the generator made it, for engine.wbs.stamp — consumed and
+        # removed before the pack is saved.
+        "wbs_hint":     dict(getattr(tc, "wbs_hint", None) or {}),
     }
 
 
@@ -117,6 +120,7 @@ def cl_to_dict(cl: ChecklistItem) -> dict:
         "item_num": getattr(cl, "item_num", "") or "",
         "depth": int(getattr(cl, "depth", 2) or 2),
         "folder_id": getattr(cl, "folder_id", None),
+        "wbs_hint": dict(getattr(cl, "wbs_hint", None) or {}),
     }
 
 

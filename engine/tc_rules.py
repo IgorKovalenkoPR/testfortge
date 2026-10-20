@@ -926,6 +926,7 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                     section, len(grid_cases), MAX_CASES_PER_GRID,
                     MAX_CASES_PER_GRID)
                 grid_cases = grid_cases[:MAX_CASES_PER_GRID]
+            _from_page(grid_cases, page)
             out.extend(grid_cases)
 
         for index, form in enumerate(page.get("forms") or [], start=1):
@@ -963,10 +964,24 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                     section, len(field_cases), max(budget, 0),
                     MAX_CASES_PER_FORM)
                 field_cases = field_cases[:max(budget, 0)]
+            _from_page(form_cases, page)
+            _from_page(field_cases, page)
             out.extend(form_cases)
             out.extend(field_cases)
 
     return out
+
+
+def _from_page(cases: list, page: dict) -> None:
+    """Record the page a case was enumerated on — its place in the WBS.
+
+    Not ``url_pattern``: that one opts the case into the walkthrough runner,
+    which is a separate decision from where the case is filed.
+    """
+    url = str(page.get("url") or "")
+    for case in cases:
+        if not getattr(case, "page_url", ""):
+            case.page_url = url
 
 
 def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:

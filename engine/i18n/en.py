@@ -2322,4 +2322,12 @@ TRANSLATIONS = {
     "folders_refile_hint": "File every item whose summary opens with [Folder -> Subfolder] into that folder, creating missing folders",
     "folders_refile_confirm": "File every item whose summary opens with [Folder -> Subfolder] into that folder? Items moved by hand follow their prefix too; items without a prefix stay where they are.",
     "folders_refiled": "Re-filed {n} item(s); {skipped} without a prefix left as they are.",
+    "folders_attribute": "Attribute to WBS",
+    "folders_attribute_hint": "File every item under the page or module of the site it tests, and rewrite its [Module -> Page] prefix to match. Shows a preview first.",
+    "folders_attr_include_edited": "Include items a person edited",
+    "folders_attr_apply": "Apply",
+    "folders_attr_cancel": "Cancel",
+    "folders_attr_head": "Preview: {changed} of {total} item(s) move into the site structure. {skipped} edited item(s) skipped.",
+    "folders_attr_model": "{n} placed by the model.",
+    "folders_attr_done": "Attributed {n} item(s); removed {pruned} empty old folder(s).",
 }

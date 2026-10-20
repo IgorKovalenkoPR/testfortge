@@ -4792,6 +4792,14 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .folder-move-row select { flex: 1 1 auto; min-width: 0; }
 .folder-hint { color: var(--text-subtle); font-size: 0.78em; margin: 10px 0 0; }
 .folder-refile { width: 100%; margin-top: 10px; white-space: normal; }
+.folder-attribute { width: 100%; margin-top: 6px; white-space: normal; }
+.folder-attr { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 0.82em; }
+.folder-attr[hidden] { display: none !important; }
+.folder-attr-head { margin: 0 0 6px; }
+.folder-attr-list { margin: 0 0 6px; padding-left: 18px; max-height: 220px; overflow: auto; }
+.folder-attr-edited { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.folder-attr-actions { display: flex; gap: 6px; }
 .folder-status { font-size: 0.82em; margin: 6px 0 0; min-height: 1em; }
 .folder-status-ok { color: var(--success); }
 .folder-status-error { color: var(--danger); }

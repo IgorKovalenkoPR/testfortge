@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from engine import db
-from engine import folder_plan as fp
+from engine import wbs as wbs_mod
 from engine import folder_prefix as fpx
 
 _RUN = secrets.token_hex(4)
@@ -153,9 +153,10 @@ class TestOnRealGeneratedSummaries:
                 if fpx.parse(c.objective)] == []
 
     def test_planned_prefixes_round_trip(self, real_checks, testfort_page):
-        plan = fp.build_plan([testfort_page])
+        tree = wbs_mod.build_wbs([testfort_page])
         for check in real_checks:
-            path = plan.for_checklist(asdict(check))
+            path = tree.path(wbs_mod.attribute(tree, asdict(check),
+                                               "objective"))
             prefixed = fpx.with_prefix(check.objective, path)
             assert fpx.parse(prefixed) == path, prefixed
             assert fpx.strip_prefix(prefixed) == check.objective
@@ -167,9 +168,10 @@ class TestOnRealGeneratedSummaries:
             self, real_checks, testfort_page):
         from engine.qa_team_lead import review_checklist
         from engine.testcase_generator import ChecklistItem
-        plan = fp.build_plan([testfort_page])
+        tree = wbs_mod.build_wbs([testfort_page])
         items = [ChecklistItem(**{**asdict(c), "objective": fpx.with_prefix(
-            c.objective, plan.for_checklist(asdict(c)))})
+            c.objective, tree.path(wbs_mod.attribute(tree, asdict(c),
+                                                     "objective")))})
             for c in real_checks]
         before = [i.objective for i in items]
         reviewed, report = review_checklist(items)
@@ -501,7 +503,7 @@ class TestUpload:
 
 class TestGeneration:
 
-    def test_generation_writes_the_prefix_and_files_by_it(self, project,
+    def test_generation_writes_the_wbs_prefix_and_files_by_it(self, project,
                                                           testfort_page):
         from routes.generation import _file_into_folders
         tcs = [_case("SA1_001", url_pattern="*/careers*"),
@@ -512,11 +514,14 @@ class TestGeneration:
                  {"url": "https://testfort.com/careers", "title": "Careers"}]
         _file_into_folders(project, pages, tcs, cls)
 
+        # The WBS decides (engine/wbs.py): the page the URL names, the
+        # site-wide topic, the chrome — and a prefix a writer guessed is
+        # replaced by the node's path rather than kept beside it.
         assert tcs[0]["summary"] == \
-            "[Header -> Why Us -> Careers page] Verify that SA1_001 works"
-        assert tcs[1]["summary"].startswith("[General] Verify that")
-        # An author's own prefix is kept, not replaced by the plan's.
-        assert tcs[2]["summary"].startswith("[Services -> Web Development]")
+            "[Why Us -> Careers] Verify that SA1_001 works"
+        assert tcs[1]["summary"].startswith(
+            "[Cross-cutting -> Security] Verify that")
+        assert tcs[2]["summary"] == "[Cross-cutting -> General] Verify that x"
         assert cls[0]["objective"].startswith("[Header] Verify that")
         assert cls[1]["objective"].startswith("[Homepage] Verify that")
         for d, field in ((tcs[0], "summary"), (tcs[2], "summary"),

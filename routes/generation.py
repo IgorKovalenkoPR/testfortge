@@ -178,8 +178,15 @@ def _run_site_aware(url: str, pid: str | None,
     if site_analysis is None:
         return None
     profile = recon_site(site_analysis)
-    strategy = build_strategy(profile)
+    # The product's WBS first (engine/wbs.py): every generator below writes
+    # into it, and the model-backed ones are handed its node ids.
+    from engine import wbs as _wbs
+    crawl_pages = [_page_to_dict(pg)
+                   for pg in (getattr(site_analysis, "pages", None) or [])]
+    wbs = _wbs.build_wbs(crawl_pages)
+    strategy = build_strategy(profile, wbs_lines=wbs.prompt_lines())
     artifacts = _build_artifacts(url, custom_prompt, raw_lines, site_analysis)
+    artifacts.wbs_nodes = wbs.prompt_lines()
     tcs, cls = generate_from_strategy(profile, strategy, artifacts=artifacts)
 
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
@@ -225,14 +232,12 @@ def _run_site_aware(url: str, pid: str | None,
 
     if pid:
         try:
-            _db.save_site_profile(pid, url, profile.to_dict(),
+            _db.save_site_profile(pid, url,
+                                  {**profile.to_dict(), "wbs": wbs.to_dict()},
                                   strategy.to_dict())
         except Exception as exc:  # pragma: no cover — best-effort
             _log.warning("site-aware: save_site_profile failed: %s", exc)
-        _file_into_folders(
-            pid, [_page_to_dict(pg)
-                  for pg in (getattr(site_analysis, "pages", None) or [])],
-            tc_dicts, cl_dicts)
+        _file_into_folders(pid, crawl_pages, tc_dicts, cl_dicts, wbs=wbs)
 
     return {
         "tc_dicts": tc_dicts,
@@ -244,6 +249,8 @@ def _run_site_aware(url: str, pid: str | None,
         # sections beyond the cap. Flashed to the operator so a thin sheet
         # reads as a known limitation rather than as the whole product.
         "checklist_gaps": ll_gaps,
+        # For the caller to file the legacy stream into the same structure.
+        "wbs": wbs,
     }
 
 
@@ -270,45 +277,43 @@ def _file_imported(incoming: list[dict], kind: str) -> None:
 
 
 def _file_into_folders(pid: str, pages: list[dict], tc_dicts: list[dict],
-                       cl_dicts: list[dict]) -> None:
-    """Write each generated item's ``[Folder -> Sub]`` prefix and file it
-    by that prefix (owner rules, 2026-10-19 and 2026-10-20).
+                       cl_dicts: list[dict], *, wbs=None) -> None:
+    """File generated items into the product's WBS (owner decision,
+    2026-10-20; engine/wbs.py).
 
-    Header → its menus → their pages, then Homepage and Footer — the
-    high-level checklist a tester starts from, as folders. The navigation
-    plan decides each item's path; the path is written into the summary /
-    objective as a prefix, and ``db.file_by_prefix`` files from the prefix —
-    the one mechanism import, inline edits and re-filing use too.
-
-    Every folder of the plan is created even when nothing lands in it yet,
-    because the point is a place to put the cases and checks people add
-    later. Folders are reused by name, so regenerating does not duplicate the
-    tree. An item that already opens with a prefix (an author wrote one)
-    keeps it.
+    The whole tree becomes folders — modules, submodules, pages, the chrome
+    — even where nothing lands yet, because the point is a place for the
+    cases and checks people add later. Each item is then attributed to a
+    node from what its generator recorded while making it (the page it was
+    enumerated on, the node the model chose, the region), and its summary
+    opens with that node's folder path: one fact, written twice.
 
     Best-effort: a failure here leaves the pack Unfiled, never unsaved.
     """
     try:
-        from engine import folder_plan as _fp
-        from engine import folder_prefix as _fpx
-        plan = _fp.build_plan(pages)
-        page_urls = [p.get("url") for p in pages if p.get("url")]
-        tc_paths, cl_paths = _fp.file_items(plan, tc_dicts, cl_dicts,
-                                            page_urls)
-        for path in plan.paths:
-            _db.ensure_folder_path(pid, list(path))
-        for dicts, paths, field in ((tc_dicts, tc_paths, "summary"),
-                                    (cl_dicts, cl_paths, "objective")):
-            for index, path in paths.items():
-                d = dicts[index]
-                if not _fpx.parse(d.get(field)):
-                    d[field] = _fpx.with_prefix(d.get(field), path)
-        filed = (_db.file_by_prefix(pid, tc_dicts, "test_case")
-                 + _db.file_by_prefix(pid, cl_dicts, "checklist_item"))
-        _log.info("folders: %d in the plan, %d item(s) filed by prefix",
-                  len(plan.paths), filed)
+        from engine import wbs as _wbs
+        tree = wbs or _wbs.build_wbs(pages)
+        _db.ensure_wbs_folders(pid, tree)
+        tc = _db.apply_wbs(pid, tree, tc_dicts, "test_case")
+        cl = _db.apply_wbs(pid, tree, cl_dicts, "checklist_item")
+        _log.info("wbs: %d node(s); %d case(s) over %d node(s), %d check(s) "
+                  "over %d node(s)", len(tree.nodes), sum(tc.values()),
+                  len(tc), sum(cl.values()), len(cl))
     except Exception as exc:  # pragma: no cover — never block generation
-        _log.warning("filing generated items into folders failed: %s", exc)
+        _log.warning("filing generated items into the WBS failed: %s", exc)
+
+
+def _file_legacy(pid: str | None, site_out: dict | None, dicts: list[dict],
+                 kind: str) -> None:
+    """File the legacy (persona / ISTQB template) stream into the WBS the
+    site-aware run built, so it stops landing in Unfiled."""
+    wbs = (site_out or {}).get("wbs")
+    if not pid or wbs is None or not dicts:
+        return
+    try:
+        _db.apply_wbs(pid, wbs, dicts, kind)
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("filing the legacy %s stream failed: %s", kind, exc)
 
 
 def _page_to_dict(page) -> dict:
@@ -781,6 +786,7 @@ def register(app: Flask) -> None:
                     site_out = _run_site_aware(url, pid, custom_prompt,
                                                raw_lines=raw_lines,
                                                tc_format=tc_format)
+                    _file_legacy(pid, site_out, tcd, "test_case")
                     if site_out:
                         tcd.extend(site_out.get("tc_dicts") or [])
                         # crawl_errors from the recon crawler land in
@@ -1036,6 +1042,7 @@ def register(app: Flask) -> None:
                 if url:
                     site_out = _run_site_aware(url, pid, custom_prompt,
                                                raw_lines=raw_lines)
+                    _file_legacy(pid, site_out, cld, "checklist_item")
                     if site_out:
                         cld.extend(site_out.get("cl_dicts") or [])
                         for e in site_out.get("crawl_errors") or []:
@@ -1582,6 +1589,7 @@ def register(app: Flask) -> None:
                 site_out = _run_site_aware(url, pid, custom_prompt,
                                            raw_lines=raw_lines,
                                            tc_format=tc_format)
+                _file_legacy(pid, site_out, tc_dicts, "test_case")
                 if site_out:
                     tc_dicts.extend(site_out.get("tc_dicts") or [])
                     for err in site_out.get("crawl_errors") or []:
@@ -1732,9 +1740,32 @@ def register(app: Flask) -> None:
             )
             new_stories = (generate_user_stories(parsed_reqs, custom_prompt)
                            if parsed_reqs else [])
+            crawl_errors: list[str] = []
             cl_list = generate_checklist(new_stories, custom_prompt,
-                                         raw_requirements=raw_reqs_for_persona)
+                                         raw_requirements=raw_reqs_for_persona,
+                                         crawl_errors_out=crawl_errors)
             cl_dicts = [cl_to_dict(c) for c in cl_list]
+
+            # The crawled low-level checklist and the WBS, as the sync POST
+            # does. This worker is the path the UI takes, and it never ran
+            # the site-aware stage: measured on qarea.com 2026-10-20, the
+            # page got the 289 template rows, all Unfiled, instead of the
+            # ~1,000-row sheet the sync path builds — and no product
+            # structure to file anything into.
+            checklist_gaps: list[str] = []
+            url = _detect_first_url(raw_lines)
+            if url:
+                site_out = _run_site_aware(url, pid, custom_prompt,
+                                           raw_lines=raw_lines)
+                _file_legacy(pid, site_out, cl_dicts, "checklist_item")
+                if site_out:
+                    cl_dicts.extend(site_out.get("cl_dicts") or [])
+                    for err in site_out.get("crawl_errors") or []:
+                        if err and err not in crawl_errors:
+                            crawl_errors.append(err)
+                    checklist_gaps = [gp for gp in
+                                      site_out.get("checklist_gaps") or []
+                                      if gp]
             if pid and cl_dicts:
                 try:
                     _db.save_checklist(pid, cl_dicts)
@@ -1744,6 +1775,8 @@ def register(app: Flask) -> None:
                 "cl_dicts": cl_dicts,
                 "stories": [story_to_dict(s) for s in new_stories],
                 "raw_requirements": raw_reqs_for_persona,
+                "crawl_errors": crawl_errors,
+                "checklist_gaps": checklist_gaps,
             }
 
         job_id = get_queue().submit(

@@ -604,6 +604,10 @@ _EDITABLE_COLUMN_MIGRATIONS = (
      "ALTER TABLE test_case ADD COLUMN folder_id INTEGER"),
     ("checklist_item", "folder_id",
      "ALTER TABLE checklist_item ADD COLUMN folder_id INTEGER"),
+    # The product-WBS node a folder stands for (engine/wbs.py). Nullable:
+    # a folder somebody made by hand stands for no node.
+    ("folder", "wbs_node",
+     "ALTER TABLE folder ADD COLUMN wbs_node VARCHAR(200)"),
 )
 
 
@@ -1376,6 +1380,11 @@ class Folder(Base):
                                            default=0, server_default="0")
     source: Mapped[str] = mapped_column(String(10), nullable=False,
                                          default="user", server_default="user")
+    #: The WBS node (engine/wbs.py) this folder stands for, e.g.
+    #: ``page:/services/web-development``. The link survives a rename or a
+    #: move, so the next generation files into the folder a person shaped
+    #: rather than recreating the original next to it.
+    wbs_node: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                   default=_utcnow, onupdate=_utcnow)
@@ -5115,7 +5124,8 @@ class FolderError(ValueError):
 
 def _folder_dict(row: "Folder") -> dict:
     return {"id": row.id, "parent_id": row.parent_id, "name": row.name,
-            "position": int(row.position or 0), "source": row.source}
+            "position": int(row.position or 0), "source": row.source,
+            "wbs_node": row.wbs_node}
 
 
 def _clean_folder_name(name) -> str:
@@ -5425,6 +5435,178 @@ def ensure_folder_path(project_id: str, path, *,
                 folders[found.id] = found
             parent_id = found.id
         return parent_id
+
+
+# ── The product WBS as folders ─────────────────────────────────────
+
+def ensure_wbs_folders(project_id: str, wbs, node_ids=None) -> dict:
+    """``{node id: (folder id, folder path)}`` for the WBS, creating what
+    is missing (engine/wbs.py).
+
+    A node is found by the folder already bound to it (``Folder.wbs_node``)
+    wherever a person has since moved or renamed it; else by name under its
+    parent's folder, ignoring case — that adopts a folder from an earlier
+    run or one made by hand — else it is created. The path returned is the
+    folder's *current* path, which is what the summary prefix is written
+    from, so prefix and folder stay one fact.
+
+    ``node_ids`` limits the work to those nodes and their ancestors (every
+    node when None).
+    """
+    if not project_id or wbs is None:
+        return {}
+    wanted = None
+    if node_ids is not None:
+        wanted = set()
+        for node_id in node_ids:
+            while node_id and node_id in wbs.nodes and node_id not in wanted:
+                wanted.add(node_id)
+                node_id = wbs.nodes[node_id].parent
+    with session_scope() as sess:
+        if sess.get(Project, project_id) is None:
+            return {}
+        folders = _project_folders(sess, project_id)
+        bound = {f.wbs_node: f for f in folders.values() if f.wbs_node}
+        ids: dict[str, int] = {}
+        for node in wbs.ordered():
+            if wanted is not None and node.id not in wanted:
+                continue
+            # Cross-cutting nodes are made on demand by attribution and
+            # then kept in the stored WBS; their folders appear only when
+            # something lands in them, so the tree never shows an empty
+            # "Cross-cutting > General".
+            if wanted is None and node.kind == "crosscutting":
+                continue
+            row = bound.get(node.id)
+            if row is None:
+                if node.parent and node.parent not in ids:
+                    continue
+                parent_id = ids.get(node.parent) if node.parent else None
+                if _folder_depth(folders, parent_id) + 1 > FOLDER_MAX_DEPTH:
+                    continue
+                name = node.name[:FOLDER_NAME_MAX]
+                row = _sibling_named(folders, parent_id, name)
+                if row is not None and row.wbs_node and row.wbs_node != node.id:
+                    row, n = None, 2
+                    while _sibling_named(folders, parent_id,
+                                         f"{name} ({n})") is not None:
+                        n += 1
+                    name = f"{name} ({n})"
+                if row is None:
+                    row = Folder(project_id=project_id, parent_id=parent_id,
+                                 name=name,
+                                 position=_next_position(folders, parent_id),
+                                 source="auto")
+                    sess.add(row)
+                    sess.flush()
+                    folders[row.id] = row
+                row.wbs_node = node.id
+                bound[node.id] = row
+            ids[node.id] = row.id
+
+        def path(folder_id):
+            names, seen = [], set()
+            while folder_id is not None and folder_id in folders \
+                    and folder_id not in seen:
+                seen.add(folder_id)
+                names.insert(0, folders[folder_id].name)
+                folder_id = folders[folder_id].parent_id
+            return tuple(names)
+
+        return {node_id: (fid, path(fid)) for node_id, fid in ids.items()}
+
+
+def apply_wbs(project_id: str, wbs, dicts: list, kind: str) -> dict:
+    """Write the WBS prefix and ``folder_id`` onto pack dicts of ``kind``.
+
+    The generator-side half of filing: every item gets a node, every node a
+    folder, and the prefix is that folder's path. Returns ``{node: count}``.
+    """
+    from engine import wbs as _wbs
+    if not project_id or wbs is None or not dicts:
+        return {}
+    field_name = FOLDER_PREFIX_FIELD.get(kind, "summary")
+    nodes = [_wbs.attribute(wbs, d, field_name) if isinstance(d, dict)
+             else None for d in dicts]
+    folders = ensure_wbs_folders(project_id, wbs,
+                                 node_ids={n for n in nodes if n})
+    return _wbs.stamp(wbs, lambda node: folders.get(node, (None, ())),
+                      dicts, kind, nodes=nodes)
+
+
+def write_wbs_attribution(project_id: str, kind: str, changes: dict) -> int:
+    """Re-file stored rows: ``{public id: (folder id, new text)}``.
+
+    The "Attribute to WBS" write (engine/wbs_attribution.py). The text
+    changes — its prefix is the folder path — so ``row_version`` moves like
+    any field edit, and an open editor holding the old text gets a conflict
+    instead of silently putting the old prefix back. Provenance is left
+    alone: filing is not authorship. Returns how many rows changed.
+    """
+    model = _FOLDER_KINDS.get(kind)
+    field_name = FOLDER_PREFIX_FIELD.get(kind)
+    if model is None or not project_id or not changes:
+        return 0
+    written = 0
+    with session_scope() as sess:
+        valid = set(_project_folders(sess, project_id))
+        for row in sess.query(model).filter(
+                model.project_id == project_id,
+                model.external_id.in_(list(changes))).all():
+            folder_id, text = changes[row.external_id]
+            if folder_id not in valid:
+                continue
+            if row.folder_id == folder_id and getattr(row, field_name) == text:
+                continue
+            row.folder_id = folder_id
+            setattr(row, field_name, text)
+            row.row_version = int(row.row_version or 1) + 1
+            written += 1
+    return written
+
+
+def prune_stale_auto_folders(project_id: str) -> int:
+    """Delete empty generator-made folders that no WBS node stands for.
+
+    What an earlier filing scheme left behind ("Header > Services > Web
+    Development page"). Only ``source='auto'`` folders with no node, no
+    items and no surviving children go — a folder a person made, renamed
+    (that sets ``source='user'``) or put anything in stays.
+    """
+    if not project_id:
+        return 0
+    removed = 0
+    with session_scope() as sess:
+        folders = _project_folders(sess, project_id)
+        used = set()
+        for model in _FOLDER_KINDS.values():
+            used |= {fid for (fid,) in sess.query(model.folder_id).filter(
+                model.project_id == project_id,
+                model.folder_id.isnot(None)).distinct().all()}
+        changed = True
+        while changed:
+            changed = False
+            parents = {f.parent_id for f in folders.values()}
+            for fid, row in list(folders.items()):
+                if row.source == "auto" and not row.wbs_node \
+                        and fid not in used and fid not in parents:
+                    sess.delete(row)
+                    del folders[fid]
+                    removed += 1
+                    changed = True
+            sess.flush()
+    return removed
+
+
+def save_project_wbs(project_id: str, wbs) -> None:
+    """Store the WBS on the project's latest site profile, for next time."""
+    rows = list_site_profiles(project_id, limit=1)
+    if not rows:
+        return
+    row = rows[0]
+    profile = dict(row.get("profile") or {})
+    profile["wbs"] = wbs.to_dict()
+    save_site_profile(project_id, row.get("url") or "", profile)
 
 
 # ── Filing by the ``[Folder -> Subfolder]`` prefix ─────────────────

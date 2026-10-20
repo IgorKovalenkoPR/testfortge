@@ -48,7 +48,7 @@ _STRATEGY_KIND = "analysis"
 _STRATEGY_MAX_TOKENS = int(os.environ.get("STRATEGY_MAX_TOKENS", "4000"))
 
 #: Part of the result cache key (ADR 0003 §4.9).
-_PROMPT_VERSION = "test_strategy/1"
+_PROMPT_VERSION = "test_strategy/2"
 
 
 # Closed enum — generator and Live Executor (Stage 3) both consume
@@ -80,6 +80,10 @@ class CheckSpec:
     priority: str = "Medium"      # High | Medium | Low
     url_pattern: str = ""         # fnmatch glob; empty = all pages
     istqb_technique: str = ""     # EP | BVA | Decision Table | ...
+    #: The product-structure node this check is for (engine/wbs.py), when
+    #: the model chose one from the list it was given. "" = let the
+    #: generator attribute it from ``url_pattern`` and the category.
+    wbs_node: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -111,7 +115,8 @@ class TestStrategy:
 # ── Public API ────────────────────────────────────────────────────
 
 def build_strategy(profile: SiteProfile, *,
-                   force_llm: bool = False) -> TestStrategy:
+                   force_llm: bool = False,
+                   wbs_lines: list[str] | None = None) -> TestStrategy:
     """Produce a :class:`TestStrategy` for ``profile``."""
     # AUTOMATION_AI_MODE (ADR 0003 §4.9). The deterministic strategy is
     # built from the profile's flags, so it is only as good as the profile:
@@ -130,7 +135,7 @@ def build_strategy(profile: SiteProfile, *,
 
     grounding = _build_grounding(profile)
     try:
-        raw = _call_llm(profile, grounding)
+        raw = _call_llm(profile, grounding, wbs_lines)
     except LLMUnavailable as exc:
         _logger.warning("test_strategy: LLM unavailable, fallback: %s", exc)
         return _rule_based_strategy(profile)
@@ -243,7 +248,8 @@ def _system_blocks(grounding: str) -> list[dict]:
     return blocks
 
 
-def _build_user_prompt(profile: SiteProfile) -> str:
+def _build_user_prompt(profile: SiteProfile,
+                       wbs_lines: list[str] | None = None) -> str:
     schema_hint = (
         "{\n"
         '  "rationale": "1-paragraph summary of why this matrix fits THIS site",\n'
@@ -251,7 +257,7 @@ def _build_user_prompt(profile: SiteProfile) -> str:
         '    "Functional": [\n'
         '      {"objective": "...", "rationale": "...", '
         '"priority": "High|Medium|Low", "url_pattern": "...", '
-        '"istqb_technique": "EP|BVA|..."}\n'
+        '"istqb_technique": "EP|BVA|...", "wbs": "<node id>"}\n'
         "    ],\n"
         '    "UI_UX": [...], "Usability": [...], "Accessibility": [...],\n'
         '    "Performance": [...], "Compatibility": [...],\n'
@@ -266,10 +272,15 @@ def _build_user_prompt(profile: SiteProfile) -> str:
         + schema_hint
         + "\nKeep each category between 3 and 8 checks. Total checks "
           "across all categories: 18-45 depending on site complexity."
+        + (("\n\nProduct structure (WBS): set \"wbs\" on every check to "
+            "the id of the page or module it is for; a Cross-cutting id only "
+            "for a check that applies to the whole site. Never invent an "
+            "id.\n" + "\n".join(wbs_lines)) if wbs_lines else "")
     )
 
 
-def _call_llm(profile: SiteProfile, grounding: str) -> str:
+def _call_llm(profile: SiteProfile, grounding: str,
+              wbs_lines: list[str] | None = None) -> str:
     resp = cached_call(
         _STRATEGY_KIND,
         prompt_version=_PROMPT_VERSION,
@@ -279,7 +290,7 @@ def _call_llm(profile: SiteProfile, grounding: str) -> str:
         system=_system_blocks(grounding),
         messages=[{
             "role": "user",
-            "content": _build_user_prompt(profile),
+            "content": _build_user_prompt(profile, wbs_lines),
         }],
     )
     usage = getattr(resp, "usage", None)
@@ -332,6 +343,7 @@ def _coerce_check(raw: dict) -> CheckSpec | None:
         priority=_coerce_priority(raw.get("priority")),
         url_pattern=str(raw.get("url_pattern") or "").strip()[:200],
         istqb_technique=str(raw.get("istqb_technique") or "").strip()[:80],
+        wbs_node=str(raw.get("wbs") or "").strip()[:200],
     )
 
 

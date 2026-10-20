@@ -81,7 +81,7 @@ _AUTHOR_TIMEOUT = int(os.environ.get("TC_AUTHOR_TIMEOUT_S", "300"))
 #: Bumped when the prompt or the shape :func:`_parse_llm_response` expects
 #: changes in a way the request text would not show. Part of the result
 #: cache key (ADR 0003 §4.9), so a bump retires every cached pack at once.
-_PROMPT_VERSION = "tc_author/1"
+_PROMPT_VERSION = "tc_author/2"
 
 
 def _author_enabled() -> bool:
@@ -178,6 +178,10 @@ class Artifacts:
     # site_pages`` already produces: url/title/h1/headings/nav_links/
     # buttons/forms.
     pages: list[dict] = field(default_factory=list)
+    #: The product's WBS as ``id — Path -> To -> Node (url)`` lines
+    #: (engine/wbs.py ``Wbs.prompt_lines``). The model files each case under
+    #: one of these ids; it never makes one up.
+    wbs_nodes: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not any((self.url, self.custom_prompt, self.requirements,
@@ -198,6 +202,12 @@ class AuthoredCase:
     testing_type: str = "Functional"
     url_pattern: str = ""
     comment: str = ""
+    #: Where the case came from, for its place in the WBS (engine/wbs.py):
+    #: the crawled page a rule enumerated it on, or the node id the model
+    #: chose. Never written to the pack — ``wbs.stamp`` turns them into the
+    #: summary prefix and the folder.
+    page_url: str = ""
+    wbs_node: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -413,7 +423,8 @@ _SCHEMA_HINT = """{
       "category": "Positive",
       "priority": "Medium",
       "testing_type": "Functional",
-      "url_pattern": "/hr/job-positions*"
+      "url_pattern": "/hr/job-positions*",
+      "wbs": "page:/hr/job-positions"
     }
   ]
 }"""
@@ -553,6 +564,14 @@ def _build_user_prompt(profile, strategy, artifacts: Artifacts) -> str:
             "controls named in the requirements and attachments below, "
             "and list every surface you could not evidence under "
             "\"gaps\".")
+
+    if artifacts.wbs_nodes:
+        blocks.append(
+            "Product structure (WBS): every case belongs to exactly one "
+            "node. Set \"wbs\" on each case to one id from this list, the "
+            "page or module the case exercises. Use a Cross-cutting id only "
+            "for a check that genuinely applies to the whole site. Never "
+            "invent an id.\n" + "\n".join(artifacts.wbs_nodes))
 
     if artifacts.requirements:
         reqs = "\n".join(f"- {r[:600]}" for r in artifacts.requirements[:80]
@@ -708,6 +727,7 @@ def _coerce_case(raw: Any) -> AuthoredCase | None:
                      or "Functional",
         url_pattern=str(raw.get("url_pattern") or "").strip()[:200],
         comment=str(raw.get("comment") or "").strip()[:300],
+        wbs_node=str(raw.get("wbs") or "").strip()[:200],
     )
 
 

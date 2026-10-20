@@ -71,6 +71,10 @@ class Section:
     name: str
     checks: list[Check] = field(default_factory=list)
     number: str = ""
+    #: The crawled page a content section walks, and ``header`` / ``footer``
+    #: for the chrome — the section's place in the WBS (engine/wbs.py).
+    url: str = ""
+    region: str = ""
 
 
 @dataclass
@@ -624,6 +628,7 @@ def build_checklist(pages: list[dict], *, url: str = "") -> LowLevelChecklist:
     out.surface = f'"{_page_name(primary.get("url", ""), primary.get("title", ""))}" page'
 
     header = header_section(primary)
+    header.region = "header"
     if header.checks:
         out.sections.append(header)
     else:
@@ -637,6 +642,7 @@ def build_checklist(pages: list[dict], *, url: str = "") -> LowLevelChecklist:
         name = "Page Content" if single else \
             f'Page Content — {_page_name(page.get("url", ""), page.get("title", ""))}'
         sec = content_section(page, name=name)
+        sec.url = str(page.get("url") or "")
         if sec.checks:
             out.sections.append(sec)
     if len(pages) > MAX_CONTENT_SECTIONS:
@@ -646,6 +652,7 @@ def build_checklist(pages: list[dict], *, url: str = "") -> LowLevelChecklist:
             f"sections per checklist.")
 
     footer = footer_section(primary)
+    footer.region = "footer"
     if footer.checks:
         out.sections.append(footer)
         gap = _footer_gap(primary, footer)
@@ -691,6 +698,9 @@ def to_checklist_items(checklist: LowLevelChecklist) -> list:
                 priority=check.priority,
                 item_num=check.number,
                 depth=check.depth,
+                wbs_hint={k: v for k, v in (
+                    ("page_url", getattr(section, "url", "")),
+                    ("region", getattr(section, "region", ""))) if v},
             ))
             try:
                 out[-1].testing_type = check.testing_type
