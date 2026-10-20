@@ -95,10 +95,31 @@ def _no_input_message(errors: list[str]) -> str:
 _URL_DETECT = _re.compile(r"(https?://[^\s,]+)", _re.IGNORECASE)
 
 
+#: A line this short that carries a URL is pointing at the site under test
+#: ("https://x.test/ is the site under test", "Site: https://x.test").
+_URL_LINE_MAX_WORDS = 12
+
+
 def _detect_first_url(raw_lines: list[str]) -> str | None:
+    """The site to crawl: a URL that stands as the input, not one quoted in it.
+
+    A requirements document mentions URLs — a CSP header listing
+    ``https://fonts.googleapis.com``, an API base, a link to a spec. Taking
+    the first one made generation-from-a-description crawl Google Fonts
+    (measured on this repo's REQUIREMENTS.md, 2026-10-20). A line that is
+    the URL, or a short line pointing at one, names the product; a URL
+    inside prose, a table row or a header value does not.
+    """
+    fenced = False
     for line in raw_lines or []:
-        m = _URL_DETECT.search(line or "")
-        if m:
+        text = (line or "").strip()
+        if text.startswith(("```", "~~~")):
+            fenced = not fenced          # a code block is quoted material
+            continue
+        m = _URL_DETECT.search(text)
+        if fenced or not m or "|" in text or "`" in text:
+            continue
+        if len(text.split()) <= _URL_LINE_MAX_WORDS:
             return m.group(1).rstrip(".,;)")
     return None
 
@@ -187,6 +208,11 @@ def _run_site_aware(url: str, pid: str | None,
     strategy = build_strategy(profile, wbs_lines=wbs.prompt_lines())
     artifacts = _build_artifacts(url, custom_prompt, raw_lines, site_analysis)
     artifacts.wbs_nodes = wbs.prompt_lines()
+    # Instance pages (the 25th article on one template) get no page-surface
+    # cases of their own beyond the first two per node — engine/wbs.py.
+    surfaces = _wbs.surface_urls(wbs, crawl_pages)
+    for page in artifacts.pages:
+        page["surface"] = page.get("url") in surfaces
     tcs, cls = generate_from_strategy(profile, strategy, artifacts=artifacts)
 
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
@@ -206,6 +232,11 @@ def _run_site_aware(url: str, pid: str | None,
         from engine import checklist_rules as _clr
         pages = [_page_to_dict(pg)
                  for pg in (getattr(site_analysis, "pages", None) or [])]
+        # One content section per page *template*: the 25th article walks
+        # the same layout as the first two (engine.wbs.surface_urls). The
+        # entry page stays first — Header and Footer are read from it.
+        pages = [p for i, p in enumerate(pages)
+                 if i == 0 or p.get("url") in surfaces]
         # The author agent when a key is configured, the enumeration when
         # not — author_checklist falls back internally, so this call has
         # one shape either way and the free tier keeps working untouched.
@@ -303,6 +334,48 @@ def _file_into_folders(pid: str, pages: list[dict], tc_dicts: list[dict],
         _log.warning("filing generated items into the WBS failed: %s", exc)
 
 
+def _text_wbs(raw_lines, custom_prompt: str = ""):
+    """The WBS a description declares (no site to crawl): the model's
+    breakdown when one is configured, the text's own headings otherwise."""
+    from engine import wbs as _wbs
+    lines = [ln for ln in (raw_lines or []) if (ln or "").strip()]
+    text = "\n".join(lines + ([custom_prompt] if custom_prompt else []))
+    try:
+        return _wbs.build_wbs_from_text_llm(text) or \
+            _wbs.build_wbs_from_text(lines)
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("text WBS failed: %s", exc)
+        return _wbs.build_wbs_from_text([])
+
+
+def _file_without_site(pid: str | None, site_out: dict | None, raw_lines,
+                       custom_prompt: str, dicts: list[dict],
+                       kind: str, stories=None) -> None:
+    """File a pack generated without a crawl — from a description, or
+    after the crawl failed — into the WBS the text declares, so it gets
+    ``[Module -> Page]`` too rather than staying Unfiled."""
+    if not pid or not dicts or (site_out or {}).get("wbs") is not None:
+        return
+    # A case derived from a user story was written for that story's
+    # requirement line, and the line sits under a heading of the text.
+    source = {}
+    for story in stories or []:
+        raw = story if isinstance(story, dict) else vars(story)
+        if raw.get("id") and raw.get("original_text"):
+            source[str(raw["id"])] = raw["original_text"]
+    for d in dicts:
+        text = source.get(str(d.get("user_story_id") or ""))
+        if text:
+            d.setdefault("wbs_hint", {})["requirement"] = text
+    try:
+        wbs = _text_wbs(raw_lines, custom_prompt)
+        _db.ensure_wbs_folders(pid, wbs)
+        _db.apply_wbs(pid, wbs, dicts, kind)
+        _db.save_site_profile(pid, "text:", {"wbs": wbs.to_dict()}, {})
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("filing a %s pack without a site failed: %s", kind, exc)
+
+
 def _file_legacy(pid: str | None, site_out: dict | None, dicts: list[dict],
                  kind: str) -> None:
     """File the legacy (persona / ISTQB template) stream into the WBS the
@@ -330,7 +403,8 @@ def _page_to_dict(page) -> dict:
 
 
 def _run_authored_without_url(custom_prompt: str,
-                              raw_lines: list[str] | None) -> list[dict]:
+                              raw_lines: list[str] | None,
+                              wbs=None) -> list[dict]:
     """Author test cases when the input has no URL to crawl.
 
     Prompt-only and attachment-only input would otherwise never reach the
@@ -354,6 +428,7 @@ def _run_authored_without_url(custom_prompt: str,
             custom_prompt=custom_prompt or "",
             requirements=[ln.strip() for ln in (raw_lines or [])
                           if (ln or "").strip()][:120],
+            wbs_nodes=wbs.prompt_lines() if wbs is not None else [],
         )
         tcs = generate_from_artifacts(artifacts)
     except Exception as exc:  # pragma: no cover — best-effort
@@ -781,6 +856,7 @@ def register(app: Flask) -> None:
                 # site-aware TCs to the legacy stream. Failure is
                 # non-fatal — the user still sees the legacy pack.
                 site_aware_meta: dict = {}
+                site_out = None
                 url = _detect_first_url(raw_lines)
                 if url:
                     site_out = _run_site_aware(url, pid, custom_prompt,
@@ -807,13 +883,16 @@ def register(app: Flask) -> None:
                     # carries. Without this, prompt-only and
                     # attachment-only input never reaches the author
                     # agent and falls back to canned templates.
-                    tcd.extend(_run_authored_without_url(custom_prompt,
-                                                         raw_lines))
+                    tcd.extend(_run_authored_without_url(
+                        custom_prompt, raw_lines,
+                        wbs=_text_wbs(raw_lines, custom_prompt)))
 
                 # Stamp the combined list — the legacy template stream
                 # and the site-aware stream both belong to the format the
                 # operator asked for. _run_site_aware already stamped its
                 # own half; re-stamping is idempotent.
+                _file_without_site(pid, site_out, raw_lines, custom_prompt,
+                                   tcd, "test_case", stories=stories)
                 tcd = _gherkin.apply_format(tcd, tc_format)
 
                 if pid and tcd:
@@ -1038,6 +1117,7 @@ def register(app: Flask) -> None:
                 cld = [cl_to_dict(c) for c in cll]
 
                 site_aware_meta: dict = {}
+                site_out = None
                 url = _detect_first_url(raw_lines)
                 if url:
                     site_out = _run_site_aware(url, pid, custom_prompt,
@@ -1064,6 +1144,8 @@ def register(app: Flask) -> None:
                                                 .get("source", ""),
                         }
 
+                _file_without_site(pid, site_out, raw_lines, custom_prompt,
+                                   cld, "checklist_item", stories=stories)
                 if pid and cld:
                     try: _db.save_checklist(pid, cld)
                     except Exception: pass
@@ -1584,6 +1666,7 @@ def register(app: Flask) -> None:
             # does — site-aware when the input names a URL, artifacts-only
             # otherwise. Without this the async endpoint silently returns
             # a thinner pack than the sync one for the same input.
+            site_out = None
             url = _detect_first_url(raw_lines)
             if url:
                 site_out = _run_site_aware(url, pid, custom_prompt,
@@ -1601,8 +1684,9 @@ def register(app: Flask) -> None:
                         f"may have refused it, or it timed out. Test cases "
                         f"were authored from the text alone.")
             else:
-                tc_dicts.extend(_run_authored_without_url(custom_prompt,
-                                                          raw_lines))
+                tc_dicts.extend(_run_authored_without_url(
+                    custom_prompt, raw_lines,
+                    wbs=_text_wbs(raw_lines, custom_prompt)))
 
             # Persist INSIDE the worker so the polling /status endpoint
             # never has to do a DB round-trip. On free-tier Postgres a
@@ -1610,6 +1694,8 @@ def register(app: Flask) -> None:
             # poll (browser caps at 6 concurrent requests per origin —
             # one slow /status hangs the modal forever once the cap is
             # hit). Best-effort: a DB outage must not hide the result.
+            _file_without_site(pid, site_out, raw_lines, custom_prompt,
+                               tc_dicts, "test_case", stories=new_stories)
             tc_dicts = _gherkin.apply_format(tc_dicts, tc_format)
             if pid and tc_dicts:
                 try:
@@ -1753,6 +1839,7 @@ def register(app: Flask) -> None:
             # ~1,000-row sheet the sync path builds — and no product
             # structure to file anything into.
             checklist_gaps: list[str] = []
+            site_out = None
             url = _detect_first_url(raw_lines)
             if url:
                 site_out = _run_site_aware(url, pid, custom_prompt,
@@ -1766,6 +1853,8 @@ def register(app: Flask) -> None:
                     checklist_gaps = [gp for gp in
                                       site_out.get("checklist_gaps") or []
                                       if gp]
+            _file_without_site(pid, site_out, raw_lines, custom_prompt,
+                               cl_dicts, "checklist_item", stories=new_stories)
             if pid and cl_dicts:
                 try:
                     _db.save_checklist(pid, cl_dicts)

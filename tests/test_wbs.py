@@ -78,15 +78,19 @@ class TestTreeOnQareaCom:
 
     def test_submodules_from_the_menu_and_from_the_url(self, qarea_tree):
         paths = _paths(qarea_tree)
-        # An "All Healthcare Solutions" entry opens a submodule.
-        assert ("Solutions", "Healthcare Solutions", "Pharma App") in paths
-        # "All AI Solutions" links to a Services page: a submodule by label.
-        assert ("Solutions", "AI Solutions", "Generative AI") in paths
+        # A menu link whose URL prefixes the links after it opens a
+        # submodule — the URL says so in any language; the label is kept
+        # exactly as the site writes it (no "All …" rule).
+        assert ("Solutions", "All Healthcare Solutions", "Pharma App") \
+            in paths
+        # The AI entries' URLs share no prefix with their heading's link,
+        # so the URL rule leaves them flat under the menu that lists them.
+        assert ("Solutions", "Generative AI") in paths
         # A menu page with pages under its URL becomes a submodule.
         assert ("Solutions", "Fitness", "Wellness App") in paths
         # Past the crawler's old 20-entry cap — the reason it was raised.
-        assert ("Solutions", "Fintech Solutuions", "Accounting Software") \
-            in paths
+        assert ("Solutions", "All Fintech Solutuions",
+                "Accounting Software") in paths
 
     def test_footer_links_into_a_module_join_the_module(self, qarea_tree):
         assert ("Services", "DevOps") in _paths(qarea_tree)
@@ -642,6 +646,286 @@ class TestGateOnARealCrawl:
         assert len(db.list_folders(generated)) == folders
 
 
+# ── the same gate on structurally different real sites ───────────────
+#
+#   qarea.com     header mega-menus with nested groups, one contact form
+#                 embedded ~4x on every page (205 forms, 3 field sets)
+#   testfort.com  header mega-menus, a 30-entry services menu, big footer
+#   dou.ua        Ukrainian, a flat header nav (no drop-downs), ~40
+#                 articles and forum topics crawled from the front page
+
+_SITES = {"qarea": "https://qarea.com/", "testfort": "https://testfort.com/",
+          "dou": "https://dou.ua/"}
+_GATE: dict = {}
+
+#: No single WBS node may hold more than this share of the test cases.
+#: Before the fix qarea.com's Homepage held 47% and two Company pages the
+#: rest; what remains on the largest node after it is the site's one real
+#: form plus that page's own content (22.3% on qarea.com, 10% on
+#: testfort.com, 19.9% on dou.ua). A node above a quarter of a multi-page
+#: site means coverage collapsed onto it again. For a tree with only a
+#: handful of page nodes a quarter is unreachable by construction, so the
+#: bound loosens to 1.5x an even split there.
+MAX_NODE_SHARE = 0.25
+
+
+def _site_pid(app, client, monkeypatch, name):
+    import engine.site_crawler as sc
+    data = json.load(gzip.open(_FIX / f"{name}_crawl_2026-10-20.json.gz",
+                               "rt", encoding="utf-8"))
+    analysis = _analysis(data)
+    monkeypatch.setattr(sc, "crawl_site", lambda url, *a, **k: analysis)
+    monkeypatch.setenv("TESTFORTGE_BROWSER_ENABLED", "0")
+    monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
+    monkeypatch.setenv("EDITORS_ENABLED", "1")
+    if name not in _GATE:
+        pid = db.upsert_project(name=f"WBS site gate {name} {_RUN}")
+        _use(client, pid)
+        for route in ("/test-cases", "/checklist"):
+            assert client.post(route, data={
+                "input_text": _SITES[name]}).status_code == 200
+        _GATE[name] = (pid, data)
+    pid, data = _GATE[name]
+    _use(client, pid)
+    return pid, data
+
+
+@pytest.mark.parametrize("name", sorted(_SITES))
+class TestGateOnEverySite:
+
+    @pytest.mark.parametrize("kind", ["test_case", "checklist_item"])
+    def test_unfiled_cross_cutting_and_prefix(self, app, client, monkeypatch,
+                                              name, kind):
+        pid, _ = _site_pid(app, client, monkeypatch, name)
+        rows, field, assign = _distribution(pid, kind)
+        assert len(rows) > 100
+        assert [r["id"] for r in rows if r["id"] not in assign] == []
+        paths = [_folder_path(pid, assign[r["id"]]) for r in rows]
+        top = Counter(p[0] for p in paths)
+        assert top["Cross-cutting"] / len(rows) < 0.15, top
+        assert "General" not in top
+        assert [r["id"] for r, p in zip(rows, paths)
+                if fpx.parse(r[field]) != p] == []
+
+    def test_every_module_with_crawled_pages_has_test_cases(
+            self, app, client, monkeypatch, name):
+        pid, data = _site_pid(app, client, monkeypatch, name)
+        tree = W.Wbs.from_dict(db.list_site_profiles(pid)[0]["profile"]["wbs"])
+        crawled = {tree.path(tree.node_for_url(p["url"]) or W.HOME)[0]
+                   for p in data["pages"]}
+        rows, _, assign = _distribution(pid, "test_case")
+        covered = {_folder_path(pid, fid)[0] for fid in assign.values()}
+        assert crawled and crawled <= covered, crawled - covered
+
+    def test_no_single_node_holds_more_than_a_quarter(
+            self, app, client, monkeypatch, name):
+        pid, _ = _site_pid(app, client, monkeypatch, name)
+        rows, _, assign = _distribution(pid, "test_case")
+        per_node = Counter(assign[r["id"]] for r in rows)
+        bound = max(MAX_NODE_SHARE, 1.5 / len(per_node))
+        node, top = per_node.most_common(1)[0]
+        assert top / len(rows) <= bound, (_folder_path(pid, node),
+                                          top, len(rows))
+
+
+# ── a product with no site: the WBS from the description ─────────────
+
+REQUIREMENTS = _FIX / "requirements_testfortge_2026-10-20.md"
+
+
+class TestTextInput:
+
+    @pytest.fixture
+    def text_pid(self, app, client, monkeypatch):
+        monkeypatch.setenv("TESTFORTGE_BROWSER_ENABLED", "0")
+        monkeypatch.setenv("WORKSPACE_DB_FIRST", "1")
+        monkeypatch.setenv("EDITORS_ENABLED", "1")
+        if "text" not in _GATE:
+            pid = db.upsert_project(name=f"WBS text gate {_RUN}")
+            _use(client, pid)
+            text = REQUIREMENTS.read_text(encoding="utf-8")
+            for route in ("/test-cases", "/checklist"):
+                assert client.post(route, data={
+                    "input_text": text}).status_code == 200
+            _GATE["text"] = pid
+        _use(client, _GATE["text"])
+        return _GATE["text"]
+
+    def test_the_document_is_not_mistaken_for_a_site(self):
+        from routes.generation import _detect_first_url
+        lines = REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+        # It quotes https://fonts.googleapis.com in a CSP block; that is
+        # not the product. Generation crawled Google Fonts before.
+        assert _detect_first_url(lines) is None
+        assert _detect_first_url(
+            ["https://example.test/ is the site under test."]) == \
+            "https://example.test/"
+        assert _detect_first_url(["Site: https://example.test"]) == \
+            "https://example.test"
+        assert _detect_first_url(["| CSP | https://x.test |"]) is None
+        assert _detect_first_url(["```", "https://x.test", "```"]) is None
+
+    def test_headings_become_modules_and_pages(self):
+        lines = REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+        tree = W.build_wbs_from_text(lines)
+        paths = _paths(tree)
+        assert ("Функціональні блоки (що робить)", "Bug Reports") in paths
+        assert ("Security Posture", "CSRF") in paths
+        # The H1 is the document title, not a module.
+        assert not any(p[0].startswith("TestFortge") for p in paths)
+        assert tree.node_for_line(
+            "Статистика виконання (pass / fail / blocked).") == \
+            "text:функціональні-блоки-що-робить/dashboard"
+
+    def test_an_outline_and_plain_lines(self):
+        outline = W.build_wbs_from_text([
+            "1. Checkout", "1.1 Cart", "Add an item to the cart.",
+            "1.2 Payment", "2. Accounts", "2.1 Sign in"])
+        assert ("Checkout", "Payment") in _paths(outline)
+        assert ("Accounts", "Sign in") in _paths(outline)
+        flat = W.build_wbs_from_text(["User can log in", "User can search"])
+        assert flat.nodes == {}
+        # No structure: each item's own area becomes a module …
+        node = W.attribute(flat, {"section": "Authentication",
+                                  "summary": "Verify that x"})
+        assert flat.path(node) == ("Authentication",)
+        # … but a generic area name never does.
+        node = W.attribute(flat, {"section": "Requirements-specific",
+                                  "summary": "Verify that x"})
+        assert flat.path(node) == ("Cross-cutting", "General")
+
+    @pytest.mark.parametrize("kind", ["test_case", "checklist_item"])
+    def test_generation_from_the_document_is_filed(self, text_pid, kind):
+        rows, field, assign = _distribution(text_pid, kind)
+        assert len(rows) > 100
+        assert [r["id"] for r in rows if r["id"] not in assign] == []
+        paths = [_folder_path(text_pid, assign[r["id"]]) for r in rows]
+        assert [r["id"] for r, p in zip(rows, paths)
+                if fpx.parse(r[field]) != p] == []
+        general = sum(1 for p in paths if p[-1] == "General")
+        assert general <= len(rows) * 0.01
+        top = Counter(p[0] for p in paths)
+        # Test cases come from the document's requirements and land under
+        # its headings. The checklist also carries a fixed block of ~76
+        # web templates (header, footer, layout, generic forms) that a
+        # described product has no page to own: Cross-cutting by honesty,
+        # hence the looser bound for it.
+        limit = 0.15 if kind == "test_case" else 0.35
+        assert top["Cross-cutting"] / len(rows) < limit, top
+        assert ("Функціональні блоки (що робить)" in top
+                and "Security Posture" in top), top
+
+    def test_the_model_answer_is_validated(self, monkeypatch):
+        from engine import llm_cache
+
+        class Resp:
+            content = [type("B", (), {"text": json.dumps({"modules": [
+                {"name": "Каталог", "pages": ["Пошук", {"name": "Фільтри"}]},
+                {"name": ""}, {"name": "Кошик", "pages": "not a list"}]})})()]
+        monkeypatch.setattr(llm_cache, "cached_call", lambda *a, **k: Resp())
+        tree = W.build_wbs_from_text_llm("Каталог …", force=True)
+        assert _paths(tree) == {("Каталог",), ("Каталог", "Пошук"),
+                                ("Каталог", "Фільтри"), ("Кошик",)}
+        assert W.build_wbs_from_text_llm("") is None
+
+        class Bad:
+            content = [type("B", (), {"text": "no json here"})()]
+        monkeypatch.setattr(llm_cache, "cached_call", lambda *a, **k: Bad())
+        assert W.build_wbs_from_text_llm("x", force=True) is None
+
+
+# ── generic: nothing about one site, language or menu shape ──────────
+
+class TestGeneric:
+
+    @pytest.fixture(scope="class")
+    def dou(self):
+        return json.load(gzip.open(_FIX / "dou_crawl_2026-10-20.json.gz",
+                                   "rt", encoding="utf-8"))
+
+    def test_a_flat_non_english_nav_is_a_module_per_link(self, dou):
+        tree = W.build_wbs(dou["pages"])
+        modules = [n.name for n in tree.ordered()
+                   if n.parent is None and n.kind == "module"]
+        assert modules[:4] == ["Форум", "Стрічка", "Календар", "Спільноти"]
+        # Off-site links (jobs.dou.ua) are not this site's pages.
+        assert "Робота" not in modules
+        ids = [n.id for n in tree.nodes.values()]
+        assert len(ids) == len(set(ids))
+
+    def test_crawled_instances_collapse_into_their_module(self, dou):
+        tree = W.build_wbs(dou["pages"])
+        lenta = tree.node_for_url("https://dou.ua/lenta/")
+        assert tree.node_for_url(
+            "https://dou.ua/lenta/articles/ai-tools-6/?from=recent") == lenta
+        assert not [n for n in tree.nodes.values()
+                    if n.url.startswith("/lenta/") or
+                    n.url.startswith("/forums/topic")]
+        # …and their content is walked twice per node, not 25 times.
+        surfaces = W.surface_urls(tree, dou["pages"])
+        assert len([u for u in surfaces if "/lenta/" in u]) <= 3
+        assert len(surfaces) < len(dou["pages"]) / 2
+
+    def test_no_header_navigation_falls_back_to_the_url_structure(self, dou):
+        pages = [dict(p) for p in dou["pages"]]
+        pages[0] = {**pages[0], "header_links": [], "nav_groups": [],
+                    "footer_links": []}
+        tree = W.build_wbs(pages)
+        modules = {n.url for n in tree.nodes.values() if n.kind == "module"}
+        assert {"/forums", "/lenta"} <= modules
+        assert tree.path(tree.node_for_url(
+            "https://dou.ua/forums/topic/62652/"))[0] != "Other pages"
+
+    def test_hash_routes_are_pages(self):
+        assert W.norm_path("https://app.test/#/pricing") == "/#/pricing"
+        assert W.norm_path("https://app.test/#!/pricing/") == "/#/pricing"
+        assert W.norm_path("https://app.test/docs#install") == "/docs"
+        page = {"url": "https://app.test/", "header_links": [
+            {"text": "Pricing", "href": "#/pricing", "in_menu": False},
+            {"text": "Docs", "href": "#/docs", "in_menu": False}]}
+        tree = W.build_wbs([page])
+        assert tree.path(tree.node_for_url("https://app.test/#/docs")) == \
+            ("Docs",)
+
+    def test_cyrillic_menu_labels_do_not_collide(self):
+        page = {"url": "https://x.test/", "nav_groups": [
+            {"region": "header", "label": "Послуги", "children": []},
+            {"region": "header", "label": "Галузі", "children": []}]}
+        tree = W.build_wbs([page])
+        assert {"Послуги", "Галузі"} <= {n.name for n in tree.nodes.values()}
+
+
+class TestSharedFormsAreOneSurface:
+    """The 192 / 192 split: the same contact form, enumerated per page."""
+
+    @pytest.fixture(scope="class")
+    def qarea_pages(self, qarea):
+        return [{k: p[k] for k in ("url", "title", "h1", "forms", "tables",
+                                   "grid_controls", "headings", "buttons",
+                                   "nav_links")} for p in qarea["pages"]]
+
+    def test_a_form_embedded_on_every_page_is_enumerated_once(
+            self, qarea_pages):
+        from engine import tc_rules
+        cases = tc_rules.enumerate_from_pages(qarea_pages)
+        pages = Counter(c.page_url for c in cases)
+        # 205 embedded forms, three field sets: the shared one on the
+        # entry page, two variants (Careers, Testing & QA) for their extra
+        # controls only.
+        assert set(pages) == {"https://qarea.com/",
+                              "https://qarea.com/careers",
+                              "https://qarea.com/services/testing-and-qa"}
+        assert pages["https://qarea.com/careers"] < \
+            pages["https://qarea.com/"] / 3
+
+    def test_every_page_gets_its_own_content_cases(self, qarea_pages):
+        from engine import tc_rules
+        cases = tc_rules.enumerate_page_surfaces(qarea_pages)
+        assert {c.page_url for c in cases} == {p["url"] for p in qarea_pages}
+        # Chrome repeated across the site is nobody's content.
+        assert not [c for c in cases if '"Back" button' in c.summary]
+        assert all(c.preconditions and len(c.steps) >= 2 for c in cases)
+
 class TestTheAsyncPathTheUiTakes:
     """The UI posts to /…/run-async, not to the sync form handler.
 
@@ -678,7 +962,7 @@ class TestTheAsyncPathTheUiTakes:
         assert self._wait(client, status + resp.get_json()["job_id"]
                           )["status"] == "done"
         rows, field, assign = _distribution(pid, kind)
-        assert len(rows) > 500
+        assert len(rows) > 300
         assert [r["id"] for r in rows if r["id"] not in assign] == []
         assert all(fpx.parse(r[field]) ==
                    _folder_path(pid, assign[r["id"]]) for r in rows)

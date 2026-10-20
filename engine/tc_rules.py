@@ -901,6 +901,8 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
     out: list[AuthoredCase] = []
     forms_seen = 0
     capped_forms = False
+    forms_done: set = set()
+    fields_done: set = set()
 
     pages = list(pages or [])
     # Decided once, up front, from the same policy the estimator prices
@@ -941,6 +943,16 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             fields = [f for f in fields if control_type(f)]
             if not fields:
                 continue
+            # One site-wide form is one surface, however many pages embed
+            # it. Measured on qarea.com (2026-10-20): 205 forms on 50 pages
+            # with 3 distinct field sets — a contact form in every page's
+            # footer and pop-up. Enumerating each copy spent the whole form
+            # budget on the first three pages (/, /company, /our-team, 188
+            # identical cases each) and no other page got a single case.
+            signature = _form_signature(form, fields)
+            if signature in forms_done:
+                continue
+            forms_done.add(signature)
             forms_seen += 1
             section = surface_name(page, form, index)
             required = [f for f in fields if f.get("required")]
@@ -948,6 +960,13 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             form_cases = _form_level_cases(page, form, section, required)
             field_cases: list[AuthoredCase] = []
             for field in fields:
+                # A control already enumerated in an earlier form (the
+                # same e-mail field in a variant of the contact form) is
+                # not enumerated again; the form keeps its form-level cases.
+                key = _field_key(field)
+                if key in fields_done:
+                    continue
+                fields_done.add(key)
                 for kind in control_types(field):
                     spec = per_type.get(kind) or {}
                     for rule in spec.get("cases") or []:
@@ -972,6 +991,159 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
     return out
 
 
+def _field_key(field: dict) -> tuple:
+    return (control_type(field) or "",
+            str(field.get("name") or field_label(field)).strip().casefold())
+
+
+def _form_signature(form: dict, fields: list[dict]) -> tuple:
+    """What makes two embedded forms the same form: their visible
+    controls (hidden inputs and tracking ids differ per copy) and the
+    submit label."""
+    return (tuple(sorted(_field_key(f) for f in fields)),
+            str(form.get("submit_text") or "").strip().casefold())
+
+
+# ── Page surfaces ────────────────────────────────────────────────────
+#
+# A page with no form or grid of its own still has content a tester walks:
+# its heading, its title, its sections, its buttons. Without this the test
+# cases covered only the pages that carry a form (three of 50 on qarea.com)
+# while the checklist covered every page. Evidence-gated like the rest: a
+# case quotes text the crawler read off that page, and anything repeated on
+# most pages (the header and footer chrome, a "Back" button) is not this
+# page's content and is left to the Header / Footer coverage.
+
+#: Per page: the heading and title, then this many sections and buttons.
+MAX_PAGE_SECTIONS = int(os.environ.get("TC_RULES_MAX_PAGE_SECTIONS", "4"))
+MAX_PAGE_BUTTONS = int(os.environ.get("TC_RULES_MAX_PAGE_BUTTONS", "3"))
+#: Text on at least this share of crawled pages is site chrome.
+_CHROME_SHARE = 0.4
+_SURFACE_TEXT_MAX = 70
+
+
+def _clean_text(text) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _chrome(pages: list[dict], key: str) -> set[str]:
+    """Labels that repeat across the site — not any one page's content."""
+    if len(pages) < 3:
+        return set()
+    seen: dict[str, int] = {}
+    for page in pages:
+        for text in {_clean_text(t).casefold() for t in page.get(key) or []}:
+            if text:
+                seen[text] = seen.get(text, 0) + 1
+    floor = max(2, int(len(pages) * _CHROME_SHARE))
+    return {text for text, n in seen.items() if n >= floor}
+
+
+def page_label(page: dict) -> str:
+    """The page as a tester names it: its H1, else its title, else its URL."""
+    for candidate in (page.get("h1"), re.split(r"\s[|\u2502]\s?",
+                                               str(page.get("title") or ""))[0]):
+        text = _clean_text(candidate)
+        if text and len(text) <= _SURFACE_TEXT_MAX:
+            return text
+    return _url_label(page) or "Home"
+
+
+def enumerate_page_surfaces(pages: list[dict]) -> list[AuthoredCase]:
+    """Content cases for every crawled page, from that page's own text."""
+    pages = [p for p in (pages or []) if isinstance(p, dict) and p.get("url")]
+    chrome_headings = _chrome(pages, "headings")
+    chrome_buttons = _chrome(pages, "buttons")
+    nav = {_clean_text(t).casefold() for p in pages
+           for t in p.get("nav_links") or []}
+    out: list[AuthoredCase] = []
+    seen_urls: set[str] = set()
+    for page in pages:
+        url = str(page.get("url") or "").strip()
+        key = url.rstrip("/").casefold()
+        # ``surface`` False: an instance page whose template is already
+        # covered (engine.wbs.surface_urls). Chrome is still measured on it.
+        if key in seen_urls or page.get("surface") is False:
+            continue
+        seen_urls.add(key)
+        name = page_label(page)
+        section = f"{name} page"
+        opened = f"{section} is opened."
+        go = f"Go to {url}"
+        cases: list[AuthoredCase] = []
+
+        h1 = _clean_text(page.get("h1"))
+        if h1 and len(h1) <= _SURFACE_TEXT_MAX:
+            cases.append(AuthoredCase(
+                summary=f'Verify that the "{h1}" heading is displayed on '
+                        f'the {section}',
+                preconditions=opened,
+                steps=[go, "Look at the main heading at the top of the page"],
+                expected_result=f'The "{h1}" heading is displayed above the '
+                                f'page content',
+                category="Positive", priority="Medium", section=section,
+                testing_type="UI/UX"))
+        title = _clean_text(page.get("title"))
+        if title and len(title) <= 120:
+            cases.append(AuthoredCase(
+                summary=f'Verify that the browser tab shows the "{title}" '
+                        f'title on the {section}',
+                preconditions=opened,
+                steps=[go, "Look at the title of the browser tab"],
+                expected_result=f'The browser tab shows the "{title}" title',
+                category="Positive", priority="Low", section=section,
+                testing_type="UI/UX"))
+
+        sections = []
+        for heading in page.get("headings") or []:
+            text = _clean_text(heading)
+            if not text or len(text) > _SURFACE_TEXT_MAX \
+                    or text.casefold() in chrome_headings \
+                    or text.casefold() == h1.casefold() \
+                    or text in sections:
+                continue
+            sections.append(text)
+            if len(sections) >= MAX_PAGE_SECTIONS:
+                break
+        for text in sections:
+            cases.append(AuthoredCase(
+                summary=f'Verify that the "{text}" section is displayed on '
+                        f'the {section}',
+                preconditions=opened,
+                steps=[go, f'Scroll to the "{text}" section'],
+                expected_result=f'The "{text}" section is displayed with '
+                                f'its content and no element overlaps it',
+                category="Positive", priority="Medium", section=section,
+                testing_type="UI/UX"))
+
+        buttons = []
+        for button in page.get("buttons") or []:
+            text = _clean_text(button)
+            low = text.casefold()
+            if not text or len(text) > 40 or low in chrome_buttons \
+                    or low in nav or text in buttons:
+                continue
+            buttons.append(text)
+            if len(buttons) >= MAX_PAGE_BUTTONS:
+                break
+        for text in buttons:
+            cases.append(AuthoredCase(
+                summary=f'Verify that the "{text}" button responds to a '
+                        f'click on the {section}',
+                preconditions=opened,
+                steps=[go, f'Click on the "{text}" button'],
+                expected_result=f'The view, dialog or section the "{text}" '
+                                f'button names is opened. No error is '
+                                f'displayed',
+                category="Positive", priority="Medium", section=section,
+                testing_type="Functional"))
+
+        cases = [normalise_case(c)[0] for c in cases]
+        _from_page(cases, page)
+        out.extend(cases)
+    return out
+
+
 def _from_page(cases: list, page: dict) -> None:
     """Record the page a case was enumerated on — its place in the WBS.
 
@@ -985,13 +1157,18 @@ def _from_page(cases: list, page: dict) -> None:
 
 
 def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
-    """Convenience wrapper over :class:`engine.tc_author.Artifacts`."""
+    """The rule engine's whole pack for :class:`engine.tc_author.Artifacts`:
+    the forms and grids, then every crawled page's own content."""
     pages = getattr(artifacts, "pages", None) or []
-    return enumerate_from_pages(pages)
+    cases = enumerate_from_pages(pages)
+    if cases or pages:
+        cases = cases + enumerate_page_surfaces(pages)
+    return cases
 
 
 __all__ = [
     "enumerate_from_artifacts", "enumerate_from_pages", "enumerate_grid",
+    "enumerate_page_surfaces", "page_label",
     "count_grid_cases", "grid_checks", "plan_grid_coverage",
     "control_type", "control_types", "field_label", "group_radios",
     "surface_name", "grid_section_name", "grid_section_names", "load_rules",

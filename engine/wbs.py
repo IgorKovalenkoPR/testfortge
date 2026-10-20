@@ -55,6 +55,8 @@ MAX_DEPTH = 3
 #: cannot. Past this many page nodes the rest attach by URL or not at all.
 MAX_PAGE_NODES = 90
 MAX_FOOTER_PAGES = 25
+#: Crawled pages with no ancestor node at all, listed under "Other pages".
+MAX_OTHER_PAGES = 15
 NAME_MAX = 45
 
 HEADER, HOME, FOOTER, OTHER, XC = "header", "home", "footer", "other", "xc"
@@ -63,7 +65,6 @@ _SKIP_LABELS = re.compile(
     r"^(home|homepage|logo|menu|open menu|close|close menu|search|"
     r"skip to (main )?content|toggle navigation|en|ua|de|fr|es|ru|"
     r"read more|learn more|more|see all|view all)$", re.I)
-_ALL_RE = re.compile(r"^all\s+(.+)$", re.I)
 
 #: Cross-cutting topics, matched against a check's section and testing type
 #: (first hit wins, so the specific ones come first).
@@ -75,7 +76,7 @@ _TOPICS = (
     ("Compatibility", r"responsive|viewport|compatib|cross-browser|"
                       r"browser: ui|mobile view|tablet"),
     ("Localization", r"locali|internation|i18n|translat|language"),
-    ("Search", r"\bsearch\b"),
+    ("Search", r"\bsearch\b|\bfilters?\b|\bsort"),
     ("Forms", r"\bforms?\b|input|validation|field"),
     ("Links & Media", r"\blinks?\b|media|image|video"),
     ("Usability", r"usab|ui ?/ ?ux|\bux\b|ui_ux|interactiv"),
@@ -83,6 +84,8 @@ _TOPICS = (
 )
 _STRUCTURE_HEADER = re.compile(r"\b(header|navigation|nav bar|menu)\b", re.I)
 _STRUCTURE_FOOTER = re.compile(r"\bfooter\b", re.I)
+_LAYOUT_SECTION = re.compile(r"\b(content\s*&\s*layout|layout)\b", re.I)
+_FORM_SECTION = re.compile(r"\bforms?\b", re.I)
 _PAGE_SECTION = re.compile(r"^\s*(?:page(?: content)?)\s*[:—–-]\s*(.+)$", re.I)
 
 
@@ -105,6 +108,14 @@ def norm_path(url: str, base: str = "") -> str:
         return ""
     path = re.sub(r"/+", "/", parsed.path or "/").rstrip("/") or "/"
     path = re.sub(r"/index\.(html?|php)$", "", path, flags=re.I) or "/"
+    # A single-page app routes in the fragment (#/pricing, #!/pricing):
+    # there the fragment is the page, an ordinary #anchor is not.
+    frag = parsed.fragment or ""
+    if frag.startswith(("/", "!/")):
+        route = re.sub(r"/+", "/", "/" + frag.lstrip("!").lstrip("/"))
+        route = route.split("?")[0].rstrip("/")
+        if route:
+            path = (path.rstrip("/") + "/#" + route) if path != "/"                 else "/#" + route
     return path.lower()
 
 
@@ -117,7 +128,8 @@ def _host(url: str) -> str:
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-") or "x"
+    # \w, not [a-z0-9]: two Cyrillic menu labels must not both become "x".
+    return re.sub(r"[^\w]+", "-", text.casefold()).strip("-_") or "x"
 
 
 def _title_key(text: str) -> str:
@@ -144,11 +156,20 @@ class Wbs:
     by_url: dict[str, str] = field(default_factory=dict)
     by_label: dict[str, str] = field(default_factory=dict)
     by_title: dict[str, str] = field(default_factory=dict)
+    #: The node of the first crawled page carrying a form — where generic
+    #: form checks ("Forms & Input") are exercised. "" when there is none.
+    primary_form: str = ""
+    #: ``site`` — read from a crawl; ``text`` — read from a description.
+    mode: str = "site"
+    #: Text mode: a requirement line (folded) → the heading it sits under.
+    by_line: dict[str, str] = field(default_factory=dict)
 
     # ── building ────────────────────────────────────────────────
     def add(self, node: WbsNode) -> WbsNode:
         if node.id in self.nodes:
             return self.nodes[node.id]
+        # Prefix-safe: the folder name and the prefix must be one string.
+        node.name = _fpx.safe_name(node.name) or node.name
         taken = {n.name.casefold() for n in self.nodes.values()
                  if n.parent == node.parent}
         name, n = node.name, 2
@@ -236,6 +257,14 @@ class Wbs:
             return self.by_title[key]
         if key in self.by_label:
             return self.by_label[key]
+        # A title quoted in a requirement is often cut ("Page: $2000 за
+        # хату й ділянк…"); a long enough prefix still names one page.
+        if len(key) >= 12:
+            hits = {node for title, node in self.by_title.items()
+                    if title.startswith(key.rstrip("…. ")) or
+                    (len(title) >= 12 and key.startswith(title))}
+            if len(hits) == 1:
+                return hits.pop()
         best = None
         for label, node_id in self.by_label.items():
             if len(label) >= 4 and re.search(
@@ -257,13 +286,17 @@ class Wbs:
         return {"base": self.base,
                 "nodes": [dict(vars(n)) for n in self.ordered()],
                 "by_title": dict(self.by_title),
-                "by_label": dict(self.by_label)}
+                "by_label": dict(self.by_label),
+                "primary_form": self.primary_form,
+                "mode": self.mode,
+                "by_line": dict(self.by_line)}
 
     @classmethod
     def from_dict(cls, data) -> "Wbs | None":
         if not isinstance(data, dict) or not data.get("nodes"):
             return None
-        wbs = cls(base=str(data.get("base") or ""))
+        wbs = cls(base=str(data.get("base") or ""),
+                  mode=str(data.get("mode") or "site"))
         for raw in data["nodes"]:
             if isinstance(raw, dict) and raw.get("id") and raw.get("name"):
                 wbs.add(WbsNode(id=raw["id"], name=raw["name"],
@@ -276,7 +309,27 @@ class Wbs:
         wbs.by_label.update({str(k): str(v) for k, v in
                              (data.get("by_label") or {}).items()
                              if v in wbs.nodes})
+        form = str(data.get("primary_form") or "")
+        wbs.primary_form = form if form in wbs.nodes else ""
+        wbs.by_line.update({str(k): str(v) for k, v in
+                            (data.get("by_line") or {}).items()
+                            if v in wbs.nodes})
         return wbs
+
+    def node_for_line(self, text: str) -> str | None:
+        """The heading a requirement line was written under (text mode)."""
+        key = _line_key(text)
+        if len(key) < 12 or not self.by_line:
+            return None
+        if key in self.by_line:
+            return self.by_line[key]
+        # Quoted requirements are cut ("…for the requirement \"Статистика
+        # виконання (pass / fail /…"); a long shared prefix is one line.
+        stem = key[:40]
+        hits = {node for line, node in self.by_line.items()
+                if line.startswith(stem) or (len(line) >= 20
+                                             and key.startswith(line[:40]))}
+        return hits.pop() if len(hits) == 1 else None
 
     def prompt_lines(self, limit: int = 120) -> list[str]:
         """``id — Path -> To -> Node (url)`` for an LLM to choose from."""
@@ -288,7 +341,28 @@ class Wbs:
 
 
 def build_wbs(pages: list[dict]) -> Wbs:
-    """The WBS for one crawl. ``pages[0]`` is the entry page."""
+    """The WBS for one crawl. ``pages[0]`` is the entry page.
+
+    Generic by construction — nothing here knows a site, a language or a
+    menu name. The evidence, in order of authority:
+
+    1. **Header menus** (``nav_groups``): each one a module; its links,
+       walked in markup order, its pages. A link whose URL is a path prefix
+       of the links after it opens a submodule (``/solutions/healthcare`` →
+       ``/solutions/healthcare/pharma-app``) — the URL says so, in any
+       language. A link to the module's own URL is its overview.
+    2. **Plain header links** (a flat nav): a module each.
+    3. **Footer links**: into a module's URL space → that module; else the
+       Footer.
+    4. **No header navigation at all** (a hamburger rendered outside the
+       header, an SPA shell, a page the crawler only saw links in): modules
+       from the crawled URLs' first path segment, named by the page at that
+       URL if it was crawled.
+    5. **Crawled pages no menu declares** are instances, not structure: an
+       article, a forum topic. They map to their nearest node by URL and
+       get no folder of their own; only a page with no ancestor at all is
+       listed under "Other pages".
+    """
     pages = [p for p in (pages or []) if isinstance(p, dict)]
     primary = pages[0] if pages else {}
     base = str(primary.get("url") or "")
@@ -303,11 +377,19 @@ def build_wbs(pages: list[dict]) -> Wbs:
         host = _host(urljoin(base, href)) if base else _host(href)
         return not host or not base or host == _host(base)
 
+    def usable(label: str) -> bool:
+        # A long "label" is a promotion or an article headline in a
+        # mega-menu (measured on testfort.com and qarea.com), not a page;
+        # an e-mail address is a mailto link, not a page; a bracketed
+        # placeholder ("[email protected]" from an obfuscating CDN) is not
+        # text the site shows anyone.
+        return bool(label) and len(label) <= NAME_MAX \
+            and not _SKIP_LABELS.match(label) and "@" not in label \
+            and not (label.startswith("[") and label.endswith("]"))
+
     def add_page(parent: str, label: str, href: str, kind: str = "page"):
         label = label.strip()
-        # A long "label" is a promotion or an article headline in a
-        # mega-menu (measured on testfort.com and qarea.com), not a page.
-        if not label or len(label) > NAME_MAX or _SKIP_LABELS.match(label)                 or not same_site(href):
+        if not usable(label) or not same_site(href):
             return None
         key = norm_path(href, base) if href else ""
         if not key:
@@ -336,28 +418,28 @@ def build_wbs(pages: list[dict]) -> Wbs:
             return owner
         # A menu page with pages under its own URL (/solutions/fitness →
         # /solutions/fitness/wellness) is a submodule of its menu.
-        if node.kind == "page" and node.parent and wbs.nodes[
-                node.parent].kind in ("module", "submodule")                 and wbs.depth(owner) < MAX_DEPTH                 and norm_path(url, base).startswith(node.url + "/"):
+        if node.kind == "page" and node.parent \
+                and wbs.nodes[node.parent].kind in ("module", "submodule") \
+                and wbs.depth(owner) < MAX_DEPTH \
+                and norm_path(url, base).startswith(node.url + "/"):
             node.kind = "submodule"
             return owner
         return None
 
     links = [l for l in (primary.get("header_links") or [])
              if isinstance(l, dict) and label_of(l.get("text"))]
-
     groups = [g for g in (primary.get("nav_groups") or [])
               if isinstance(g, dict) and g.get("region") == "header"
-              and label_of(g.get("label"))
-              and not _SKIP_LABELS.match(label_of(g.get("label")))]
+              and usable(label_of(g.get("label")))]
     head_href = {label_of(l["text"]).casefold(): l.get("href") or ""
                  for l in links if not l.get("in_menu")}
     modules: dict[str, str] = {}
     member: dict[str, str] = {}
     for group in groups:
-        label = label_of(group["label"])[:NAME_MAX]
+        label = label_of(group["label"])
         href = head_href.get(label.casefold(), "")
         url = norm_path(href, base) if href and same_site(href) else ""
-        if url in ("/",) or url in wbs.by_url:
+        if url == "/" or url in wbs.by_url:
             url = ""
         module = wbs.add(WbsNode(f"module:{_slug(label)}", label, "module",
                                  url=url))
@@ -366,13 +448,11 @@ def build_wbs(pages: list[dict]) -> Wbs:
         for child in group.get("children") or []:
             member.setdefault(label_of(child).casefold(), label.casefold())
 
-    # Header menus → modules → pages, walking the links in the order the
-    # markup lists them. The drop-down children lists are capped by the
-    # crawler; the links are the full record, and each one joins the menu
-    # that lists it (or the menu opened last).
+    # 1. Header menus, in markup order. The crawler caps the drop-down
+    # children lists; the links are the full record, and each one joins the
+    # menu that lists it (or the menu opened last).
+    in_menu: list[tuple[str, str, str]] = []
     current: str | None = None
-    open_parent: dict[str, str] = {}
-    menu_texts: set[str] = set()
     for link in links:
         text = label_of(link["text"])
         key = text.casefold()
@@ -384,47 +464,49 @@ def build_wbs(pages: list[dict]) -> Wbs:
         if module_id is None:
             continue
         current = module_id
-        menu_texts.add(key)
-        module = wbs.nodes[module_id]
         href = link.get("href") or ""
-        m = _ALL_RE.match(text)
-        if m:
-            url = norm_path(href, base) if href and same_site(href) else ""
-            if not url or url == module.url:
-                open_parent[module_id] = module_id   # the module's overview
-                if url and url not in wbs.by_url:
-                    wbs.by_url[url] = module_id
-                continue
-            name = m.group(1)[:NAME_MAX]
-            if url in wbs.by_url:
-                # The menu groups pages under a heading whose own link is
-                # another module's page: a submodule identified by label.
-                sub = wbs.add(WbsNode(f"group:{module_id}:{_slug(name)}",
-                                      name, "submodule", parent=module_id))
-            else:
-                sub = wbs.add(WbsNode(f"page:{url}", name, "submodule",
-                                      parent=module_id, url=url))
-            wbs.by_label.setdefault(key, sub.id)
-            open_parent[module_id] = sub.id
+        if same_site(href):
+            in_menu.append((module_id, text, norm_path(href, base)))
+    menu_texts = {text.casefold() for _, text, _ in in_menu}
+    open_parent: dict[str, str] = {}
+    for index, (module_id, text, url) in enumerate(in_menu):
+        module = wbs.nodes[module_id]
+        if not url or url == module.url:
+            open_parent[module_id] = module_id      # the module's overview
+            if url and url not in wbs.by_url:
+                wbs.by_url[url] = module_id
             continue
-        add_page(open_parent.get(module_id, module_id), text, href)
+        parent = open_parent.get(module_id, module_id)
+        if parent != module_id and not url.startswith(
+                wbs.nodes[parent].url + "/"):
+            parent = open_parent[module_id] = module_id
+        node_id = add_page(parent, text, url)
+        following = [u for m, _, u in in_menu[index + 1:index + 4]
+                     if m == module_id]
+        if node_id and node_id != HOME \
+                and wbs.nodes[node_id].kind == "page" \
+                and wbs.depth(node_id) < MAX_DEPTH \
+                and any(u.startswith(url + "/") for u in following):
+            wbs.nodes[node_id].kind = "submodule"
+            open_parent[module_id] = node_id
 
-    # Plain top-level links → a module each (Contact us, Blog).
+    # 2. Plain top-level links → a module each.
     for link in links:
         text = label_of(link["text"])
-        if link.get("in_menu") or text.casefold() in modules                 or text.casefold() in menu_texts:
+        if link.get("in_menu") or text.casefold() in modules \
+                or text.casefold() in menu_texts:
             continue
         href = link.get("href") or ""
         key = norm_path(href, base) if href and same_site(href) else ""
-        if not key or key in wbs.by_url or _SKIP_LABELS.match(text)                 or len(text) > NAME_MAX:
-            if key == "/":
-                wbs.by_label.setdefault(text.casefold(), HOME)
+        if key == "/":
+            wbs.by_label.setdefault(text.casefold(), HOME)
+            continue
+        if not key or key in wbs.by_url or not usable(text):
             continue
         node = wbs.add(WbsNode(f"page:{key}", text, "module", url=key))
         wbs.by_label.setdefault(text.casefold(), node.id)
 
-    # Footer: its own links; a footer link into a module's URL space joins
-    # that module rather than the Footer.
+    # 3. Footer.
     wbs.add(WbsNode(FOOTER, "Footer", "component"))
     footer_budget = [MAX_FOOTER_PAGES]
     for link in primary.get("footer_links") or []:
@@ -443,32 +525,81 @@ def build_wbs(pages: list[dict]) -> Wbs:
         elif footer_budget[0] > 0 and add_page(FOOTER, text, href):
             footer_budget[0] -= 1
 
-    # Crawled pages no menu linked → beside their URL siblings, else Other.
     from engine.checklist_rules import _page_name
+
+    def page_name(page: dict, key: str) -> str:
+        return next((c for c in (
+            label_of(_title_key(page.get("title")) and re.split(
+                r"\s[|│]\s?|\s[–—]\s", str(page.get("title") or ""))[0]),
+            label_of(page.get("h1")),
+            re.sub(r"[-_]+", " ", key.rstrip("/").rsplit("/", 1)[-1])
+            .strip().capitalize(),
+        ) if c and usable(c)), "")
+
+    # 4. No header navigation: the URL structure is the evidence left.
+    has_nav = any(n.kind in ("module", "submodule") for n in wbs.nodes.values())
+    if not has_nav:
+        by_url = {norm_path(str(p.get("url") or ""), base): p for p in pages}
+        for key in sorted(k for k in by_url if k and k != "/"):
+            first = "/" + key.strip("/").split("/")[0]
+            if first not in wbs.by_url:
+                page = by_url.get(first)
+                name = page_name(page, first) if page else page_name({}, first)
+                if name:
+                    wbs.add(WbsNode(f"page:{first}", name, "module",
+                                    url=first))
+
+    for page in pages:
+        if any((f or {}).get("fields") for f in page.get("forms") or []):
+            key = norm_path(str(page.get("url") or ""), base)
+            wbs.primary_form = HOME if key == "/" else (
+                wbs.node_for_url(str(page.get("url") or "")) or "")
+            break
+
+    # 5. Crawled pages: map to the nearest node; only orphans are listed.
+    other_budget = [MAX_OTHER_PAGES]
     for page in pages:
         url = str(page.get("url") or "")
         if not url:
             continue
-        node_id = wbs.node_for_url(url) if norm_path(url, base) in wbs.by_url \
-            else None
+        key = norm_path(url, base)
+        node_id = HOME if key == "/" else wbs.node_for_url(url)
         if node_id is None:
-            key = norm_path(url, base)
-            if key == "/":
-                node_id = HOME
-            else:
-                parent = under_module(url) or wbs.other()
-                label = next((c for c in (
-                    label_of(re.split(r"\s[|│]\s?", str(page.get("title") or ""))[0]),
-                    label_of(page.get("h1")),
-                    re.sub(r"[-_]+", " ", key.rsplit("/", 1)[-1]).strip().capitalize(),
-                ) if c and len(c) <= NAME_MAX), "")
-                node_id = add_page(parent, label, url) or parent
+            if other_budget[0] > 0:
+                node_id = add_page(wbs.other(), page_name(page, key), url)
+                other_budget[0] -= 1
+            node_id = node_id or wbs.other()
         for name in (_page_name(url, page.get("title", "")),
                      page.get("title"), page.get("h1")):
-            key = _title_key(name)
-            if key:
-                wbs.by_title.setdefault(key, node_id)
+            title = _title_key(name)
+            if title:
+                wbs.by_title.setdefault(title, node_id)
     return wbs
+
+
+def surface_urls(wbs: Wbs, pages: list[dict], per_node: int = 2) -> set[str]:
+    """The crawled pages whose own content gets test cases.
+
+    Every page with a node of its own, and at most ``per_node`` of the
+    instance pages that map onto one node (25 articles share a template;
+    walking it twice is coverage, 25 times is duplication).
+    """
+    out: set[str] = set()
+    taken: dict[str, int] = {}
+    for page in pages or []:
+        url = str((page or {}).get("url") or "")
+        if not url:
+            continue
+        key = norm_path(url, wbs.base)
+        node_id = HOME if key == "/" else (wbs.node_for_url(url) or OTHER)
+        node = wbs.nodes.get(node_id)
+        if node is not None and node.url == key:
+            out.add(url)
+            continue
+        if taken.get(node_id, 0) < per_node:
+            taken[node_id] = taken.get(node_id, 0) + 1
+            out.add(url)
+    return out
 
 
 # ── attribution ─────────────────────────────────────────────────────
@@ -481,7 +612,7 @@ def topic_of(*texts) -> str | None:
     return None
 
 
-def attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
+def _attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
     """The node an item belongs to. Never returns None.
 
     In order: an explicit node a generator chose (an LLM picks from
@@ -538,12 +669,31 @@ def attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
                     return found
 
     text = str(item.get(field_name) or "")
-    requirement = re.search(r'requirement "Page:\s*([^|"]+)', text)
-    if requirement:
-        found = wbs.node_for_name(requirement.group(1))
+    quoted = re.search(r'requirement "([^"]+)', text)
+    for requirement in (hint.get("requirement"),
+                        quoted.group(1) if quoted else None):
+        if not requirement:
+            continue
+        page = re.match(r"\s*Page:\s*([^|]+)", requirement)
+        found = (wbs.node_for_name(page.group(1)) if page
+                 else wbs.node_for_line(requirement))
         if found:
             return found
 
+    # Generic template families that are not site-wide: layout checks are
+    # written for "the page" (the entry page), form checks for a form —
+    # the first one the crawl found, when it found one.
+    if _LAYOUT_SECTION.search(section):
+        return HOME
+    if _FORM_SECTION.search(section) and wbs.primary_form:
+        return wbs.primary_form
+
+    if wbs.mode == "text":
+        # A description has no pages to point at; what an item says about
+        # itself — its area, then its own words — is the evidence.
+        found = wbs.node_for_name(section) or wbs.node_for_name(text)
+        if found:
+            return found
     topic = topic_of(section, item.get("testing_type"))
     if topic:
         return wbs.cross_cutting(topic)
@@ -555,7 +705,28 @@ def attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
     topic = topic_of(text)
     if topic:
         return wbs.cross_cutting(topic)
+    area = _clean_heading(section.split("—")[0])
+    if wbs.mode == "text" and area and not _GENERIC_AREA.match(area):
+        # No node names this area: the area is a module of its own.
+        node = wbs.add(WbsNode(f"text:{_slug(area)}", area, "module"))
+        _alias_labels(wbs, node)
+        return node.id
     return wbs.cross_cutting("General")
+
+
+#: Section names generators use for "no particular area" — never a module.
+_GENERIC_AREA = re.compile(
+    r"^(general|general web|misc|other|requirements?[- ]specific)$", re.I)
+
+
+def attribute(wbs: Wbs, item: dict, field_name: str = "summary") -> str:
+    """The node an item belongs to. Never returns None, and always a node
+    of ``wbs`` (a description has no Header or Homepage: the chrome checks
+    the web templates still write go to Cross-cutting there)."""
+    node = _attribute(wbs, item, field_name)
+    if node in wbs.nodes:
+        return node
+    return wbs.cross_cutting("UI")
 
 
 def stamp(wbs: Wbs, folder_for, dicts: list, kind: str, *,
@@ -584,5 +755,195 @@ def stamp(wbs: Wbs, folder_for, dicts: list, kind: str, *,
     return counts
 
 
-__all__ = ["Wbs", "WbsNode", "build_wbs", "attribute", "stamp", "topic_of",
+
+# ── a product with no crawlable site: the WBS from the input text ─────
+#
+# Generation from a description (requirements, a spec, an attachment) has
+# no navigation to read, but a written description has structure of its
+# own: headings, a numbered outline, "Area:" lines. Same rules as the site
+# builder — evidence only, depth ≤ 3, names as the author wrote them —
+# so an item still gets ``[Module -> Page]``, never "General".
+
+_MD_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+_OUTLINE = re.compile(r"^\s*(\d{1,2}(?:\.\d{1,2}){0,2})[.)]?\s+(\S.{0,79})$")
+_COLON_HEAD = re.compile(r"^\s*([^\s:][^:]{1,59}):\s*$")
+_NUMBERING = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s+")
+MAX_TEXT_MODULES = 30
+MAX_TEXT_PAGES = 30
+
+
+def _clean_heading(text) -> str:
+    text = _NUMBERING.sub("", str(text or ""))
+    text = re.sub(r"[*_`]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip().rstrip(":").strip()
+    return text[:NAME_MAX].strip()
+
+
+def _text_headings(lines) -> list[tuple[int, str]]:
+    """``[(level, name)]`` — markdown headings, else an outline, else
+    ``Area:`` lines. Whichever the text actually uses."""
+    lines = [str(l or "") for l in lines or []]
+    found = [(len(m.group(1)), m.group(2)) for m in
+             (_MD_HEADING.match(l) for l in lines) if m]
+    if not found:
+        for line in lines:
+            m = _OUTLINE.match(line)
+            # A heading, not a numbered requirement: short, no sentence.
+            if m and not re.search(r"[.;!?]\s*$", m.group(2)) \
+                    and len(m.group(2).split()) <= 8:
+                found.append((m.group(1).count(".") + 1, m.group(2)))
+    if not found:
+        found = [(1, m.group(1)) for m in
+                 (_COLON_HEAD.match(l) for l in lines) if m]
+    return [(level, _clean_heading(name)) for level, name in found
+            if _clean_heading(name)]
+
+
+def _alias_labels(wbs: "Wbs", node: "WbsNode") -> None:
+    name = node.name.casefold()
+    wbs.by_label.setdefault(name, node.id)
+    bare = re.sub(r"\s*[(\[].*?[)\]]\s*", " ", name).strip()
+    if bare and bare != name and len(bare) >= 3:
+        wbs.by_label.setdefault(bare, node.id)
+
+
+def build_wbs_from_text(lines) -> "Wbs":
+    """The WBS a written description declares. Empty (no modules) when the
+    text has no structure at all; attribution then makes a module of each
+    generated item's own area rather than filing it under "General"."""
+    wbs = Wbs(base="", mode="text")
+    heads = _text_headings(lines)
+    if not heads:
+        return wbs
+    levels = sorted({level for level, _ in heads})
+    # A level used once is the document's title, not a module.
+    while len(levels) > 1 and sum(1 for l, _ in heads if l == levels[0]) == 1:
+        levels = levels[1:]
+    rank = {level: i for i, level in enumerate(levels[:3])}
+    stack: list[str | None] = [None, None, None]
+    counts = {"module": 0, "page": 0}
+    for level, name in heads:
+        if level not in rank:
+            continue
+        depth = rank[level]
+        parent = stack[depth - 1] if depth else None
+        if depth and parent is None:
+            continue
+        kind = "module" if depth == 0 else "page"
+        bucket = "module" if depth == 0 else "page"
+        if counts[bucket] >= (MAX_TEXT_MODULES if depth == 0
+                              else MAX_TEXT_MODULES * MAX_TEXT_PAGES):
+            continue
+        counts[bucket] += 1
+        if parent and wbs.nodes[parent].kind == "page":
+            wbs.nodes[parent].kind = "submodule"
+        path = "/".join(_slug(n) for n in (
+            *(wbs.path(parent) if parent else ()), name))
+        node = wbs.add(WbsNode(f"text:{path}", name, kind, parent=parent))
+        _alias_labels(wbs, node)
+        stack[depth] = node.id
+        for deeper in range(depth + 1, 3):
+            stack[deeper] = None
+    _record_lines(wbs, lines)
+    return wbs
+
+
+def _line_key(text) -> str:
+    text = re.sub(r"^\s*(?:[-*+•]|\d+[.)])\s+", "", str(text or ""))
+    text = re.sub(r"[*_`#>]+", "", text)
+    return re.sub(r"\s+", " ", text).strip().casefold()[:80]
+
+
+def _record_lines(wbs: "Wbs", lines) -> None:
+    """Each requirement line → the deepest node of the headings above it."""
+    by_name = {}
+    for node in wbs.ordered():
+        by_name.setdefault(node.name, node.id)
+    current = None
+    for line in lines or []:
+        text = str(line or "")
+        m = _MD_HEADING.match(text) or _OUTLINE.match(text)
+        name = _clean_heading(m.group(2)) if m else ""
+        if name and name in by_name:
+            current = by_name[name]
+            continue
+        key = _line_key(text)
+        if current and len(key) >= 12:
+            wbs.by_line.setdefault(key, current)
+
+
+_TEXT_PROMPT_VERSION = "wbs_text/1"
+
+
+def build_wbs_from_text_llm(text: str, *, force: bool = False) -> "Wbs | None":
+    """The model's breakdown of a description, or None.
+
+    Asked for modules → pages only; the answer is validated and capped like
+    the deterministic one, and an unusable answer returns None so the
+    caller keeps :func:`build_wbs_from_text`.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return None
+    try:
+        from engine import wbs_attribution as _attr
+        if not (force or _attr._llm_available()):
+            return None
+        from engine.llm_cache import cached_call
+        from engine.llm_client import call_messages
+        prompt = (
+            "Break this product down into a work breakdown structure for "
+            "testing: its modules, and the pages or screens inside each. "
+            "Use the names the text itself uses, in its language. Answer "
+            "with ONE JSON object {\"modules\": [{\"name\": \"…\", "
+            "\"pages\": [\"…\"]}]}. At most 30 modules, 30 pages each; "
+            "nothing the text does not describe.\n\n" + text[:12000])
+        resp = cached_call(
+            "analysis", prompt_version=_TEXT_PROMPT_VERSION,
+            call=call_messages, max_tokens=3000,
+            accept=lambda t: _parse_modules(t) is not None,
+            messages=[{"role": "user", "content": prompt}])
+        raw = "\n".join(getattr(b, "text", "") or ""
+                        for b in getattr(resp, "content", []) or [])
+    except Exception:
+        return None
+    modules = _parse_modules(raw)
+    if not modules:
+        return None
+    wbs = Wbs(base="", mode="text")
+    for module in modules[:MAX_TEXT_MODULES]:
+        name = _clean_heading(module.get("name"))
+        if not name:
+            continue
+        mod = wbs.add(WbsNode(f"text:{_slug(name)}", name, "module"))
+        _alias_labels(wbs, mod)
+        pages = module.get("pages")
+        for page in (pages if isinstance(pages, list) else [])[:MAX_TEXT_PAGES]:
+            pname = _clean_heading(page.get("name") if isinstance(page, dict)
+                                   else page)
+            if pname:
+                node = wbs.add(WbsNode(f"text:{_slug(name)}/{_slug(pname)}",
+                                       pname, "page", parent=mod.id))
+                _alias_labels(wbs, node)
+    return wbs if wbs.nodes else None
+
+
+def _parse_modules(text: str):
+    import json as _json
+    m = re.search(r"\{.*\}", text or "", re.DOTALL)
+    if not m:
+        return None
+    try:
+        value = _json.loads(m.group(0))
+    except ValueError:
+        return None
+    modules = value.get("modules") if isinstance(value, dict) else None
+    if not isinstance(modules, list) or not all(
+            isinstance(x, dict) for x in modules):
+        return None
+    return modules
+
+
+__all__ = ["Wbs", "WbsNode", "build_wbs", "surface_urls",
+           "build_wbs_from_text", "build_wbs_from_text_llm", "attribute", "stamp", "topic_of",
            "norm_path", "label_of", "HEADER", "HOME", "FOOTER", "OTHER", "XC"]

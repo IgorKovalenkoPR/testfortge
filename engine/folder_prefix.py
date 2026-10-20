@@ -109,12 +109,23 @@ def prefix_changed(old_text, new_text) -> bool:
     return bool(new) and new != path_key(parse(old_text))
 
 
+def safe_name(name) -> str:
+    """A folder name that survives a round trip through a prefix.
+
+    A name holding a separator or a bracket would not parse back as itself
+    ("Парсинг вимог → User Stories" is three levels to the parser), so the
+    separator becomes " / " — which is not one — and brackets go. The WBS
+    names its nodes through this, so the folder and the prefix agree.
+    """
+    text = re.sub(r"\s+", " ", str(name or "")).strip()
+    text = _SPLIT_RE.sub(" / ", text)
+    text = re.sub(r"[\[\]]", "", text)
+    return re.sub(r"\s+", " ", text).strip(" /")
+
+
 def format_prefix(path) -> str:
     """``("Services", "Web Development")`` → ``[Services -> Web Development]``."""
-    names = [re.sub(r"\s+", " ", str(p)).strip() for p in (path or ())]
-    # A name holding a bracket or a separator would not parse back as itself.
-    names = [re.sub(r"[\[\]]", "", _SPLIT_RE.sub(" ", n)).strip()
-             for n in names]
+    names = [safe_name(p) for p in (path or ())]
     names = [n for n in names if n][:MAX_DEPTH]
     return f"[{SEPARATOR.join(names)}]" if names else ""
 
