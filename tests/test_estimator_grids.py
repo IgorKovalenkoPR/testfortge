@@ -19,7 +19,6 @@ import pytest
 from engine import qa_estimator as est
 from engine import tc_rules
 from engine.site_crawler import SiteAnalysis, _detect_features, _parse_page
-from engine.tc_author import Artifacts
 
 
 ADMIN_GRID = """
@@ -111,11 +110,12 @@ class TestGridBudget:
         page = _analysis(ADMIN_GRID).pages[0]
         priced, _ = est._grid_tc(page, len(page.tables))
 
-        generated = tc_rules.enumerate_from_artifacts(Artifacts(pages=[{
+        # The grid pass only: page-content cases are priced per page.
+        generated = tc_rules.enumerate_from_pages([{
             "url": page.url, "h1": page.h1, "title": page.title,
             "forms": [], "tables": page.tables,
             "grid_controls": page.grid_controls,
-        }]))
+        }])
         assert priced == len(generated), (priced, len(generated))
 
     def test_the_page_row_names_the_grid_it_charged_for(self):
@@ -202,11 +202,17 @@ def _quoted_beyond(analysis) -> int:
 
 
 def _generated(analysis) -> int:
-    """Grid cases the generator will actually write."""
-    return len(tc_rules.enumerate_from_artifacts(Artifacts(pages=[{
+    """Grid cases the generator will actually write.
+
+    ``enumerate_from_pages`` — the forms-and-grids pass, which is what the
+    grid quote prices. The generator's pack also carries each page's own
+    content cases (``tc_rules.enumerate_page_surfaces``); the estimate
+    prices those in its per-page density budget, not in the grid line.
+    """
+    return len(tc_rules.enumerate_from_pages([{
         "url": p.url, "h1": p.h1, "title": p.title, "forms": [],
         "tables": p.tables, "grid_controls": p.grid_controls,
-    } for p in analysis.pages])))
+    } for p in analysis.pages]))
 
 
 class TestQuoteMatchesPack:

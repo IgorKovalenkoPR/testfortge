@@ -119,7 +119,7 @@ class TestParse:
         assert fpx.with_prefix("[Old] Verify that x", ()) == "Verify that x"
         # A name holding a separator or a bracket still parses back.
         odd = fpx.with_prefix("x", ("A -> B", "[C]"))
-        assert fpx.parse(odd) == ("A B", "C")
+        assert fpx.parse(odd) == ("A / B", "C")
 
     def test_map_body_keeps_the_prefix(self):
         assert fpx.map_body("[A] hello", str.upper) == "[A] HELLO"

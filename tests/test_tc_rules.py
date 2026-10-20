@@ -314,7 +314,13 @@ class TestRobustness:
         pages = _pages(ORDER_FORM)
         direct = tc_rules.enumerate_from_pages(pages)
         wrapped = tc_rules.enumerate_from_artifacts(Artifacts(pages=pages))
-        assert [c.to_dict() for c in direct] == [c.to_dict() for c in wrapped]
+        # The forms first, unchanged; then the page's own content cases
+        # (engine.tc_rules.enumerate_page_surfaces), nothing else.
+        assert [c.to_dict() for c in wrapped[:len(direct)]] ==             [c.to_dict() for c in direct]
+        extra = wrapped[len(direct):]
+        assert [c.to_dict() for c in extra] == [
+            c.to_dict() for c in tc_rules.enumerate_page_surfaces(pages)]
+        assert all(c.section.endswith(" page") for c in extra)
 
 
 # ── Integration with the generator ───────────────────────────────────
@@ -327,7 +333,10 @@ class TestGeneratorUsesTheRuleEngine:
 
         tcs = generate_from_artifacts(Artifacts(pages=_pages(ORDER_FORM)))
         assert len(tcs) > 10, "the free-tier path must still enumerate"
-        assert {t.section for t in tcs} == {"Customer order"}
+        # The form's surface, plus the page's own content section.
+        assert {t.section for t in tcs} - {"Customer order"} <= {
+            f"{tc_rules.page_label(p)} page" for p in _pages(ORDER_FORM)}
+        assert "Customer order" in {t.section for t in tcs}
         # Authored section numbers, so IDs cannot collide with the
         # strategy-category range.
         assert all(int(t.id[2:].split("_")[0]) >= 10 for t in tcs)
@@ -354,7 +363,9 @@ class TestGeneratorUsesTheRuleEngine:
             profile, strategy,
             artifacts=Artifacts(pages=_pages(ORDER_FORM)))
         # Sections come from the surface, not from strategy categories.
-        assert {t.section for t in tcs} == {"Customer order"}
+        assert {t.section for t in tcs} - {"Customer order"} <= {
+            f"{tc_rules.page_label(p)} page" for p in _pages(ORDER_FORM)}
+        assert "Customer order" in {t.section for t in tcs}
         # The checklist still comes from the Medium/Low strategy checks.
         assert cls
 

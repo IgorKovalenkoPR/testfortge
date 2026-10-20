@@ -316,7 +316,10 @@ class TestRobustness:
         pages = _pages(ORDERS_GRID)
         direct = tc_rules.enumerate_from_pages(pages)
         wrapped = tc_rules.enumerate_from_artifacts(Artifacts(pages=pages))
-        assert [c.to_dict() for c in direct] == [c.to_dict() for c in wrapped]
+        # The grid's cases first and unchanged, then the page's content.
+        assert [c.to_dict() for c in wrapped[:len(direct)]] ==             [c.to_dict() for c in direct]
+        assert all(c.section.endswith(" page")
+                   for c in wrapped[len(direct):])
 
     def test_a_page_dict_without_the_new_keys_still_works(self):
         # Callers built before grids existed hand over url/title/h1/forms

@@ -243,7 +243,21 @@ def analyze_input(requirements: list[dict],
             if site_analysis.nav_items:
                 detected_areas.add("navigation")
 
+            # One requirement per page *template*, not per instance: thirty
+            # articles on one layout produced ninety identical "valid /
+            # invalid / boundary input" rows on dou.ua (2026-10-20). The
+            # pages the WBS gives a node of their own, plus two instances
+            # per node — engine.wbs.surface_urls.
+            try:
+                from dataclasses import asdict as _asdict
+                from engine import wbs as _wbs
+                _dicts = [_asdict(p) for p in site_analysis.pages]
+                _surfaces = _wbs.surface_urls(_wbs.build_wbs(_dicts), _dicts)
+            except Exception:  # pragma: no cover — never block generation
+                _surfaces = None
             for page in site_analysis.pages:
+                if _surfaces is not None and page.url not in _surfaces:
+                    continue
                 parts = []
                 if page.title:
                     parts.append(f"Page: {page.title}")
