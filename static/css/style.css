@@ -4327,6 +4327,22 @@ h3.tf-ask-sub { margin-top: var(--space-2); font-size: 12px; font-weight: 700; c
 .page-test-cases .tc-dialog-actions { justify-content: flex-end; }
 .page-test-cases .tc-mt-8 { margin-top: 8px; }
 .page-test-cases .tc-badge-suite { background: var(--violet-bg); color: var(--violet-text); border: 1px solid var(--violet-border); }
+/* An empty editable field shows its placeholder, styled as one. */
+.ie.ie-empty { font-style: italic; opacity: .75; }
+.page-test-cases .tc-badge-suite:has(.ie-empty) { background: transparent; border-style: dashed; }
+/* A hint on the element itself: on hover and on keyboard focus, no JS
+   (CSP) — WCAG 1.4.13 asks for focus as well as hover. */
+.tf-hover-hint { position: relative; }
+.tf-hover-hint[data-hint]:hover::after,
+.tf-hover-hint[data-hint]:focus-within::after {
+    content: attr(data-hint);
+    position: absolute; left: 0; top: calc(100% + 6px); z-index: 30;
+    width: max-content; max-width: 260px; white-space: normal;
+    padding: 6px 8px; border-radius: 6px;
+    background: var(--text, #222); color: var(--bg, #fff);
+    font-size: 0.78rem; font-weight: 400; font-style: normal; line-height: 1.35;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .18); pointer-events: none;
+}
 .page-test-cases .tc-badge-indigo { background: var(--indigo-bg-soft); border-color: var(--indigo-border); color: var(--indigo-text); }
 .page-test-cases .tc-edit-panel { margin-top: 10px; border: 1px dashed var(--border-strong); border-radius: 6px; padding: 8px 12px; background: var(--tf-surface-2); }
 .page-test-cases .tc-edit-summary { cursor: pointer; font-weight: 600; color: var(--badge-grey); font-size: 0.9em; }

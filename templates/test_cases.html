@@ -22,11 +22,12 @@
     global is lazy and cached per request, so this costs one query. -#}
 {% set tc_edit = edit_metadata('test_cases') %}
 
-{% macro tc_field(tc, field, value, kind="text", label=None) %}
+{% macro tc_field(tc, field, value, kind="text", label=None, placeholder="—") %}
   {%- set meta = tc_edit.get(tc.id) if tc_edit else None -%}
   {{ editable("test_case", tc.id, field, value,
               version=meta.row_version if meta else None,
-              kind=kind, label=label, readonly=(meta is none)) }}
+              kind=kind, label=label, readonly=(meta is none),
+              placeholder=placeholder) }}
 {%- endmacro %}
 
 {% block page_class %}{{ ' page-test-cases' }}{% endblock %}
@@ -837,13 +838,23 @@
             <div class="badge-group">
                 <span class="badge badge-cat-{{ tc.category|lower|replace(' ', '-')|replace('edge-case','edge') }}">{{ tc_field(tc, "category", tc.category) }}</span>
                 <span class="badge badge-{{ tc.priority|lower }}">{{ tc_field(tc, "priority", tc.priority) }}</span>
+                {#- The suite pill: shown to editors even when the case is in
+                    no suite, so it can be set here — labelled "Suite" then,
+                    not a bare "—", with the hint on the pill itself (owner
+                    ruling: per-element hints, not page cards). -#}
                 {% if tc.suite or editors_enabled() %}
-                <span class="badge badge-suite-{{ tc.suite|lower }} tc-badge-suite">
-                    {{ tc_field(tc, "suite", tc.suite, label="suite") }}
+                {%- set suite_hint = t.tc_suite_hint_edit if editors_enabled() else t.tc_suite_hint %}
+                <span class="badge badge-suite-{{ tc.suite|lower }} tc-badge-suite tf-hover-hint"
+                      data-hint="{{ suite_hint }}">
+                    {{ tc_field(tc, "suite", tc.suite, label="suite", placeholder=t.tc_suite) }}
+                    <span class="sr-only">{{ suite_hint }}</span>
                 </span>
                 {% endif %}
                 <span class="badge badge-outline folder-badge" data-folder-badge="{{ tc.id }}" hidden></span>
-                <span class="badge badge-outline">{{ tc.user_story_id }}</span>
+                {%- if tc.user_story_id %}
+                <span class="badge badge-outline tf-hover-hint"
+                      data-hint="{{ t.tc_user_story_hint }}">{{ tc.user_story_id }}</span>
+                {%- endif %}
                 {% if tc.trigger and tc.trigger != 'manual' %}
                 <span class="badge badge-outline tc-badge-indigo"
                       title="{{ t.tc_walkthrough_note }}">

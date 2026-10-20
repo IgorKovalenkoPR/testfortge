@@ -216,7 +216,10 @@
             control.remove();
         }
         host.classList.remove(EDITING_CLASS);
-        host.textContent = text;
+        // An emptied field shows what it is for ("Suite"), not a blank
+        // pill — the same placeholder the server rendered it with.
+        host.textContent = text || host.getAttribute('data-ie-placeholder') || '';
+        host.classList.toggle('ie-empty', !text);
         host.setAttribute('tabindex', '0');
         // After a save the value is new, so the name that describes it is
         // stale; refreshing here covers every close path at once.

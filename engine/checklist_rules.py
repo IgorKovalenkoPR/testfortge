@@ -42,12 +42,19 @@ from engine.log import get_logger
 
 _logger = get_logger(__name__)
 
-#: Content sections beyond this are dropped and reported as a gap. A
-#: checklist nobody can walk in a sitting is not a deliverable.
-MAX_CONTENT_SECTIONS = 12
+#: Content sections beyond this are dropped and reported as a gap. It was
+#: 12, which gave twelve pages ~60 rows each and every other crawled page
+#: none (owner rule 2026-10-21: every page covered evenly). Now every page
+#: template the crawl reached gets a section, and the walkable size is
+#: kept by sharing a fixed heading budget between them instead.
+MAX_CONTENT_SECTIONS = 60
 #: Per-surface caps. The reference spends 38 rows on one page; a 50-heading
 #: marketing page would otherwise bury the form checks that matter.
 MAX_HEADINGS_PER_SECTION = 24
+#: Heading rows for the whole sheet — the old 12 x 24 — shared between the
+#: content sections, at least ``MIN_HEADINGS_PER_SECTION`` each.
+HEADING_BUDGET = 288
+MIN_HEADINGS_PER_SECTION = 4
 MAX_FIELD_CHECKS_PER_FORM = 40
 
 
@@ -199,6 +206,17 @@ def _is_noise_field(fld: dict, label: str) -> bool:
         return True
     blob = " ".join(str(fld.get(k) or "") for k in ("name", "id", "class"))
     return bool(_HONEYPOT_RE.search(blob) or _HONEYPOT_RE.search(label))
+
+
+def _site_form_key(fields: list[dict]) -> tuple:
+    """The same form on another page: its visible controls, by type and
+    name. Not the action — Contact Form 7 posts each page's copy to that
+    page (qarea.com: /careers#wpcf7-…, /company#wpcf7-…), so the per-page
+    signature below never matches across pages."""
+    return tuple(sorted(
+        (str(f.get("type") or "text").lower(),
+         str(f.get("name") or _field_label(f)).strip().casefold())
+        for f in fields))
 
 
 def _form_signature(form: dict, fields: list[dict]) -> tuple:
@@ -396,8 +414,16 @@ def _footer_gap(page: dict, section: Section) -> str:
 
 # ── Page content ─────────────────────────────────────────────────────
 
-def content_section(page: dict, *, name: str = "Page Content") -> Section:
-    """One section per surface: its headed blocks, grids and forms."""
+def content_section(page: dict, *, name: str = "Page Content",
+                    max_headings: int | None = None,
+                    forms_done: set | None = None) -> Section:
+    """One section per surface: its headed blocks, grids and forms.
+
+    ``max_headings`` is this section's share of the sheet's heading budget;
+    ``forms_done`` holds the forms already expanded elsewhere in the sheet,
+    so a form embedded on every page is checked once, not fifty times.
+    """
+    cap = MAX_HEADINGS_PER_SECTION if max_headings is None else max_headings
     sec = Section(name=name)
     add = sec.checks.append
 
@@ -432,7 +458,7 @@ def content_section(page: dict, *, name: str = "Page Content") -> Section:
         if not text or text == h1 or text in seen:
             continue
         seen.add(text)
-        if emitted >= MAX_HEADINGS_PER_SECTION:
+        if emitted >= cap:
             dropped += 1
             continue
         if level <= 2:
@@ -452,7 +478,7 @@ def content_section(page: dict, *, name: str = "Page Content") -> Section:
                      dropped, page.get("url"))
 
     _add_grid_checks(page, sec, name)
-    _add_form_checks(page, sec, name)
+    _add_form_checks(page, sec, name, forms_done)
     return sec
 
 
@@ -489,7 +515,8 @@ def _add_grid_checks(page: dict, sec: Section, name: str) -> None:
             f'"{_clean(flt, 40)}" filter'), name, depth=3))
 
 
-def _add_form_checks(page: dict, sec: Section, name: str) -> None:
+def _add_form_checks(page: dict, sec: Section, name: str,
+                     forms_done: set | None = None) -> None:
     """One level-2 row per form, one level-3 row per field per rule.
 
     This is where a low-level checklist earns its name — the reference
@@ -503,6 +530,7 @@ def _add_form_checks(page: dict, sec: Section, name: str) -> None:
     # per CTA; expanding each produced 60 rows where the team writes 15.
     unique: list[tuple[dict, list[dict], int]] = []
     seen_sigs: dict[tuple, int] = {}
+    site_keys: list[tuple] = []
     for form in forms:
         fields = [x for x in (form.get("fields") or form.get("inputs") or [])
                   if isinstance(x, dict)]
@@ -513,6 +541,9 @@ def _add_form_checks(page: dict, sec: Section, name: str) -> None:
         if not fields:
             continue
         sig = _form_signature(form, fields)
+        site_key = _site_form_key(fields)
+        if forms_done is not None and site_key in forms_done:
+            continue                      # expanded on an earlier page
         if sig in seen_sigs:
             unique[seen_sigs[sig]] = (
                 unique[seen_sigs[sig]][0], unique[seen_sigs[sig]][1],
@@ -520,6 +551,9 @@ def _add_form_checks(page: dict, sec: Section, name: str) -> None:
             continue
         seen_sigs[sig] = len(unique)
         unique.append((form, fields, 1))
+        site_keys.append(site_key)
+    if forms_done is not None:
+        forms_done.update(site_keys)
 
     for f_ix, (form, fields, copies) in enumerate(unique, start=1):
         submit = _clean(form.get("submit_text"), 40) or "Submit"
@@ -637,11 +671,16 @@ def build_checklist(pages: list[dict], *, url: str = "") -> LowLevelChecklist:
             "omitted. Header checks are usually 7 rows.")
 
     content_pages = pages[:MAX_CONTENT_SECTIONS]
+    share = max(MIN_HEADINGS_PER_SECTION, min(
+        MAX_HEADINGS_PER_SECTION,
+        HEADING_BUDGET // max(1, len(content_pages))))
+    forms_done: set = set()
     single = len(content_pages) == 1
     for page in content_pages:
         name = "Page Content" if single else \
             f'Page Content — {_page_name(page.get("url", ""), page.get("title", ""))}'
-        sec = content_section(page, name=name)
+        sec = content_section(page, name=name, max_headings=share,
+                              forms_done=forms_done)
         sec.url = str(page.get("url") or "")
         if sec.checks:
             out.sections.append(sec)

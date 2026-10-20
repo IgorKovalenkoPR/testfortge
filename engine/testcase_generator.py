@@ -1320,7 +1320,8 @@ def _authored_to_testcase(case, *, section_num: int, idx: int) -> TestCase:
         trigger="walkthrough_url_match" if case.url_pattern else "manual",
         wbs_hint={k: v for k, v in (
             ("page_url", getattr(case, "page_url", "")),
-            ("node", getattr(case, "wbs_node", ""))) if v},
+            ("node", getattr(case, "wbs_node", "")),
+            ("surface", getattr(case, "surface", ""))) if v},
     )
 
 

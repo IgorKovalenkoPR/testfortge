@@ -1463,6 +1463,9 @@ TRANSLATIONS = {
     "tc_editor_hint": "Click any field to edit it. Changes are saved for "
                       "the whole team.",
     "tc_suite": "Suite",
+    "tc_suite_hint": "Suite: Smoke, Regression or E2E — what the suite filter above selects by.",
+    "tc_suite_hint_edit": "Suite: Smoke, Regression or E2E. Click to set it — a case in no suite still runs in “All suites”.",
+    "tc_user_story_hint": "The user story this case was written from.",
     "tc_edited": "edited",
     "tc_step_edit": "Edit step",
     "tc_step_up": "Move up",

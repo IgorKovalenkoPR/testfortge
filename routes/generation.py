@@ -261,6 +261,14 @@ def _run_site_aware(url: str, pid: str | None,
     except Exception as exc:  # pragma: no cover — never block generation
         _log.warning("low-level checklist build failed: %s", exc)
 
+    # Every leaf of the tree gets its baseline, crawled or not — unless the
+    # user's instructions scoped the run (engine/wbs_baseline.py).
+    from engine import wbs_baseline as _bl
+    scope = _bl.user_scope(custom_prompt, raw_lines, wbs)
+    base_tcs, base_checks = _bl.baseline(wbs, crawl_pages, scope)
+    tc_dicts.extend(_gherkin.apply_format(base_tcs, tc_format))
+    cl_dicts.extend(base_checks)
+
     if pid:
         try:
             _db.save_site_profile(pid, url,
@@ -369,11 +377,33 @@ def _file_without_site(pid: str | None, site_out: dict | None, raw_lines,
             d.setdefault("wbs_hint", {})["requirement"] = text
     try:
         wbs = _text_wbs(raw_lines, custom_prompt)
+        from engine import wbs_baseline as _bl
+        base_tcs, base_checks = _bl.baseline(
+            wbs, [], _bl.user_scope(custom_prompt, raw_lines, wbs))
+        dicts.extend(base_tcs if kind == "test_case" else base_checks)
         _db.ensure_wbs_folders(pid, wbs)
         _db.apply_wbs(pid, wbs, dicts, kind)
         _db.save_site_profile(pid, "text:", {"wbs": wbs.to_dict()}, {})
     except Exception as exc:  # pragma: no cover — never block generation
         _log.warning("filing a %s pack without a site failed: %s", kind, exc)
+
+
+def _balance_pack(dicts: list[dict], raw_lines, custom_prompt: str,
+                  site_out: dict | None) -> None:
+    """Keep per-leaf counts within the coverage band, then drop the marks
+    the balancer reads (engine.wbs_baseline.balance)."""
+    from engine import wbs_baseline as _bl
+    try:
+        scope = _bl.user_scope(custom_prompt, raw_lines,
+                               (site_out or {}).get("wbs"))
+        report = _bl.balance(dicts, scope)
+        if report["trimmed"]:
+            _log.info("wbs balance: median %s, cap %s, trimmed %d",
+                      report["median"], report["cap"], report["trimmed"])
+    except Exception as exc:  # pragma: no cover — never block generation
+        _log.warning("balancing the pack failed: %s", exc)
+    finally:
+        _bl.clear_marks(dicts)
 
 
 def _file_legacy(pid: str | None, site_out: dict | None, dicts: list[dict],
@@ -893,6 +923,7 @@ def register(app: Flask) -> None:
                 # own half; re-stamping is idempotent.
                 _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                    tcd, "test_case", stories=stories)
+                _balance_pack(tcd, raw_lines, custom_prompt, site_out)
                 tcd = _gherkin.apply_format(tcd, tc_format)
 
                 if pid and tcd:
@@ -1146,6 +1177,8 @@ def register(app: Flask) -> None:
 
                 _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                    cld, "checklist_item", stories=stories)
+
+                _balance_pack(cld, raw_lines, custom_prompt, site_out)
                 if pid and cld:
                     try: _db.save_checklist(pid, cld)
                     except Exception: pass
@@ -1696,6 +1729,7 @@ def register(app: Flask) -> None:
             # hit). Best-effort: a DB outage must not hide the result.
             _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                tc_dicts, "test_case", stories=new_stories)
+            _balance_pack(tc_dicts, raw_lines, custom_prompt, site_out)
             tc_dicts = _gherkin.apply_format(tc_dicts, tc_format)
             if pid and tc_dicts:
                 try:
@@ -1855,6 +1889,7 @@ def register(app: Flask) -> None:
                                       if gp]
             _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                cl_dicts, "checklist_item", stories=new_stories)
+            _balance_pack(cl_dicts, raw_lines, custom_prompt, site_out)
             if pid and cl_dicts:
                 try:
                     _db.save_checklist(pid, cl_dicts)

@@ -35,7 +35,7 @@
   {#- `readonly` renders the same element without the affordances, so a
       page can show a field to a viewer and to an editor from one call
       rather than branching around two blocks. -#}
-  <span class="ie"
+  <span class="ie{% if not value %} ie-empty{% endif %}"
         data-ie-entity="{{ entity }}"
         data-ie-id="{{ item_id }}"
         data-ie-field="{{ field }}"
@@ -47,6 +47,7 @@
             tell "unchanged" from "changed" without re-reading rendered
             text, which whitespace collapsing would have altered. -#}
         data-ie-original="{{ value if value is not none else '' }}"
+        data-ie-placeholder="{{ placeholder }}"
         {% if readonly or not editors_enabled() %}data-ie-readonly{% endif %}
         >{{ value if value else placeholder }}</span>
 {%- endmacro %}
