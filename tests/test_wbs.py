@@ -79,17 +79,16 @@ class TestTreeOnQareaCom:
     def test_submodules_from_the_menu_and_from_the_url(self, qarea_tree):
         paths = _paths(qarea_tree)
         # A menu link whose URL prefixes the links after it opens a
-        # submodule — the URL says so in any language; the label is kept
-        # exactly as the site writes it (no "All …" rule).
-        assert ("Solutions", "All Healthcare Solutions", "Pharma App") \
-            in paths
+        # submodule — the URL says so in any language; its "All …" landing
+        # label names the group without the phrase (wbs.group_name).
+        assert ("Solutions", "Healthcare Solutions", "Pharma App") in paths
         # The AI entries' URLs share no prefix with their heading's link,
         # so the URL rule leaves them flat under the menu that lists them.
         assert ("Solutions", "Generative AI") in paths
         # A menu page with pages under its URL becomes a submodule.
         assert ("Solutions", "Fitness", "Wellness App") in paths
         # Past the crawler's old 20-entry cap — the reason it was raised.
-        assert ("Solutions", "All Fintech Solutuions",
+        assert ("Solutions", "Fintech Solutuions",
                 "Accounting Software") in paths
 
     def test_footer_links_into_a_module_join_the_module(self, qarea_tree):
@@ -717,6 +716,26 @@ class TestGateOnEverySite:
         covered = {_folder_path(pid, fid)[0] for fid in assign.values()}
         assert crawled and crawled <= covered, crawled - covered
 
+    def test_folder_names_are_words_not_decoration(self, app, client,
+                                                   monkeypatch, name):
+        pid, _ = _site_pid(app, client, monkeypatch, name)
+        _assert_clean_names(pid)
+
+    def test_the_header_case_lists_the_real_modules(self, app, client,
+                                                    monkeypatch, name):
+        # dou.ua listed "the documented sections: Місяць" — a calendar
+        # widget's month switcher, taken from some other page's <nav>.
+        pid, _ = _site_pid(app, client, monkeypatch, name)
+        tree = W.Wbs.from_dict(db.list_site_profiles(pid)[0]["profile"]["wbs"])
+        modules = {n.name for n in tree.nodes.values() if n.parent is None}
+        header = [r for r in db.load_test_cases(pid)
+                  if "primary navigation exposes the documented sections"
+                  in r["summary"]]
+        assert len(header) == 1
+        listed = header[0]["summary"].split("sections:", 1)[1].split("·")
+        named = {label.strip() for label in listed} & modules
+        assert len(named) >= 3, (listed, sorted(modules))
+
     def test_no_single_node_holds_more_than_a_quarter(
             self, app, client, monkeypatch, name):
         pid, _ = _site_pid(app, client, monkeypatch, name)
@@ -815,6 +834,9 @@ class TestTextInput:
         assert ("Функціональні блоки (що робить)" in top
                 and "Security Posture" in top), top
 
+    def test_folder_names_are_words_not_decoration(self, text_pid):
+        _assert_clean_names(text_pid)
+
     def test_the_model_answer_is_validated(self, monkeypatch):
         from engine import llm_cache
 
@@ -835,6 +857,45 @@ class TestTextInput:
 
 
 # ── generic: nothing about one site, language or menu shape ──────────
+
+def _assert_clean_names(pid) -> None:
+    """No emoji, pictograph or private-use character in any folder name,
+    and no "All …" / "Усі …" landing-link phrasing left on a group."""
+    import unicodedata
+    for folder in db.list_folders(pid):
+        name = folder["name"]
+        bad = [ch for ch in name
+               if unicodedata.category(ch) in {"So", "Sk", "Co", "Cs", "Cn"}
+               or ch in "\ufe0e\ufe0f\u200d\u20e3"]
+        assert not bad, (name, bad)
+        assert not W._SHOW_ALL_LEAD.match(name), name
+
+
+class TestNames:
+
+    def test_decoration_is_stripped_and_words_kept(self):
+        assert W.strip_decoration("👍👎 Оцініть свою компанію") == \
+            "Оцініть свою компанію"
+        assert W.strip_decoration("★ Featured") == "Featured"
+        for kept in ("C++ & C#", "Résumé — Über", "100% Free", "Shop $5",
+                     "日本語のページ", "Поради та FAQ"):
+            assert W.strip_decoration(kept) == kept
+
+    def test_show_all_landing_links_name_their_group(self):
+        assert W.group_name("All Healthcare Solutions",
+                            "/solutions/healthcare") == "Healthcare Solutions"
+        assert W.group_name("Усі послуги", "/poslugy") == "Послуги"
+        assert W.group_name("Healthcare — view all", "/h") == "Healthcare"
+        assert W.group_name("View all", "/solutions/finance") == "Finance"
+        assert W.group_name("Все", "/catalog/shoes") == "Shoes"
+        # Whole phrases only.
+        assert W.group_name("Alliance program", "/a") == "Alliance program"
+        assert W.group_name("Allegro", "/a") == "Allegro"
+
+    def test_on_the_real_menus(self, qarea_tree):
+        assert ("Solutions", "Healthcare Solutions", "Pharma App") in \
+            _paths(qarea_tree)
+
 
 class TestGeneric:
 
