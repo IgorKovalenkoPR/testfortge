@@ -163,6 +163,40 @@ TRANSLATIONS = {
     "checklist_gaps_partial": ("Some checks could not be derived — the "
                                "sheet is thinner than the site: "),
     "checklist_gaps_more": "(+%(n)d more not listed)",
+    # Limits one generation run hit (engine/generation_notes.py) — each
+    # names the limit and what it left out, then points at the Guide.
+    "gen_limit_crawl": ("Read %(read)d of %(total)d linked pages — the "
+                        "limit is %(limit)d per generation. The other "
+                        "%(left)d were not opened; those in the site's menu "
+                        "or footer got their baseline only."),
+    "gen_limit_wbs_pages": ("The site structure holds up to %(limit)d page "
+                            "folders: %(n)d more menu or footer pages got no "
+                            "folder of their own and are filed under the "
+                            "nearest section."),
+    "gen_limit_wbs_footer": ("Up to %(limit)d footer-only pages get a "
+                             "folder: %(n)d more footer links got none."),
+    "gen_limit_wbs_other": ("Up to %(limit)d crawled pages outside the menu "
+                            "get their own folder: %(n)d more are filed in "
+                            "Other pages itself."),
+    "gen_limit_forms": ("Test cases cover up to %(limit)d different forms "
+                        "per generation: %(n)d more forms got no form "
+                        "cases."),
+    "gen_limit_headings": ("Section headings share a budget of %(budget)d "
+                           "rows, %(share)d per page on this site: "
+                           "%(sections)d of %(pages)d page sections kept "
+                           "their first %(share)d and left out %(headings)d "
+                           "more."),
+    "gen_limit_requirements": ("The AI author read the first %(limit)d of "
+                               "%(total)d requirement lines; the rest were "
+                               "not used."),
+    "gen_limit_balance": ("To keep pages even, none gets more than "
+                          "%(band)d× the median (%(median)s), so %(cap)d "
+                          "rows: %(n)d rows above that were dropped, generic "
+                          "ones first."),
+    "gen_limit_prompt": ("Additional Instructions were cut to their first "
+                         "%(limit)d characters (you entered %(total)d)."),
+    "gen_limit_see_guide_tc": "See Guide → Test Cases → Limits.",
+    "gen_limit_see_guide_cl": "See Guide → Checklist → Limits.",
     "cl_subtitle": "TestFort-format checklist with section prefixes",
     "cl_objective": "Objective",
     "cl_comments": "Comments / Issues",

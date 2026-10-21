@@ -48,6 +48,7 @@ from engine.job_queue import get_queue, DONE, FAILED
 from engine import ai_mode as _ai_mode
 from engine import db as _db
 from engine import gherkin as _gherkin
+from engine import generation_notes as _notes
 # The pilot flag the recorder owns. One route here shares it —
 # see the module docstring.
 from .recorder import recorder_enabled
@@ -162,7 +163,9 @@ def _build_artifacts(url: str, custom_prompt: str,
     return Artifacts(
         url=url,
         custom_prompt=custom_prompt or "",
-        requirements=requirements[:120],
+        # Uncapped: the author reads MAX_REQUIREMENT_LINES of them and
+        # reports the rest (engine/generation_notes.py).
+        requirements=requirements,
         pages=pages,
     )
 
@@ -182,6 +185,7 @@ def _run_site_aware(url: str, pid: str | None,
         profile:      SiteProfile.to_dict()
         strategy:     TestStrategy.to_dict()
         crawl_errors: list[str] passed through from the crawler
+        notes:        the limits this run hit (engine/generation_notes.py)
 
     Important: this function does NOT write TC/CL to the DB. The
     caller concatenates these with the legacy stream and writes
@@ -205,6 +209,7 @@ def _run_site_aware(url: str, pid: str | None,
     crawl_pages = [_page_to_dict(pg)
                    for pg in (getattr(site_analysis, "pages", None) or [])]
     wbs = _wbs.build_wbs(crawl_pages)
+    notes = _notes.crawl(site_analysis) + _notes.wbs(wbs)
     strategy = build_strategy(profile, wbs_lines=wbs.prompt_lines())
     artifacts = _build_artifacts(url, custom_prompt, raw_lines, site_analysis)
     artifacts.wbs_nodes = wbs.prompt_lines()
@@ -214,6 +219,7 @@ def _run_site_aware(url: str, pid: str | None,
     for page in artifacts.pages:
         page["surface"] = page.get("url") in surfaces
     tcs, cls = generate_from_strategy(profile, strategy, artifacts=artifacts)
+    notes += _notes.artifacts(artifacts, _notes.TC)
 
     tc_dicts = [tc_to_dict(tc) for tc in tcs]
     cl_dicts = [cl_to_dict(cl) for cl in cls]
@@ -240,12 +246,16 @@ def _run_site_aware(url: str, pid: str | None,
         # The author agent when a key is configured, the enumeration when
         # not — author_checklist falls back internally, so this call has
         # one shape either way and the free tier keeps working untouched.
-        authored = _cla.author_checklist(
-            artifacts=_cla.Artifacts(
-                url=url, pages=pages, custom_prompt=custom_prompt or "",
-                requirements=[ln.strip() for ln in (raw_lines or [])
-                              if (ln or "").strip()][:120]),
-            profile=profile)
+        cl_artifacts = _cla.Artifacts(
+            url=url, pages=pages, custom_prompt=custom_prompt or "",
+            requirements=[ln.strip() for ln in (raw_lines or [])
+                          if (ln or "").strip()])
+        authored = _cla.author_checklist(artifacts=cl_artifacts,
+                                         profile=profile)
+        notes += _notes.artifacts(cl_artifacts, _notes.CL)
+        if authored.source == "deterministic":
+            # The model's sheet is not bound by the enumeration's budget.
+            notes += _notes.headings(authored.checklist)
         if authored.total:
             cl_dicts = [cl_to_dict(ci)
                         for ci in _cla.to_checklist_items(authored)]
@@ -288,6 +298,7 @@ def _run_site_aware(url: str, pid: str | None,
         # sections beyond the cap. Flashed to the operator so a thin sheet
         # reads as a known limitation rather than as the whole product.
         "checklist_gaps": ll_gaps,
+        "notes": notes,
         # For the caller to file the legacy stream into the same structure.
         "wbs": wbs,
     }
@@ -389,9 +400,10 @@ def _file_without_site(pid: str | None, site_out: dict | None, raw_lines,
 
 
 def _balance_pack(dicts: list[dict], raw_lines, custom_prompt: str,
-                  site_out: dict | None) -> None:
+                  site_out: dict | None, kind: str) -> list[dict]:
     """Keep per-leaf counts within the coverage band, then drop the marks
-    the balancer reads (engine.wbs_baseline.balance)."""
+    the balancer reads (engine.wbs_baseline.balance). Returns the note for
+    the user when it trimmed anything."""
     from engine import wbs_baseline as _bl
     try:
         scope = _bl.user_scope(custom_prompt, raw_lines,
@@ -400,10 +412,52 @@ def _balance_pack(dicts: list[dict], raw_lines, custom_prompt: str,
         if report["trimmed"]:
             _log.info("wbs balance: median %s, cap %s, trimmed %d",
                       report["median"], report["cap"], report["trimmed"])
+        return _notes.balance(report, kind)
     except Exception as exc:  # pragma: no cover — never block generation
         _log.warning("balancing the pack failed: %s", exc)
+        return []
     finally:
         _bl.clear_marks(dicts)
+
+
+def _input_notes() -> list[dict]:
+    """Limits the input itself hit, read while the request is still here
+    (the workers run without one)."""
+    return _notes.prompt(int(getattr(g, "custom_prompt_chars", 0) or 0))
+
+
+def _flash_run_report(r: dict, kind: str) -> None:
+    """Everything a finished run has to tell the user, on whichever path
+    shows it — the sync POST or the GET that drains a background job.
+
+    The crawl's failures, the checklist's gaps, and the limits the run hit
+    (engine/generation_notes.py). The test-case drain used to repeat only
+    the first of these, and the checklist drain none of them.
+    """
+    t = getattr(g, "t", None) or {}
+    errors = r.get("crawl_errors") or []
+    if errors:
+        flash(t.get("crawl_partial",
+                    "Some pages could not be crawled — generation "
+                    "continued on available data: %(errors)s")
+              % {"errors": "; ".join(errors[:3])}, "warning")
+    # Deliberately not truncated the way crawl_errors is: a report of what
+    # was missed that itself misses things reads as complete, which is the
+    # failure it exists to prevent. Long lists get a count instead.
+    gaps = [gp for gp in (r.get("checklist_gaps") or []) if gp] \
+        if kind == _notes.CL else []
+    if gaps:
+        shown, rest = gaps[:3], gaps[3:]
+        tail = ("" if not rest else
+                " " + t.get("checklist_gaps_more",
+                            "(+%(n)d more not listed)") % {"n": len(rest)})
+        flash(t.get("checklist_gaps_partial",
+                    "Some checks could not be derived — the sheet is "
+                    "thinner than the site: ") + "; ".join(shown) + tail,
+              "warning")
+    for n in _notes.for_page(r.get("notes"), kind):
+        if _notes.text(n, kind, t):          # translated: g.t is set
+            flash(_notes.text(n, kind, g.t), "info")
 
 
 def _file_legacy(pid: str | None, site_out: dict | None, dicts: list[dict],
@@ -434,7 +488,8 @@ def _page_to_dict(page) -> dict:
 
 def _run_authored_without_url(custom_prompt: str,
                               raw_lines: list[str] | None,
-                              wbs=None) -> list[dict]:
+                              wbs=None,
+                              notes_out: list | None = None) -> list[dict]:
     """Author test cases when the input has no URL to crawl.
 
     Prompt-only and attachment-only input would otherwise never reach the
@@ -447,7 +502,7 @@ def _run_authored_without_url(custom_prompt: str,
 
     Returns TC dicts to append to the legacy stream, or ``[]`` when the
     LLM is unreachable (the legacy knowledge-base path owns baseline
-    coverage either way).
+    coverage either way). ``notes_out`` receives the limits it hit.
     """
     if not (raw_lines or custom_prompt):
         return []
@@ -457,10 +512,12 @@ def _run_authored_without_url(custom_prompt: str,
         artifacts = Artifacts(
             custom_prompt=custom_prompt or "",
             requirements=[ln.strip() for ln in (raw_lines or [])
-                          if (ln or "").strip()][:120],
+                          if (ln or "").strip()],
             wbs_nodes=wbs.prompt_lines() if wbs is not None else [],
         )
         tcs = generate_from_artifacts(artifacts)
+        if notes_out is not None:
+            _notes.merge(notes_out, _notes.artifacts(artifacts, _notes.TC))
     except Exception as exc:  # pragma: no cover — best-effort
         _log.warning("authoring without URL failed: %s", exc)
         return []
@@ -751,25 +808,15 @@ def _drain_tc_job_into_session() -> None:
     if not job or job.kind != "tc_gen":
         return
     if job.status == DONE and job.result:
-        from flask import flash as _flash, g as _g
         r = job.result
         _store_test_cases(r.get("tc_dicts", []))
         session["user_stories"]      = r.get("stories", [])
         session["raw_requirements"]  = r.get("raw_requirements", [])
         session["traceability_data"] = r.get("trace", [])
-        # The same warning the synchronous path has always raised. Without
-        # it a partial crawl produced a thinner pack with nothing on screen
+        # What the synchronous path has always said. Without it a partial
+        # crawl or a limit produced a thinner pack with nothing on screen
         # to explain the difference.
-        errors = r.get("crawl_errors") or []
-        if errors:
-            _flash(
-                (_g.t.get("crawl_partial",
-                          "Some pages could not be crawled — generation "
-                          "continued on available data: %(errors)s")
-                 if hasattr(_g, "t") else
-                 "Some pages could not be crawled: %(errors)s")
-                % {"errors": "; ".join(errors[:3])},
-                "warning")
+        _flash_run_report(r, _notes.TC)
         session.pop("tc_gen_job_id", None)
     elif job.status == FAILED:
         # Surface the worker error once and stop polling for this id.
@@ -800,6 +847,7 @@ def _drain_cl_job_into_session() -> None:
         _store_checklist(r.get("cl_dicts", []))
         session["user_stories"]      = r.get("stories", [])
         session["raw_requirements"]  = r.get("raw_requirements", [])
+        _flash_run_report(r, _notes.CL)
         session.pop("cl_gen_job_id", None)
     elif job.status == FAILED:
         from flask import flash as _flash, g as _g
@@ -853,11 +901,13 @@ def register(app: Flask) -> None:
             # Read the knob inside the request, not inside the worker —
             # the worker runs on a JobQueue thread with no request context.
             sync_tc_format = _requested_tc_format()
+            sync_notes = _input_notes()
 
             def _sync_worker(raw_lines=sync_raw_lines,
                              custom_prompt=sync_custom_prompt,
                              pid=sync_pid,
-                             tc_format=sync_tc_format):
+                             tc_format=sync_tc_format,
+                             notes=sync_notes):
                 # Legacy path always runs — it owns baseline coverage
                 # (50+ ISTQB-knowledge test cases per typical site)
                 # and the user-stories / traceability surfaces. Stage-2
@@ -895,6 +945,7 @@ def register(app: Flask) -> None:
                     _file_legacy(pid, site_out, tcd, "test_case")
                     if site_out:
                         tcd.extend(site_out.get("tc_dicts") or [])
+                        _notes.merge(notes, site_out.get("notes"))
                         # crawl_errors from the recon crawler land in
                         # the same warning stream — operator sees one
                         # banner, regardless of which crawler call
@@ -915,7 +966,8 @@ def register(app: Flask) -> None:
                     # agent and falls back to canned templates.
                     tcd.extend(_run_authored_without_url(
                         custom_prompt, raw_lines,
-                        wbs=_text_wbs(raw_lines, custom_prompt)))
+                        wbs=_text_wbs(raw_lines, custom_prompt),
+                        notes_out=notes))
 
                 # Stamp the combined list — the legacy template stream
                 # and the site-aware stream both belong to the format the
@@ -923,7 +975,8 @@ def register(app: Flask) -> None:
                 # own half; re-stamping is idempotent.
                 _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                    tcd, "test_case", stories=stories)
-                _balance_pack(tcd, raw_lines, custom_prompt, site_out)
+                _notes.merge(notes, _balance_pack(
+                    tcd, raw_lines, custom_prompt, site_out, _notes.TC))
                 tcd = _gherkin.apply_format(tcd, tc_format)
 
                 if pid and tcd:
@@ -935,6 +988,7 @@ def register(app: Flask) -> None:
                         "raw_requirements": raw_for_persona,
                         "trace": trc,
                         "crawl_errors": crawl_errors,
+                        "notes": notes,
                         **site_aware_meta}
 
             sid = get_session_id(session)
@@ -993,20 +1047,13 @@ def register(app: Flask) -> None:
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
             session["traceability_data"] = r.get("trace", [])
+            # Shown here, so the drain on the next GET must not say it all
+            # a second time.
+            session.pop("tc_gen_job_id", None)
 
-            # Surface partial crawler failures so the user knows why some
-            # URL-derived test cases might be missing. Generation already
-            # fell back to generic ISTQB knowledge for the failed pages.
-            _crawl_errors = r.get("crawl_errors") or []
-            if _crawl_errors:
-                flash(
-                    g.t.get(
-                        "crawl_partial",
-                        "Some pages could not be crawled — generation "
-                        "continued on available data: %(errors)s"
-                    ) % {"errors": "; ".join(_crawl_errors[:3])},
-                    "warning",
-                )
+            # Partial crawler failures and the limits this run hit, so the
+            # user knows why some test cases might be missing.
+            _flash_run_report(r, _notes.TC)
 
             tc_list = reconstruct_test_cases(r.get("tc_dicts", []))
             trace = session["traceability_data"]
@@ -1122,10 +1169,12 @@ def register(app: Flask) -> None:
             sync_pid = ensure_active_project()
             sync_raw_lines = raw_lines
             sync_custom_prompt = custom_prompt
+            sync_notes = _input_notes()
 
             def _sync_worker(raw_lines=sync_raw_lines,
                              custom_prompt=sync_custom_prompt,
-                             pid=sync_pid):
+                             pid=sync_pid,
+                             notes=sync_notes):
                 # Symmetric to test_cases_page: legacy first (baseline
                 # coverage from ISTQB-knowledge templates), site-aware
                 # appended with SA_*-prefixed IDs. One save_checklist
@@ -1156,6 +1205,7 @@ def register(app: Flask) -> None:
                     _file_legacy(pid, site_out, cld, "checklist_item")
                     if site_out:
                         cld.extend(site_out.get("cl_dicts") or [])
+                        _notes.merge(notes, site_out.get("notes"))
                         for e in site_out.get("crawl_errors") or []:
                             if e and e not in crawl_errors:
                                 crawl_errors.append(e)
@@ -1178,7 +1228,8 @@ def register(app: Flask) -> None:
                 _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                    cld, "checklist_item", stories=stories)
 
-                _balance_pack(cld, raw_lines, custom_prompt, site_out)
+                _notes.merge(notes, _balance_pack(
+                    cld, raw_lines, custom_prompt, site_out, _notes.CL))
                 if pid and cld:
                     try: _db.save_checklist(pid, cld)
                     except Exception: pass
@@ -1188,6 +1239,7 @@ def register(app: Flask) -> None:
                         "raw_requirements": raw_for_persona,
                         "crawl_errors": crawl_errors,
                         "checklist_gaps": checklist_gaps,
+                        "notes": notes,
                         **site_aware_meta}
 
             sid = get_session_id(session)
@@ -1237,39 +1289,11 @@ def register(app: Flask) -> None:
             _store_checklist(r.get("cl_dicts", []))
             session["user_stories"] = r.get("stories", [])
             session["raw_requirements"] = r.get("raw_requirements", [])
+            session.pop("cl_gen_job_id", None)
 
-            # Surface partial crawler failures — same logic as /test-cases.
-            _crawl_errors = r.get("crawl_errors") or []
-            if _crawl_errors:
-                flash(
-                    g.t.get(
-                        "crawl_partial",
-                        "Some pages could not be crawled — generation "
-                        "continued on available data: %(errors)s"
-                    ) % {"errors": "; ".join(_crawl_errors[:3])},
-                    "warning",
-                )
-
-            # What the builders could not cover. Deliberately not
-            # truncated the way crawl_errors is: a report of what was
-            # missed that itself misses things reads as complete, which
-            # is the failure it exists to prevent. Long lists get a
-            # count instead of a silent cut.
-            _cl_gaps = [gp for gp in (r.get("checklist_gaps") or []) if gp]
-            if _cl_gaps:
-                shown, rest = _cl_gaps[:3], _cl_gaps[3:]
-                tail = ("" if not rest else
-                        " " + g.t.get(
-                            "checklist_gaps_more",
-                            "(+%(n)d more not listed)") % {"n": len(rest)})
-                flash(
-                    g.t.get(
-                        "checklist_gaps_partial",
-                        "Some checks could not be derived — the sheet is "
-                        "thinner than the site: "
-                    ) + "; ".join(shown) + tail,
-                    "warning",
-                )
+            # Crawler failures, what the builders could not cover, and the
+            # limits this run hit — same report as /test-cases.
+            _flash_run_report(r, _notes.CL)
 
             cl_list = reconstruct_checklist(r.get("cl_dicts", []))
             if not cl_list:
@@ -1668,9 +1692,10 @@ def register(app: Flask) -> None:
         # Same reason as the sync path: the worker thread has no request
         # context, so the knob is read here and closed over.
         wanted_format = _requested_tc_format()
+        input_notes = _input_notes()
 
         def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid,
-                    tc_format=wanted_format):
+                    tc_format=wanted_format, notes=input_notes):
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
             raw_reqs_for_persona = (
@@ -1708,6 +1733,7 @@ def register(app: Flask) -> None:
                 _file_legacy(pid, site_out, tc_dicts, "test_case")
                 if site_out:
                     tc_dicts.extend(site_out.get("tc_dicts") or [])
+                    _notes.merge(notes, site_out.get("notes"))
                     for err in site_out.get("crawl_errors") or []:
                         if err and err not in crawl_errors:
                             crawl_errors.append(err)
@@ -1719,7 +1745,8 @@ def register(app: Flask) -> None:
             else:
                 tc_dicts.extend(_run_authored_without_url(
                     custom_prompt, raw_lines,
-                    wbs=_text_wbs(raw_lines, custom_prompt)))
+                    wbs=_text_wbs(raw_lines, custom_prompt),
+                    notes_out=notes))
 
             # Persist INSIDE the worker so the polling /status endpoint
             # never has to do a DB round-trip. On free-tier Postgres a
@@ -1729,7 +1756,8 @@ def register(app: Flask) -> None:
             # hit). Best-effort: a DB outage must not hide the result.
             _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                tc_dicts, "test_case", stories=new_stories)
-            _balance_pack(tc_dicts, raw_lines, custom_prompt, site_out)
+            _notes.merge(notes, _balance_pack(
+                tc_dicts, raw_lines, custom_prompt, site_out, _notes.TC))
             tc_dicts = _gherkin.apply_format(tc_dicts, tc_format)
             if pid and tc_dicts:
                 try:
@@ -1742,6 +1770,7 @@ def register(app: Flask) -> None:
                 "raw_requirements": raw_reqs_for_persona,
                 "trace": trace,
                 "crawl_errors": crawl_errors,
+                "notes": notes,
             }
 
         job_id = get_queue().submit(
@@ -1848,8 +1877,10 @@ def register(app: Flask) -> None:
         # worker can persist without needing a request context, and the
         # /status endpoint never has to make a DB round-trip.
         pid = ensure_active_project()
+        input_notes = _input_notes()
 
-        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid):
+        def _worker(raw_lines=raw_lines, custom_prompt=custom_prompt, pid=pid,
+                    notes=input_notes):
             parsed_reqs = split_into_requirements(raw_lines)
             parsed_reqs = [r for r in parsed_reqs if not is_instruction(r.text)]
             raw_reqs_for_persona = (
@@ -1881,6 +1912,7 @@ def register(app: Flask) -> None:
                 _file_legacy(pid, site_out, cl_dicts, "checklist_item")
                 if site_out:
                     cl_dicts.extend(site_out.get("cl_dicts") or [])
+                    _notes.merge(notes, site_out.get("notes"))
                     for err in site_out.get("crawl_errors") or []:
                         if err and err not in crawl_errors:
                             crawl_errors.append(err)
@@ -1889,7 +1921,8 @@ def register(app: Flask) -> None:
                                       if gp]
             _file_without_site(pid, site_out, raw_lines, custom_prompt,
                                cl_dicts, "checklist_item", stories=new_stories)
-            _balance_pack(cl_dicts, raw_lines, custom_prompt, site_out)
+            _notes.merge(notes, _balance_pack(
+                cl_dicts, raw_lines, custom_prompt, site_out, _notes.CL))
             if pid and cl_dicts:
                 try:
                     _db.save_checklist(pid, cl_dicts)
@@ -1901,6 +1934,7 @@ def register(app: Flask) -> None:
                 "raw_requirements": raw_reqs_for_persona,
                 "crawl_errors": crawl_errors,
                 "checklist_gaps": checklist_gaps,
+                "notes": notes,
             }
 
         job_id = get_queue().submit(

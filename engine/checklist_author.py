@@ -43,6 +43,7 @@ from engine import ai_mode
 from engine import glossary
 from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
+from engine.llm_safety import MAX_REQUIREMENT_LINES
 from engine.llm_keys import platform_key as _platform_key
 from engine.log import get_logger
 
@@ -98,6 +99,10 @@ class Artifacts:
     requirements: list[str] = field(default_factory=list)
     attachments: list[dict] = field(default_factory=list)
     pages: list[dict] = field(default_factory=list)
+    #: What this run cut — ``requirements``: lines past
+    #: ``MAX_REQUIREMENT_LINES`` when the model was asked. Read back by
+    #: engine/generation_notes.py to tell the user.
+    limits: dict = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         return not any((self.url, self.custom_prompt, self.requirements,
@@ -292,8 +297,9 @@ def _build_user_prompt(artifacts: Artifacts, profile: Any = None) -> str:
             _logger.debug("checklist_author: baseline failed: %s", exc)
 
     if artifacts.requirements:
-        reqs = "\n".join(f"- {r[:600]}" for r in artifacts.requirements[:80]
-                         if (r or "").strip())
+        lines = [r for r in artifacts.requirements if (r or "").strip()]
+        reqs = "\n".join(f"- {r[:600]}"
+                         for r in lines[:MAX_REQUIREMENT_LINES])
         if reqs:
             blocks.append("Requirements / notes supplied by the operator:\n"
                           + reqs)
@@ -683,7 +689,18 @@ def author_checklist(*, artifacts: Artifacts | None = None,
     _logger.info("checklist_author: %d rows over %d sections "
                  "(%d dropped, %d lint findings)",
                  built.total, len(built.sections), len(dropped), len(lint))
+    _record_requirement_window(artifacts)
     return result
+
+
+def _record_requirement_window(artifacts) -> None:
+    """The model was shown ``MAX_REQUIREMENT_LINES`` requirement lines and
+    its result is the one used: record how many there were, for the run
+    to say what it did not read (engine/generation_notes.py). Not recorded
+    on a fallback — then nothing the model read reached the pack."""
+    lines = [r for r in artifacts.requirements or [] if (r or "").strip()]
+    if len(lines) > MAX_REQUIREMENT_LINES:
+        artifacts.limits["requirements"] = len(lines)
 
 
 def to_checklist_items(result: AuthoredChecklist) -> list:

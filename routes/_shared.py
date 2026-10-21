@@ -17,7 +17,7 @@ import re
 import time
 import uuid
 
-from flask import current_app, request, session
+from flask import current_app, g, request, session
 from werkzeug.utils import secure_filename
 
 from engine.file_parser import parse_file, split_into_requirements, allowed_file  # noqa: F401 re-exported
@@ -199,7 +199,13 @@ def parse_page_input(file_field: str = "input_files",
 
     # Sprint 4 task 4.4: cap the live value that flows into the generator
     # so an adversarially long custom_prompt cannot expand procedurally
-    # nor leak into LLM calls beyond the documented limit.
+    # nor leak into LLM calls beyond the documented limit. The length it
+    # had is kept for the run to say what was cut
+    # (engine/generation_notes.py ``prompt``).
+    try:
+        g.custom_prompt_chars = len(custom_prompt or "")
+    except RuntimeError:  # pragma: no cover — outside an app context
+        pass
     custom_prompt = _cap_prompt(custom_prompt, MAX_CUSTOM_PROMPT_CHARS)
 
     return raw_lines, errors, custom_prompt

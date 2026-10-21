@@ -307,6 +307,11 @@ class Wbs:
     mode: str = "site"
     #: Text mode: a requirement line (folded) → the heading it sits under.
     by_line: dict[str, str] = field(default_factory=dict)
+    #: Pages a budget refused a folder, per budget — ``page_nodes``
+    #: (``MAX_PAGE_NODES``), ``footer`` (``MAX_FOOTER_PAGES``), ``other``
+    #: (``MAX_OTHER_PAGES``) → the set of their URL paths. Told to the user
+    #: after generation (engine/generation_notes.py); not persisted.
+    cut: dict[str, set] = field(default_factory=dict)
 
     # ── building ────────────────────────────────────────────────
     def add(self, node: WbsNode) -> WbsNode:
@@ -549,7 +554,10 @@ def build_wbs(pages: list[dict]) -> Wbs:
         if key in wbs.by_url:
             wbs.by_label.setdefault(label.casefold(), wbs.by_url[key])
             return wbs.by_url[key]
-        if wbs.depth(parent) + 1 > MAX_DEPTH or budget[0] <= 0:
+        if wbs.depth(parent) + 1 > MAX_DEPTH:
+            return None
+        if budget[0] <= 0:
+            wbs.cut.setdefault("page_nodes", set()).add(key)
             return None
         budget[0] -= 1
         node = wbs.add(WbsNode(f"page:{key}", label, kind, parent=parent,
@@ -674,7 +682,10 @@ def build_wbs(pages: list[dict]) -> Wbs:
         owner = under_module(href)
         if owner:
             add_page(owner, text, href)
-        elif footer_budget[0] > 0 and add_page(FOOTER, text, href):
+        elif footer_budget[0] <= 0:
+            if usable(text) and not is_tracking_url(href, base):
+                wbs.cut.setdefault("footer", set()).add(key)
+        elif add_page(FOOTER, text, href):
             footer_budget[0] -= 1
 
     from engine.checklist_rules import _page_name
@@ -722,6 +733,8 @@ def build_wbs(pages: list[dict]) -> Wbs:
             if other_budget[0] > 0:
                 node_id = add_page(wbs.other(), page_name(page, key), url)
                 other_budget[0] -= 1
+            else:
+                wbs.cut.setdefault("other", set()).add(key)
             node_id = node_id or wbs.other()
         for name in (_page_name(url, page.get("title", "")),
                      page.get("title"), page.get("h1")):

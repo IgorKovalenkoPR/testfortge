@@ -189,6 +189,10 @@ class SiteAnalysis:
     # "landing", "static", "generic".
     site_type: str = "generic"
     architecture_notes: list[str] = field(default_factory=list)
+    #: Linked same-site pages still waiting when ``MAX_PAGES`` stopped the
+    #: crawl — told to the user, not just logged. ``None`` on records saved
+    #: before it was kept; :func:`unread_links` derives it for those.
+    unread_links: int | None = None
 
 
 # ── Grid evidence patterns ───────────────────────────────────────
@@ -1483,6 +1487,47 @@ def _round_robin_seeds(page: "PageInfo", base_url: str) -> list[str]:
     return seeds
 
 
+_SKIP_EXT = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+             ".css", ".js", ".zip", ".mp4", ".webm", ".ico", ".woff",
+             ".woff2", ".ttf", ".eot", ".xml", ".json")
+
+
+def _clean_link(url: str) -> str:
+    """scheme://host/path without query, fragment or trailing slash."""
+    norm = urlparse(url)
+    return f"{norm.scheme}://{norm.netloc}{norm.path}".rstrip("/")
+
+
+def _is_page_link(url: str) -> bool:
+    """A link the crawler would open as a page (not a PDF, image, feed)."""
+    return not urlparse(url).path.lower().endswith(_SKIP_EXT)
+
+
+def unread_links(analysis) -> tuple[int, int]:
+    """``(read, left)`` — pages the crawl read and linked same-site pages
+    the ``MAX_PAGES`` budget left unread. ``left`` is 0 when the crawl
+    reached everything it found.
+
+    The crawler records ``left`` as it stops; a record saved before it did
+    (``unread_links is None``) gets it from its own pages' links, counted
+    only when the budget was spent.
+    """
+    pages = list(getattr(analysis, "pages", None) or [])
+    read = len(pages)
+    left = getattr(analysis, "unread_links", None)
+    if left is None:
+        errors = len(getattr(analysis, "crawl_errors", None) or [])
+        if read + errors < MAX_PAGES:
+            return read, 0
+        domain = getattr(analysis, "domain", "") or ""
+        seen = {_clean_link(getattr(p, "url", "") or "") for p in pages}
+        linked = {_clean_link(link) for p in pages
+                  for link in (getattr(p, "links_internal", None) or [])
+                  if urlparse(link).netloc == domain and _is_page_link(link)}
+        left = len(linked - seen)
+    return read, int(left or 0)
+
+
 def crawl_site(url: str) -> SiteAnalysis:
     """Crawl a website starting from *url* and return a SiteAnalysis.
 
@@ -1521,11 +1566,7 @@ def crawl_site(url: str) -> SiteAnalysis:
         visited.add(clean_url)
 
         # Skip non-page URLs
-        path_lower = norm.path.lower()
-        skip_ext = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
-                     ".css", ".js", ".zip", ".mp4", ".webm", ".ico", ".woff",
-                     ".woff2", ".ttf", ".eot", ".xml", ".json")
-        if any(path_lower.endswith(ext) for ext in skip_ext):
+        if not _is_page_link(current_url):
             continue
 
         _LANDED.url = ""
@@ -1569,6 +1610,13 @@ def crawl_site(url: str) -> SiteAnalysis:
             link_clean = f"{link_parsed.scheme}://{link_parsed.netloc}{link_parsed.path}".rstrip("/")
             if link_clean not in visited and link_parsed.netloc == base_domain:
                 queue.append(link)
+
+    # What the page budget left unread: the queue, less what was visited
+    # and what is not a page. Empty when the crawl ran out of links.
+    analysis.unread_links = 0
+    if len(visited) >= MAX_PAGES:
+        analysis.unread_links = len(
+            {_clean_link(u) for u in queue if _is_page_link(u)} - visited)
 
     # Collect nav items from first page
     if analysis.pages:
