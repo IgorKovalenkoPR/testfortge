@@ -40,7 +40,7 @@ def _tc_limits() -> dict:
     from engine import site_crawler as sc
     from engine.db import FOLDER_MAX_DEPTH, FOLDER_NAME_MAX
     from engine.imports import MAX_IMPORT_ROWS
-    from engine.llm_safety import MAX_CUSTOM_PROMPT_CHARS
+    from engine.llm_safety import MAX_CUSTOM_PROMPT_CHARS, MAX_REQUIREMENT_LINES
     from routes.generation import MAX_CONCURRENT_GEN_JOBS
     import routes.generation as gen
     sync_budget = int(re.search(r"SYNC_GEN_BUDGET_S = (\d+)", Path(
@@ -61,7 +61,8 @@ def _tc_limits() -> dict:
         "sections": tc_rules.MAX_PAGE_SECTIONS,
         "buttons": tc_rules.MAX_PAGE_BUTTONS,
         "band": int(wbs_baseline.BAND),
-        "author cases": tc_author._MAX_CASES, "requirement lines": 80,
+        "author cases": tc_author._MAX_CASES,
+        "requirement lines": MAX_REQUIREMENT_LINES,
         "instructions": MAX_CUSTOM_PROMPT_CHARS,
         "text modules": wbs.MAX_TEXT_MODULES,
         "text pages": wbs.MAX_TEXT_PAGES,
@@ -78,6 +79,7 @@ def _tc_limits() -> dict:
 def _cl_limits() -> dict:
     from engine import checklist_author, checklist_rules as cr, wbs_baseline
     from engine import site_crawler as sc
+    from engine.llm_safety import MAX_REQUIREMENT_LINES
     return {
         "sections": cr.MAX_CONTENT_SECTIONS, "pages": sc.MAX_PAGES,
         "heading budget": cr.HEADING_BUDGET,
@@ -86,7 +88,7 @@ def _cl_limits() -> dict:
         "field checks": cr.MAX_FIELD_CHECKS_PER_FORM,
         "band": int(wbs_baseline.BAND),
         "author checks": checklist_author._MAX_CHECKS,
-        "requirement lines": 80,
+        "requirement lines": MAX_REQUIREMENT_LINES,
     }
 
 
@@ -102,8 +104,9 @@ def test_every_documented_limit_matches_the_code(lang, card, limits):
 
 
 def test_the_requirement_window_is_the_one_documented():
-    """"Reads up to 80 requirement lines" — both authors slice to 80."""
+    """"Reads up to 80 requirement lines" — both authors slice to the one
+    constant the figure above is read from."""
     for module in ("engine/tc_author.py", "engine/checklist_author.py"):
         src = (Path(__file__).parent.parent / module).read_text(
             encoding="utf-8")
-        assert "artifacts.requirements[:80]" in src, module
+        assert "lines[:MAX_REQUIREMENT_LINES]" in src, module

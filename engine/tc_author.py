@@ -49,6 +49,7 @@ from engine import glossary
 from engine import ai_mode
 from engine.llm_cache import cached_call
 from engine.llm_client import LLMUnavailable, call_messages
+from engine.llm_safety import MAX_REQUIREMENT_LINES
 from engine.log import get_logger
 
 _logger = get_logger(__name__)
@@ -182,6 +183,11 @@ class Artifacts:
     #: (engine/wbs.py ``Wbs.prompt_lines``). The model files each case under
     #: one of these ids; it never makes one up.
     wbs_nodes: list[str] = field(default_factory=list)
+    #: What this run cut, filled in as it happens — ``requirements``: lines
+    #: past ``MAX_REQUIREMENT_LINES`` when the model was asked;
+    #: ``forms_skipped``: distinct forms past ``tc_rules.MAX_FORMS``. Read
+    #: back by engine/generation_notes.py to tell the user.
+    limits: dict = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         return not any((self.url, self.custom_prompt, self.requirements,
@@ -576,8 +582,9 @@ def _build_user_prompt(profile, strategy, artifacts: Artifacts) -> str:
             "invent an id.\n" + "\n".join(artifacts.wbs_nodes))
 
     if artifacts.requirements:
-        reqs = "\n".join(f"- {r[:600]}" for r in artifacts.requirements[:80]
-                         if (r or "").strip())
+        lines = [r for r in artifacts.requirements if (r or "").strip()]
+        reqs = "\n".join(f"- {r[:600]}"
+                         for r in lines[:MAX_REQUIREMENT_LINES])
         if reqs:
             blocks.append("Requirements / notes supplied by the operator:\n"
                           + reqs)
@@ -1474,6 +1481,7 @@ def author_test_cases(*, profile=None, strategy=None,
     gaps = [str(g)[:300] for g in (parsed.get("gaps") or [])
             if isinstance(g, (str, int, float))]
 
+    _record_requirement_window(arts)
     return AuthoringResult(
         cases=cases,
         source="llm",
@@ -1481,6 +1489,16 @@ def author_test_cases(*, profile=None, strategy=None,
         gaps=gaps[:20],
         lint_findings=findings[:60],
     )
+
+
+def _record_requirement_window(artifacts) -> None:
+    """The model was shown ``MAX_REQUIREMENT_LINES`` requirement lines and
+    its result is the one used: record how many there were, for the run
+    to say what it did not read (engine/generation_notes.py). Not recorded
+    on a fallback — then nothing the model read reached the pack."""
+    lines = [r for r in artifacts.requirements or [] if (r or "").strip()]
+    if len(lines) > MAX_REQUIREMENT_LINES:
+        artifacts.limits["requirements"] = len(lines)
 
 
 def _rule_coverage(result: AuthoringResult) -> float:

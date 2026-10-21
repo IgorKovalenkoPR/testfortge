@@ -24,6 +24,9 @@ from html import escape as _html_escape
 MAX_CUSTOM_PROMPT_CHARS = 1000
 MAX_DOCUMENT_CHARS = 4000
 MAX_REQUIREMENT_CHARS = 600
+#: Requirement lines an authoring model is shown (engine/tc_author.py,
+#: engine/checklist_author.py). The rest are not read, and the run says so.
+MAX_REQUIREMENT_LINES = 80
 
 
 _HARDENING_CLAUSE = (
@@ -91,6 +94,7 @@ __all__ = [
     "MAX_CUSTOM_PROMPT_CHARS",
     "MAX_DOCUMENT_CHARS",
     "MAX_REQUIREMENT_CHARS",
+    "MAX_REQUIREMENT_LINES",
     "cap",
     "wrap_user_input",
     "wrap_document",

@@ -82,7 +82,12 @@ class TestTheAsyncWorkerReportsWhatItCouldNotReach:
             encoding="utf-8")
         drain = source.split("def _drain_tc_job_into_session", 1)[1].split(
             "def _drain_cl_job_into_session", 1)[0]
-        assert "crawl_errors" in drain and "crawl_partial" in drain
+        # One report for every path that shows a finished run
+        # (tests/test_generation_limit_notes.py drives it end to end).
+        assert "_flash_run_report(r, _notes.TC)" in drain
+        report = source.split("def _flash_run_report", 1)[1].split(
+            "\ndef ", 1)[0]
+        assert "crawl_errors" in report and "crawl_partial" in report
 
     def test_a_url_that_yields_nothing_is_not_silent(self, monkeypatch):
         """``_run_site_aware`` returns ``None`` when the crawl itself

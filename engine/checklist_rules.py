@@ -82,6 +82,8 @@ class Section:
     #: for the chrome — the section's place in the WBS (engine/wbs.py).
     url: str = ""
     region: str = ""
+    #: Headings past this section's share of ``HEADING_BUDGET``.
+    headings_dropped: int = 0
 
 
 @dataclass
@@ -94,6 +96,10 @@ class LowLevelChecklist:
     #: operator rather than silently omitted.
     gaps: list[str] = field(default_factory=list)
     source: str = "deterministic"
+    #: What the heading budget cut, when it did: ``sections`` trimmed of
+    #: ``pages`` content sections, ``headings`` dropped, ``share`` each —
+    #: told to the user after generation (engine/generation_notes.py).
+    heading_cut: dict = field(default_factory=dict)
 
     def all_checks(self) -> list[Check]:
         return [c for s in self.sections for c in s.checks]
@@ -473,9 +479,7 @@ def content_section(page: dict, *, name: str = "Page Content",
                 f'Verify that the "{text}" block is visible and matches the '
                 f"design"), name, depth=3 if have_parent else 2))
         emitted += 1
-    if dropped:
-        _logger.info("checklist_rules: %d headings beyond the cap on %s",
-                     dropped, page.get("url"))
+    sec.headings_dropped = dropped
 
     _add_grid_checks(page, sec, name)
     _add_form_checks(page, sec, name, forms_done)
@@ -684,6 +688,12 @@ def build_checklist(pages: list[dict], *, url: str = "") -> LowLevelChecklist:
         sec.url = str(page.get("url") or "")
         if sec.checks:
             out.sections.append(sec)
+    trimmed = [s.headings_dropped for s in out.sections if s.headings_dropped]
+    if trimmed:
+        out.heading_cut = {"sections": len(trimmed), "pages": len(content_pages),
+                           "headings": sum(trimmed), "share": share}
+        _logger.info("checklist_rules: %d headings beyond the share of %d "
+                     "on %d section(s)", sum(trimmed), share, len(trimmed))
     if len(pages) > MAX_CONTENT_SECTIONS:
         out.gaps.append(
             f"{len(pages) - MAX_CONTENT_SECTIONS} further crawled surfaces "

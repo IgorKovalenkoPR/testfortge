@@ -952,7 +952,8 @@ def _grid_nav(page: dict, section: str) -> str:
 
 # ── Public API ───────────────────────────────────────────────────────
 
-def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
+def enumerate_from_pages(pages: list[dict], *,
+                         report: dict | None = None) -> list[AuthoredCase]:
     """Deterministic case pack from a crawler control inventory.
 
     Walks two surfaces per page, in the order ``enumeration_order``
@@ -960,6 +961,9 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
     Returns [] when neither is present — there is nothing to enumerate
     honestly, and a caller should keep whatever baseline coverage it
     already has rather than receive invented cases.
+
+    ``report``, when given, receives ``forms_skipped``: distinct forms past
+    ``MAX_FORMS`` that got no cases — said to the user, not just logged.
     """
     rules = load_rules()
     per_type = (((rules.get("create_form") or {})
@@ -972,7 +976,7 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
 
     out: list[AuthoredCase] = []
     forms_seen = 0
-    capped_forms = False
+    forms_skipped = 0
     forms_done: set = set()
     fields_done: set = set()
 
@@ -1004,12 +1008,6 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             out.extend(grid_cases)
 
         for index, form in enumerate(page.get("forms") or [], start=1):
-            if forms_seen >= MAX_FORMS:
-                if not capped_forms:
-                    _logger.info("tc_rules: stopped after %d forms (cap)",
-                                 MAX_FORMS)
-                    capped_forms = True
-                break
             fields = group_radios([f for f in (form.get("fields") or [])
                                    if isinstance(f, dict)])
             fields = [f for f in fields if control_type(f)]
@@ -1025,6 +1023,11 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             if signature in forms_done:
                 continue
             forms_done.add(signature)
+            # Past the cap a form is only counted, so the user hears how
+            # many distinct forms went without cases.
+            if forms_seen >= MAX_FORMS:
+                forms_skipped += 1
+                continue
             forms_seen += 1
             section = surface_name(page, form, index)
             required = [f for f in fields if f.get("required")]
@@ -1076,6 +1079,11 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             out.extend(form_cases)
             out.extend(field_cases)
 
+    if forms_skipped:
+        _logger.info("tc_rules: %d form(s) beyond the cap of %d",
+                     forms_skipped, MAX_FORMS)
+        if report is not None:
+            report["forms_skipped"] = forms_skipped
     return out
 
 
@@ -1263,7 +1271,8 @@ def enumerate_from_artifacts(artifacts: Any) -> list[AuthoredCase]:
     """The rule engine's whole pack for :class:`engine.tc_author.Artifacts`:
     the forms and grids, then every crawled page's own content."""
     pages = getattr(artifacts, "pages", None) or []
-    cases = enumerate_from_pages(pages)
+    cases = enumerate_from_pages(pages,
+                                 report=getattr(artifacts, "limits", None))
     if cases or pages:
         cases = cases + enumerate_page_surfaces(pages)
     return cases
