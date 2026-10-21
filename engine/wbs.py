@@ -171,6 +171,75 @@ def label_of(text) -> str:
     return ""
 
 
+#: First path segments that name a redirect or click-tracking endpoint, not
+#: a page: /goto/L76F, /out?url=…, /redirect/…, /click/…, /r/abc.
+_REDIRECT_SEGMENTS = {
+    "goto", "go", "out", "outbound", "away", "redirect", "redir", "click",
+    "clicks", "track", "tracking", "r", "l", "link", "links", "ext",
+    "external", "exit", "jump", "visit", "aff", "affiliate"}
+#: Query parameters that track a visit rather than name a page.
+_TRACKER_PARAM = re.compile(
+    r"^(utm_\w+|gclid|gbraid|wbraid|fbclid|msclkid|yclid|dclid|mc_[ce]id|"
+    r"lnk|ref|referrer|source|from|campaign|_ga|_gl|hsctatracking|igshid)$",
+    re.I)
+#: A raw slug: one token of letters and digits interleaved ("L76F",
+#: "a8Fk2") or a short case-mixed token ("xeIs"). Applied only to labels a
+#: URL produced — "B2B", "iOS" or "Top" written in a menu are words.
+_SLUG_MIXED = re.compile(r"^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9]{3,12}$")
+_SLUG_INTERLEAVED = re.compile(r"[A-Za-z]\d+[A-Za-z]|\d[A-Za-z]+\d")
+_SLUG_CAMEL = re.compile(r"^[a-z]+[A-Z][a-z]*$")
+
+
+def _url_name(key: str) -> str:
+    """A name from a URL's last segment — "" when that is a raw slug."""
+    slug = key.rstrip("/").rsplit("/", 1)[-1]
+    if is_raw_slug(slug):
+        return ""
+    return re.sub(r"[-_]+", " ", slug).strip().capitalize()
+
+
+def has_query(text: str) -> bool:
+    """A query string, not words: "?" or "=". A bare "&" is punctuation
+    ("Testing & QA", "Pricing & Business Models")."""
+    text = str(text or "")
+    return "?" in text or "=" in text
+
+
+def is_tracking_url(url: str, base: str = "") -> bool:
+    """A redirect, click-tracking or query-identified URL — not a page.
+
+    Generic, by URL shape: a redirect endpoint as the first path segment,
+    or a page whose identity lives only in the query string (``/?id=717``,
+    after the tracker parameters are discounted). The crawler drops what
+    actually redirects off-site (``PageInfo.final_url``); this catches the
+    links and the records that never say.
+    """
+    try:
+        parsed = urlparse(urljoin(base, url) if base else url)
+    except ValueError:
+        return True
+    segments = [s for s in (parsed.path or "/").split("/") if s]
+    if segments and segments[0].casefold() in _REDIRECT_SEGMENTS:
+        return True
+    params = [p.split("=", 1)[0] for p in (parsed.query or "").split("&") if p]
+    identity = [p for p in params if not _TRACKER_PARAM.match(p)]
+    return not segments and bool(identity)
+
+
+def is_raw_slug(text: str) -> bool:
+    """A URL-made label that is not words: a query, or an opaque token."""
+    text = str(text or "").strip()
+    if not text or has_query(text):
+        return True
+    if " " in text or "-" in text:
+        return False
+    # Interleaved letters and digits with a capital in them: "L76F",
+    # "a8Fk2". Lower-case numeronyms are words ("i18n", "l10n", "k8s").
+    return bool((_SLUG_MIXED.match(text) and _SLUG_INTERLEAVED.search(text)
+                 and any(ch.isupper() for ch in text))
+                or (len(text) <= 8 and _SLUG_CAMEL.match(text)))
+
+
 def norm_path(url: str, base: str = "") -> str:
     """``/pricing`` for every spelling of the pricing page's URL."""
     try:
@@ -463,11 +532,13 @@ def build_wbs(pages: list[dict]) -> Wbs:
         # text the site shows anyone.
         return bool(label) and len(label) <= NAME_MAX \
             and not _SKIP_LABELS.match(label) and "@" not in label \
-            and not (label.startswith("[") and label.endswith("]"))
+            and not (label.startswith("[") and label.endswith("]")) \
+            and not is_raw_slug(label)
 
     def add_page(parent: str, label: str, href: str, kind: str = "page"):
         label = label.strip()
-        if not usable(label) or not same_site(href):
+        if not usable(label) or not same_site(href) \
+                or is_tracking_url(href, base):
             return None
         key = norm_path(href, base) if href else ""
         if not key:
@@ -578,10 +649,11 @@ def build_wbs(pages: list[dict]) -> Wbs:
             continue
         href = link.get("href") or ""
         key = norm_path(href, base) if href and same_site(href) else ""
-        if key == "/":
+        if key == "/" and not is_tracking_url(href, base):
             wbs.by_label.setdefault(text.casefold(), HOME)
             continue
-        if not key or key in wbs.by_url or not usable(text):
+        if not key or key in wbs.by_url or not usable(text) \
+                or is_tracking_url(href, base):
             continue
         node = wbs.add(WbsNode(f"page:{key}", text, "module", url=key))
         wbs.by_label.setdefault(text.casefold(), node.id)
@@ -612,8 +684,9 @@ def build_wbs(pages: list[dict]) -> Wbs:
             label_of(_title_key(page.get("title")) and re.split(
                 r"\s[|│]\s?|\s[–—]\s", str(page.get("title") or ""))[0]),
             label_of(page.get("h1")),
-            re.sub(r"[-_]+", " ", key.rstrip("/").rsplit("/", 1)[-1])
-            .strip().capitalize(),
+            # The URL only when the page names itself nowhere.
+            "" if (page.get("title") or page.get("h1")) else
+            _url_name(key),
         ) if c and usable(c)), "")
 
     # 4. No header navigation: the URL structure is the evidence left.
@@ -641,7 +714,7 @@ def build_wbs(pages: list[dict]) -> Wbs:
     other_budget = [MAX_OTHER_PAGES]
     for page in pages:
         url = str(page.get("url") or "")
-        if not url:
+        if not url or is_tracking_url(url, base):
             continue
         key = norm_path(url, base)
         node_id = HOME if key == "/" else wbs.node_for_url(url)
@@ -669,7 +742,7 @@ def surface_urls(wbs: Wbs, pages: list[dict], per_node: int = 2) -> set[str]:
     taken: dict[str, int] = {}
     for page in pages or []:
         url = str((page or {}).get("url") or "")
-        if not url:
+        if not url or is_tracking_url(url, wbs.base):
             continue
         key = norm_path(url, wbs.base)
         node_id = HOME if key == "/" else (wbs.node_for_url(url) or OTHER)
@@ -1037,5 +1110,6 @@ def _parse_modules(text: str):
 
 
 __all__ = ["Wbs", "WbsNode", "build_wbs", "surface_urls",
+           "is_tracking_url", "is_raw_slug", "has_query",
            "build_wbs_from_text", "build_wbs_from_text_llm", "attribute", "stamp", "topic_of",
            "norm_path", "label_of", "HEADER", "HOME", "FOOTER", "OTHER", "XC"]

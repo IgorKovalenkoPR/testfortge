@@ -978,8 +978,10 @@ class TestSharedFormsAreOneSurface:
         assert set(pages) == {"https://qarea.com/",
                               "https://qarea.com/careers",
                               "https://qarea.com/services/testing-and-qa"}
-        assert pages["https://qarea.com/careers"] < \
-            pages["https://qarea.com/"] / 3
+        # One case per rule per form (rules merged over the controls they
+        # apply to), not one per control: the 20-field form is ~14 cases.
+        assert sum(pages.values()) <= 40, pages
+        assert max(pages.values()) < 20, pages
 
     def test_every_page_gets_its_own_content_cases(self, qarea_pages):
         from engine import tc_rules

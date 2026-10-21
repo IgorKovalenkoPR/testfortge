@@ -659,6 +659,24 @@ def _localization_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
     return list(LOADER.get_test_cases("localization"))
 
 
+def _page_display_name(page: dict) -> str:
+    """What a page is called in a summary: the part of its title before the
+    site name, else its heading, else its URL path — and "" when the path
+    is all there is and it is a raw slug or a query."""
+    from engine.wbs import is_raw_slug, label_of
+    for candidate in (re.split(r"\s[|│]\s?|\s[–—]\s",
+                               str(page.get("title") or ""))[0],
+                      page.get("h1")):
+        text = label_of(candidate)
+        if text and len(text) <= 80:
+            return text
+    label = _path_label(page.get("url", ""))
+    last = str(page.get("url", "")).rstrip("/").rsplit("/", 1)[-1]
+    if not label or is_raw_slug(last) or is_raw_slug(label.replace(" > ", "")):
+        return ""
+    return label
+
+
 def _primary_nav_labels(pages: list[dict], limit: int = 8) -> list[str]:
     """The labels of the site's primary navigation, in the order shown.
 
@@ -721,16 +739,30 @@ def _site_specific_test_cases(analysis: "AnalysisResult") -> list[TCTemplate]:
         ))
 
     # Cap per-page emissions so a 200-page site doesn't drown the export.
+    # Redirect / click-tracking URLs are not pages ("goto > top >
+    # ?id=1064&lnk=1" on dou.ua), and a page is named by its own title or
+    # heading — the URL only when it names itself nowhere, and not at all
+    # when that would be a raw slug or a query.
+    from engine.wbs import is_raw_slug, is_tracking_url
     MAX_PAGES = 8
-    for p in pages[:MAX_PAGES]:
+    named_pages = []
+    for p in pages:
         url = p.get("url", "")
-        title = p.get("title") or p.get("h1") or _path_label(url)
+        if not url or is_tracking_url(url):
+            continue
+        name = _page_display_name(p)
+        if not name:
+            continue
+        named_pages.append((p, name))
+    for p, display in named_pages[:MAX_PAGES]:
+        url = p.get("url", "")
+        title = p.get("title") or p.get("h1") or display
         h1 = p.get("h1") or ""
         headings = p.get("headings") or []
         buttons = p.get("buttons") or []
         forms = p.get("forms") or []
         has_video = p.get("has_video")
-        path_lbl = _path_label(url)
+        path_lbl = display
         section = f"Page: {_slugify_section(title or path_lbl)}"
 
         section_list = ", ".join(h for h in headings[:3]) if headings else ""

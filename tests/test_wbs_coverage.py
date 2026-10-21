@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import secrets
 import statistics
 from collections import Counter
@@ -90,13 +91,14 @@ def _per_leaf(pid, kind):
     return tree, {n.id: per.get(n.id, 0) for n in BL.leaves(tree)}
 
 
-def _form_nodes(tree, crawl) -> set:
-    """Leaves that hold real form or grid cases — from the crawl itself."""
+def _form_cases(tree, crawl) -> Counter:
+    """Form and grid cases per leaf — recomputed from the crawl itself, the
+    same enumeration the generator runs."""
     from engine import tc_rules
     pages = [{k: p.get(k) for k in ("url", "title", "h1", "forms", "tables",
                                     "grid_controls")} for p in crawl["pages"]]
-    return {tree.node_for_url(c.page_url) or W.HOME
-            for c in tc_rules.enumerate_from_pages(pages)}
+    return Counter(tree.node_for_url(c.page_url) or W.HOME
+                   for c in tc_rules.enumerate_from_pages(pages))
 
 
 def _baseline_floor(tree, crawl, kind) -> dict:
@@ -105,7 +107,19 @@ def _baseline_floor(tree, crawl, kind) -> dict:
                    for d in (tcs if kind == "test_case" else checks))
 
 
-def _assert_even(tree, counts, floor, exempt, label):
+#: No leaf may hold more than this share of the test cases. qarea.com's
+#: Homepage held 108 of 702 (15%) — one 20-field form enumerated control by
+#: control. On a small tree an even split is itself near 10% (dou.ua: 12
+#: leaves, 8.3% each), so the bound is the larger of 10% and 2.5x an even
+#: share: exactly 10% from 25 leaves up.
+MAX_LEAF_SHARE = 0.10
+
+
+def _leaf_share_bound(leaves: int) -> float:
+    return max(MAX_LEAF_SHARE, 2.5 / max(1, leaves))
+
+
+def _assert_even(tree, counts, floor, form_cases, label, *, total=None):
     assert counts, label
     zero = [tree.path(n) for n, c in counts.items() if c == 0]
     assert zero == [], (label, zero)
@@ -113,9 +127,16 @@ def _assert_even(tree, counts, floor, exempt, label):
              if counts[n] < floor.get(n, 0)]
     assert below == [], (label, below)
     median = statistics.median(counts.values())
-    over = [(tree.path(n), c) for n, c in counts.items()
-            if n not in exempt and c > BL.BAND * median]
+    # A form page may exceed the band only by its distinct form cases.
+    over = [(tree.path(n), c, form_cases.get(n, 0))
+            for n, c in counts.items()
+            if c - form_cases.get(n, 0) > BL.BAND * median]
     assert over == [], (label, median, over)
+    if total:
+        bound = _leaf_share_bound(len(counts))
+        big = [(tree.path(n), c) for n, c in counts.items()
+               if c > bound * total]
+        assert big == [], (label, total, bound, big)
 
 
 @pytest.mark.parametrize("name", sorted(_SITES))
@@ -125,8 +146,12 @@ def test_every_leaf_is_covered_evenly_on_a_real_site(app, client,
     crawl = _crawl(name)
     pid = _generate(client, monkeypatch, name, _SITES[name], crawl=crawl)
     tree, counts = _per_leaf(pid, kind)
+    rows = db.load_test_cases(pid) if kind == "test_case" \
+        else db.load_checklist(pid)
     _assert_even(tree, counts, _baseline_floor(tree, crawl, kind),
-                 _form_nodes(tree, crawl), f"{name} {kind}")
+                 _form_cases(tree, crawl) if kind == "test_case" else {},
+                 f"{name} {kind}",
+                 total=len(rows) if kind == "test_case" else None)
 
 
 @pytest.mark.parametrize("kind", ["test_case", "checklist_item"])
@@ -136,8 +161,90 @@ def test_every_heading_of_a_description_is_covered_evenly(app, client,
         encoding="utf-8")
     pid = _generate(client, monkeypatch, "text", text)
     tree, counts = _per_leaf(pid, kind)
-    _assert_even(tree, counts, _baseline_floor(tree, None, kind), set(),
+    _assert_even(tree, counts, _baseline_floor(tree, None, kind), {},
                  f"text {kind}")
+
+
+# ── no page made of a redirect, a tracker or a raw slug ──────────────
+
+_JUNK_LABEL = re.compile(r"\?[^\s\"]*=|(?<![\w/])goto\s*>|\bgoto\b\s*/", re.I)
+
+
+@pytest.mark.parametrize("name", sorted(_SITES) + ["text"])
+def test_no_redirect_query_or_slug_becomes_a_page(app, client, monkeypatch,
+                                                  name):
+    """dou.ua produced "Verify that goto > top > ?id=1064&lnk=1 renders its
+    primary content…": a click-tracking redirect taken for a page, named by
+    its URL. Nothing like it may reach a summary, an objective or a node."""
+    if name == "text":
+        text = (_FIX / "requirements_testfortge_2026-10-20.md").read_text(
+            encoding="utf-8")
+        pid = _generate(client, monkeypatch, "text", text)
+    else:
+        pid = _generate(client, monkeypatch, name, _SITES[name],
+                        crawl=_crawl(name))
+    def unquoted(text):
+        # A requirement or a label the page itself shows is quoted, and may
+        # hold a "?" legitimately ("…?lang=ua…"); the page label is not.
+        return re.sub(r'"[^"]*"|«[^»]*»|“[^”]*”', "", text)
+
+    bad = [r["summary"] for r in db.load_test_cases(pid)
+           if _JUNK_LABEL.search(unquoted(r["summary"]))]
+    bad += [r["objective"] for r in db.load_checklist(pid)
+            if _JUNK_LABEL.search(unquoted(r["objective"]))]
+    assert bad == [], bad[:5]
+    tree = W.Wbs.from_dict(db.list_site_profiles(pid)[0]["profile"]["wbs"])
+    slugs = [n.name for n in tree.nodes.values()
+             if W.has_query(n.name) or W.is_raw_slug(n.name)
+             or any(seg in W._REDIRECT_SEGMENTS
+                    for seg in n.url.strip("/").split("/")[:1])]
+    assert slugs == [], slugs
+
+
+class TestTrackingUrls:
+
+    @pytest.mark.parametrize("url", [
+        "https://dou.ua/goto/top/?id=1064&lnk=1", "https://dou.ua/goto/L76F",
+        "https://dou.ua/goto/?id=717&mini", "https://x.test/?id=5",
+        "https://x.test/out?url=https://y.test", "https://x.test/r/abc"])
+    def test_redirects_and_query_identities_are_not_pages(self, url):
+        assert W.is_tracking_url(url)
+
+    @pytest.mark.parametrize("url", [
+        "https://x.test/", "https://x.test/?utm_source=mail&gclid=1",
+        "https://x.test/blog/post?utm_campaign=a&ref=b",
+        "https://x.test/resources/guide", "https://x.test/go-live"])
+    def test_pages_with_trackers_are_still_pages(self, url):
+        assert not W.is_tracking_url(url)
+
+    def test_labels(self):
+        for slug in ("L76F", "xeIs", "a8Fk2", "?id=1064&lnk=1", "id=5"):
+            assert W.is_raw_slug(slug), slug
+        for word in ("Top", "Blog", "iOS", "CSRF", "v2", "Front-end", "i18n",
+                     "Testing & QA", "Pricing & Business Models"):
+            assert not W.is_raw_slug(word) or word in ("iOS",), word
+            assert not W.has_query(word), word
+
+    def test_a_redirect_off_site_is_not_crawled_as_a_page(self, monkeypatch):
+        from engine import site_crawler as sc
+        entry = ('<html><head><title>Home</title></head><body><header><nav>'
+                 '<a href="/about">About</a><a href="/goto/x1">Partner</a>'
+                 '</nav></header></body></html>')
+
+        def fake_fetch(url, *a, **k):
+            if url.rstrip("/").endswith("/goto/x1"):
+                sc._LANDED.url = "https://t.me/channel"
+                return "<html><title>Telegram</title></html>", None
+            sc._LANDED.url = url
+            return (entry if url.rstrip("/") == "https://site.test" else
+                    "<html><head><title>About us</title></head></html>"), None
+
+        monkeypatch.setattr(sc, "_fetch_page", fake_fetch)
+        sc._CRAWL_CACHE.clear()
+        analysis = sc.crawl_site("https://site.test/")
+        urls = [p.url for p in analysis.pages]
+        assert "https://site.test/about" in urls
+        assert not any("goto" in u for u in urls), urls
 
 
 # ── the baseline ─────────────────────────────────────────────────────
@@ -204,12 +311,17 @@ class TestBalance:
         assert len(d) == 12
         assert sum(1 for r in d if r["id"].startswith("BL")) == 2
 
-    def test_a_form_node_and_a_named_node_are_exempt(self):
+    def test_form_cases_ride_above_the_band_and_nothing_else(self):
         rows = (self._rows("a", 4) + self._rows("b", 4) + self._rows("c", 4)
-                + self._rows("f", 1, "form") + self._rows("f", 40)
+                + self._rows("f", 30, "form") + self._rows("f", 40)
                 + self._rows("n", 40))
-        BL.balance(rows, BL.Scope(named={"n"}))
-        assert len(rows) == 12 + 41 + 40
+        report = BL.balance(rows, BL.Scope(named={"n"}))
+        f = [r for r in rows if r["_wbs_node"] == "f"]
+        # All 30 form cases stay; the page's other rows are held to the cap.
+        assert sum(1 for r in f if r.get("_wbs_surface") == "form") == 30
+        assert len(f) == 30 + report["cap"]
+        # A node the user named is not touched at all.
+        assert sum(1 for r in rows if r["_wbs_node"] == "n") == 40
 
     def test_a_reshaped_run_is_not_balanced(self):
         rows = self._rows("a", 1) + self._rows("b", 1) + self._rows("c", 50)

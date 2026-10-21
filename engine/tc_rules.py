@@ -622,6 +622,78 @@ def _field_case(page: dict, form: dict, field: dict, kind: str,
     return case
 
 
+def _merged_field_case(page: dict, form: dict, kind: str, members: list,
+                       section: str) -> AuthoredCase:
+    """One rule over several controls of one form: one case, a step each.
+
+    The summary is the rule's own title with the control replaced by "each
+    listed <noun>"; the steps type each control's value — the same value the
+    single-control case would have used — and submit.
+    """
+    rule = members[0][1]
+    noun = _control_noun(kind)
+    category = str(rule.get("category") or "Positive").strip().title()
+    objective = str(rule.get("objective") or "").strip()
+    title_tpl = str(rule.get("title") or "").strip()
+    many = f"each listed {noun}"
+    if title_tpl:
+        summary = title_tpl.replace('the "{label}" {noun}', many).format(
+            label=many, noun=noun, section=section)
+    else:
+        passive = _passive_clause(objective)
+        clause = passive or (objective[0].lower() + objective[1:]
+                             if objective else "the control behaves")
+        summary = f"Verify that {clause} in {many}"
+    step_tpl = str(rule.get("step") or "").strip()
+    submit = str(form.get("submit_text") or "").strip()
+    submit_step = (f'click on the "{submit}" button' if submit
+                   else "submit the form")
+    steps = [_nav(page, form)]
+    if category == "Negative":
+        steps.append("Fill every required control with a valid value")
+    labels = []
+    for field, _ in members:
+        label = field_label(field)
+        labels.append(f'"{label}"')
+        fmt = {"label": label, "noun": noun, "section": section}
+        action = (step_tpl.format(**fmt) if step_tpl
+                  else f'{objective} in the "{label}" {noun}')
+        data = _test_data(kind, field, objective)
+        if data:
+            action = f"{action} — {data}"
+        steps.append(f"{action}, then {submit_step}")
+    # A long form folds the tail into one step rather than dropping it:
+    # every listed control is still walked.
+    head = 2 if category == "Negative" else 1
+    if len(steps) > 19:
+        rest = labels[19 - head - 1:]
+        steps = steps[:19 - 1] + [
+            f"Repeat the same for {', '.join(rest)}, one at a time, then "
+            f"{submit_step}"]
+    listed = ", ".join(labels)
+    if category == "Negative":
+        expected = (f"The form is not submitted for any of the listed "
+                    f"controls ({listed}). Each one is highlighted and a "
+                    f"validation message names it. Nothing is persisted.")
+    else:
+        expected = (f"The value is accepted in every listed control "
+                    f"({listed}) and no validation message is shown.")
+    case = AuthoredCase(
+        summary=summary,
+        preconditions=f"{section} is opened.",
+        steps=steps[:20],
+        test_data="",
+        expected_result=expected,
+        category=category,
+        priority="High" if any(f.get("required") for f, _ in members)
+        else "Medium",
+        section=section,
+        testing_type="Functional",
+    )
+    case, _ = normalise_case(case)
+    return case
+
+
 def _form_level_cases(page: dict, form: dict, section: str,
                       required: list[dict]) -> list[AuthoredCase]:
     """The whole-form cases: happy path, required sweep, save, discard."""
@@ -958,7 +1030,14 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
             required = [f for f in fields if f.get("required")]
 
             form_cases = _form_level_cases(page, form, section, required)
-            field_cases: list[AuthoredCase] = []
+            # One case per rule per form, not per rule per field: a rule
+            # that applies to several controls ("a value at the maximum
+            # length is accepted") is one case walking each of them. On
+            # qarea.com one 20-field form produced 20 "maximum length", 20
+            # "one over the maximum", 20 "non-Latin" cases — 188 rows for
+            # one form, 108 on its page. Every control keeps its own step;
+            # a rule that fits one control keeps its precise single case.
+            groups: dict[tuple, list] = {}
             for field in fields:
                 # A control already enumerated in an earlier form (the
                 # same e-mail field in a variant of the contact form) is
@@ -969,12 +1048,21 @@ def enumerate_from_pages(pages: list[dict]) -> list[AuthoredCase]:
                 fields_done.add(key)
                 for kind in control_types(field):
                     spec = per_type.get(kind) or {}
-                    for rule in spec.get("cases") or []:
+                    for index, rule in enumerate(spec.get("cases") or []):
                         if not _has_evidence(rule.get("requires"),
                                              field, form):
                             continue
-                        field_cases.append(_field_case(
-                            page, form, field, kind, rule, section))
+                        groups.setdefault((kind, index), []).append(
+                            (field, rule))
+            field_cases: list[AuthoredCase] = []
+            for (kind, _), members in groups.items():
+                if len(members) == 1:
+                    field, rule = members[0]
+                    field_cases.append(_field_case(
+                        page, form, field, kind, rule, section))
+                else:
+                    field_cases.append(_merged_field_case(
+                        page, form, kind, members, section))
 
             budget = MAX_CASES_PER_FORM - len(form_cases)
             if len(field_cases) > budget:
@@ -1046,7 +1134,12 @@ def page_label(page: dict) -> str:
         text = _clean_text(candidate)
         if text and len(text) <= _SURFACE_TEXT_MAX:
             return text
-    return _url_label(page) or "Home"
+    from engine.wbs import is_raw_slug
+    label = _url_label(page)
+    last = str(page.get("url") or "").rstrip("/").rsplit("/", 1)[-1]
+    if label and is_raw_slug(last):
+        return ""                 # a raw slug or query names nothing
+    return label or "Home"
 
 
 def enumerate_page_surfaces(pages: list[dict]) -> list[AuthoredCase]:
@@ -1065,8 +1158,13 @@ def enumerate_page_surfaces(pages: list[dict]) -> list[AuthoredCase]:
         # covered (engine.wbs.surface_urls). Chrome is still measured on it.
         if key in seen_urls or page.get("surface") is False:
             continue
+        from engine.wbs import is_tracking_url
+        if is_tracking_url(url):
+            continue
         seen_urls.add(key)
         name = page_label(page)
+        if not name:
+            continue
         section = f"{name} page"
         opened = f"{section} is opened."
         go = f"Go to {url}"

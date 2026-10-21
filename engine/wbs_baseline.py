@@ -279,31 +279,35 @@ def balance(dicts: list[dict], scope: Scope | None = None) -> dict:
 
     Only nodes ``wbs.stamp`` recorded (``_wbs_node``) are counted;
     Cross-cutting is left alone (it is gated on its share, not its size).
-    A node holding form or grid cases is exempt, and so is a node the
-    user's instructions named. Returns ``{"median", "cap", "trimmed"}``.
+    A node's form and grid cases are not held to the band (only its other
+    items are); a node the user's instructions named is exempt entirely. Returns ``{"median", "cap", "trimmed"}``.
     """
     scope = scope or Scope()
     report = {"median": 0, "cap": 0, "trimmed": 0}
     if scope.reshaped:
         return report
     by_node: dict[str, list[int]] = {}
-    exempt: set[str] = set(scope.named)
     for index, d in enumerate(dicts):
         node = d.get("_wbs_node")
         if not node or node.startswith(_wbs.XC):
             continue
         by_node.setdefault(node, []).append(index)
-        if d.get("_wbs_surface") in ("form", "grid"):
-            exempt.add(node)
     if len(by_node) < 3:
         return report
     median = statistics.median(len(v) for v in by_node.values())
     cap = max(int(BAND * median), 1)
     drop: set[int] = set()
     for node, indexes in by_node.items():
-        if node in exempt or len(indexes) <= cap:
+        if node in scope.named:
             continue
-        ranked = sorted(indexes, key=lambda i: (_keep_order(dicts[i]), i))
+        # A page's form and grid cases ride above the band — a form with
+        # twelve controls is that much coverage — but only those: the rest
+        # of the page is held to the cap like any other leaf.
+        others = [i for i in indexes
+                  if dicts[i].get("_wbs_surface") not in ("form", "grid")]
+        if len(others) <= cap:
+            continue
+        ranked = sorted(others, key=lambda i: (_keep_order(dicts[i]), i))
         drop.update(ranked[cap:])
     if drop:
         dicts[:] = [d for i, d in enumerate(dicts) if i not in drop]
