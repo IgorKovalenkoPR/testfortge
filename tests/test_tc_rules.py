@@ -55,7 +55,11 @@ def cases() -> list:
 
 
 def _for(cases, label: str) -> list:
-    return [c for c in cases if f'"{label}"' in c.summary]
+    """Cases that exercise a control: named in the summary, or — for a rule
+    merged over several controls of one form — walked in a step."""
+    quoted = f'"{label}"'
+    return [c for c in cases if quoted in c.summary
+            or any(quoted in s for s in c.steps)]
 
 
 # ── Evidence discipline ──────────────────────────────────────────────
@@ -216,7 +220,9 @@ class TestHouseStyle:
     def test_every_case_quotes_a_real_control_or_names_the_surface(self,
                                                                   cases):
         for c in cases:
-            assert '"' in c.summary or "Customer order" in c.summary, c.summary
+            # A rule merged over several controls names them in its
+            # expected result ("…every listed control ("A", "B")").
+            assert '"' in c.summary or "Customer order" in c.summary                 or ("each listed" in c.summary and '"' in c.expected_result),                 c.summary
 
     def test_negatives_assert_the_feedback_half(self, cases):
         from engine.tc_author import asserts_feedback
@@ -237,8 +243,11 @@ class TestHouseStyle:
     def test_required_controls_get_high_priority(self, cases):
         for c in _for(cases, "Customer name"):
             assert c.priority == "High"
+        # A case about the optional control alone is Medium; a rule merged
+        # over several controls is High when any of them is required.
         for c in _for(cases, "Telephone"):
-            assert c.priority == "Medium"
+            if not _for([c], "Customer name"):
+                assert c.priority == "Medium"
 
     def test_valid_value_data_is_not_the_boundary_value(self, cases):
         """A happy-path value must not be described as a 60-char string —
@@ -402,7 +411,8 @@ def httpbin_cases() -> list:
 
 class TestRealWorldMarkup:
     def test_labels_lose_their_trailing_punctuation(self, httpbin_cases):
-        blob = " ".join(c.summary for c in httpbin_cases)
+        blob = " ".join(" ".join([c.summary, c.expected_result, *c.steps])
+                        for c in httpbin_cases)
         assert '"Customer name"' in blob
         assert '"Customer name:"' not in blob, (
             "a quoted colon reads as part of the control name")

@@ -1031,6 +1031,18 @@ class _PageParser(HTMLParser):
 
 # ── Fetcher ──────────────────────────────────────────────────────
 
+import threading as _threading
+
+#: The URL the last fetch on this thread landed on after redirects. A side
+#: channel rather than a third return value: _fetch_page's (html, error)
+#: shape is used — and stubbed — across the code base.
+_LANDED = _threading.local()
+
+
+def _landed_url() -> str:
+    return getattr(_LANDED, "url", "") or ""
+
+
 def _fetch_page(url: str) -> tuple[str, str]:
     """Fetch a URL and return (html_content, error).
 
@@ -1069,6 +1081,10 @@ def _fetch_page(url: str) -> tuple[str, str]:
         # address. See engine.security._ValidatingRedirectHandler.
         with _security.safe_opener(context=ctx).open(
                 req, timeout=FETCH_TIMEOUT) as resp:
+            try:
+                _LANDED.url = resp.geturl() or ""
+            except Exception:  # pragma: no cover — a response without one
+                _LANDED.url = ""
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" not in content_type and "application/xhtml" not in content_type:
                 return "", f"Not HTML: {content_type}"
@@ -1512,10 +1528,26 @@ def crawl_site(url: str) -> SiteAnalysis:
         if any(path_lower.endswith(ext) for ext in skip_ext):
             continue
 
+        _LANDED.url = ""
         html, error = _fetch_page(current_url)
         if error:
             analysis.crawl_errors.append(f"{current_url}: {error}")
             continue
+        # A link that redirected is not a page of its own: off-site it is
+        # an outbound/tracking link (dou.ua's /goto/xeIs lands on Telegram)
+        # and is dropped; on-site it is filed under where it landed.
+        landed = _landed_url()
+        if landed:
+            lp = urlparse(landed)
+            if lp.netloc and lp.netloc.lower().removeprefix("www.") != \
+                    base_domain.lower().removeprefix("www."):
+                continue
+            landed_clean = f"{lp.scheme}://{lp.netloc}{lp.path}".rstrip("/")
+            if landed_clean != clean_url:
+                if landed_clean in visited:
+                    continue
+                visited.add(landed_clean)
+                current_url = landed
 
         all_html_parts.append(html)
         page = _parse_page(html, current_url, base_domain)
