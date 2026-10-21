@@ -301,6 +301,51 @@
       <li>Typing a prefix yourself still works: a changed
           <code>[Folder -&gt; Subfolder]</code> moves the item.</li>
     </ul>
+    <h3>Limits — how much one generation writes</h3>
+    <p>Generation is bounded so a pack stays reviewable and a run finishes.
+       What happens at each limit:</p>
+    <ul>
+      <li><strong>Pages read from a site: up to 50.</strong> 8 seconds and
+          512 KB per page. Pages are taken one per section of the site's
+          menu in turn, so every section is reached. On a larger site the
+          rest are not read, but every page in the menu or footer still gets
+          a baseline: its menu entry opens it, it opens with its title and
+          heading, it loads without console or network errors, its links
+          work.</li>
+      <li><strong>Site structure:</strong> up to 90 page folders, 3 levels
+          deep (module → submodule → page), 25 footer-only pages and 15
+          "Other pages". Menus are read up to 80 entries and 200 header or
+          footer links. Redirect and tracking links are not pages.</li>
+      <li><strong>Forms: up to 8 different forms per generation.</strong> A
+          form repeated on every page counts once. Each rule is one case per
+          form, with every field as a step (not one case per field), up to
+          120 cases per form.</li>
+      <li><strong>Data grids:</strong> up to 24 per generation, 3 per page,
+          40 cases each.</li>
+      <li><strong>Page content:</strong> per page, its heading and title,
+          up to 4 sections and 3 buttons. Elements repeated across the site
+          (header, footer, a "Back" button) are not counted as a page's
+          content. Articles or posts that share one template are tested on
+          two of them per section, not on every copy.</li>
+      <li><strong>Evenness:</strong> no page gets more than 3× the median
+          number of cases, except for its form cases. Extra rows above that
+          are dropped, generic ones first. If your instructions name a
+          section ("only Services", "focus on Careers"), that section is
+          not trimmed; "only" also keeps the baseline inside it.</li>
+      <li><strong>With the AI author:</strong> up to 300 cases per run; it
+          reads up to 80 requirement lines. The Additional Instructions
+          field keeps its first 1,000 characters.</li>
+      <li><strong>From a description (no site):</strong> up to 30 modules
+          of 30 pages each, taken from the document's headings. Each one
+          gets up to 4 cases from the requirement lines under it.</li>
+      <li><strong>Runs:</strong> 2 generations at a time per person. The
+          page waits 90 seconds, then the run continues in the background
+          and the result appears when you reload.</li>
+      <li><strong>Editing and import:</strong> a summary up to 2,000
+          characters, steps up to 20,000; folders 6 levels deep, names up
+          to 200 characters; an import up to 20,000 rows; files up to
+          64 MB.</li>
+    </ul>
     <h3>TC editor — walkthrough binding</h3>
     <p>Each card on /test-cases has an inline editor for two
        fields that drive the walkthrough mode in Test Execution:</p>
@@ -377,6 +422,26 @@
       <li>Export to XLSX. Add Platforms &amp; Browsers columns
           before sharing with the team.</li>
     </ol>
+    <h3>Limits — how much one generation checks</h3>
+    <ul>
+      <li><strong>One content section per page template</strong>, up to 60.
+          The pages come from the same crawl as the test cases (up to 50,
+          one per menu section in turn); articles or posts sharing a
+          template get two sections per site section.</li>
+      <li><strong>Section headings share a budget of 288 rows</strong>,
+          between 4 and 24 per page. On a 50-page site that is about 5
+          headings a page, so a long page keeps its first headings only.
+          Header and Footer sections are not part of this budget.</li>
+      <li><strong>Forms:</strong> up to 40 field checks per form. A form
+          repeated on every page is checked once, on the first page it
+          appears.</li>
+      <li><strong>Every page in the site structure</strong> gets at least
+          its baseline (menu entry, title and heading, no errors, working
+          links), and no page gets more than 3× the median number of
+          checks.</li>
+      <li><strong>With the AI author:</strong> up to 400 checks per run;
+          it reads up to 80 requirement lines.</li>
+    </ul>
     <h3>When to pick Checklist over Test Cases</h3>
     <ul>
       <li>You want exhaustive coverage of a specific module rather
