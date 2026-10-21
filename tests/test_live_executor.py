@@ -69,9 +69,14 @@ class TestOomGuard:
         assert g.budget_bytes == 400 * 1024 * 1024
         assert g.active is True
         # rss_mb returns a positive integer on this process.
-        assert g.rss_mb() > 0
-        # Real budget is well above the current RSS — over_budget False.
-        assert g.over_budget() is False
+        now = g.rss_mb()
+        assert now > 0
+        # A budget well above what the tree measures now is not exceeded.
+        # Relative, not a fixed 400: the guard measures the whole process
+        # tree, and a long-lived xdist worker that has already driven real
+        # crawls through the routes passes 400 MB on its own — the fixed
+        # figure went red on whichever Python matrix leg ran those first.
+        assert OomGuard(now + 400).over_budget() is False
 
     @staticmethod
     def _fake_process(own_mb: int, child_mb: tuple[int, ...] = ()):
